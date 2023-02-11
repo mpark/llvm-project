@@ -1986,6 +1986,8 @@ private:
                                   ParsedType &CastTy,
                                   SourceLocation &RParenLoc);
 
+  ExprResult ParseDoStmtExpression();
+
   ExprResult ParseCXXAmbiguousParenExpression(
       ParenParseOption &ExprType, ParsedType &CastTy,
       BalancedDelimiterTracker &Tracker, ColonProtectionRAIIObject &ColonProt);
@@ -2240,6 +2242,7 @@ private:
   StmtResult ParseContinueStatement();
   StmtResult ParseBreakStatement();
   StmtResult ParseReturnStatement();
+  StmtResult ParseDoYieldStatement();
   StmtResult ParseAsmStatement(bool &msAsm);
   StmtResult ParseMicrosoftAsmStatement(SourceLocation AsmLoc);
   StmtResult ParsePragmaLoopHint(StmtVector &Stmts, ParsedStmtContext StmtCtx,

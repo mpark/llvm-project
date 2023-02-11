@@ -10934,6 +10934,9 @@ public:
                                      NamedReturnInfo &NRInfo,
                                      bool SupressSimplerImplicitMoves);
 
+  StmtResult ActOnDoYieldStmt(SourceLocation YieldLoc, Expr *YieldValExp,
+                              Scope *CurScope);
+
   /// ActOnCXXCatchBlock - Takes an exception declaration and a handler block
   /// and creates a proper catch handler from them.
   StmtResult ActOnCXXCatchBlock(SourceLocation CatchLoc, Decl *ExDecl,
