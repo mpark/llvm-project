@@ -43,8 +43,9 @@ def KEYDEFERTS : TokenKey<0x20000000>;
 def KEYNOHLSL : TokenKey<0x40000000>;
 def KEYDOEXPR : TokenKey<0x80000000>;
 def KEYREFLECT : TokenKey<0x100000000>;
+def KEYPATMAT : TokenKey<0x200000000>;
 
-def KEYMAX : TokenKey<KEYREFLECT.Value>;
+def KEYMAX : TokenKey<KEYPATMAT.Value>;
 def KEYALLCXX : TokenKey<!or(KEYCXX.Value, KEYCXX11.Value, KEYCXX20.Value)>;
 def KEYALL : TokenKey<!and(!or(KEYMAX.Value, !sub(KEYMAX.Value, 1)),
                            !xor(KEYNOMS18.Value, -1),

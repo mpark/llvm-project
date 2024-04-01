@@ -177,6 +177,8 @@ static KeywordStatus getKeywordStatusHelper(const LangOptions &LangOpts,
     // being one, so let earlier C++ modes diagnose the uses that a migration
     // to C++29 would break. Same treatment as the C++20 keywords.
     return LangOpts.CPlusPlus ? KS_Future : KS_Unknown;
+  case KEYPATMAT:
+    return LangOpts.PatternMatching ? KS_Enabled : KS_Disabled;
   default:
     llvm_unreachable("Unknown KeywordStatus flag");
   }
@@ -856,12 +858,13 @@ IdentifierTable::getFutureCompatDiagKind(const IdentifierInfo &II,
     if (((Flags & KEYCXX20) == KEYCXX20) ||
         ((Flags & CHAR8SUPPORT) == CHAR8SUPPORT))
       return diag::warn_cxx20_keyword;
-
     // do-expressions are not modeled as a KEYCXX29 keyword class because
     // 'do_return' is the only one, and it is gated on the feature's own
     // LangOpt.
     if ((Flags & KEYDOEXPR) == KEYDOEXPR)
       return diag::warn_cxx29_keyword;
+    if ((Flags & KEYPATMAT) == KEYPATMAT)
+      return diag::warn_cxx_pattern_matching;
   } else {
     if ((Flags & KEYC99) == KEYC99)
       return diag::warn_c99_keyword;
