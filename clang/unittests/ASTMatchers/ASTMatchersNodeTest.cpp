@@ -1520,6 +1520,20 @@ TEST_P(ASTMatchersTest, SwitchCase_MatchesSwitch) {
   EXPECT_TRUE(notMatches("void x() {}", switchStmt()));
 }
 
+TEST(PatternMatching, MatchesInspect) {
+  EXPECT_TRUE(matchesConditionally("void x() { inspect(42) { __ => {} }; }",
+                                   inspectExpr(), true,
+                                   {"-fpattern-matching"}));
+  EXPECT_TRUE(matchesConditionally("void x() { inspect(42) { 42 => {} }; }",
+                                   inspectExpr(), true,
+                                   {"-fpattern-matching"}));
+  EXPECT_TRUE(
+      matchesConditionally("void x() { int y=0; inspect(42) { y => {} }; }",
+                           inspectExpr(), true, {"-fpattern-matching"}));
+  EXPECT_TRUE(matchesConditionally("void x() { }", inspectExpr(), false,
+                                   {"-fpattern-matching"}));
+}
+
 TEST_P(ASTMatchersTest, CxxExceptionHandling_SimpleCases) {
   if (!GetParam().isCXX()) {
     return;

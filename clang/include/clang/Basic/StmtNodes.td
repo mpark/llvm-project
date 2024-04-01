@@ -25,6 +25,14 @@ def CaseStmt : StmtNode<SwitchCase>;
 def DefaultStmt : StmtNode<SwitchCase>;
 def CapturedStmt : StmtNode<Stmt>;
 
+// Pattern matching statements
+def PatternStmt : StmtNode<Stmt, 1>;
+def WildcardPatternStmt : StmtNode<PatternStmt>;
+def IdentifierPatternStmt : StmtNode<PatternStmt>;
+def ExpressionPatternStmt : StmtNode<PatternStmt>;
+def StructuredBindingPatternStmt : StmtNode<PatternStmt>;
+def AlternativePatternStmt : StmtNode<PatternStmt>;
+
 // Statements that might produce a value (for example, as the last non-null
 // statement in a GNU statement-expression).
 def ValueStmt : StmtNode<Stmt, 1>;
@@ -162,6 +170,9 @@ def MaterializeTemporaryExpr : StmtNode<Expr>;
 def LambdaExpr : StmtNode<Expr>;
 def CXXFoldExpr : StmtNode<Expr>;
 def CXXParenListInitExpr: StmtNode<Expr>;
+
+// Pattern matching inspect expression
+def InspectExpr : StmtNode<Expr>;
 
 // C++ Coroutines expressions
 def CoroutineSuspendExpr : StmtNode<Expr, 1>;

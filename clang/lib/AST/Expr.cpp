@@ -3821,6 +3821,12 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     break;
   }
 
+  case InspectExprClass: {
+    // FIXME: check if substmts are actually covered somewhere else
+    // otherwise put that logic here.
+    return false;
+  }
+
   case LambdaExprClass: {
     const LambdaExpr *LE = cast<LambdaExpr>(this);
     for (Expr *E : LE->capture_inits())

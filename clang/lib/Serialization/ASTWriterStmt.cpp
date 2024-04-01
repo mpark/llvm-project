@@ -254,6 +254,71 @@ void ASTStmtWriter::VisitSwitchStmt(SwitchStmt *S) {
   Code = serialization::STMT_SWITCH;
 }
 
+void ASTStmtWriter::VisitInspectExpr(InspectExpr *S) {
+  VisitExpr(S);
+
+  bool HasInit = S->getInit() != nullptr;
+  bool HasVar = S->getConditionVariableDeclStmt() != nullptr;
+  Record.push_back(HasInit);
+  Record.push_back(HasVar);
+
+  Record.AddStmt(S->getCond());
+  if (HasInit)
+    Record.AddStmt(S->getInit());
+  if (HasVar)
+    Record.AddDeclRef(S->getConditionVariable());
+
+  Record.AddSourceLocation(S->getInspectLoc());
+
+  for (PatternStmt *PS = S->getPatternList(); PS; PS = PS->getNextPattern())
+    Record.push_back(Writer.RecordInspectPatternID(PS));
+  Code = serialization::EXPR_INSPECT;
+}
+
+void ASTStmtWriter::VisitPatternStmt(PatternStmt *S) {
+  VisitStmt(S);
+
+  bool HasPatternGuard = S->getPatternGuard() != nullptr;
+
+  Record.push_back(HasPatternGuard);
+  Record.push_back(Writer.getInspectPatternID(S));
+  Record.AddSourceLocation(S->getPatternLoc());
+  Record.AddSourceLocation(S->getColonLoc());
+
+  if (HasPatternGuard) {
+    Record.AddStmt(S->getPatternGuard());
+  }
+}
+
+void ASTStmtWriter::VisitWildcardPatternStmt(WildcardPatternStmt *S) {
+  VisitPatternStmt(S);
+  Record.AddStmt(S->getSubStmt());
+  Code = serialization::STMT_WILDCARDPATTERN;
+}
+
+void ASTStmtWriter::VisitIdentifierPatternStmt(IdentifierPatternStmt *S) {
+  VisitPatternStmt(S);
+  Record.AddStmt(S->getVar());
+  Record.AddStmt(S->getSubStmt());
+  Code = serialization::STMT_IDENTIFIERPATTERN;
+}
+
+void ASTStmtWriter::VisitExpressionPatternStmt(ExpressionPatternStmt *S) {
+  VisitPatternStmt(S);
+  Record.AddStmt(S->getMatchCond());
+  Record.AddStmt(S->getSubStmt());
+  Code = serialization::STMT_EXPRESSIONPATTERN;
+}
+
+void ASTStmtWriter::VisitStructuredBindingPatternStmt(
+    StructuredBindingPatternStmt *S) {
+  assert(0 && "not implemented");
+}
+
+void ASTStmtWriter::VisitAlternativePatternStmt(AlternativePatternStmt *S) {
+  assert(0 && "not implemented");
+}
+
 void ASTStmtWriter::VisitWhileStmt(WhileStmt *S) {
   VisitStmt(S);
 
@@ -2949,6 +3014,22 @@ unsigned ASTWriter::getSwitchCaseID(SwitchCase *S) {
 void ASTWriter::ClearSwitchCaseIDs() {
   SwitchCaseIDs.clear();
 }
+
+unsigned ASTWriter::RecordInspectPatternID(PatternStmt *S) {
+  assert(InspectPatternIDs.find(S) == InspectPatternIDs.end() &&
+         "PatternStmt recorded twice");
+  unsigned NextID = InspectPatternIDs.size();
+  InspectPatternIDs[S] = NextID;
+  return NextID;
+}
+
+unsigned ASTWriter::getInspectPatternID(PatternStmt *S) {
+  assert(InspectPatternIDs.find(S) != InspectPatternIDs.end() &&
+         "PatternStmt hasn't been seen yet");
+  return InspectPatternIDs[S];
+}
+
+void ASTWriter::ClearInspectPatternIDs() { InspectPatternIDs.clear(); }
 
 /// Write the given substatement or subexpression to the
 /// bitstream.

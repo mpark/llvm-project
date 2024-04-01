@@ -85,6 +85,9 @@ def warn_c99_keyword : Warning<"'%0' is a keyword in C99">,
 def warn_c23_keyword : Warning<"'%0' is a keyword in C23">,
   InGroup<C23Compat>, DefaultIgnore;
 
+def warn_cxx_pattern_matching : Warning<"'%0' is a keyword in C++ pattern matching">,
+  InGroup<CXX20Compat>, DefaultIgnore;
+
 def ext_unterminated_char_or_string : ExtWarn<
   "missing terminating %select{'|'\"'}0 character">, InGroup<InvalidPPToken>;
 def ext_empty_character : ExtWarn<"empty character constant">,

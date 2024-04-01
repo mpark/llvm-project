@@ -67,6 +67,7 @@ class SourceManager;
 class StringLiteral;
 class Token;
 class VarDecl;
+
 enum class CharacterLiteralKind;
 enum class ConstantResultStorageKind;
 enum class CXXConstructionKind;
@@ -74,6 +75,8 @@ enum class CXXNewInitializationStyle;
 enum class PredefinedIdentKind;
 enum class SourceLocIdentKind;
 enum class StringLiteralKind;
+
+class DecompositionDecl;
 
 //===----------------------------------------------------------------------===//
 // AST classes for statements.
@@ -1214,6 +1217,57 @@ protected:
     SourceLocation Loc;
   };
 
+  // ===--- Pattern Matching bitfields classes ---===//
+  class InspectExprBitfields {
+    friend class InspectExpr;
+
+    unsigned : NumStmtBits;
+
+    /// True if the InspectExpr has storage for an init statement.
+    unsigned HasInit : 1;
+
+    /// True if the InspectExpr has storage for a condition variable.
+    unsigned HasVar : 1;
+
+    /// The location of the "inspect".
+    SourceLocation InspectLoc;
+  };
+
+  class InspectPatternBitfields {
+    friend class PatternStmt;
+    friend class WildcardPatternStmt;
+    friend class IdentifierPatternStmt;
+    friend class ExpressionPatternStmt;
+    friend class StructuredBindingPatternStmt;
+    friend class AlternativePatternStmt;
+
+    unsigned : NumStmtBits;
+
+    /// Used by PatternStmt to discover whether a
+    /// pattern statement has a pattern guard
+    unsigned PatternStmtHasPatternGuard : 1;
+
+    /// Defaults to false, only applies to patterns
+    /// that could use the keyword case (expression
+    /// patterns)
+    unsigned HasCase : 1;
+
+    /// Used by PatternStmt to discover whether a
+    /// pattern statement contributes to return type deduction
+    /// for the overall inspect expression
+    unsigned SkipTypeDeduction : 1;
+
+    /// StructuredBindingPatternStmt only
+
+    /// Unified condition considering all matchers in the pattern
+    /// list. Usually a chain of '&&' on equality checks.
+    unsigned HasPatCond : 1;
+
+    /// The location of the '__' wildcard, identifier,
+    /// constant expression or pattern list.
+    SourceLocation PatternLoc;
+  };
+
   union {
     // Same order as in StmtNodes.td.
     // Statements
@@ -1286,6 +1340,10 @@ protected:
 
     // C++ Coroutines expressions
     CoawaitExprBitfields CoawaitBits;
+
+    // C++ Pattern Matching expressions and statements
+    InspectExprBitfields InspectExprBits;
+    InspectPatternBitfields InspectPatternBits;
 
     // Obj-C Expressions
     ObjCIndirectCopyRestoreExprBitfields ObjCIndirectCopyRestoreExprBits;
@@ -3995,6 +4053,789 @@ public:
 
   const_child_range children() const;
 };
+
+/// Pattern Matching
+///   PatternStmt is the base class for WildcardPatternStmt,
+///   IdentifierPatternStmt, ExpressionPatternStmt and AlternativePatternStmt.
+/// Note that the classes below are not in StmtCXX.h to prevent
+/// pulling all of StmtCXX.h into ExprCXX.h for InspectExpr.
+class PatternStmt : public Stmt {
+protected:
+  /// The location of the ":".
+  SourceLocation ColonLoc;
+
+  /// A pointer to the following PatternStmt class in the same
+  /// inspect statement.
+  PatternStmt *NextPattern = nullptr;
+
+  PatternStmt(StmtClass SC, SourceLocation KWLoc, SourceLocation ColonLoc,
+              bool ExcludedFromTypeDeduction)
+      : Stmt(SC), ColonLoc(ColonLoc) {
+    setPatternLoc(KWLoc);
+    setHasCase(false);
+
+    InspectPatternBits.SkipTypeDeduction = ExcludedFromTypeDeduction;
+  }
+
+  PatternStmt(StmtClass SC, EmptyShell) : Stmt(SC) {}
+
+public:
+  const PatternStmt *getNextPattern() const { return NextPattern; }
+  PatternStmt *getNextPattern() { return NextPattern; }
+  void setNextPattern(PatternStmt *SC) { NextPattern = SC; }
+
+  SourceLocation getPatternLoc() const { return InspectPatternBits.PatternLoc; }
+  void setPatternLoc(SourceLocation L) { InspectPatternBits.PatternLoc = L; }
+  SourceLocation getColonLoc() const { return ColonLoc; }
+  void setColonLoc(SourceLocation L) { ColonLoc = L; }
+
+  inline Stmt *getSubStmt();
+  const Stmt *getSubStmt() const {
+    return const_cast<PatternStmt *>(this)->getSubStmt();
+  }
+
+  inline Expr *getPatternGuard();
+  const Expr *getPatternGuard() const {
+    return const_cast<PatternStmt *>(this)->getPatternGuard();
+  }
+
+  inline void setPatternGuard(Expr *PatternGuard);
+  inline bool hasPatternGuard() const;
+
+  inline void setHasCase(bool HasCase) { InspectPatternBits.HasCase = HasCase; }
+  inline bool hasCase() const { return InspectPatternBits.HasCase; }
+
+  inline bool excludedFromTypeDeduction() const {
+    return InspectPatternBits.SkipTypeDeduction;
+  }
+
+  SourceLocation getBeginLoc() const { return getPatternLoc(); }
+  inline SourceLocation getEndLoc() const LLVM_READONLY;
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == WildcardPatternStmtClass ||
+           T->getStmtClass() == IdentifierPatternStmtClass ||
+           T->getStmtClass() == ExpressionPatternStmtClass ||
+           T->getStmtClass() == StructuredBindingPatternStmtClass ||
+           T->getStmtClass() == AlternativePatternStmtClass;
+  }
+};
+
+class WildcardPatternStmt final
+    : public PatternStmt,
+      private llvm::TrailingObjects<WildcardPatternStmt, Stmt *> {
+  friend TrailingObjects;
+
+  // WildcardPatternStmt is followed by several trailing objects.
+  //
+  // * A "Stmt *" for the substatement of the pattern statement. Always present.
+  //   In case of non void return types, this is in fact a "Expr *" but accessors
+  //   are still on a "Stmt *" basis, differently from the condition.
+  //
+  // * A "Stmt *" for the condition.
+  //    Present if and only if hasPatternGuard(). This is in fact a "Expr *".
+  //
+  enum { NumMandatoryStmtPtr = 1 };
+
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasPatternGuard();
+  }
+
+  unsigned subStmtOffset() const { return 0; }
+  unsigned patternGuardOffset() const { return 1; }
+
+public:
+  WildcardPatternStmt(SourceLocation PatternLoc, SourceLocation ColonLoc,
+                      Stmt *SubStmt, Expr *Guard,
+                      bool ExcludedFromTypeDeduction)
+      : PatternStmt(WildcardPatternStmtClass, PatternLoc, ColonLoc,
+                    ExcludedFromTypeDeduction) {
+    setSubStmt(SubStmt);
+    setPatternGuard(Guard);
+  }
+
+  /// Build an empty wildcard pattern statement.
+  explicit WildcardPatternStmt(EmptyShell Empty, bool HasPatternGuard)
+      : PatternStmt(WildcardPatternStmtClass, Empty) {
+    InspectPatternBits.PatternStmtHasPatternGuard = HasPatternGuard;
+  }
+
+  /// Build a wildcard pattern statement.
+  static WildcardPatternStmt *Create(const ASTContext &Ctx,
+                                     SourceLocation PatternLoc,
+                                     SourceLocation ColonLoc,
+                                     Expr *patternGuard,
+                                     bool ExcludedFromTypeDeduction);
+
+  /// Build an empty wildcard pattern statement.
+  static WildcardPatternStmt *CreateEmpty(const ASTContext &Ctx,
+                                          bool hasPatternGuard);
+
+  SourceLocation getIdentifierLoc() const { return getPatternLoc(); }
+  void setIdentifierLoc(SourceLocation L) { setPatternLoc(L); }
+
+  Stmt *getSubStmt() { return getTrailingObjects<Stmt *>()[subStmtOffset()]; }
+  const Stmt *getSubStmt() const {
+    return getTrailingObjects<Stmt *>()[subStmtOffset()];
+  }
+
+  void setSubStmt(Stmt *S) {
+    getTrailingObjects<Stmt *>()[subStmtOffset()] = S;
+  }
+
+  Expr *getPatternGuard() {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  const Expr *getPatternGuard() const {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  void setPatternGuard(Expr *Guard) {
+    getTrailingObjects<Stmt *>()[patternGuardOffset()] =
+        reinterpret_cast<Stmt *>(Guard);
+    InspectPatternBits.PatternStmtHasPatternGuard = Guard ? true : false;
+  }
+
+  bool hasPatternGuard() const {
+    return InspectPatternBits.PatternStmtHasPatternGuard;
+  }
+
+  SourceLocation getBeginLoc() const { return getIdentifierLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    // Handle deeply nested wildcard pattern statements with iteration
+    // instead of recursion.
+    // FIXME: Is this the right approach? There are no tests for this.
+    const PatternStmt *CS = this;
+    while (const auto *CS2 = dyn_cast<PatternStmt>(CS->getSubStmt()))
+      CS = CS2;
+
+    return CS->getSubStmt()->getEndLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == WildcardPatternStmtClass;
+  }
+
+  // Iterators over subexpressions.  The iterators will include iterating
+  // over the initialization expression referenced by the condition variable.
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+};
+
+class IdentifierPatternStmt final
+    : public PatternStmt,
+      private llvm::TrailingObjects<IdentifierPatternStmt, Stmt *> {
+  friend TrailingObjects;
+
+  // IdentifierPatternStmt is followed by several trailing objects.
+  //
+  // * A "Stmt *" for the substatement of the pattern statement. Always present.
+  //
+  // * A "Stmt *" for the identifier of the pattern statement. Always present.
+  //   This is in fact a "Expr *".
+  //
+  // * A "Stmt *" for the condition.
+  //    Present if and only if hasPatternGuard(). This is in fact a "Expr *".
+  //
+  enum { SubStmtOffset = 0, VarOffset = 1 };
+  enum { NumMandatoryStmtPtr = 2 };
+
+  unsigned varOffset() const { return VarOffset; }
+  unsigned subStmtOffset() const { return SubStmtOffset; }
+  unsigned patternGuardOffset() const { return NumMandatoryStmtPtr; }
+
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasPatternGuard();
+  }
+
+public:
+  IdentifierPatternStmt(SourceLocation PatternLoc, SourceLocation ColonLoc,
+                        Stmt *VD, Stmt *SubStmt, Expr *Guard,
+                        bool ExcludedFromTypeDeduction)
+      : PatternStmt(IdentifierPatternStmtClass, PatternLoc, ColonLoc,
+                    ExcludedFromTypeDeduction) {
+    setSubStmt(SubStmt);
+    setVar(VD);
+    setPatternGuard(Guard);
+  }
+
+  /// Build an empty identifier pattern statement.
+  explicit IdentifierPatternStmt(EmptyShell Empty, bool HasPatternGuard)
+      : PatternStmt(IdentifierPatternStmtClass, Empty) {
+    InspectPatternBits.PatternStmtHasPatternGuard = HasPatternGuard;
+  }
+
+  /// Build a identifier pattern statement.
+  static IdentifierPatternStmt *Create(const ASTContext &Ctx,
+                                       SourceLocation PatternLoc,
+                                       SourceLocation ColonLoc,
+                                       Expr *patternGuard,
+                                       bool ExcludedFromTypeDeduction);
+
+  /// Build an empty identifier pattern statement.
+  static IdentifierPatternStmt *CreateEmpty(const ASTContext &Ctx,
+                                            bool HasPatternGuard);
+
+  SourceLocation getIdentifierLoc() const { return getPatternLoc(); }
+  void setIdentifierLoc(SourceLocation L) { setPatternLoc(L); }
+
+  Stmt *getVar() {
+    return getTrailingObjects<Stmt *>()[varOffset()];
+  }
+  const Stmt *getVar() const {
+    return getTrailingObjects<Stmt *>()[varOffset()];
+  }
+  void setVar(Stmt *VDStmt) {
+    getTrailingObjects<Stmt *>()[varOffset()] = VDStmt;
+  }
+
+  Stmt *getSubStmt() { return getTrailingObjects<Stmt *>()[subStmtOffset()]; }
+  const Stmt *getSubStmt() const {
+    return getTrailingObjects<Stmt *>()[subStmtOffset()];
+  }
+
+  void setSubStmt(Stmt *S) {
+    getTrailingObjects<Stmt *>()[subStmtOffset()] = S;
+  }
+
+  Expr *getPatternGuard() {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  const Expr *getPatternGuard() const {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  void setPatternGuard(Expr *Guard) {
+    getTrailingObjects<Stmt *>()[patternGuardOffset()] =
+        reinterpret_cast<Stmt *>(Guard);
+    InspectPatternBits.PatternStmtHasPatternGuard = Guard ? true : false;
+  }
+
+  bool hasPatternGuard() const {
+    return InspectPatternBits.PatternStmtHasPatternGuard;
+  }
+
+  SourceLocation getBeginLoc() const { return getIdentifierLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    // Handle deeply nested identifier pattern statements with iteration instead
+    // of recursion.
+    // FIXME: Is this the right approach? There are no tests for this.
+    const PatternStmt *CS = this;
+    while (const auto *CS2 = dyn_cast<PatternStmt>(CS->getSubStmt()))
+      CS = CS2;
+
+    return CS->getSubStmt()->getEndLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == IdentifierPatternStmtClass;
+  }
+
+  // Iterators
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+};
+
+class ExpressionPatternStmt final
+    : public PatternStmt,
+      private llvm::TrailingObjects<ExpressionPatternStmt, Stmt *> {
+  friend TrailingObjects;
+
+  // ExpressionPatternStmt is followed by several trailing objects.
+  //
+  // * A "Stmt *" for the substatement of the pattern statement. Always present.
+  //
+  // * A "Stmt *" for the matching expression between a constant expression and
+  //   the inspect condition. This is in fact a "Expr *".
+  //
+  // * A "Stmt *" for the condition.
+  //    Present if and only if hasPatternGuard(). This is in fact a "Expr *".
+  //
+  enum { SubStmtOffset = 0, MatchCondOffset = 1 };
+  enum { NumMandatoryStmtPtr = 2 };
+
+  unsigned matchCondOffset() const { return MatchCondOffset; }
+  unsigned subStmtOffset() const { return SubStmtOffset; }
+  unsigned patternGuardOffset() const { return NumMandatoryStmtPtr; }
+
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasPatternGuard();
+  }
+
+public:
+  ExpressionPatternStmt(SourceLocation PatternLoc, SourceLocation ColonLoc,
+                        Stmt *MatchCond, Stmt *SubStmt, Expr *Guard,
+                        bool ExcludedFromTypeDeduction)
+      : PatternStmt(ExpressionPatternStmtClass, PatternLoc, ColonLoc,
+                    ExcludedFromTypeDeduction) {
+    setSubStmt(SubStmt);
+    setMatchCond(MatchCond);
+    setPatternGuard(Guard);
+  }
+
+  /// Build an empty expression pattern statement.
+  explicit ExpressionPatternStmt(EmptyShell Empty, bool HasPatternGuard)
+      : PatternStmt(ExpressionPatternStmtClass, Empty) {
+    InspectPatternBits.PatternStmtHasPatternGuard = HasPatternGuard;
+  }
+
+  /// Build a expression pattern statement.
+  static ExpressionPatternStmt *Create(const ASTContext &Ctx,
+                                       SourceLocation PatternLoc,
+                                       SourceLocation ColonLoc,
+                                       Expr *patternGuard,
+                                       bool ExcludedFromTypeDeduction);
+
+  /// Build an empty expression pattern statement.
+  static ExpressionPatternStmt *CreateEmpty(const ASTContext &Ctx,
+                                            bool HasPatternGuard);
+
+  SourceLocation getIdentifierLoc() const { return getPatternLoc(); }
+  void setIdentifierLoc(SourceLocation L) { setPatternLoc(L); }
+
+  Stmt *getMatchCond() {
+    return getTrailingObjects<Stmt *>()[matchCondOffset()];
+  }
+  const Stmt *getMatchCond() const {
+    return getTrailingObjects<Stmt *>()[matchCondOffset()];
+  }
+  void setMatchCond(Stmt *MatchCond) {
+    getTrailingObjects<Stmt *>()[matchCondOffset()] = MatchCond;
+  }
+
+  Stmt *getSubStmt() { return getTrailingObjects<Stmt *>()[subStmtOffset()]; }
+  const Stmt *getSubStmt() const {
+    return getTrailingObjects<Stmt *>()[subStmtOffset()];
+  }
+
+  void setSubStmt(Stmt *S) {
+    getTrailingObjects<Stmt *>()[subStmtOffset()] = S;
+  }
+
+  Expr *getPatternGuard() {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  const Expr *getPatternGuard() const {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  void setPatternGuard(Expr *Guard) {
+    getTrailingObjects<Stmt *>()[patternGuardOffset()] =
+        reinterpret_cast<Stmt *>(Guard);
+    InspectPatternBits.PatternStmtHasPatternGuard = Guard ? true : false;
+  }
+
+  bool hasPatternGuard() const {
+    return InspectPatternBits.PatternStmtHasPatternGuard;
+  }
+
+  SourceLocation getBeginLoc() const { return getIdentifierLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    // Handle deeply nested identifier pattern statements with iteration instead
+    // of recursion.
+    // FIXME: Is this the right approach? There are no tests for this.
+    const PatternStmt *CS = this;
+    while (const auto *CS2 = dyn_cast<PatternStmt>(CS->getSubStmt()))
+      CS = CS2;
+
+    return CS->getSubStmt()->getEndLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ExpressionPatternStmtClass;
+  }
+
+  // Iterators
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+};
+
+/// Describes C++ pattern-list for structural bindings in inspects.
+class StructuredBindingPatternStmt final
+    : public PatternStmt,
+      private llvm::TrailingObjects<StructuredBindingPatternStmt, Stmt *> {
+  friend TrailingObjects;
+  SourceLocation LSquareLoc, RSquareLoc;
+
+  // StructuredBindingPatternStmt is followed by several trailing objects.
+  //
+  // * A "Stmt *" for the substatement of the pattern statement. Always present.
+  //
+  // * A "Stmt *" to hold the decomposition declaration representing bindings
+  //   from the inspect condition.
+  //
+  // * A "Stmt *" for the pattern guard condition.
+  //    Present if and only if hasPatternGuard(). This is in fact a "Expr *".
+  //
+  // * A "Stmt *" representing the root of a && chain between all patterns
+  //    that contribute to matching and form the overall pattern condition.
+  //    Present only if there are any conditions.
+  //
+  enum { SubStmtOffset = 0, DecompDeclOffset = 1 };
+  enum { NumMandatoryStmtPtr = 2 };
+
+  unsigned subStmtOffset() const { return SubStmtOffset; }
+  unsigned decompDeclOffset() const { return DecompDeclOffset; }
+  unsigned patternGuardOffset() const { return NumMandatoryStmtPtr; }
+  unsigned patCondOffset() const {
+    return NumMandatoryStmtPtr + hasPatternGuard();
+  }
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasPatternGuard() + hasPatCond();
+  }
+
+public:
+  StructuredBindingPatternStmt(const ASTContext &Ctx, SourceLocation PatternLoc,
+                               SourceLocation ColonLoc, SourceLocation LLoc,
+                               SourceLocation RLoc, Stmt *DecompCond,
+                               Stmt *SubStmt, Expr *Guard, Expr *PatCond,
+                               bool ExcludedFromTypeDeduction);
+
+  /// Build an empty expression pattern statement.
+  explicit StructuredBindingPatternStmt(EmptyShell Empty, bool HasPatternGuard)
+      : PatternStmt(StructuredBindingPatternStmtClass, Empty) {
+    InspectPatternBits.PatternStmtHasPatternGuard = HasPatternGuard;
+    InspectPatternBits.HasPatCond = false;
+  }
+
+  /// Build a expression pattern statement.
+  static StructuredBindingPatternStmt *
+  Create(const ASTContext &Ctx, SourceLocation PatternLoc,
+         SourceLocation ColonLoc, SourceLocation LLoc, SourceLocation RLoc,
+         Stmt *DecompCond, Stmt *SubStmt, Expr *Guard, Expr *PatCond,
+         bool ExcludedFromTypeDeduction);
+
+  /// Build an empty expression pattern statement.
+  static StructuredBindingPatternStmt *
+  CreateEmpty(const ASTContext &Ctx, bool HasPatternGuard, bool HasPatCond);
+
+  SourceLocation getLSquareLoc() const { return LSquareLoc; }
+  void setLSquareLoc(SourceLocation Loc) { LSquareLoc = Loc; }
+  SourceLocation getRSquareLoc() const { return RSquareLoc; }
+  void setRSquareLoc(SourceLocation Loc) { RSquareLoc = Loc; }
+  SourceLocation getBeginLoc() const LLVM_READONLY { return getLSquareLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY { return getRSquareLoc(); }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == StructuredBindingPatternStmtClass;
+  }
+
+  SourceLocation getIdentifierLoc() const { return getPatternLoc(); }
+  void setIdentifierLoc(SourceLocation L) { setPatternLoc(L); }
+
+  /// Substmt
+  Stmt *getSubStmt() { return getTrailingObjects<Stmt *>()[subStmtOffset()]; }
+  const Stmt *getSubStmt() const {
+    return getTrailingObjects<Stmt *>()[subStmtOffset()];
+  }
+
+  void setSubStmt(Stmt *S) {
+    getTrailingObjects<Stmt *>()[subStmtOffset()] = S;
+  }
+
+  /// DecompositionDecl
+  Stmt *getDecompStmt();
+  const Stmt *getDecompStmt() const;
+  void setDecompStmt(const ASTContext &Ctx, Stmt *S);
+
+  /// Pattern guards
+  Expr *getPatternGuard() {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  const Expr *getPatternGuard() const {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  void setPatternGuard(Expr *Guard) {
+    getTrailingObjects<Stmt *>()[patternGuardOffset()] =
+        reinterpret_cast<Stmt *>(Guard);
+    InspectPatternBits.PatternStmtHasPatternGuard = Guard ? true : false;
+  }
+
+  bool hasPatternGuard() const {
+    return InspectPatternBits.PatternStmtHasPatternGuard;
+  }
+
+  /// Pattern condition
+  Expr *getPatCond() {
+    assert(hasPatCond() && "This pattern list yields no condition!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patCondOffset()]);
+  }
+
+  const Expr *getPatCond() const {
+    assert(hasPatCond() && "This pattern list yields no condition!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patCondOffset()]);
+  }
+
+  void setPatCond(Expr *Cond) {
+    getTrailingObjects<Stmt *>()[patCondOffset()] =
+        reinterpret_cast<Stmt *>(Cond);
+    InspectPatternBits.HasPatCond = Cond ? true : false;
+  }
+
+  bool hasPatCond() const { return InspectPatternBits.HasPatCond; }
+
+  // Iterators
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  friend class ASTStmtReader;
+  friend class ASTStmtWriter;
+};
+
+class AlternativePatternStmt final
+    : public PatternStmt,
+      private llvm::TrailingObjects<AlternativePatternStmt, Stmt *> {
+  friend TrailingObjects;
+
+  // AlternativePatternStmt work in progress
+  enum { SubStmtOffset = 0, MatchCondOffset = 1 };
+  enum { NumMandatoryStmtPtr = 2 };
+
+  unsigned matchCondOffset() const { return MatchCondOffset; }
+  unsigned subStmtOffset() const { return SubStmtOffset; }
+  unsigned patternGuardOffset() const {
+    return NumMandatoryStmtPtr;
+  }
+
+  unsigned numTrailingObjects(OverloadToken<Stmt *>) const {
+    return NumMandatoryStmtPtr + hasPatternGuard();
+  }
+
+public:
+  AlternativePatternStmt(SourceLocation PatternLoc, SourceLocation ColonLoc,
+                         Stmt *MatchCond, Stmt *SubStmt, Expr *Guard,
+                         bool ExcludedFromTypeDeduction)
+      : PatternStmt(AlternativePatternStmtClass, PatternLoc, ColonLoc,
+                    ExcludedFromTypeDeduction) {
+    setPatternGuard(Guard);
+    setSubStmt(SubStmt);
+    setMatchCond(MatchCond);
+  }
+
+  /// Build an empty alternative pattern statement.
+  explicit AlternativePatternStmt(EmptyShell Empty, bool HasPatternGuard)
+      : PatternStmt(AlternativePatternStmtClass, Empty) {
+    InspectPatternBits.PatternStmtHasPatternGuard = HasPatternGuard;
+  }
+
+  /// Build an alternative pattern statement.
+  static AlternativePatternStmt *Create(const ASTContext &Ctx,
+                                       SourceLocation PatternLoc,
+                                       SourceLocation ColonLoc,
+                                       Expr *patternGuard,
+                                       bool ExcludedFromTypeDeduction);
+
+  /// Build an empty alternative pattern statement.
+  static AlternativePatternStmt *CreateEmpty(const ASTContext &Ctx,
+                                             bool HasPatternGuard);
+
+  SourceLocation getIdentifierLoc() const { return getPatternLoc(); }
+  void setIdentifierLoc(SourceLocation L) { setPatternLoc(L); }
+
+  Stmt *getMatchCond() {
+    return getTrailingObjects<Stmt *>()[matchCondOffset()];
+  }
+  const Stmt *getMatchCond() const {
+    return getTrailingObjects<Stmt *>()[matchCondOffset()];
+  }
+  void setMatchCond(Stmt *MatchCond) {
+    getTrailingObjects<Stmt *>()[matchCondOffset()] = MatchCond;
+  }
+
+  Stmt *getSubStmt() { return getTrailingObjects<Stmt *>()[subStmtOffset()]; }
+  const Stmt *getSubStmt() const {
+    return getTrailingObjects<Stmt *>()[subStmtOffset()];
+  }
+
+  void setSubStmt(Stmt *S) {
+    getTrailingObjects<Stmt *>()[subStmtOffset()] = S;
+  }
+
+  Expr *getPatternGuard() {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  const Expr *getPatternGuard() const {
+    assert(hasPatternGuard() && "This pattern has no guard to get!");
+    return reinterpret_cast<Expr *>(
+        getTrailingObjects<Stmt *>()[patternGuardOffset()]);
+  }
+
+  void setPatternGuard(Expr *Guard) {
+    getTrailingObjects<Stmt *>()[patternGuardOffset()] =
+        reinterpret_cast<Stmt *>(Guard);
+    InspectPatternBits.PatternStmtHasPatternGuard = Guard ? true : false;
+  }
+
+  bool hasPatternGuard() const {
+    return InspectPatternBits.PatternStmtHasPatternGuard;
+  }
+
+  SourceLocation getBeginLoc() const { return getIdentifierLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    // Handle deeply nested identifier pattern statements with iteration instead
+    // of recursion.
+    // FIXME: Is this the right approach? There are no tests for this.
+    const PatternStmt *CS = this;
+    while (const auto *CS2 = dyn_cast<PatternStmt>(CS->getSubStmt()))
+      CS = CS2;
+
+    return CS->getSubStmt()->getEndLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == AlternativePatternStmtClass;
+  }
+
+  // Iterators
+  child_range children() {
+    return child_range(getTrailingObjects<Stmt *>(),
+                       getTrailingObjects<Stmt *>() +
+                           numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+
+  const_child_range children() const {
+    return const_child_range(getTrailingObjects<Stmt *>(),
+                             getTrailingObjects<Stmt *>() +
+                                 numTrailingObjects(OverloadToken<Stmt *>()));
+  }
+};
+
+SourceLocation PatternStmt::getEndLoc() const {
+  if (const auto *WP = dyn_cast<WildcardPatternStmt>(this))
+    return WP->getEndLoc();
+  else if (const auto *IP = dyn_cast<IdentifierPatternStmt>(this))
+    return IP->getEndLoc();
+  else if (const auto *EP = dyn_cast<ExpressionPatternStmt>(this))
+    return EP->getEndLoc();
+  else if (const auto *SBP = dyn_cast<StructuredBindingPatternStmt>(this))
+    return SBP->getEndLoc();
+  else if (const auto *AP = dyn_cast<AlternativePatternStmt>(this))
+    return AP->getEndLoc();
+
+  llvm_unreachable("Unknown PatternStmt!");
+}
+
+Stmt *PatternStmt::getSubStmt() {
+  if (auto *WP = dyn_cast<WildcardPatternStmt>(this))
+    return WP->getSubStmt();
+  else if (auto *IP = dyn_cast<IdentifierPatternStmt>(this))
+    return IP->getSubStmt();
+  else if (auto *EP = dyn_cast<ExpressionPatternStmt>(this))
+    return EP->getSubStmt();
+  else if (auto *SBP = dyn_cast<StructuredBindingPatternStmt>(this))
+    return SBP->getSubStmt();
+  else if (auto *AP = dyn_cast<AlternativePatternStmt>(this))
+    return AP->getSubStmt();
+
+  llvm_unreachable("Unknown PatternStmt!");
+}
+
+bool PatternStmt::hasPatternGuard() const {
+  if (const auto *WP = dyn_cast<WildcardPatternStmt>(this))
+    return WP->hasPatternGuard();
+  else if (const auto *IP = dyn_cast<IdentifierPatternStmt>(this))
+    return IP->hasPatternGuard();
+  else if (const auto *EP = dyn_cast<ExpressionPatternStmt>(this))
+    return EP->hasPatternGuard();
+  else if (const auto *SBP = dyn_cast<StructuredBindingPatternStmt>(this))
+    return SBP->hasPatternGuard();
+  else if (const auto *AP = dyn_cast<AlternativePatternStmt>(this))
+    return AP->hasPatternGuard();
+
+  llvm_unreachable("Unknown PatternStmt!");
+}
+
+Expr *PatternStmt::getPatternGuard() {
+  if (auto *WP = dyn_cast<WildcardPatternStmt>(this))
+    return WP->getPatternGuard();
+  else if (auto *IP = dyn_cast<IdentifierPatternStmt>(this))
+    return IP->getPatternGuard();
+  else if (auto *EP = dyn_cast<ExpressionPatternStmt>(this))
+    return EP->getPatternGuard();
+  else if (auto *SBP = dyn_cast<StructuredBindingPatternStmt>(this))
+    return SBP->getPatternGuard();
+  else if (auto *AP = dyn_cast<AlternativePatternStmt>(this))
+    return AP->getPatternGuard();
+
+  llvm_unreachable("Unknown PatternStmt!");
+}
+
+void PatternStmt::setPatternGuard(Expr *PatternGuard) {
+  if (auto *WP = dyn_cast<WildcardPatternStmt>(this))
+    WP->setPatternGuard(PatternGuard);
+  else if (auto *IP = dyn_cast<IdentifierPatternStmt>(this))
+    IP->setPatternGuard(PatternGuard);
+  else if (auto *EP = dyn_cast<ExpressionPatternStmt>(this))
+    EP->setPatternGuard(PatternGuard);
+  else if (auto *SBP = dyn_cast<StructuredBindingPatternStmt>(this))
+    return SBP->setPatternGuard(PatternGuard);
+  else if (auto *AP = dyn_cast<AlternativePatternStmt>(this))
+    return AP->setPatternGuard(PatternGuard);
+
+  llvm_unreachable("Unknown PatternStmt!");
+}
 
 } // namespace clang
 

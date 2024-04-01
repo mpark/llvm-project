@@ -1966,3 +1966,72 @@ CXXFoldExpr::CXXFoldExpr(QualType T, UnresolvedLookupExpr *Callee,
   SubExprs[SubExpr::RHS] = RHS;
   setDependence(computeDependence(this));
 }
+
+InspectExpr::InspectExpr(const ASTContext &Ctx, Stmt *Init, VarDecl *Var,
+                         Expr *Cond, bool IsConstexpr, bool ExplicitResultType)
+    // FIXME: VK_XValue?
+    : Expr(InspectExprClass, QualType(), VK_PRValue, OK_Ordinary),
+      FirstPattern(nullptr), ConstexprInspect(IsConstexpr),
+      ExplicitResultType(ExplicitResultType) {
+
+  bool HasInit = Init != nullptr;
+  bool HasVar = Var != nullptr;
+  InspectExprBits.HasInit = HasInit;
+  InspectExprBits.HasVar = HasVar;
+
+  setCond(Cond);
+  setBody(nullptr);
+  if (HasInit)
+    setInit(Init);
+  if (HasVar)
+    setConditionVariable(Ctx, Var);
+
+  setInspectLoc(SourceLocation{});
+}
+
+InspectExpr::InspectExpr(EmptyShell Empty, bool HasInit, bool HasVar)
+    // FIXME: VK_XValue?
+    : Expr(InspectExprClass, QualType(), VK_PRValue, OK_Ordinary),
+      FirstPattern(nullptr), ConstexprInspect(false),
+      ExplicitResultType(false) {
+
+  InspectExprBits.HasInit = HasInit;
+  InspectExprBits.HasVar = HasVar;
+}
+
+InspectExpr *InspectExpr::Create(const ASTContext &Ctx, Stmt *Init,
+                                 VarDecl *Var, Expr *Cond, bool IsConstexpr,
+                                 bool ExplicitResultType) {
+  void *Mem = Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr),
+                           alignof(InspectExpr));
+  return new (Mem)
+      InspectExpr(Ctx, Init, Var, Cond, IsConstexpr, ExplicitResultType);
+}
+
+InspectExpr *InspectExpr::CreateEmpty(const ASTContext &Ctx, bool HasInit,
+                                      bool HasVar) {
+  void *Mem = Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr),
+                           alignof(InspectExpr));
+  return new (Mem) InspectExpr(EmptyShell(), HasInit, HasVar);
+}
+
+VarDecl *InspectExpr::getConditionVariable() {
+  auto *DS = getConditionVariableDeclStmt();
+  if (!DS)
+    return nullptr;
+  return cast<VarDecl>(DS->getSingleDecl());
+}
+
+void InspectExpr::setConditionVariable(const ASTContext &Ctx, VarDecl *V) {
+  assert(hasVarStorage() &&
+         "This inspect statement has no storage for a condition variable!");
+
+  if (!V) {
+    getTrailingObjects<Stmt *>()[varOffset()] = nullptr;
+    return;
+  }
+
+  SourceRange VarRange = V->getSourceRange();
+  getTrailingObjects<Stmt *>()[varOffset()] = new (Ctx)
+      DeclStmt(DeclGroupRef(V), VarRange.getBegin(), VarRange.getEnd());
+}

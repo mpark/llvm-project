@@ -947,6 +947,7 @@ ExprResult Parser::ParseBuiltinPtrauthTypeDiscriminator() {
 /// [G++]   binary-type-trait '(' type-id ',' type-id ')'           [TODO]
 /// [EMBT]  array-type-trait '(' type-id ',' integer ')'
 /// [clang] '^' block-literal
+/// [C++2b]   'inspect-expression'
 ///
 ///       constant: [C99 6.4.4]
 ///         integer-constant
@@ -1851,6 +1852,10 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
     Actions.CodeCompletion().CodeCompleteExpression(
         getCurScope(), PreferredType.get(Tok.getLocation()));
     return ExprError();
+  }
+  case tok::kw_inspect: { // C++2b Pattern Matching: inspect-statement
+    Res = ParseInspectExpr();
+    break;
   }
 #define TRANSFORM_TYPE_TRAIT_DEF(_, Trait) case tok::kw___##Trait:
 #include "clang/Basic/TransformTypeTraits.def"

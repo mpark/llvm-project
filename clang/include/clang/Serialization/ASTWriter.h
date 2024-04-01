@@ -65,6 +65,7 @@ class ModuleFileExtension;
 class ModuleFileExtensionWriter;
 class NamedDecl;
 class ObjCInterfaceDecl;
+class PatternStmt;
 class PreprocessingRecord;
 class Preprocessor;
 class RecordDecl;
@@ -475,6 +476,9 @@ private:
   /// Mapping from SwitchCase statements to IDs.
   llvm::DenseMap<SwitchCase *, unsigned> SwitchCaseIDs;
 
+  /// Mapping from PatternStmt statements to IDs.
+  llvm::DenseMap<PatternStmt *, unsigned> InspectPatternIDs;
+
   /// The number of statements written to the AST file.
   unsigned NumStatements = 0;
 
@@ -805,6 +809,14 @@ public:
   unsigned getSwitchCaseID(SwitchCase *S);
 
   void ClearSwitchCaseIDs();
+
+  /// Record an ID for the given pattern statement.
+  unsigned RecordInspectPatternID(PatternStmt *S);
+
+  /// Retrieve the ID for the given pattern statement.
+  unsigned getInspectPatternID(PatternStmt *S);
+
+  void ClearInspectPatternIDs();
 
   unsigned getTypeExtQualAbbrev() const {
     return TypeExtQualAbbrev;
