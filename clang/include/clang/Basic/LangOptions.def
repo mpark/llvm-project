@@ -285,6 +285,7 @@ LANGOPT(AnnotationAttributes,  1, 0, NotCompatible, "Experimental C++26 support 
 LANGOPT(EntityProxyReflection, 1, 0, NotCompatible, "Augments C++26 Reflection with entity proxy reflection")
 LANGOPT(ReflectionLatest    ,  1, 0, NotCompatible, "Enable all experimental C++26 features supported by Clang/P2996")
 
+LANGOPT(PatternMatching , 1, 0, NotCompatible, "enable C++ Extensions for Pattern Matching")
 LANGOPT(MSVCEnableStdcMacro , 1, 0, NotCompatible, "Define __STDC__ with '-fms-compatibility'")
 LANGOPT(SizedDeallocation , 1, 0, NotCompatible, "sized deallocation")
 LANGOPT(AlignedAllocation , 1, 0, NotCompatible, "aligned allocation")

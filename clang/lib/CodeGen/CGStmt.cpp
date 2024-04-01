@@ -116,6 +116,11 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
   case Stmt::DeferStmtClass:
   case Stmt::SEHLeaveStmtClass:
   case Stmt::SYCLKernelCallStmtClass:
+  case Stmt::WildcardPatternStmtClass:
+  case Stmt::IdentifierPatternStmtClass:
+  case Stmt::ExpressionPatternStmtClass:
+  case Stmt::StructuredBindingPatternStmtClass:
+  case Stmt::AlternativePatternStmtClass:
     llvm_unreachable("should have emitted these statements as simple");
 
 #define STMT(Type, Base)
@@ -558,6 +563,21 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S,
     break;
   case Stmt::SYCLKernelCallStmtClass:
     EmitSYCLKernelCallStmt(cast<SYCLKernelCallStmt>(*S));
+    break;
+  case Stmt::WildcardPatternStmtClass:
+    EmitWildcardPatternStmt(cast<WildcardPatternStmt>(*S));
+    break;
+  case Stmt::IdentifierPatternStmtClass:
+    EmitIdentifierPatternStmt(cast<IdentifierPatternStmt>(*S));
+    break;
+  case Stmt::ExpressionPatternStmtClass:
+    EmitExpressionPatternStmt(cast<ExpressionPatternStmt>(*S));
+    break;
+  case Stmt::StructuredBindingPatternStmtClass:
+    EmitStructuredBindingPatternStmt(cast<StructuredBindingPatternStmt>(*S));
+    break;
+  case Stmt::AlternativePatternStmtClass:
+    EmitAlternativePatternStmt(cast<AlternativePatternStmt>(*S));
     break;
   }
   return true;
@@ -2572,6 +2592,282 @@ void CodeGenFunction::EmitSwitchStmt(const SwitchStmt &S) {
   SwitchWeights = SavedSwitchWeights;
   SwitchLikelihood = SavedSwitchLikelihood;
   CaseRangeBlock = SavedCRBlock;
+}
+
+static const char *GetPatternName(const PatternStmt *S) {
+  if (!S)
+    return "";
+  if (const auto *WPS = dyn_cast<WildcardPatternStmt>(S))
+    return "pat.wildcard";
+  if (const auto *IPS = dyn_cast<IdentifierPatternStmt>(S))
+    return "pat.id";
+  if (const auto *EPS = dyn_cast<ExpressionPatternStmt>(S))
+    return "pat.exp";
+  if (const auto *EPS = dyn_cast<StructuredBindingPatternStmt>(S))
+    return "pat.stbind";
+  if (const auto *AP = dyn_cast<AlternativePatternStmt>(S))
+    return "pat.alt";
+  llvm_unreachable("unexpected pattern type");
+}
+
+// Emit code for a pattern body and a branch to inspect's exit block.
+void CodeGenFunction::EmitPatternStmtBody(const PatternStmt &S) {
+  // Emit code for the pattern body, which could be a compound statement or an
+  // expression statement.
+  const Expr *E = dyn_cast<Expr>(S.getSubStmt());
+  if (!E) {
+    EmitStmt(S.getSubStmt());
+    // Banch to the next block after inspect.
+    EmitBranch(InspectCtx.InspectExit);
+    return;
+  }
+
+  // No result to store, but evaluate the expression for side effects.
+  if (E->getType()->isVoidType()) {
+    EmitAnyExpr(E);
+  } else if (FnRetTy->isReferenceType()) {
+    // If the expr is a reference, take the address of the expression
+    // rather than the value.
+    RValue Result = EmitReferenceBindingToExpr(E);
+    Builder.CreateStore(Result.getScalarVal(), InspectCtx.InspectResult);
+  } else {
+    switch (getEvaluationKind(E->getType())) {
+    case TEK_Scalar:
+      Builder.CreateStore(EmitScalarExpr(E), InspectCtx.InspectResult);
+      break;
+    case TEK_Complex:
+      EmitComplexExprIntoLValue(E, MakeAddrLValue(InspectCtx.InspectResult, E->getType()),
+                                /*isInit*/ true);
+      break;
+    case TEK_Aggregate:
+      EmitAggExpr(E,
+                  AggValueSlot::forAddr(InspectCtx.InspectResult, Qualifiers(),
+                                        AggValueSlot::IsDestructed,
+                                        AggValueSlot::DoesNotNeedGCBarriers,
+                                        AggValueSlot::IsNotAliased,
+                                        getOverlapForReturnValue()));
+      break;
+    }
+  }
+
+  // Banch to the next block after inspect.
+  EmitBranch(InspectCtx.InspectExit);
+}
+
+void CodeGenFunction::EmitWildcardPatternStmt(const WildcardPatternStmt &S) {
+  assert(InspectCtx.InspectExit && "Expected associated inspect statement");
+
+  // Unless this is the last pattern in the inspect statement, create a new
+  // basic block placeholder for the next pattern to be able to point to it.
+  auto *ThisPattern = InspectCtx.NextPattern;
+  auto *NextPattern = S.getNextPattern()
+                          ? createBasicBlock(GetPatternName(S.getNextPattern()))
+                          : InspectCtx.InspectExit;
+  InspectCtx.NextPattern = NextPattern;
+
+  // Emit code for the current pattern test.
+  EmitBlock(ThisPattern);
+
+  // Do the proper handling in the presence of a pattern guard.
+  if (S.hasPatternGuard()) {
+    // Do not bother creating a specific BB for the pattern body if
+    // there's no extra condition to branch on.
+    llvm::BasicBlock *PatBodyBB = createBasicBlock("patbody");
+    EmitBranchOnBoolExpr(S.getPatternGuard(), PatBodyBB, NextPattern,
+                         getProfileCount(S.getSubStmt()));
+    EmitBlock(PatBodyBB);
+  }
+
+  // Emit the pattern body
+  EmitPatternStmtBody(S);
+}
+
+void CodeGenFunction::EmitIdentifierPatternStmt(
+    const IdentifierPatternStmt &S) {
+  // Unless this is the last pattern in the inspect statement, create a new
+  // basic block placeholder for the next pattern to be able to point to it.
+  auto *ThisPattern = InspectCtx.NextPattern;
+  auto *NextPattern = S.getNextPattern()
+                          ? createBasicBlock(GetPatternName(S.getNextPattern()))
+                          : InspectCtx.InspectExit;
+  InspectCtx.NextPattern = NextPattern;
+
+  // Emit code for the current pattern test.
+  EmitBlock(ThisPattern);
+
+  // Emit variable introduced by identifier pattern.
+  EmitStmt(S.getVar());
+
+  // Do the proper handling in the presence of a pattern guard.
+  if (S.hasPatternGuard()) {
+    // Do not bother creating a specific BB for the pattern body if
+    // there's no extra condition to branch on.
+    llvm::BasicBlock *PatBodyBB = createBasicBlock("patbody");
+    EmitBranchOnBoolExpr(S.getPatternGuard(), PatBodyBB, NextPattern,
+                         getProfileCount(S.getSubStmt()));
+    EmitBlock(PatBodyBB);
+  }
+
+  // Emit the pattern body
+  EmitPatternStmtBody(S);
+}
+
+void CodeGenFunction::EmitExpressionPatternStmt(
+    const ExpressionPatternStmt &S) {
+  // Unless this is the last pattern in the inspect statement, create a new
+  // basic block placeholder for the next pattern to be able to point to it.
+  auto *ThisPattern = InspectCtx.NextPattern;
+  auto *NextPattern = S.getNextPattern()
+                          ? createBasicBlock(GetPatternName(S.getNextPattern()))
+                          : InspectCtx.InspectExit;
+  auto *PatBodyBB = createBasicBlock("patbody");
+  auto *MatchCondNextBB =
+      S.hasPatternGuard() ? createBasicBlock("patguard") : PatBodyBB;
+  InspectCtx.NextPattern = NextPattern;
+
+  // Emit code for the current pattern test.
+  EmitBlock(ThisPattern);
+
+  // Emit code to handle the condition for the matching expression.
+  EmitBranchOnBoolExpr(cast<Expr>(S.getMatchCond()), MatchCondNextBB,
+                       NextPattern, getProfileCount(S.getMatchCond()));
+
+  // Do the proper handling in the presence of a pattern guard.
+  if (S.hasPatternGuard()) {
+    EmitBlock(MatchCondNextBB);
+    EmitBranchOnBoolExpr(S.getPatternGuard(), PatBodyBB, NextPattern,
+                         getProfileCount(S.getSubStmt()));
+  }
+  EmitBlock(PatBodyBB);
+
+  // Emit the pattern body
+  EmitPatternStmtBody(S);
+}
+
+void CodeGenFunction::EmitStructuredBindingPatternStmt(
+    const StructuredBindingPatternStmt &S) {
+  // Unless this is the last pattern in the inspect statement, create a new
+  // basic block placeholder for the next pattern to be able to point to it.
+  auto *ThisPattern = InspectCtx.NextPattern;
+  auto *NextPattern = S.getNextPattern()
+                          ? createBasicBlock(GetPatternName(S.getNextPattern()))
+                          : InspectCtx.InspectExit;
+  auto *PatBodyBB = createBasicBlock("patbody");
+  auto *MatchCondNextBB =
+      S.hasPatternGuard() ? createBasicBlock("patguard") : PatBodyBB;
+  InspectCtx.NextPattern = NextPattern;
+
+  // Emit code for the current pattern test.
+  EmitBlock(ThisPattern);
+  EmitStmt(S.getDecompStmt());
+
+  // Emit code to handle the condition for the matching expression.
+  if (S.hasPatCond())
+    EmitBranchOnBoolExpr(cast<Expr>(S.getPatCond()), MatchCondNextBB,
+                         NextPattern, getProfileCount(S.getPatCond()));
+
+  // Do the proper handling in the presence of a pattern guard.
+  if (S.hasPatternGuard()) {
+    EmitBlock(MatchCondNextBB);
+    EmitBranchOnBoolExpr(S.getPatternGuard(), PatBodyBB, NextPattern,
+                         getProfileCount(S.getSubStmt()));
+  }
+  EmitBlock(PatBodyBB);
+
+  // Emit the pattern body
+  EmitPatternStmtBody(S);
+}
+
+void CodeGenFunction::EmitAlternativePatternStmt(
+    const AlternativePatternStmt &S) {
+  assert(0 && "not implemented");
+}
+
+static std::string
+SimplifyConstraint(const char *Constraint, const TargetInfo &Target,
+                 SmallVectorImpl<TargetInfo::ConstraintInfo> *OutCons=nullptr) {
+  std::string Result;
+
+  while (*Constraint) {
+    switch (*Constraint) {
+    default:
+      Result += Target.convertConstraint(Constraint);
+      break;
+    // Ignore these
+    case '*':
+    case '?':
+    case '!':
+    case '=': // Will see this and the following in mult-alt constraints.
+    case '+':
+      break;
+    case '#': // Ignore the rest of the constraint alternative.
+      while (Constraint[1] && Constraint[1] != ',')
+        Constraint++;
+      break;
+    case '&':
+    case '%':
+      Result += *Constraint;
+      while (Constraint[1] && Constraint[1] == *Constraint)
+        Constraint++;
+      break;
+    case ',':
+      Result += "|";
+      break;
+    case 'g':
+      Result += "imr";
+      break;
+    case '[': {
+      assert(OutCons &&
+             "Must pass output names to constraints with a symbolic name");
+      unsigned Index;
+      bool result = Target.resolveSymbolicName(Constraint, *OutCons, Index);
+      assert(result && "Could not resolve symbolic name"); (void)result;
+      Result += llvm::utostr(Index);
+      break;
+    }
+    }
+
+    Constraint++;
+  }
+
+  return Result;
+}
+
+/// AddVariableConstraints - Look at AsmExpr and if it is a variable declared
+/// as using a particular register add that as a constraint that will be used
+/// in this asm stmt.
+static std::string
+AddVariableConstraints(const std::string &Constraint, const Expr &AsmExpr,
+                       const TargetInfo &Target, CodeGenModule &CGM,
+                       const AsmStmt &Stmt, const bool EarlyClobber,
+                       std::string *GCCReg = nullptr) {
+  const DeclRefExpr *AsmDeclRef = dyn_cast<DeclRefExpr>(&AsmExpr);
+  if (!AsmDeclRef)
+    return Constraint;
+  const ValueDecl &Value = *AsmDeclRef->getDecl();
+  const VarDecl *Variable = dyn_cast<VarDecl>(&Value);
+  if (!Variable)
+    return Constraint;
+  if (Variable->getStorageClass() != SC_Register)
+    return Constraint;
+  AsmLabelAttr *Attr = Variable->getAttr<AsmLabelAttr>();
+  if (!Attr)
+    return Constraint;
+  StringRef Register = Attr->getLabel();
+  assert(Target.isValidGCCRegisterName(Register));
+  // We're using validateOutputConstraint here because we only care if
+  // this is a register constraint.
+  TargetInfo::ConstraintInfo Info(Constraint, "");
+  if (Target.validateOutputConstraint(Info) &&
+      !Info.allowsRegister()) {
+    CGM.ErrorUnsupported(&Stmt, "__asm__");
+    return Constraint;
+  }
+  // Canonicalize the register here before returning it.
+  Register = Target.getNormalizedGCCRegisterName(Register);
+  if (GCCReg != nullptr)
+    *GCCReg = Register.str();
+  return (EarlyClobber ? "&{" : "{") + Register.str() + "}";
 }
 
 std::pair<llvm::Value*, llvm::Type *> CodeGenFunction::EmitAsmInputLValue(

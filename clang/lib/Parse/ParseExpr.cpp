@@ -1547,6 +1547,11 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     AllowSuffix = false;
     break;
 
+  case tok::kw_inspect: { // C++2b Pattern Matching: inspect-expression
+    Res = ParseInspectExpr();
+    break;
+  }
+
   case tok::kw_noexcept: { // [C++0x] 'noexcept' '(' expression ')'
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;
