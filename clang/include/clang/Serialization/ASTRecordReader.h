@@ -374,6 +374,14 @@ public:
   const CXXMetafunctionExpr::ImplFn &getMetafunctionCb(unsigned ID) {
     return Reader->getSema()->getMetafunctionCb(ID);
   }
+
+  void recordInspectPatternID(PatternStmt *SC, unsigned ID) {
+    Reader->RecordInspectPatternID(SC, ID);
+  }
+
+  PatternStmt *getInspectPatternWithID(unsigned ID) {
+    return Reader->getInspectPatternWithID(ID);
+  }
 };
 
 /// Helper class that saves the current stream position and
