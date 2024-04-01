@@ -45,7 +45,6 @@ class IdentifierInfo;
 class LangOptions;
 class MultiKeywordSelector;
 class SourceLocation;
-
 /// How a keyword is treated in the selected standard. This enum is ordered
 /// intentionally so that the value that 'wins' is the most 'permissive'.
 enum KeywordStatus {
