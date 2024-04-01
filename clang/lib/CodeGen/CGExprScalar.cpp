@@ -943,6 +943,9 @@ public:
   Value *VisitPackIndexingExpr(PackIndexingExpr *E) {
     return Visit(E->getSelectedExpr());
   }
+  Value *VisitInspectExpr(InspectExpr *IE) {
+    return CGF.EmitInspectExpr(*IE).getScalarVal();
+  }
 };
 }  // end anonymous namespace.
 

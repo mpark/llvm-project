@@ -2358,6 +2358,84 @@ extern const internal::VariadicDynCastAllOfMatcher<Stmt, CaseStmt> caseStmt;
 extern const internal::VariadicDynCastAllOfMatcher<Stmt, DefaultStmt>
     defaultStmt;
 
+/// Matches inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { }
+/// \endcode
+/// InspectExpr()
+///   matches 'inspect(a)'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, InspectExpr>
+    inspectExpr;
+
+/// Matches pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b: x(); 0: y(); __: z() }
+/// \endcode
+/// switchCase()
+///   matches 'b: ', '0:' and '__:'
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, PatternStmt>
+    patternStmt;
+
+/// Matches wildcard pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b: x(); 0: y(); __: z() }
+/// \endcode
+/// wildcardPatternStmt()
+///   matches '__:'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, WildcardPatternStmt>
+    wildcardPatternStmt;
+
+/// Matches identifier pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b: x(); 0: y(); __: z() }
+/// \endcode
+/// identifierPatternStmt()
+///   matches 'b:'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, IdentifierPatternStmt>
+    identifierPatternStmt;
+
+/// Matches expression pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b: x(); 0: y(); __: z() }
+/// \endcode
+/// expressionPatternStmt()
+///   matches '0:'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, ExpressionPatternStmt>
+    expressionPatternStmt;
+
+/// Matches structured binding pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b => x(); [i, j] => y(); __ => z() }
+/// \endcode
+/// StructuredBindingPatternStmt()
+///   matches '[i, j] =>'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt,
+                                                   StructuredBindingPatternStmt>
+    structuredBindingPatternStmt;
+
+/// Matches alternative pattern statements inside inspect expressions.
+///
+/// Given
+/// \code
+///   inspect(a) { b => x(); <T> => y();  __ => z() }
+/// \endcode
+/// AlternativePatternStmt()
+///   matches '<T> =>'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, AlternativePatternStmt>
+    alternativePatternStmt;
+
 /// Matches compound statements.
 ///
 /// Example matches '{}' and '{{}}' in 'for (;;) {{}}'
@@ -5596,17 +5674,17 @@ AST_POLYMORPHIC_MATCHER_P(hasInitStatement,
 }
 
 /// Matches the condition expression of an if statement, for loop,
-/// switch statement or conditional operator.
+/// switch statement, inspect statement or conditional operator.
 ///
 /// Example matches true (matcher = hasCondition(cxxBoolLiteral(equals(true))))
 /// \code
 ///   if (true) {}
 /// \endcode
-AST_POLYMORPHIC_MATCHER_P(
-    hasCondition,
-    AST_POLYMORPHIC_SUPPORTED_TYPES(IfStmt, ForStmt, WhileStmt, DoStmt,
-                                    SwitchStmt, AbstractConditionalOperator),
-    internal::Matcher<Expr>, InnerMatcher) {
+AST_POLYMORPHIC_MATCHER_P(hasCondition,
+                          AST_POLYMORPHIC_SUPPORTED_TYPES(
+                              IfStmt, ForStmt, WhileStmt, DoStmt, SwitchStmt,
+                              InspectExpr, AbstractConditionalOperator),
+                          internal::Matcher<Expr>, InnerMatcher) {
   const Expr *const Condition = Node.getCond();
   return (Condition != nullptr &&
           InnerMatcher.matches(*Condition, Finder, Builder));
@@ -7896,6 +7974,31 @@ AST_MATCHER_P(SwitchStmt, forEachSwitchCase, internal::Matcher<SwitchCase>,
     if (CaseMatched) {
       Matched = true;
       Result.addMatch(CaseBuilder);
+    }
+  }
+  *Builder = std::move(Result);
+  return Matched;
+}
+
+/// Matches each pattern statement belonging to the given inspect
+/// statement. This matcher may produce multiple matches.
+///
+/// Given
+/// \code
+///   inspect (a) { }
+/// \endcode
+AST_MATCHER_P(InspectExpr, forEachInspectPattern,
+              internal::Matcher<PatternStmt>, InnerMatcher) {
+  BoundNodesTreeBuilder Result;
+
+  bool Matched = false;
+  for (const PatternStmt *PS = Node.getPatternList(); PS;
+       PS = PS->getNextPattern()) {
+    BoundNodesTreeBuilder PatternBuilder(*Builder);
+    bool PatternMatched = InnerMatcher.matches(*PS, Finder, &PatternBuilder);
+    if (PatternMatched) {
+      Matched = true;
+      Result.addMatch(PatternBuilder);
     }
   }
   *Builder = std::move(Result);

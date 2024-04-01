@@ -5803,6 +5803,8 @@ recurse:
     Diags.Report(DiagID);
     return;
   }
+  case Expr::InspectExprClass:
+    assert(0 && "not implemented");
   }
 
   if (AsTemplateArg && !IsPrimaryExpr)

@@ -8203,6 +8203,41 @@ TreeTransform<Derived>::TransformSwitchStmt(SwitchStmt *S) {
                                             Body.get());
 }
 
+template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformInspectExpr(InspectExpr *S) {
+  return ExprError();
+}
+
+template <typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformWildcardPatternStmt(WildcardPatternStmt *S) {
+  return StmtError();
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformIdentifierPatternStmt(
+    IdentifierPatternStmt *S) {
+  return StmtError();
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformExpressionPatternStmt(
+    ExpressionPatternStmt *S) {
+  return StmtError();
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformStructuredBindingPatternStmt(
+    StructuredBindingPatternStmt *S) {
+  return StmtError();
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformAlternativePatternStmt(
+    AlternativePatternStmt *S) {
+  return StmtError();
+}
+
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformWhileStmt(WhileStmt *S) {

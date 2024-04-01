@@ -4244,3 +4244,80 @@ ExprResult Parser::ParseBuiltinBitCast() {
   return Actions.ActOnBuiltinBitCastExpr(KWLoc, DeclaratorInfo, Operand,
                                          T.getCloseLocation());
 }
+
+/// ParseInspectExpr
+///       inspect-expression:
+/// [C++]   'inspect' ['constexpr'] '(' condition ')' statement
+ExprResult Parser::ParseInspectExpr() {
+  assert(Tok.is(tok::kw_inspect) && "Not an inspect expression!");
+  SourceLocation InspectLoc = ConsumeToken(); // eat the 'inspect'.
+
+  // Check for constexpr
+  bool IsConstexpr = false;
+  if (Tok.is(tok::kw_constexpr)) {
+    IsConstexpr = true;
+    ConsumeToken();
+  }
+
+  // inspect (...) { }
+  //         ^
+  if (Tok.isNot(tok::l_paren)) {
+    Diag(Tok, diag::err_expected_lparen_after)
+        << (IsConstexpr ? "constexpr" : "inspect");
+    SkipUntil(tok::semi);
+    return ExprError();
+  }
+
+  ParseScope InspectScope(this, Scope::InspectScope);
+
+  // Parse the condition.
+  StmtResult Init;
+  Sema::ConditionResult Cond;
+  SourceLocation LParen;
+  SourceLocation RParen;
+  if (ParseParenExprOrCondition(&Init, Cond, InspectLoc,
+                                Sema::ConditionKind::Inspect, LParen, RParen) ||
+      Cond.isInvalid())
+    return ExprError();
+
+  // Parse trailing-return-type[opt].
+  TypeResult TrailingReturnType(true);
+  if (Tok.is(tok::arrow)) {
+    SourceRange Range;
+    TrailingReturnType =
+        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit*/ false);
+    if (TrailingReturnType.isInvalid()) // FIXME: add error message
+      return ExprError();
+  }
+
+  ExprResult Inspect = Actions.ActOnStartOfInspectExpr(
+      InspectLoc, Init.get(), Cond, IsConstexpr, TrailingReturnType);
+  if (Inspect.isInvalid()) {
+    // Skip the inspect body.
+    if (Tok.is(tok::l_brace)) {
+      ConsumeBrace();
+      SkipUntil(tok::r_brace);
+    } else
+      SkipUntil(tok::semi);
+    return Inspect;
+  }
+
+  // See comments in ParseIfStatement for why we create a scope for the
+  // condition and a new scope for substatement in C++.
+  ParseScope InnerScope(this, Scope::DeclScope, true, Tok.is(tok::l_brace));
+
+  // Read the body statement.
+  //
+  // inspect (...) { ... }
+  //               ^
+  StmtResult Body(ParseCompoundStatementBody(/*bool isStmtExpr*/true));
+
+  // Pop the scopes.
+  InnerScope.Exit();
+  InspectScope.Exit();
+
+  if (Body.isInvalid())
+    return ExprError();
+
+  return Actions.ActOnFinishInspectExpr(InspectLoc, Inspect.get(), Body.get());
+}

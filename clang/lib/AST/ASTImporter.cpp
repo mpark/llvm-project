@@ -578,6 +578,13 @@ namespace clang {
     ExpectedStmt VisitAttributedStmt(AttributedStmt *S);
     ExpectedStmt VisitIfStmt(IfStmt *S);
     ExpectedStmt VisitSwitchStmt(SwitchStmt *S);
+    ExpectedStmt VisitInspectExpr(InspectExpr *S);
+    ExpectedStmt VisitWildcardPatternStmt(WildcardPatternStmt *S);
+    ExpectedStmt VisitIdentifierPatternStmt(IdentifierPatternStmt *S);
+    ExpectedStmt VisitExpressionPatternStmt(ExpressionPatternStmt *S);
+    ExpectedStmt
+    VisitStructuredBindingPatternStmt(StructuredBindingPatternStmt *S);
+    ExpectedStmt VisitAlternativePatternStmt(AlternativePatternStmt *S);
     ExpectedStmt VisitWhileStmt(WhileStmt *S);
     ExpectedStmt VisitDoStmt(DoStmt *S);
     ExpectedStmt VisitForStmt(ForStmt *S);
@@ -7019,6 +7026,111 @@ ExpectedStmt ASTNodeImporter::VisitSwitchStmt(SwitchStmt *S) {
   }
 
   return ToStmt;
+}
+
+ExpectedStmt ASTNodeImporter::VisitInspectExpr(InspectExpr *S) {
+  Error Err = Error::success();
+  auto ToInit = importChecked(Err, S->getInit());
+  auto ToConditionVariable = importChecked(Err, S->getConditionVariable());
+  auto ToCond = importChecked(Err, S->getCond());
+  auto ToInspectLoc = importChecked(Err, S->getInspectLoc());
+  auto ToIsConstexpr = S->isConstexpr();
+  auto ToHasExplicitResultType = S->hasExplicitResultType();
+  if (Err)
+    return std::move(Err);
+
+  auto *ToStmt =
+      InspectExpr::Create(Importer.getToContext(), ToInit, ToConditionVariable,
+                          ToCond, ToIsConstexpr, ToHasExplicitResultType);
+  ToStmt->setInspectLoc(ToInspectLoc);
+
+  // Now we have to re-chain the patterns.
+  PatternStmt *LastChainedPattern = nullptr;
+  for (PatternStmt *PS = S->getPatternList(); PS != nullptr;
+       PS = PS->getNextPattern()) {
+    Expected<PatternStmt *> ToPatternOrErr = import(PS);
+    if (!ToPatternOrErr)
+      return ToPatternOrErr.takeError();
+    if (LastChainedPattern)
+      LastChainedPattern->setNextPattern(*ToPatternOrErr);
+    else
+      ToStmt->setPatternList(*ToPatternOrErr);
+    LastChainedPattern = *ToPatternOrErr;
+  }
+
+  return ToStmt;
+}
+
+ExpectedStmt ASTNodeImporter::VisitWildcardPatternStmt(WildcardPatternStmt *S) {
+  Error Err = Error::success();
+  auto ToSubStmt = importChecked(Err, S->getSubStmt());
+  auto ToPatternLoc = importChecked(Err, S->getPatternLoc());
+  auto ToColonLoc = importChecked(Err, S->getColonLoc());
+  auto ToPatternGuard = importChecked(Err, S->getPatternGuard());
+  auto ExcludedFromTypeDeduction = S->excludedFromTypeDeduction();
+  if (Err)
+    return std::move(Err);
+
+  auto *ToStmt = WildcardPatternStmt::Create(
+      Importer.getToContext(), ToPatternLoc, ToColonLoc, ToPatternGuard,
+      ExcludedFromTypeDeduction);
+  ToStmt->setSubStmt(ToSubStmt);
+
+  return ToStmt;
+}
+
+ExpectedStmt
+ASTNodeImporter::VisitIdentifierPatternStmt(IdentifierPatternStmt *S) {
+  Error Err = Error::success();
+  auto ToSubStmt = importChecked(Err, S->getSubStmt());
+  auto ToPatternLoc = importChecked(Err, S->getPatternLoc());
+  auto ToColonLoc = importChecked(Err, S->getColonLoc());
+  auto ToVar = importChecked(Err, S->getVar());
+  auto ToPatternGuard = importChecked(Err, S->getPatternGuard());
+  auto ExcludedFromTypeDeduction = S->excludedFromTypeDeduction();
+  if (Err)
+    return std::move(Err);
+
+  auto *ToStmt = IdentifierPatternStmt::Create(
+      Importer.getToContext(), ToPatternLoc, ToColonLoc, ToPatternGuard,
+      ExcludedFromTypeDeduction);
+  ToStmt->setVar(ToVar);
+  ToStmt->setSubStmt(ToSubStmt);
+
+  return ToStmt;
+}
+
+ExpectedStmt
+ASTNodeImporter::VisitExpressionPatternStmt(ExpressionPatternStmt *S) {
+  Error Err = Error::success();
+  auto ToSubStmt = importChecked(Err, S->getSubStmt());
+  auto ToPatternLoc = importChecked(Err, S->getPatternLoc());
+  auto ToColonLoc = importChecked(Err, S->getColonLoc());
+  auto ToCond = importChecked(Err, S->getMatchCond());
+  auto ToPatternGuard = importChecked(Err, S->getPatternGuard());
+  auto ExcludedFromTypeDeduction = S->excludedFromTypeDeduction();
+  if (Err)
+    return std::move(Err);
+
+  auto *ToStmt = ExpressionPatternStmt::Create(
+      Importer.getToContext(), ToPatternLoc, ToColonLoc, ToPatternGuard,
+      ExcludedFromTypeDeduction);
+  ToStmt->setMatchCond(ToCond);
+  ToStmt->setSubStmt(ToSubStmt);
+
+  return ToStmt;
+}
+
+ExpectedStmt ASTNodeImporter::VisitStructuredBindingPatternStmt(
+    StructuredBindingPatternStmt *S) {
+  assert(0 && "not implemented");
+  return S;
+}
+
+ExpectedStmt
+ASTNodeImporter::VisitAlternativePatternStmt(AlternativePatternStmt *S) {
+  assert(0 && "Not implemented");
+  return S;
 }
 
 ExpectedStmt ASTNodeImporter::VisitWhileStmt(WhileStmt *S) {

@@ -94,7 +94,8 @@ const char *Stmt::getStmtClassName() const {
 #define STMT(CLASS, PARENT)                                                    \
   static_assert(std::is_trivially_destructible<CLASS>::value,                  \
                 #CLASS " should be trivially destructible!");
-// FIXME: InitListExpr is not trivially destructible due to its ASTVector.
+// FIXME: InitListExpr & PatternListExpr are not trivially destructible due to
+// theirs ASTVector.
 #define INITLISTEXPR(CLASS, PARENT)
 #include "clang/AST/StmtNodes.inc"
 

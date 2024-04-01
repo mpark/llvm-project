@@ -192,6 +192,30 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_SwitchStmt;
     break;
 
+  case Stmt::InspectExprClass:
+    K = CXCursor_InspectExpr;
+    break;
+
+  case Stmt::WildcardPatternStmtClass:
+    K = CXCursor_WildcardPatternStmt;
+    break;
+
+  case Stmt::IdentifierPatternStmtClass:
+    K = CXCursor_IdentifierPatternStmt;
+    break;
+
+  case Stmt::ExpressionPatternStmtClass:
+    K = CXCursor_ExpressionPatternStmt;
+    break;
+
+  case Stmt::StructuredBindingPatternStmtClass:
+    K = CXCursor_StructuredBindingPatternStmt;
+    break;
+    
+  case Stmt::AlternativePatternStmtClass:
+    K = CXCursor_AlternativePatternStmt;
+    break;
+
   case Stmt::WhileStmtClass:
     K = CXCursor_WhileStmt;
     break;

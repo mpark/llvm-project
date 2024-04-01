@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/StmtCXX.h"
+#include "clang/AST/ExprCXX.h"
 
 #include "clang/AST/ASTContext.h"
 
@@ -125,4 +126,142 @@ CoroutineBodyStmt::CoroutineBodyStmt(CoroutineBodyStmt::CtorArgs const &Args)
       Args.ReturnStmtOnAllocFailure;
   std::copy(Args.ParamMoves.begin(), Args.ParamMoves.end(),
             const_cast<Stmt **>(getParamMoves().data()));
+}
+
+WildcardPatternStmt *
+WildcardPatternStmt::Create(const ASTContext &Ctx, SourceLocation WildcardLoc,
+                            SourceLocation ColonLoc, Expr *PatternGuard,
+                            bool ExcludedFromTypeDeduction) {
+  bool HasPatternGuard = PatternGuard != nullptr;
+
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(WildcardPatternStmt));
+  return new (Mem) WildcardPatternStmt(WildcardLoc, ColonLoc, nullptr,
+                                       PatternGuard, ExcludedFromTypeDeduction);
+}
+
+WildcardPatternStmt *WildcardPatternStmt::CreateEmpty(const ASTContext &Ctx,
+                                                      bool HasPatternGuard) {
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(WildcardPatternStmt));
+  return new (Mem) WildcardPatternStmt(EmptyShell(), HasPatternGuard);
+}
+
+IdentifierPatternStmt *
+IdentifierPatternStmt::Create(const ASTContext &Ctx, SourceLocation CaseLoc,
+                              SourceLocation ColonLoc, Expr *PatternGuard,
+                              bool ExcludedFromTypeDeduction) {
+  bool HasPatternGuard = PatternGuard != nullptr;
+
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(IdentifierPatternStmt));
+  return new (Mem)
+      IdentifierPatternStmt(CaseLoc, ColonLoc, nullptr, nullptr, PatternGuard,
+                            ExcludedFromTypeDeduction);
+}
+
+IdentifierPatternStmt *
+IdentifierPatternStmt::CreateEmpty(const ASTContext &Ctx,
+                                   bool HasPatternGuard) {
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(IdentifierPatternStmt));
+  return new (Mem) IdentifierPatternStmt(EmptyShell(), HasPatternGuard);
+}
+
+ExpressionPatternStmt *
+ExpressionPatternStmt::Create(const ASTContext &Ctx, SourceLocation CaseLoc,
+                              SourceLocation ColonLoc, Expr *PatternGuard,
+                              bool ExcludedFromTypeDeduction) {
+  bool HasPatternGuard = PatternGuard != nullptr;
+
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(ExpressionPatternStmt));
+  return new (Mem)
+      ExpressionPatternStmt(CaseLoc, ColonLoc, nullptr, nullptr, PatternGuard,
+                            ExcludedFromTypeDeduction);
+}
+
+ExpressionPatternStmt *
+ExpressionPatternStmt::CreateEmpty(const ASTContext &Ctx,
+                                   bool HasPatternGuard) {
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(ExpressionPatternStmt));
+  return new (Mem) ExpressionPatternStmt(EmptyShell(), HasPatternGuard);
+}
+
+StructuredBindingPatternStmt::StructuredBindingPatternStmt(
+    const ASTContext &Ctx, SourceLocation PatternLoc, SourceLocation ColonLoc,
+    SourceLocation LLoc, SourceLocation RLoc, Stmt *DecompCond, Stmt *SubStmt,
+    Expr *Guard, Expr *PatCond, bool ExcludedFromTypeDeduction)
+    : PatternStmt(StructuredBindingPatternStmtClass, PatternLoc, ColonLoc,
+                  ExcludedFromTypeDeduction) {
+  setPatternGuard(Guard);
+  setPatCond(PatCond);
+  InspectPatternBits.PatternLoc = LLoc;
+  setLSquareLoc(LLoc);
+  setRSquareLoc(RLoc);
+  setDecompStmt(Ctx, DecompCond);
+  setSubStmt(SubStmt);
+}
+
+StructuredBindingPatternStmt *StructuredBindingPatternStmt::Create(
+    const ASTContext &Ctx, SourceLocation PatternLoc, SourceLocation ColonLoc,
+    SourceLocation LLoc, SourceLocation RLoc, Stmt *DecompCond, Stmt *SubStmt,
+    Expr *Guard, Expr *PatCond, bool ExcludedFromTypeDeduction) {
+  bool HasPatternGuard = Guard != nullptr;
+  bool HasPatCond = PatCond != nullptr;
+
+  void *Mem =
+      Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr +
+                                            HasPatternGuard + HasPatCond),
+                   alignof(StructuredBindingPatternStmt));
+  return new (Mem) StructuredBindingPatternStmt(
+      Ctx, PatternLoc, ColonLoc, LLoc, RLoc, DecompCond, SubStmt, Guard,
+      PatCond, ExcludedFromTypeDeduction);
+}
+
+StructuredBindingPatternStmt *StructuredBindingPatternStmt::CreateEmpty(
+    const ASTContext &Ctx, bool HasPatternGuard, bool HasPatCond) {
+  void *Mem =
+      Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr +
+                                            HasPatternGuard + HasPatCond),
+                   alignof(StructuredBindingPatternStmt));
+  return new (Mem) StructuredBindingPatternStmt(EmptyShell(), HasPatternGuard);
+}
+
+Stmt *StructuredBindingPatternStmt::getDecompStmt() {
+  return getTrailingObjects<Stmt *>()[decompDeclOffset()];
+}
+
+const Stmt *StructuredBindingPatternStmt::getDecompStmt() const {
+  return getTrailingObjects<Stmt *>()[decompDeclOffset()];
+}
+
+void StructuredBindingPatternStmt::setDecompStmt(const ASTContext &Ctx,
+                                                 Stmt *S) {
+  getTrailingObjects<Stmt *>()[decompDeclOffset()] = S;
+}
+
+AlternativePatternStmt *
+AlternativePatternStmt::CreateEmpty(const ASTContext &Ctx,
+                                    bool HasPatternGuard) {
+  void *Mem = Ctx.Allocate(
+      totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr + HasPatternGuard),
+      alignof(AlternativePatternStmt));
+  return new (Mem) AlternativePatternStmt(EmptyShell(), HasPatternGuard);
+}
+
+AlternativePatternStmt *
+AlternativePatternStmt::Create(const ASTContext &Ctx,
+                               SourceLocation PatternLoc,
+                               SourceLocation ColonLoc,
+                               Expr *patternGuard,
+                               bool ExcludedFromTypeDeduction) {
+    assert(0 && "not implemented");
 }

@@ -1322,6 +1322,48 @@ void TextNodeDumper::VisitSwitchStmt(const SwitchStmt *Node) {
     OS << " has_var";
 }
 
+void TextNodeDumper::VisitInspectExpr(const InspectExpr *Node) {
+  if (Node->hasInitStorage())
+    OS << " has_init";
+  if (Node->hasVarStorage())
+    OS << " has_var";
+
+  // TODO: when InspectExpr becomes InspectExpr we should
+  // match LambdaExpr's printing behavior and output `-> typename`
+  if (Node->hasExplicitResultType())
+    OS << " has_explicit_result_type";
+  else
+    OS << " has_implicit_result_type";
+}
+void TextNodeDumper::VisitWildcardPatternStmt(const WildcardPatternStmt *Node) {
+  if (Node->hasPatternGuard())
+    OS << " has_guard";
+}
+
+void TextNodeDumper::VisitIdentifierPatternStmt(
+    const IdentifierPatternStmt *Node) {
+  if (Node->hasPatternGuard())
+    OS << " has_guard";
+}
+
+void TextNodeDumper::VisitExpressionPatternStmt(
+    const ExpressionPatternStmt *Node) {
+  if (Node->hasCase())
+    OS << " has_case";
+}
+
+void TextNodeDumper::VisitStructuredBindingPatternStmt(
+    const StructuredBindingPatternStmt *Node) {
+  if (Node->hasPatternGuard())
+    OS << " has_guard";
+}
+
+void TextNodeDumper::VisitAlternativePatternStmt(
+    const AlternativePatternStmt *Node) {
+  if (Node->hasPatternGuard())
+    OS << " has_guard";
+}
+
 void TextNodeDumper::VisitWhileStmt(const WhileStmt *Node) {
   if (Node->hasVarStorage())
     OS << " has_var";

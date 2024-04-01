@@ -1709,6 +1709,15 @@ private:
   /// statement range in current switch instruction.
   llvm::BasicBlock *CaseRangeBlock = nullptr;
 
+  /// InspectContext - Keep track of inspect information. This helps pattern
+  /// codegen and handling nested inspect patterns.
+  struct InspectContext {
+    llvm::BasicBlock *NextPattern = nullptr;
+    llvm::BasicBlock *InspectExit = nullptr;
+    Address InspectResult = Address::invalid();
+  };
+  InspectContext InspectCtx;
+
   /// OpaqueLValues - Keeps track of the current set of opaque value
   /// expressions.
   llvm::DenseMap<const OpaqueValueExpr *, LValue> OpaqueLValues;
@@ -3564,6 +3573,14 @@ public:
   void EmitDefaultStmt(const DefaultStmt &S, ArrayRef<const Attr *> Attrs);
   void EmitCaseStmt(const CaseStmt &S, ArrayRef<const Attr *> Attrs);
   void EmitCaseStmtRange(const CaseStmt &S, ArrayRef<const Attr *> Attrs);
+
+  void EmitPatternStmtBody(const PatternStmt &S);
+  void EmitWildcardPatternStmt(const WildcardPatternStmt &S);
+  void EmitIdentifierPatternStmt(const IdentifierPatternStmt &S);
+  void EmitExpressionPatternStmt(const ExpressionPatternStmt &S);
+  void EmitStructuredBindingPatternStmt(const StructuredBindingPatternStmt &S);
+  void EmitAlternativePatternStmt(const AlternativePatternStmt &S);
+
   void EmitAsmStmt(const AsmStmt &S);
 
   void EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S);
@@ -4976,6 +4993,8 @@ public:
   void EmitCXXThrowExpr(const CXXThrowExpr *E, bool KeepInsertionPoint = true);
 
   RValue EmitAtomicExpr(AtomicExpr *E);
+
+  RValue EmitInspectExpr(const InspectExpr &S);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission

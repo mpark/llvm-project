@@ -17,6 +17,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/Type.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/PartialDiagnostic.h"
@@ -118,7 +119,7 @@ public:
   /// initializer, or anything else that can't be jumped past.
   bool HasBranchProtectedScope : 1;
 
-  /// Whether this function contains any switches or direct gotos.
+  /// Whether this function contains any switches, inspects or direct gotos.
   bool HasBranchIntoScope : 1;
 
   /// Whether this function contains any indirect gotos.
@@ -207,6 +208,19 @@ public:
   /// SwitchStack - This is the current set of active switch statements in the
   /// block.
   SmallVector<SwitchInfo, 8> SwitchStack;
+
+  /// A InspectExpr, along with a flag indicating if its list of patterns
+  /// is incomplete (because we dropped an invalid one while parsing).
+  using InspectInfo = llvm::PointerIntPair<InspectExpr *, 1, bool>;
+
+  /// InspectStack - This is the current set of active inspect statements in the
+  /// block.
+  SmallVector<InspectInfo, 8> InspectStack;
+
+  /// Track the number of inspect patterns - useful to create names for
+  /// temporary bindings on structural bindings pattern. FIXME: is there a
+  /// better approach?
+  unsigned InspectPatCount = 0;
 
   /// The list of return statements that occur within the function or
   /// block, if there is any chance of applying the named return value
