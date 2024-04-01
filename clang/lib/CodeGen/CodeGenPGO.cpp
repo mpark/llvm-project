@@ -127,6 +127,12 @@ public:
     BinaryOperatorGE,
     BinaryOperatorEQ,
     BinaryOperatorNE,
+    InspectExprClass,
+    WildcardPatternStmtClass,
+    IdentifierPatternStmtClass,
+    ExpressionPatternStmtClass,
+    StructuredBindingPatternStmtClass,
+    AlternativePatternStmtClass,
     // The preceding values are available since PGO_HASH_V2.
 
     // Keep this last.  It's for the static assert that follows.
@@ -506,6 +512,18 @@ struct MapRegionCounters : public RecursiveASTVisitor<MapRegionCounters> {
       return PGOHash::CaseStmt;
     case Stmt::DefaultStmtClass:
       return PGOHash::DefaultStmt;
+    case Stmt::InspectExprClass:
+      return PGOHash::InspectExprClass;
+    case Stmt::WildcardPatternStmtClass:
+      return PGOHash::WildcardPatternStmtClass;
+    case Stmt::IdentifierPatternStmtClass:
+      return PGOHash::IdentifierPatternStmtClass;
+    case Stmt::ExpressionPatternStmtClass:
+      return PGOHash::ExpressionPatternStmtClass;
+    case Stmt::StructuredBindingPatternStmtClass:
+      return PGOHash::StructuredBindingPatternStmtClass;
+    case Stmt::AlternativePatternStmtClass:
+      return PGOHash::AlternativePatternStmtClass;
     case Stmt::IfStmtClass:
       return PGOHash::IfStmt;
     case Stmt::CXXTryStmtClass:

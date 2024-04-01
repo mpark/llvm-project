@@ -40,6 +40,9 @@
 #ifndef MODULES_KEYWORD
 #define MODULES_KEYWORD(X) KEYWORD(X,KEYMODULES)
 #endif
+#ifndef PATMAT_KEYWORD
+#define PATMAT_KEYWORD(X) KEYWORD(X,KEYPATMAT)
+#endif
 #ifndef TYPE_TRAIT
 #define TYPE_TRAIT(N,I,K) KEYWORD(I,K)
 #endif
@@ -259,6 +262,9 @@ PUNCTUATOR(at,                  "@")
 PUNCTUATOR(lesslessless,          "<<<")
 PUNCTUATOR(greatergreatergreater, ">>>")
 
+// Pattern Matching support
+PUNCTUATOR(equalarrow,            "=>")
+
 // C99 6.4.1: Keywords.  These turn into kw_* tokens.
 // Flags allowed:
 //   KEYALL   - This is a keyword in all variants of C and C++, or it
@@ -430,6 +436,10 @@ CXX20_KEYWORD(requires              , 0)
 
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)
+
+// C++ 2b / pattern matching keywords
+PATMAT_KEYWORD(inspect)
+PATMAT_KEYWORD(let)
 
 // C11 Extension
 KEYWORD(_Float16                    , KEYALL)
