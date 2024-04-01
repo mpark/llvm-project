@@ -475,12 +475,16 @@ class Parser : public CodeCompletionHandler {
     /// This context is at the top level of a GNU statement expression.
     InStmtExpr = 0x4,
 
+    /// This context of a compound-statement when used with inspect patterns
+    /// that do not yield values.
+    InPatternCompoundStmt = 0x8,
+
     /// The context of a regular substatement.
     SubStmt = 0,
     /// The context of a compound-statement.
     Compound = AllowDeclarationsInC | AllowStandaloneOpenMPDirectives,
 
-    LLVM_MARK_AS_BITMASK_ENUM(InStmtExpr)
+    LLVM_MARK_AS_BITMASK_ENUM(InPatternCompoundStmt)
   };
 
   /// Act on an expression statement that might be the last statement in a
@@ -2183,6 +2187,23 @@ private:
   StmtResult ParseExprStatement(ParsedStmtContext StmtCtx);
   StmtResult ParseLabeledStatement(ParsedAttributes &Attrs,
                                    ParsedStmtContext StmtCtx);
+  bool ParsePatternGuard(Sema::ConditionResult &Cond, SourceLocation &IfLoc,
+                         bool IsConstexprIf);
+
+  StmtResult ParseWildcardPattern(ParsedStmtContext StmtCtx);
+  StmtResult ParseIdentifierPattern(ParsedStmtContext StmtCtx);
+  StmtResult ParseExpressionPattern(ParsedStmtContext StmtCtx,
+                                    bool HasCase = false);
+  StmtResult ParseStructuralBindingPattern(ParsedStmtContext StmtCtx);
+
+  ///
+  /// Structured bindings pattern
+  Sema::ParsedPatEltResult ParsePatternElement(ParsedStmtContext StmtCtx);
+
+  bool ParsePatternList(ParsedStmtContext StmtCtx,
+                        SmallVectorImpl<Sema::ParsedPatEltResult> &ParsedPats,
+                        SourceLocation &RSquare);
+
   StmtResult ParseCaseStatement(ParsedStmtContext StmtCtx,
                                 bool MissingCase = false,
                                 ExprResult Expr = ExprResult());
@@ -3935,6 +3956,10 @@ private:
   ExprResult ParseExpressionTrait();
 
   ExprResult ParseBuiltinPtrauthTypeDiscriminator();
+
+  //===--------------------------------------------------------------------===//
+  // C++ Pattern Matching
+  ExprResult ParseInspectExpr();
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through

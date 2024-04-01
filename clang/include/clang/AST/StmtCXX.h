@@ -17,6 +17,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/Stmt.h"
+#include "clang/Lex/Token.h"
 #include "llvm/Support/Compiler.h"
 
 namespace clang {
@@ -523,7 +524,6 @@ public:
     return T->getStmtClass() == CoreturnStmtClass;
   }
 };
-
 }  // end namespace clang
 
 #endif

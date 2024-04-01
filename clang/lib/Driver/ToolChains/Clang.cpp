@@ -8130,6 +8130,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     assert(Output.isNothing() && "Invalid output.");
   }
 
+  if (Args.hasArg(options::OPT_fpattern_matching)) {
+    CmdArgs.push_back("-fpattern-matching");
+  }
+
   addDashXForInput(Args, Input, CmdArgs);
 
   ArrayRef<InputInfo> FrontendInputs = Input;

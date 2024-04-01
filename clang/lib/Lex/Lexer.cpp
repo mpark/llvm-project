@@ -4369,6 +4369,9 @@ LexStart:
 
       Kind = tok::equalequal;
       CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
+    } else if (LangOpts.PatternMatching && Char == '>') {
+      CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
+      Kind = tok::equalarrow;
     } else {
       Kind = tok::equal;
     }
