@@ -1959,7 +1959,8 @@ enum class DeclaratorContext {
   AliasTemplate,       // C++11 alias-declaration template.
   RequiresExpr,        // C++2a requires-expression.
   Association,         // C11 _Generic selection expression association.
-  ReflectOperator      // C++2c reflect operator (P2996).
+  ReflectOperator,     // C++2c reflect operator (P2996).
+  PatternContext       // C++2b inspect structural bindings pattern.
 };
 
 // Describes whether the current context is a context where an implicit
@@ -2225,6 +2226,7 @@ public:
     case DeclaratorContext::ForInit:
     case DeclaratorContext::SelectionInit:
     case DeclaratorContext::Condition:
+    case DeclaratorContext::PatternContext:
       return false;
 
     case DeclaratorContext::TypeName:
@@ -2272,6 +2274,7 @@ public:
     case DeclaratorContext::CXXCatch:
     case DeclaratorContext::ObjCCatch:
     case DeclaratorContext::RequiresExpr:
+    case DeclaratorContext::PatternContext:
       return true;
 
     case DeclaratorContext::TypeName:
@@ -2305,6 +2308,7 @@ public:
     case DeclaratorContext::ForInit:
     case DeclaratorContext::SelectionInit:
     case DeclaratorContext::Condition:
+    case DeclaratorContext::PatternContext:
       return true;
 
     case DeclaratorContext::Member:
@@ -2362,6 +2366,7 @@ public:
     case DeclaratorContext::ForInit:
     case DeclaratorContext::SelectionInit:
     case DeclaratorContext::TrailingReturnVar:
+    case DeclaratorContext::PatternContext:
       return true;
 
     case DeclaratorContext::Condition:
@@ -2633,6 +2638,7 @@ public:
     case DeclaratorContext::RequiresExpr:
     case DeclaratorContext::Association:
     case DeclaratorContext::ReflectOperator:
+    case DeclaratorContext::PatternContext:
       return false;
     }
     llvm_unreachable("unknown context kind!");
@@ -2676,6 +2682,7 @@ public:
     case DeclaratorContext::Condition:
     case DeclaratorContext::TemplateArg:
     case DeclaratorContext::ReflectOperator:
+    case DeclaratorContext::PatternContext:
       return true;
     }
 

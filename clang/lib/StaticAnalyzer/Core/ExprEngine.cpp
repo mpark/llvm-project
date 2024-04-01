@@ -1851,6 +1851,12 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::SwitchStmtClass:
     case Stmt::WhileStmtClass:
     case Stmt::DeferStmtClass:
+    case Stmt::InspectExprClass:
+    case Stmt::ExpressionPatternStmtClass:
+    case Stmt::IdentifierPatternStmtClass:
+    case Stmt::WildcardPatternStmtClass:
+    case Stmt::StructuredBindingPatternStmtClass:
+    case Stmt::AlternativePatternStmtClass:
     case Expr::MSDependentExistsStmtClass:
       llvm_unreachable("Stmt should not be in analyzer evaluation loop");
     case Stmt::ImplicitValueInitExprClass:

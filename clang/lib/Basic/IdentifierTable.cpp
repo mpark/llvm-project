@@ -170,6 +170,8 @@ static KeywordStatus getKeywordStatusHelper(const LangOptions &LangOpts,
     return LangOpts.Reflection ? KS_Extension : KS_Unknown;
   case KEYDEFERTS:
     return LangOpts.DeferTS ? KS_Enabled : KS_Disabled;
+  case KEYPATMAT:
+    return LangOpts.PatternMatching ? KS_Enabled : KS_Disabled;
   default:
     llvm_unreachable("Unknown KeywordStatus flag");
   }
@@ -851,6 +853,8 @@ IdentifierTable::getFutureCompatDiagKind(const IdentifierInfo &II,
     if (((Flags & KEYCXX20) == KEYCXX20) ||
         ((Flags & CHAR8SUPPORT) == CHAR8SUPPORT))
       return diag::warn_cxx20_keyword;
+    if ((Flags & KEYPATMAT) == KEYPATMAT)
+      return diag::warn_cxx_pattern_matching;
   } else {
     if ((Flags & KEYC99) == KEYC99)
       return diag::warn_c99_keyword;
