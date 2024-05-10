@@ -2383,6 +2383,7 @@ CheckConstexprFunctionStmt(Sema &SemaRef, const FunctionDecl *Dcl, Stmt *S,
       Cxx2bLoc = S->getBeginLoc();
     return CheckChildren();
 
+  case Stmt::MatchExprClass:
   case Stmt::InspectExprClass:
   case Stmt::WildcardPatternStmtClass:
   case Stmt::IdentifierPatternStmtClass:

@@ -2149,6 +2149,7 @@ public:
   void VisitUnaryExprOrTypeTraitExpr(const UnaryExprOrTypeTraitExpr *E);
   void VisitStmt(const Stmt *S);
   void VisitSwitchStmt(const SwitchStmt *S);
+  void VisitMatchExpr(const MatchExpr *S);
   void VisitInspectExpr(const InspectExpr *S);
   void VisitWhileStmt(const WhileStmt *W);
   void VisitTypeTraitExpr(const TypeTraitExpr *E);
@@ -3293,6 +3294,11 @@ void EnqueueVisitor::VisitSwitchStmt(const SwitchStmt *S) {
 void EnqueueVisitor::VisitInspectExpr(const InspectExpr *S) {
   AddStmt(S->getCond());
   AddDecl(S->getConditionVariable());
+}
+
+void EnqueueVisitor::VisitMatchExpr(const MatchExpr *S) {
+  AddStmt(S->getCond());
+  // AddDecl(S->getConditionVariable());
 }
 
 void EnqueueVisitor::VisitWhileStmt(const WhileStmt *W) {
@@ -6189,6 +6195,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("IfStmt");
   case CXCursor_SwitchStmt:
     return cxstring::createRef("SwitchStmt");
+  // case CXCursor_MatchExpr:
+  //   return cxstring::createRef("MatchExpr");
   case CXCursor_InspectExpr:
     return cxstring::createRef("InspectExpr");
   case CXCursor_WildcardPatternStmt:
