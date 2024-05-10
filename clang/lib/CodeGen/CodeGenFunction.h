@@ -1718,6 +1718,15 @@ private:
   };
   InspectContext InspectCtx;
 
+  /// Keep track of match information. This helps pattern codegen and handling
+  /// nested match patterns.
+  struct MatchContext {
+    llvm::BasicBlock *NextPattern = nullptr;
+    llvm::BasicBlock *MatchExit = nullptr;
+    Address MatchResult = Address::invalid();
+  };
+  MatchContext MatchCtx;
+
   /// OpaqueLValues - Keeps track of the current set of opaque value
   /// expressions.
   llvm::DenseMap<const OpaqueValueExpr *, LValue> OpaqueLValues;
@@ -4995,6 +5004,7 @@ public:
   RValue EmitAtomicExpr(AtomicExpr *E);
 
   RValue EmitInspectExpr(const InspectExpr &S);
+  RValue EmitMatchExpr(const MatchExpr &S);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission

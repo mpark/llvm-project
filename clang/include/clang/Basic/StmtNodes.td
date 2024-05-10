@@ -173,6 +173,7 @@ def CXXParenListInitExpr: StmtNode<Expr>;
 
 // Pattern matching inspect expression
 def InspectExpr : StmtNode<Expr>;
+def MatchExpr : StmtNode<Expr>;
 
 // C++ Coroutines expressions
 def CoroutineSuspendExpr : StmtNode<Expr, 1>;

@@ -164,11 +164,14 @@ public:
     /// This is a scope of friend declaration.
     FriendScope = 0x40000000,
 
+    /// This is the scope of a C++ match statement.
+    MatchScope = 0x80000000,
+
     /// This is the scope of a C++ inspect statement.
-    InspectScope = 0x80000000,
+    InspectScope = 0x100000000,
 
     /// This is the scope of a C++ pattern statement.
-    PatternScope = 0x100000000,
+    PatternScope = 0x200000000,
   };
 
 private:
