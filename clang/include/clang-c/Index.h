@@ -2209,6 +2209,7 @@ enum CXCursorKind {
   /** An inspect statement.
    */
   CXCursor_InspectExpr = 340,
+  // FIXME: add CXCursor_MatchExpr = 307,
 
   /** A wildcard pattern statement.
    */

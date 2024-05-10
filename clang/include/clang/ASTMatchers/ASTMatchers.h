@@ -2389,6 +2389,16 @@ extern const internal::VariadicDynCastAllOfMatcher<Stmt, DefaultStmt>
 extern const internal::VariadicDynCastAllOfMatcher<Stmt, InspectExpr>
     inspectExpr;
 
+/// Matches inspect expressions.
+///
+/// Given
+/// \code
+///   a match { }
+/// \endcode
+/// MatchExpr()
+///   matches 'a match'.
+extern const internal::VariadicDynCastAllOfMatcher<Stmt, MatchExpr> matchExpr;
+
 /// Matches pattern statements inside inspect expressions.
 ///
 /// Given
@@ -8056,6 +8066,31 @@ AST_MATCHER_P(SwitchStmt, forEachSwitchCase, internal::Matcher<SwitchCase>,
 /// \endcode
 AST_MATCHER_P(InspectExpr, forEachInspectPattern,
               internal::Matcher<PatternStmt>, InnerMatcher) {
+  BoundNodesTreeBuilder Result;
+
+  bool Matched = false;
+  for (const PatternStmt *PS = Node.getPatternList(); PS;
+       PS = PS->getNextPattern()) {
+    BoundNodesTreeBuilder PatternBuilder(*Builder);
+    bool PatternMatched = InnerMatcher.matches(*PS, Finder, &PatternBuilder);
+    if (PatternMatched) {
+      Matched = true;
+      Result.addMatch(PatternBuilder);
+    }
+  }
+  *Builder = std::move(Result);
+  return Matched;
+}
+
+/// Matches each pattern statement belonging to the given inspect
+/// statement. This matcher may produce multiple matches.
+///
+/// Given
+/// \code
+///   inspect (a) { }
+/// \endcode
+AST_MATCHER_P(MatchExpr, forEachMatchPattern, internal::Matcher<PatternStmt>,
+              InnerMatcher) {
   BoundNodesTreeBuilder Result;
 
   bool Matched = false;

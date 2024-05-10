@@ -1624,6 +1624,9 @@ enum StmtCode {
   /// An InspectExpr record.
   EXPR_INSPECT,
 
+  /// An MatchExpr record.
+  EXPR_MATCH,
+
   /// A constant expression context.
   EXPR_CONSTANT,
 

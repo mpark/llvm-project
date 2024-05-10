@@ -3960,6 +3960,7 @@ private:
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
   ExprResult ParseInspectExpr();
+  ExprResult ParseMatchExpr(ExprResult LHS);
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through

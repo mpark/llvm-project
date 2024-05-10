@@ -2196,6 +2196,7 @@ CheckConstexprFunctionStmt(Sema &SemaRef, const FunctionDecl *Dcl, Stmt *S,
     }
     return true;
 
+  case Stmt::MatchExprClass:
   case Stmt::InspectExprClass:
   case Stmt::WildcardPatternStmtClass:
   case Stmt::IdentifierPatternStmtClass:
