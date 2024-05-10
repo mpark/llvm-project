@@ -4500,6 +4500,7 @@ private:
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
   ExprResult ParseInspectExpr();
+  ExprResult ParseMatchExpr(ExprResult LHS);
 
   ///@}
 
