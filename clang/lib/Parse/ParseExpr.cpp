@@ -1706,6 +1706,12 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
                                       ")");
   }
 
+  if (Tok.getKind() == tok::kw_match) {
+    // FIXME: not sure we should attribute that back to Res.
+    Res = ParseMatchExpr(Res);
+    return Res;
+  }
+
   // These can be followed by postfix-expr pieces.
   PreferredType = SavedType;
   Res = ParsePostfixExpressionSuffix(Res);

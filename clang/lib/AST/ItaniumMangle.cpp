@@ -6220,6 +6220,7 @@ recurse:
         << UnsupportedItaniumManglingKind::OpenACCAsteriskSizeExpr;
     return;
   }
+  case Expr::MatchExprClass:
   case Expr::InspectExprClass:
     assert(0 && "not implemented");
   }
