@@ -183,7 +183,7 @@ def err_typecheck_converted_constant_expression_indirect : Error<
 def select_cce_kind : TextSubstitution<
   "%select{case value|enumerator value|non-type template argument|non-type parameter of template template parameter|"
   "array size|explicit specifier argument|noexcept specifier argument|"
-  "call to 'size()'|call to 'data()'|pack index}0">;
+  "call to 'size()'|call to 'data()'|pattern|pack index}0">;
 def err_expr_not_cce : Error<
   "%sub{select_cce_kind}0 is not a constant expression">;
 def ext_cce_narrowing : ExtWarn<

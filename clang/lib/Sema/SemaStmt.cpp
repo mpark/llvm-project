@@ -735,10 +735,10 @@ ExprResult Sema::CheckPatternConstantExpr(Expr *MatchExpr,
     // It's not a constant expression. Produce an appropriate diagnostic.
     if (Notes.size() == 1 &&
         Notes[0].second.getDiagID() == diag::note_invalid_subexpr_in_const_expr)
-      Diag(Notes[0].first, diag::err_expr_not_cce) << CCEK_PatternExpr;
+      Diag(Notes[0].first, diag::err_expr_not_cce) << CCEKind::PatternExpr;
     else {
       Diag(MatchExprLoc, diag::err_expr_not_cce)
-          << CCEK_PatternExpr << MatchExpr->getSourceRange();
+          << CCEKind::PatternExpr << MatchExpr->getSourceRange();
       for (unsigned I = 0; I < Notes.size(); ++I)
         Diag(Notes[I].first, Notes[I].second);
     }
