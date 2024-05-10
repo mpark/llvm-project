@@ -3833,6 +3833,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     break;
   }
 
+  case MatchExprClass:
   case InspectExprClass: {
     // FIXME: check if substmts are actually covered somewhere else
     // otherwise put that logic here.
