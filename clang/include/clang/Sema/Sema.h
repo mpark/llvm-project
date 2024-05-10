@@ -845,6 +845,7 @@ enum class CCEKind {
                            ///< message.
   StaticAssertMessageData, ///< Call to data() in a static assert
                            ///< message.
+  PatternExpr, ///< Expression in a pattern.
   PackIndex ///< Index of a pack indexing expression or specifier.
 };
 
