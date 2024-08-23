@@ -2882,6 +2882,8 @@ void StmtPrinter::VisitHLSLOutArgExpr(HLSLOutArgExpr *Node) {
   PrintExpr(Node->getArgLValue());
 }
 
+void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

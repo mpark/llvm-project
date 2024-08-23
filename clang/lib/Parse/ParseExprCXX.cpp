@@ -4247,44 +4247,43 @@ ExprResult Parser::ParseBuiltinBitCast() {
 
 ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc) {
   bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
-
-  // Parse trailing-return-type[opt].
   TypeResult TrailingReturnType;
   if (Tok.is(tok::arrow)) {
     SourceRange Range;
     TrailingReturnType =
         ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
-    if (TrailingReturnType.isInvalid()) // FIXME: add error message
+    if (TrailingReturnType.isInvalid())
       return ExprError();
   }
-
-  StmtResult Body = ParseMatchBody();
-
-  return ExprError(); /* Actions.ActOnMatchExpr(
-      LHS.get(),
-      MatchLoc,
-      IsConstexpr,
-      TrailingReturnType,
-      Body); */
+  SmallVector<MatchCase, 32> Cases;
+  SourceRange Braces;
+  if (ParseMatchBody(Cases, Braces)) {
+    return ExprError();
+  }
+  return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
+                                      TrailingReturnType.get(), Cases, Braces);
 }
 
-StmtResult Parser::ParseMatchBody() {
+bool Parser::ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in match body");
   BalancedDelimiterTracker T(*this, tok::l_brace);
-  if (T.expectAndConsume()) return StmtError();
-  StmtVector Cases;
+  if (T.expectAndConsume())
+    return true;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
-    StmtResult Case = ParseMatchCase();
-    if (Case.isUsable())
-      Cases.push_back(Case.get());
+    MatchCase Case;
+    if (ParseMatchCase(Case)) {
+      return true;
+    }
+    Result.push_back(Case);
   }
   T.consumeClose();
-  return StmtError();
+  Braces = T.getRange();
+  return false;
 }
 
-StmtResult Parser::ParseMatchCase() {
+bool Parser::ParseMatchCase(MatchCase& Case) {
   StmtResult Pattern = ParsePattern();
   if (Pattern.isInvalid()) {
     SkipUntil(tok::kw_if, tok::equalgreater, StopAtSemi | StopBeforeMatch);
@@ -4298,28 +4297,36 @@ StmtResult Parser::ParseMatchCase() {
     }
   }
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after, "pattern")) {
-    return StmtError();
+    return true;
   }
   StmtResult Handler = ParseStatement();
-  if (Handler.isInvalid()) {
-    return StmtError();
+  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid()) {
+    return true;
   }
-
-  return StmtError();
+  Case = {Pattern.get(), Guard.get(), Handler.get()};
+  return false;
 }
 
 StmtResult Parser::ParsePattern() {
-  if (IdentifierInfo* II = Tok.getIdentifierInfo()) {
-    StringRef name = II->getName();
-    if (name == "_") {
-      return StmtError(); // Actions.ActOnWildcardPattern(ConsumeToken());
+  switch (Tok.getKind()) {
+    case tok::identifier: {
+      StringRef name = Tok.getIdentifierInfo()->getName();
+      if (name == "_") {
+        return Actions.ActOnWildcardPattern(ConsumeToken());
+      }
+      // else if (name == "let") {
+      //   return ParseBindingPattern();
+      // }
+      return StmtError();
     }
-    // else if (name == "let") {
-    //   return ParseBindingPattern();
-    // }
+    case tok::question: {
+      SourceLocation QuestionLoc = ConsumeToken();
+      StmtResult Pattern = ParsePattern();
+      if (Pattern.isInvalid()) {
+        return StmtError();
+      }
+      return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
+    }
+    default: return StmtError();
   }
-  // else if (Tok.is(tok::question)) {
-  //   return ParseOptionalPattern();
-  // }
-  return StmtError();
 }

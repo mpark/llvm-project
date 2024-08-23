@@ -485,20 +485,21 @@ class Sema final : public SemaBase {
   // 20. Name Lookup (SemaLookup.cpp)
   // 21. Modules (SemaModule.cpp)
   // 22. C++ Overloading (SemaOverload.cpp)
-  // 23. Statements (SemaStmt.cpp)
-  // 24. `inline asm` Statement (SemaStmtAsm.cpp)
-  // 25. Statement Attribute Handling (SemaStmtAttr.cpp)
-  // 26. C++ Templates (SemaTemplate.cpp)
-  // 27. C++ Template Argument Deduction (SemaTemplateDeduction.cpp)
-  // 28. C++ Template Deduction Guide (SemaTemplateDeductionGuide.cpp)
-  // 29. C++ Template Instantiation (SemaTemplateInstantiate.cpp)
-  // 30. C++ Template Declaration Instantiation
+  // 23. C++ Pattern Matching (SemaMatchPattern.cpp)
+  // 24. Statements (SemaStmt.cpp)
+  // 25. `inline asm` Statement (SemaStmtAsm.cpp)
+  // 26. Statement Attribute Handling (SemaStmtAttr.cpp)
+  // 27. C++ Templates (SemaTemplate.cpp)
+  // 28. C++ Template Argument Deduction (SemaTemplateDeduction.cpp)
+  // 29. C++ Template Deduction Guide (SemaTemplateDeductionGuide.cpp)
+  // 30. C++ Template Instantiation (SemaTemplateInstantiate.cpp)
+  // 31. C++ Template Declaration Instantiation
   //     (SemaTemplateInstantiateDecl.cpp)
-  // 31. C++ Variadic Templates (SemaTemplateVariadic.cpp)
-  // 32. Constraints and Concepts (SemaConcept.cpp)
-  // 33. Types (SemaType.cpp)
-  // 34. FixIt Helpers (SemaFixItUtils.cpp)
-  // 35. Function Effects (SemaFunctionEffects.cpp)
+  // 32. C++ Variadic Templates (SemaTemplateVariadic.cpp)
+  // 33. Constraints and Concepts (SemaConcept.cpp)
+  // 34. Types (SemaType.cpp)
+  // 35. FixIt Helpers (SemaFixItUtils.cpp)
+  // 36. Function Effects (SemaFunctionEffects.cpp)
 
   /// \name Semantic Analysis
   /// Implementations are in Sema.cpp
@@ -10672,6 +10673,28 @@ public:
   //
   //
 
+  /// \name Pattern Matching
+  /// Implementations are in SemaMatchPattern.cpp
+  ///@{
+
+public:
+  ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+                                  bool IsConstexpr,
+                                  ParsedType TrailingReturnType,
+                                  ArrayRef<MatchCase> Patterns,
+                                  SourceRange Braces);
+
+  StmtResult ActOnWildcardPattern(SourceLocation WildcardLoc);
+  StmtResult ActOnOptionalPattern(SourceLocation QuestionLoc, Stmt *SubPattern);
+
+  ///@}
+
+  //
+  //
+  // -------------------------------------------------------------------------
+  //
+  //
+
   /// \name Statements
   /// Implementations are in SemaStmt.cpp
   ///@{
@@ -10888,6 +10911,9 @@ public:
                                   bool SupressSimplerImplicitMoves = false);
 
   TypeLoc getReturnTypeLoc(FunctionDecl *FD) const;
+
+  bool DeduceAutoTypeFromExpr(TypeLoc OrigResultType, SourceLocation ReturnLoc,
+                              Expr *E, QualType &Deduced, const AutoType *AT);
 
   /// Deduce the return type for a function from a returned expression, per
   /// C++1y [dcl.spec.auto]p6.

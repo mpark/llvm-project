@@ -3948,8 +3948,9 @@ private:
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
   ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc);
-  StmtResult ParseMatchBody();
-  StmtResult ParseMatchCase();
+
+  bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces);
+  bool ParseMatchCase(MatchCase& Case);
   StmtResult ParsePattern();
 
   //===--------------------------------------------------------------------===//
