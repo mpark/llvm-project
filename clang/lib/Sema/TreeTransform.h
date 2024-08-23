@@ -17401,6 +17401,11 @@ ExprResult TreeTransform<Derived>::TransformHLSLOutArgExpr(HLSLOutArgExpr *E) {
   return getDerived().TransformExpr(E->getArgLValue());
 }
 
+ExprResult
+TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *S) {
+  return ExprError();
+}
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_LIB_SEMA_TREETRANSFORM_H
