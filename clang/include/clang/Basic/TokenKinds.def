@@ -267,6 +267,9 @@ PUNCTUATOR(coloncolon,          "::")
 PUNCTUATOR(l_splice,            "[:")
 PUNCTUATOR(r_splice,            ":]")
 
+// C++ Pattern Matching
+PUNCTUATOR(equalgreater,        "=>")
+
 // Objective C support.
 PUNCTUATOR(at,                  "@")
 
