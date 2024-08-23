@@ -449,6 +449,7 @@ public:
   void VisitEmbedExpr(const EmbedExpr *S);
   void VisitAtomicExpr(const AtomicExpr *AE);
   void VisitConvertVectorExpr(const ConvertVectorExpr *S);
+  void VisitMatchSelectExpr(const MatchSelectExpr *MSE);
 };
 
 } // namespace clang

@@ -3287,6 +3287,18 @@ DEF_TRAVERSE_STMT(RequiresExpr, {
 DEF_TRAVERSE_STMT(CXXExpansionStmtPattern, {})
 DEF_TRAVERSE_STMT(CXXExpansionStmtInstantiation, {})
 DEF_TRAVERSE_STMT(CXXExpansionSelectExpr, {})
+DEF_TRAVERSE_STMT(MatchSelectExpr, {
+  for (unsigned I = 0, E = S->getNumCases(); I < E; ++I) {
+    MatchCase& Case = S->getCase(I);
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Pattern);
+    if (Case.Guard)
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard);
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Handler);
+  }
+})
+
+DEF_TRAVERSE_STMT(WildcardPattern, {})
+DEF_TRAVERSE_STMT(OptionalPattern, {})
 
 // These literals (all of them) do not need any action.
 DEF_TRAVERSE_STMT(IntegerLiteral, {})
