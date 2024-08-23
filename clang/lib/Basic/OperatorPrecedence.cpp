@@ -11,12 +11,13 @@
 ///
 //===----------------------------------------------------------------------===//
 #include "clang/Basic/OperatorPrecedence.h"
+#include "clang/Basic/IdentifierTable.h"
 
 namespace clang {
 
-prec::Level getBinOpPrecedence(tok::TokenKind Kind, bool GreaterThanIsOperator,
-                               bool CPlusPlus11) {
-  switch (Kind) {
+prec::Level getBinOpPrecedence(const Token &Tok, bool GreaterThanIsOperator,
+                               bool CPlusPlus11, bool PatternMatching) {
+  switch (Tok.getKind()) {
   case tok::greater:
     // C++ [temp.names]p3:
     //   [...] When parsing a template-argument-list, the first
@@ -35,6 +36,13 @@ prec::Level getBinOpPrecedence(tok::TokenKind Kind, bool GreaterThanIsOperator,
     //   the template-id. [...]
     if (GreaterThanIsOperator || !CPlusPlus11)
       return prec::Shift;
+    return prec::Unknown;
+
+  case tok::identifier:
+    if (PatternMatching)
+      if (IdentifierInfo* II = Tok.getIdentifierInfo())
+        if (II->isStr("match"))
+          return prec::Match;
     return prec::Unknown;
 
   default:                        return prec::Unknown;
