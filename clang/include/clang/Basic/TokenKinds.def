@@ -255,6 +255,9 @@ PUNCTUATOR(periodstar,          ".*")
 PUNCTUATOR(arrowstar,           "->*")
 PUNCTUATOR(coloncolon,          "::")
 
+// C++ Pattern Matching
+PUNCTUATOR(equalgreater,        "=>")
+
 // Objective C support.
 PUNCTUATOR(at,                  "@")
 
