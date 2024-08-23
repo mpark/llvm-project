@@ -2329,70 +2329,30 @@ void InspectExpr::setConditionVariable(const ASTContext &Ctx, VarDecl *V) {
       DeclStmt(DeclGroupRef(V), VarRange.getBegin(), VarRange.getEnd());
 }
 
-MatchExpr::MatchExpr(const ASTContext &Ctx, Stmt *Init, VarDecl *Var,
-                     Expr *Cond, bool IsConstexpr, bool ExplicitResultType)
-    // FIXME: VK_XValue?
-    : Expr(MatchExprClass, QualType(), VK_PRValue, OK_Ordinary),
-      FirstPattern(nullptr), ConstexprMatch(IsConstexpr),
-      ExplicitResultType(ExplicitResultType) {
+MatchSelectExpr::MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+                                 bool IsConstexpr, QualType Ty,
+                                 ArrayRef<MatchCase> Cases, SourceRange Braces)
+    : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary), Subject(Subject),
+      MatchLoc(MatchLoc), IsConstexpr(IsConstexpr), NumCases(Cases.size()),
+      Braces(Braces) {
+  std::uninitialized_copy(Cases.begin(), Cases.end(),
+                          getTrailingObjects<MatchCase>());
 
-  bool HasInit = Init != nullptr;
-  bool HasVar = Var != nullptr;
-  MatchExprBits.HasInit = HasInit;
-  MatchExprBits.HasVar = HasVar;
-
-  setCond(Cond);
-  setBody(nullptr);
-  if (HasInit)
-    setInit(Init);
-  if (HasVar)
-    setConditionVariable(Ctx, Var);
-
-  setMatchLoc(SourceLocation{});
+  // TODO: setDependence(computeDependence(this));
 }
 
-MatchExpr::MatchExpr(EmptyShell Empty, bool HasInit, bool HasVar)
-    // FIXME: VK_XValue?
-    : Expr(MatchExprClass, QualType(), VK_PRValue, OK_Ordinary),
-      FirstPattern(nullptr), ConstexprMatch(false), ExplicitResultType(false) {
-
-  MatchExprBits.HasInit = HasInit;
-  MatchExprBits.HasVar = HasVar;
-}
-
-MatchExpr *MatchExpr::Create(const ASTContext &Ctx, Stmt *Init, VarDecl *Var,
-                             Expr *Cond, bool IsConstexpr,
-                             bool ExplicitResultType) {
-  void *Mem = Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr),
-                           alignof(MatchExpr));
+MatchSelectExpr *MatchSelectExpr::Create(const ASTContext &Ctx, Expr *Subject,
+                                         SourceLocation MatchLoc,
+                                         bool IsConstexpr, QualType Ty,
+                                         ArrayRef<MatchCase> Cases,
+                                         SourceRange Braces) {
+  void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase>(Cases.size()));
   return new (Mem)
-      MatchExpr(Ctx, Init, Var, Cond, IsConstexpr, ExplicitResultType);
+      MatchSelectExpr(Subject, MatchLoc, IsConstexpr, Ty, Cases, Braces);
 }
 
-MatchExpr *MatchExpr::CreateEmpty(const ASTContext &Ctx, bool HasInit,
-                                  bool HasVar) {
-  void *Mem = Ctx.Allocate(totalSizeToAlloc<Stmt *>(NumMandatoryStmtPtr),
-                           alignof(MatchExpr));
-  return new (Mem) MatchExpr(EmptyShell(), HasInit, HasVar);
-}
-
-VarDecl *MatchExpr::getConditionVariable() {
-  auto *DS = getConditionVariableDeclStmt();
-  if (!DS)
-    return nullptr;
-  return cast<VarDecl>(DS->getSingleDecl());
-}
-
-void MatchExpr::setConditionVariable(const ASTContext &Ctx, VarDecl *V) {
-  assert(hasVarStorage() &&
-         "This inspect statement has no storage for a condition variable!");
-
-  if (!V) {
-    getTrailingObjects<Stmt *>()[varOffset()] = nullptr;
-    return;
-  }
-
-  SourceRange VarRange = V->getSourceRange();
-  getTrailingObjects<Stmt *>()[varOffset()] = new (Ctx)
-      DeclStmt(DeclGroupRef(V), VarRange.getBegin(), VarRange.getEnd());
+MatchSelectExpr *MatchSelectExpr::CreateEmpty(const ASTContext &Ctx,
+                                              unsigned NumCases) {
+  void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase>(NumCases));
+  return new (Mem) MatchSelectExpr(NumCases, EmptyShell());
 }

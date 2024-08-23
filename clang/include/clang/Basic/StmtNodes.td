@@ -211,6 +211,13 @@ def ExplDependentCallExpr : StmtNode<Expr>;
 // C++26 Expansion statement support expressions
 def CXXExpansionSelectExpr : StmtNode<Expr>;
 
+// Pattern matching expression
+def MatchSelectExpr : StmtNode<Expr>;
+
+def Pattern : StmtNode<Stmt, 1>;
+def WildcardPattern : StmtNode<Pattern>;
+def OptionalPattern : StmtNode<Pattern>;
+
 // Obj-C Expressions.
 def ObjCObjectLiteral : StmtNode<Expr, 1>;
 def ObjCStringLiteral : StmtNode<ObjCObjectLiteral>;
