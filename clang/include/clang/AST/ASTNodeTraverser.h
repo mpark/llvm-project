@@ -159,7 +159,7 @@ public:
 
       // Some statements have custom mechanisms for dumping their children.
       if (isa<DeclStmt, GenericSelectionExpr, RequiresExpr,
-              OpenACCWaitConstruct, SYCLKernelCallStmt,
+              OpenACCWaitConstruct, SYCLKernelCallStmt, MatchSelectExpr,
               UnresolvedSYCLKernelCallStmt>(S))
         return;
 
@@ -1036,6 +1036,16 @@ public:
 
   void VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *Node) {
     Visit(Node->getExpr());
+  }
+
+  void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
+    for (unsigned I = 0, E = Node->getNumCases(); I < E; ++I) {
+      const MatchCase &Case = Node->getCase(I);
+      Visit(Case.Pattern);
+      if (Case.Guard)
+        Visit(Case.Guard);
+      Visit(Case.Handler);
+    }
   }
 
   // Implements Visit methods for Attrs.
