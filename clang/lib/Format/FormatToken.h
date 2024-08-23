@@ -869,8 +869,8 @@ public:
   prec::Level getPrecedence() const {
     if (ForcedPrecedence != prec::Unknown)
       return ForcedPrecedence;
-    return getBinOpPrecedence(Tok.getKind(), /*GreaterThanIsOperator=*/true,
-                              /*CPlusPlus11=*/true);
+    return getBinOpPrecedence(Tok, /*GreaterThanIsOperator=*/true,
+                              /*CPlusPlus11=*/true, /*PatternMatching=*/false);
   }
 
   template <typename T> [[nodiscard]] FormatToken *getPrevious(T A1) const {
