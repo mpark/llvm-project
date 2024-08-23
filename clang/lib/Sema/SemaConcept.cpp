@@ -135,9 +135,10 @@ bool Sema::CheckConstraintExpression(const Expr *ConstraintExpression,
         // The user probably isn't aware of the parentheses required around
         // the binary operator, and we're only going to parse 'func' as the
         // first operand, and complain that it is of non-bool type.
-        getBinOpPrecedence(NextToken.getKind(),
+        getBinOpPrecedence(NextToken,
                            /*GreaterThanIsOperator=*/true,
-                           getLangOpts().CPlusPlus11) > prec::LogicalAnd;
+                           getLangOpts().CPlusPlus11,
+                           getLangOpts().PatternMatching) > prec::LogicalAnd;
   };
 
   // An atomic constraint!

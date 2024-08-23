@@ -4245,156 +4245,81 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
-ExprResult Parser::ParseMatchExpr(ExprResult LHS) {
-  assert(Tok.is(tok::kw_match) && "Not an inspect expression!");
-  SourceLocation InspectLoc = ConsumeToken(); // eat the 'inspect'.
-
-  // TODO: maybe in the future consider 'requires'.
-
-  // Check for constexpr
-  bool IsConstexpr = false;
-  if (Tok.is(tok::kw_constexpr)) {
-    IsConstexpr = true;
-    ConsumeToken();
-  }
-
-  // inspect (...) { }
-  //         ^
-  // if (Tok.isNot(tok::l_paren)) {
-  //   Diag(Tok, diag::err_expected_lparen_after)
-  //       << (IsConstexpr ? "constexpr" : "inspect");
-  //   SkipUntil(tok::semi);
-  //   return ExprError();
-  // }
-
-  ParseScope MatchScope(this, Scope::MatchScope);
-
-  // Parse the condition.
-  // StmtResult Init;
-  // Sema::ConditionResult Cond;
-  // SourceLocation LParen;
-  // SourceLocation RParen;
-  // if (ParseParenExprOrCondition(&Init, Cond, InspectLoc,
-  //                               Sema::ConditionKind::Inspect, LParen, RParen)
-  //                               ||
-  //     Cond.isInvalid())
-  //   return ExprError();
+ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc) {
+  bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
 
   // Parse trailing-return-type[opt].
-  TypeResult TrailingReturnType(true);
+  TypeResult TrailingReturnType;
   if (Tok.is(tok::arrow)) {
     SourceRange Range;
     TrailingReturnType =
-        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit*/ false);
+        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
     if (TrailingReturnType.isInvalid()) // FIXME: add error message
       return ExprError();
   }
 
-  ExprResult Inspect = Actions.ActOnStartOfMatchExpr(
-      InspectLoc, LHS.get(), IsConstexpr, TrailingReturnType);
-  if (Inspect.isInvalid()) {
-    // Skip the inspect body.
-    if (Tok.is(tok::l_brace)) {
-      ConsumeBrace();
-      SkipUntil(tok::r_brace);
-    } else
-      SkipUntil(tok::semi);
-    return Inspect;
-  }
+  StmtResult Body = ParseMatchBody();
 
-  // See comments in ParseIfStatement for why we create a scope for the
-  // condition and a new scope for substatement in C++.
-  ParseScope InnerScope(this, Scope::DeclScope, true, Tok.is(tok::l_brace));
-
-  // Read the body statement.
-  //
-  // inspect (...) { ... }
-  //               ^
-  StmtResult Body(ParseCompoundStatementBody(/*bool isStmtExpr*/ true));
-
-  // Pop the scopes.
-  InnerScope.Exit();
-  MatchScope.Exit();
-
-  if (Body.isInvalid())
-    return ExprError();
-
-  return Actions.ActOnFinishMatchExpr(InspectLoc, Inspect.get(), Body.get());
+  return ExprError(); /* Actions.ActOnMatchExpr(
+      LHS.get(),
+      MatchLoc,
+      IsConstexpr,
+      TrailingReturnType,
+      Body); */
 }
 
-/// ParseInspectExpr
-///       inspect-expression:
-/// [C++]   'inspect' ['constexpr'] '(' condition ')' statement
-ExprResult Parser::ParseInspectExpr() {
-  assert(Tok.is(tok::kw_inspect) && "Not an inspect expression!");
-  SourceLocation InspectLoc = ConsumeToken(); // eat the 'inspect'.
+StmtResult Parser::ParseMatchBody() {
+  PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
+                                Tok.getLocation(),
+                                "in match body");
+  BalancedDelimiterTracker T(*this, tok::l_brace);
+  if (T.expectAndConsume()) return StmtError();
+  StmtVector Cases;
+  while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
+    StmtResult Case = ParseMatchCase();
+    if (Case.isUsable())
+      Cases.push_back(Case.get());
+  }
+  T.consumeClose();
+  return StmtError();
+}
 
-  // Check for constexpr
-  bool IsConstexpr = false;
-  if (Tok.is(tok::kw_constexpr)) {
-    IsConstexpr = true;
-    ConsumeToken();
+StmtResult Parser::ParseMatchCase() {
+  StmtResult Pattern = ParsePattern();
+  if (Pattern.isInvalid()) {
+    SkipUntil(tok::kw_if, tok::equalgreater, StopAtSemi | StopBeforeMatch);
+  }
+  SourceLocation IfLoc;
+  ExprResult Guard;
+  if (TryConsumeToken(tok::kw_if, IfLoc)) {
+    Guard = ParseExpression();
+    if (Guard.isInvalid()) {
+      SkipUntil(tok::equalgreater, StopAtSemi | StopBeforeMatch);
+    }
+  }
+  if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after, "pattern")) {
+    return StmtError();
+  }
+  StmtResult Handler = ParseStatement();
+  if (Handler.isInvalid()) {
+    return StmtError();
   }
 
-  // inspect (...) { }
-  //         ^
-  if (Tok.isNot(tok::l_paren)) {
-    Diag(Tok, diag::err_expected_lparen_after)
-        << (IsConstexpr ? "constexpr" : "inspect");
-    SkipUntil(tok::semi);
-    return ExprError();
+  return StmtError();
+}
+
+StmtResult Parser::ParsePattern() {
+  if (IdentifierInfo* II = Tok.getIdentifierInfo()) {
+    StringRef name = II->getName();
+    if (name == "_") {
+      return StmtError(); // Actions.ActOnWildcardPattern(ConsumeToken());
+    }
+    // else if (name == "let") {
+    //   return ParseBindingPattern();
+    // }
   }
-
-  ParseScope InspectScope(this, Scope::InspectScope);
-
-  // Parse the condition.
-  StmtResult Init;
-  Sema::ConditionResult Cond;
-  SourceLocation LParen;
-  SourceLocation RParen;
-  if (ParseParenExprOrCondition(&Init, Cond, InspectLoc,
-                                Sema::ConditionKind::Inspect, LParen, RParen) ||
-      Cond.isInvalid())
-    return ExprError();
-
-  // Parse trailing-return-type[opt].
-  TypeResult TrailingReturnType(true);
-  if (Tok.is(tok::arrow)) {
-    SourceRange Range;
-    TrailingReturnType =
-        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit*/ false);
-    if (TrailingReturnType.isInvalid()) // FIXME: add error message
-      return ExprError();
-  }
-
-  ExprResult Inspect = Actions.ActOnStartOfInspectExpr(
-      InspectLoc, Init.get(), Cond, IsConstexpr, TrailingReturnType);
-  if (Inspect.isInvalid()) {
-    // Skip the inspect body.
-    if (Tok.is(tok::l_brace)) {
-      ConsumeBrace();
-      SkipUntil(tok::r_brace);
-    } else
-      SkipUntil(tok::semi);
-    return Inspect;
-  }
-
-  // See comments in ParseIfStatement for why we create a scope for the
-  // condition and a new scope for substatement in C++.
-  ParseScope InnerScope(this, Scope::DeclScope, true, Tok.is(tok::l_brace));
-
-  // Read the body statement.
-  //
-  // inspect (...) { ... }
-  //               ^
-  StmtResult Body(ParseCompoundStatementBody(/*bool isStmtExpr*/true));
-
-  // Pop the scopes.
-  InnerScope.Exit();
-  InspectScope.Exit();
-
-  if (Body.isInvalid())
-    return ExprError();
-
-  return Actions.ActOnFinishInspectExpr(InspectLoc, Inspect.get(), Body.get());
+  // else if (Tok.is(tok::question)) {
+  //   return ParseOptionalPattern();
+  // }
+  return StmtError();
 }
