@@ -4113,7 +4113,7 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
       Args.hasFlag(OPT_fconvergent_functions, OPT_fno_convergent_functions,
                    HasConvergentOperations);
 
-  Opts.PatternMatching = Args.hasArg(options::OPT_fpattern_matching);
+  Opts.PatternMatching = Args.hasArg(OPT_fpattern_matching);
 
   Opts.NoBuiltin = Args.hasArg(OPT_fno_builtin) || Opts.Freestanding;
   if (!Opts.NoBuiltin)
