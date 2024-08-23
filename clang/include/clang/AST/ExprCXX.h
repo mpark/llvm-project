@@ -28,6 +28,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/OperationKinds.h"
+#include "clang/AST/Pattern.h"
 #include "clang/AST/Reflection.h"
 #include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/Stmt.h"
@@ -5940,6 +5941,71 @@ public:
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == BuiltinBitCastExprClass;
+  }
+};
+
+struct MatchCase {
+  Stmt *Pattern, *Guard, *Handler;
+  SourceLocation IfLoc, FatArrowLoc;
+};
+
+class MatchSelectExpr final
+    : public Expr,
+      private llvm::TrailingObjects<MatchSelectExpr, MatchCase> {
+  friend class TrailingObjects;
+
+  Expr *Subject;
+  SourceLocation MatchLoc;
+  bool IsConstexpr;
+  unsigned NumCases;
+  SourceRange Braces;
+
+  explicit MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+                           bool IsConstexpr, QualType Ty,
+                           ArrayRef<MatchCase> Cases, SourceRange Braces);
+
+  explicit MatchSelectExpr(unsigned NumCases, EmptyShell Empty)
+      : Expr(MatchSelectExprClass, Empty), NumCases(NumCases) {}
+
+  const MatchCase *getCases() const { return getTrailingObjects<MatchCase>(); }
+  MatchCase *getCases() { return getTrailingObjects<MatchCase>(); }
+
+public:
+  unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
+    return NumCases;
+  }
+
+  static MatchSelectExpr *Create(const ASTContext &Ctx, Expr *Subject,
+                                 SourceLocation MatchLoc, bool IsConstexpr,
+                                 QualType Ty, ArrayRef<MatchCase> Cases,
+                                 SourceRange Braces);
+
+  static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases);
+
+  bool isConstexpr() const { return IsConstexpr; }
+
+  unsigned getNumCases() const { return NumCases; }
+
+  const MatchCase &getCase(unsigned I) const { return getCases()[I]; }
+
+  MatchCase &getCase(unsigned I) { return getCases()[I]; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY {
+    return Subject->getBeginLoc();
+  }
+
+  SourceLocation getEndLoc() const LLVM_READONLY { return Braces.getEnd(); }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == MatchSelectExprClass;
   }
 };
 

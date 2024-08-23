@@ -20,13 +20,31 @@ void test_match_no_rhs(int i) {
   42 match -> void; // expected-error {{expected '{'}}
 }
 
-void test_structures() {
-  42 match { _ => 0; };
-  42 match { _ if true => 0; };
-  42 match constexpr { _ => 0; };
-  42 match constexpr { _ if true => 0; };
-  42 match -> int { _ => 0; };
-  42 match -> int { _ if true => 0; };
-  42 match constexpr -> int { _ => 0; };
-  42 match constexpr -> int { _ if true => 0; };
+void test_structures(int x) {
+  x match { _ => 0; };
+  x match { _ if true => 0; };
+  x match constexpr { _ => 0; };
+  x match constexpr { _ if true => 0; };
+  x match -> int { _ => 0; };
+  x match -> auto { _ => 0; };
+  x match -> decltype(auto) { _ => 0; };
+  x match -> int { _ if true => 0; };
+  x match -> auto { _ if true => 0; };
+  x match -> decltype(auto) { _ if true => 0; };
+  x match constexpr -> int { _ => 0; };
+  x match constexpr -> auto { _ => 0; };
+  x match constexpr -> decltype(auto) { _ => 0; };
+  x match constexpr -> int { _ if true => 0; };
+  x match constexpr -> auto { _ if true => 0; };
+  x match constexpr -> decltype(auto) { _ if true => 0; };
+}
+
+void test_wildcard_pattern(int x) {
+  x match { _ => 0; };
+}
+
+void test_optional_pattern(int* p) {
+  p match { ? _ => 0; };
+  p match { ??_ => 0; };
+  p match { ???_ => 0; };
 }
