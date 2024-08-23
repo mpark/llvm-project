@@ -319,8 +319,9 @@ Parser::ParseConstraintLogicalAndExpression(bool IsTrailingRequiresClause) {
     if (NotPrimaryExpression ||
         // Check if the following tokens must be a part of a non-primary
         // expression
-        getBinOpPrecedence(Tok.getKind(), GreaterThanIsOperator,
-                           /*CPlusPlus11=*/true) > prec::LogicalAnd ||
+        getBinOpPrecedence(Tok, GreaterThanIsOperator,
+                           /*CPlusPlus11=*/true,
+                           getLangOpts().PatternMatching) > prec::LogicalAnd ||
         // Postfix operators other than '(' (which will be checked for in
         // CheckConstraintExpression).
         Tok.isOneOf(tok::period, tok::plusplus, tok::minusminus) ||
@@ -416,20 +417,22 @@ bool Parser::isNotExpressionStart() {
 
 bool Parser::isFoldOperator(prec::Level Level) const {
   return Level > prec::Unknown && Level != prec::Conditional &&
-         Level != prec::Spaceship;
+         Level != prec::Spaceship && Level != prec::Match;
 }
 
-bool Parser::isFoldOperator(tok::TokenKind Kind) const {
-  return isFoldOperator(getBinOpPrecedence(Kind, GreaterThanIsOperator, true));
+bool Parser::isFoldOperator(const Token &Tok) const {
+  return isFoldOperator(getBinOpPrecedence(Tok, GreaterThanIsOperator,
+                                           true, getLangOpts().PatternMatching));
 }
 
 /// Parse a binary expression that starts with \p LHS and has a
 /// precedence of at least \p MinPrec.
 ExprResult
 Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
-  prec::Level NextTokPrec = getBinOpPrecedence(Tok.getKind(),
+  prec::Level NextTokPrec = getBinOpPrecedence(Tok,
                                                GreaterThanIsOperator,
-                                               getLangOpts().CPlusPlus11);
+                                               getLangOpts().CPlusPlus11,
+                                               getLangOpts().PatternMatching);
   SourceLocation ColonLoc;
 
   auto SavedType = PreferredType;
@@ -552,6 +555,16 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
       }
     }
 
+    // Special case handling for `match` expressions.
+    if (NextTokPrec == prec::Match &&
+        Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
+      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation());
+      NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
+                                       getLangOpts().CPlusPlus11,
+                                       getLangOpts().PatternMatching);
+      continue;
+    }
+
     PreferredType.enterBinary(Actions, Tok.getLocation(), LHS.get(),
                               OpToken.getKind());
     // Parse another leaf here for the RHS of the operator.
@@ -586,8 +599,9 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // Remember the precedence of this operator and get the precedence of the
     // operator immediately to the right of the RHS.
     prec::Level ThisPrec = NextTokPrec;
-    NextTokPrec = getBinOpPrecedence(Tok.getKind(), GreaterThanIsOperator,
-                                     getLangOpts().CPlusPlus11);
+    NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
+                                     getLangOpts().CPlusPlus11,
+                                     getLangOpts().PatternMatching);
 
     // Assignment and conditional expressions are right-associative.
     bool isRightAssoc = ThisPrec == prec::Conditional ||
@@ -620,8 +634,9 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
         LHS = ExprError();
       }
 
-      NextTokPrec = getBinOpPrecedence(Tok.getKind(), GreaterThanIsOperator,
-                                       getLangOpts().CPlusPlus11);
+      NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
+                                       getLangOpts().CPlusPlus11,
+                                       getLangOpts().PatternMatching);
     }
 
     if (!RHS.isInvalid() && RHSIsInitList) {
@@ -3299,7 +3314,7 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
       return ExprError();
     }
   } else if (ExprType >= FoldExpr && Tok.is(tok::ellipsis) &&
-             isFoldOperator(NextToken().getKind())) {
+             isFoldOperator(NextToken())) {
     ExprType = FoldExpr;
     return ParseFoldExpression(ExprResult(), T);
   } else if (isTypeCast) {
@@ -3311,7 +3326,7 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
       // FIXME: If we ever support comma expressions as operands to
       // fold-expressions, we'll need to allow multiple ArgExprs here.
       if (ExprType >= FoldExpr && ArgExprs.size() == 1 &&
-          isFoldOperator(Tok.getKind()) && NextToken().is(tok::ellipsis)) {
+          isFoldOperator(Tok) && NextToken().is(tok::ellipsis)) {
         ExprType = FoldExpr;
         return ParseFoldExpression(ArgExprs[0], T);
       }
@@ -3362,7 +3377,7 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
       Result = Actions.CorrectDelayedTyposInExpr(Result);
     }
 
-    if (ExprType >= FoldExpr && isFoldOperator(Tok.getKind()) &&
+    if (ExprType >= FoldExpr && isFoldOperator(Tok) &&
         NextToken().is(tok::ellipsis)) {
       ExprType = FoldExpr;
       return ParseFoldExpression(Result, T);
@@ -3588,7 +3603,7 @@ ExprResult Parser::ParseFoldExpression(ExprResult LHS,
   SourceLocation FirstOpLoc;
   if (LHS.isUsable()) {
     Kind = Tok.getKind();
-    assert(isFoldOperator(Kind) && "missing fold-operator");
+    assert(isFoldOperator(Tok) && "missing fold-operator");
     FirstOpLoc = ConsumeToken();
   }
 
@@ -3597,7 +3612,7 @@ ExprResult Parser::ParseFoldExpression(ExprResult LHS,
 
   ExprResult RHS;
   if (Tok.isNot(tok::r_paren)) {
-    if (!isFoldOperator(Tok.getKind()))
+    if (!isFoldOperator(Tok))
       return Diag(Tok.getLocation(), diag::err_expected_fold_operator);
 
     if (Kind != tok::unknown && Tok.getKind() != Kind)

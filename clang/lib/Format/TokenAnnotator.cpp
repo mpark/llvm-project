@@ -710,7 +710,7 @@ private:
          Parent->isUnaryOperator() ||
          // FIXME(bug 36976): ObjC return types shouldn't use TT_CastRParen.
          Parent->isOneOf(TT_ObjCForIn, TT_CastRParen) ||
-         (getBinOpPrecedence(Parent->Tok.getKind(), true, true) >
+         (getBinOpPrecedence(Parent->Tok, true, true, true) >
           prec::Unknown));
     bool ColonFound = false;
 

@@ -752,8 +752,8 @@ private:
   /// Checks if the \p Level is valid for use in a fold expression.
   bool isFoldOperator(prec::Level Level) const;
 
-  /// Checks if the \p Kind is a valid operator for fold expressions.
-  bool isFoldOperator(tok::TokenKind Kind) const;
+  /// Checks if the \p Tok is a valid operator for fold expressions.
+  bool isFoldOperator(const Token &Tok) const;
 
   /// Initialize all pragma handlers.
   void initializePragmaHandlers();
@@ -3947,8 +3947,10 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
-  ExprResult ParseInspectExpr();
-  ExprResult ParseMatchExpr(ExprResult LHS);
+  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc);
+  StmtResult ParseMatchBody();
+  StmtResult ParseMatchCase();
+  StmtResult ParsePattern();
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through
