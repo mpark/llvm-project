@@ -185,6 +185,13 @@ def CoyieldExpr : StmtNode<CoroutineSuspendExpr>;
 def ConceptSpecializationExpr : StmtNode<Expr>;
 def RequiresExpr : StmtNode<Expr>;
 
+// Pattern matching expression
+def MatchSelectExpr : StmtNode<Expr>;
+
+def Pattern : StmtNode<Stmt, 1>;
+def WildcardPattern : StmtNode<Pattern>;
+def OptionalPattern : StmtNode<Pattern>;
+
 // Obj-C Expressions.
 def ObjCStringLiteral : StmtNode<Expr>;
 def ObjCBoxedExpr : StmtNode<Expr>;
