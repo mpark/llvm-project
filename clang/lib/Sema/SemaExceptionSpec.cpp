@@ -1286,8 +1286,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::ConvertVectorExprClass:
   case Expr::VAArgExprClass:
   case Expr::CXXParenListInitExprClass:
-  case Stmt::MatchExprClass:
-  case Stmt::InspectExprClass:
+  case Expr::MatchSelectExprClass:
     return canSubStmtsThrow(*this, S);
 
   case Expr::CompoundLiteralExprClass:
@@ -1533,11 +1532,8 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Stmt::SEHTryStmtClass:
   case Stmt::SwitchStmtClass:
   case Stmt::WhileStmtClass:
-  case Stmt::ExpressionPatternStmtClass:
-  case Stmt::IdentifierPatternStmtClass:
-  case Stmt::WildcardPatternStmtClass:
-  case Stmt::StructuredBindingPatternStmtClass:
-  case Stmt::AlternativePatternStmtClass:
+  case Stmt::WildcardPatternClass:
+  case Stmt::OptionalPatternClass:
     return canSubStmtsThrow(*this, S);
 
   case Stmt::DeclStmtClass: {

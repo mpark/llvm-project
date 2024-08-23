@@ -430,6 +430,7 @@ public:
   void VisitOpenACCAsteriskSizeExpr(const OpenACCAsteriskSizeExpr *S);
   void VisitEmbedExpr(const EmbedExpr *S);
   void VisitAtomicExpr(const AtomicExpr *AE);
+  void VisitMatchSelectExpr(const MatchSelectExpr *MSE);
 };
 
 } // namespace clang
