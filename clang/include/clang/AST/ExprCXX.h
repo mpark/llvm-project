@@ -23,9 +23,9 @@
 #include "clang/AST/DeclarationName.h"
 #include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/MatchPattern.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/OperationKinds.h"
-#include "clang/AST/Pattern.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/TemplateBase.h"
@@ -5709,7 +5709,9 @@ public:
 };
 
 struct MatchCase {
-  Stmt *Pattern, *Guard, *Handler;
+  MatchPattern *Pattern;
+  Expr *Guard;
+  Stmt *Handler;
   SourceLocation IfLoc, FatArrowLoc;
 };
 

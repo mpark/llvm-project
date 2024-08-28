@@ -2392,20 +2392,6 @@ void ASTStmtWriter::VisitMatchSelectExpr(MatchSelectExpr *E) {
   Code = serialization::EXPR_MATCH_SELECT;
 }
 
-void ASTStmtWriter::VisitPattern(Pattern *S) {
-  VisitStmt(S);
-}
-
-void ASTStmtWriter::VisitWildcardPattern(WildcardPattern *S) {
-  VisitPattern(S);
-  Code = serialization::PATTERN_WILDCARD;
-}
-
-void ASTStmtWriter::VisitOptionalPattern(OptionalPattern *S) {
-  VisitPattern(S);
-  Code = serialization::PATTERN_OPTIONAL;
-}
-
 //===----------------------------------------------------------------------===//
 // CUDA Expressions and Statements.
 //===----------------------------------------------------------------------===//

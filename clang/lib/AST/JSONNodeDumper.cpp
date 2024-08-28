@@ -256,6 +256,9 @@ void JSONNodeDumper::Visit(const ConceptReference *CR) {
                       [CR, this] { writeSourceRange(CR->getSourceRange()); });
 }
 
+void JSONNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {}
+void JSONNodeDumper::Visit(const MatchPattern *Node) {}
+
 void JSONNodeDumper::writeIncludeStack(PresumedLoc Loc, bool JustFirst) {
   if (Loc.isInvalid())
     return;

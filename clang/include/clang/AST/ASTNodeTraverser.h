@@ -963,12 +963,25 @@ public:
     for (unsigned I = 0, E = Node->getNumCases(); I < E; ++I) {
       getNodeDelegate().AddChild([=] {
         const MatchCase &Case = Node->getCase(I);
-        Visit(Case.Pattern);
+        VisitMatchPattern(Case.Pattern);
         if (Case.Guard)
           Visit(Case.Guard);
         Visit(Case.Handler);
       });
     }
+  }
+
+  void VisitMatchPattern(const MatchPattern* Node) {
+    getNodeDelegate().AddChild([=] {
+      getNodeDelegate().Visit(Node);
+
+      if (!Node) {
+        return;
+      }
+
+      for (const MatchPattern *SubPattern : Node->children())
+        VisitMatchPattern(SubPattern);
+    });
   }
 
   // Implements Visit methods for Attrs.
