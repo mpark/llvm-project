@@ -3507,3 +3507,17 @@ void TextNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";
 }
+
+void TextNodeDumper::Visit(const MatchPattern *Node) {
+  if (!Node) {
+    ColorScope Color(OS, ShowColors, ASTDumpColor::Null);
+    OS << "<<<NULL>>>";
+    return;
+  }
+  {
+    ColorScope Color(OS, ShowColors, ASTDumpColor::Stmt);
+    OS << Node->getMatchPatternClassName();
+  }
+  dumpPointer(Node);
+  dumpSourceRange(Node->getSourceRange());
+}
