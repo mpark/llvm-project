@@ -2996,6 +2996,7 @@ DEF_TRAVERSE_STMT(RequiresExpr, {
 })
 
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
   for (unsigned I = 0, E = S->getNumCases(); I < E; ++I) {
     MatchCase& Case = S->getCase(I);
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Pattern);

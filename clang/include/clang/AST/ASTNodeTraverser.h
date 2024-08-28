@@ -959,12 +959,15 @@ public:
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
+    Visit(Node->getSubject());
     for (unsigned I = 0, E = Node->getNumCases(); I < E; ++I) {
-      const MatchCase &Case = Node->getCase(I);
-      Visit(Case.Pattern);
-      if (Case.Guard)
-        Visit(Case.Guard);
-      Visit(Case.Handler);
+      getNodeDelegate().AddChild([=] {
+        const MatchCase &Case = Node->getCase(I);
+        Visit(Case.Pattern);
+        if (Case.Guard)
+          Visit(Case.Guard);
+        Visit(Case.Handler);
+      });
     }
   }
 
