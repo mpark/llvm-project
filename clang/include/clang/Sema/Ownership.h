@@ -33,6 +33,7 @@ class CXXBaseSpecifier;
 class CXXCtorInitializer;
 class Decl;
 class Expr;
+class MatchPattern;
 class ParsedTemplateArgument;
 class QualType;
 class SpliceSpecifier;
@@ -253,6 +254,7 @@ template <> struct IsResultPtrLowBitFree<SpliceSpecifier *> {
 using ExprResult = ActionResult<Expr *>;
 using StmtResult = ActionResult<Stmt *>;
 using TypeResult = ActionResult<ParsedType>;
+using MatchPatternResult = ActionResult<MatchPattern *>;
 using BaseResult = ActionResult<CXXBaseSpecifier *>;
 using MemInitResult = ActionResult<CXXCtorInitializer *>;
 
@@ -274,6 +276,7 @@ inline TypeResult TypeError() { return TypeResult(true); }
 inline DeclResult DeclError() { return DeclResult(true); }
 
 inline SpliceResult SpliceError() { return SpliceResult(true); }
+inline MatchPatternResult MatchPatternError() { return MatchPatternResult(true); }
 
 inline ExprResult ExprError(const StreamingDiagnostic &) { return ExprError(); }
 inline StmtResult StmtError(const StreamingDiagnostic &) { return StmtError(); }

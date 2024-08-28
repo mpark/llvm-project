@@ -103,6 +103,7 @@ add_clang_library(clangAST
   ItaniumMangle.cpp
   JSONNodeDumper.cpp
   Mangle.cpp
+  MatchPattern.cpp
   MicrosoftCXXABI.cpp
   MicrosoftMangle.cpp
   NestedNameSpecifier.cpp
