@@ -5753,6 +5753,9 @@ public:
 
   bool isConstexpr() const { return IsConstexpr; }
 
+  const Expr* getSubject() const { return Subject; }
+  Expr* getSubject() { return Subject; }
+
   unsigned getNumCases() const { return NumCases; }
 
   const MatchCase& getCase(unsigned i) const {
