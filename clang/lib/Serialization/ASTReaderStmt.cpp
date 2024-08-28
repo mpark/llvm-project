@@ -2635,18 +2635,6 @@ void ASTStmtReader::VisitMatchSelectExpr(MatchSelectExpr *E) {
   VisitExpr(E);
 }
 
-void ASTStmtReader::VisitPattern(Pattern *S) {
-  VisitStmt(S);
-}
-
-void ASTStmtReader::VisitWildcardPattern(WildcardPattern *S) {
-  VisitPattern(S);
-}
-
-void ASTStmtReader::VisitOptionalPattern(OptionalPattern *S) {
-  VisitPattern(S);
-}
-
 //===----------------------------------------------------------------------===//
 // CUDA Expressions and Statements
 //===----------------------------------------------------------------------===//

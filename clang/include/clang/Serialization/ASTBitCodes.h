@@ -1982,8 +1982,6 @@ enum StmtCode {
   EXPR_CXX_EXPANSION_SELECT,              // CXXExpansionSelectExpr
 
   EXPR_MATCH_SELECT,                      // MatchSelectExpr
-  PATTERN_WILDCARD,                       // WildcardPattern
-  PATTERN_OPTIONAL,                       // OptionalPattern
 
   // CUDA
   EXPR_CUDA_KERNEL_CALL, // CUDAKernelCallExpr
