@@ -314,6 +314,9 @@ public:
   void VisitCXXDefaultArgExpr(const CXXDefaultArgExpr *Node);
   void VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *Node);
 
+  void VisitMatchSelectExpr(const MatchSelectExpr *Node);
+  void Visit(const MatchPattern *);
+
   void VisitObjCEncodeExpr(const ObjCEncodeExpr *OEE);
   void VisitObjCMessageExpr(const ObjCMessageExpr *OME);
   void VisitObjCBoxedExpr(const ObjCBoxedExpr *OBE);
