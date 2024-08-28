@@ -3957,7 +3957,7 @@ bool Parser::ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Bra
 }
 
 bool Parser::ParseMatchCase(MatchCase& Case) {
-  MatchPatternResult Pattern = ParsePattern();
+  ActionResult<MatchPattern *> Pattern = ParsePattern();
   if (Pattern.isInvalid()) {
     SkipUntil(tok::kw_if, tok::equalgreater, StopAtSemi | StopBeforeMatch);
   }
@@ -3980,7 +3980,7 @@ bool Parser::ParseMatchCase(MatchCase& Case) {
   return false;
 }
 
-MatchPatternResult Parser::ParsePattern() {
+ActionResult<MatchPattern *> Parser::ParsePattern() {
   switch (Tok.getKind()) {
     case tok::identifier: {
       StringRef name = Tok.getIdentifierInfo()->getName();
@@ -3990,16 +3990,16 @@ MatchPatternResult Parser::ParsePattern() {
       // else if (name == "let") {
       //   return ParseBindingPattern();
       // }
-      return MatchPatternError();
+      return true;
     }
     case tok::question: {
       SourceLocation QuestionLoc = ConsumeToken();
-      MatchPatternResult Pattern = ParsePattern();
+      ActionResult<MatchPattern *> Pattern = ParsePattern();
       if (Pattern.isInvalid()) {
-        return MatchPatternError();
+        return true;
       }
       return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
     }
-    default: return MatchPatternError();
+    default: return true;
   }
 }
