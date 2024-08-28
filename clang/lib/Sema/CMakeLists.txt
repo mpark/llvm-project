@@ -67,6 +67,7 @@ add_clang_library(clangSema
   SemaLookup.cpp
   SemaLoongArch.cpp
   SemaM68k.cpp
+  SemaMatchPattern.cpp
   SemaMIPS.cpp
   SemaMSP430.cpp
   SemaModule.cpp
@@ -80,7 +81,6 @@ add_clang_library(clangSema
   SemaOpenCL.cpp
   SemaOpenMP.cpp
   SemaOverload.cpp
-  SemaPattern.cpp
   SemaPPC.cpp
   SemaPseudoObject.cpp
   SemaReflect.cpp
