@@ -4513,7 +4513,7 @@ private:
 
   bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
   bool ParseMatchCase(MatchCase &Case);
-  StmtResult ParsePattern();
+  MatchPatternResult ParsePattern();
 
   ///@}
 
