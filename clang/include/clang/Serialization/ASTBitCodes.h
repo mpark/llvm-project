@@ -1910,8 +1910,6 @@ enum StmtCode {
   EXPR_REQUIRES,                          // RequiresExpr
 
   EXPR_MATCH_SELECT,                      // MatchSelectExpr
-  PATTERN_WILDCARD,                       // WildcardPattern
-  PATTERN_OPTIONAL,                       // OptionalPattern
 
   // CUDA
   EXPR_CUDA_KERNEL_CALL, // CUDAKernelCallExpr
