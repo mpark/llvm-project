@@ -249,7 +249,6 @@ template <> struct IsResultPtrLowBitFree<CXXCtorInitializer *> {
 using ExprResult = ActionResult<Expr *>;
 using StmtResult = ActionResult<Stmt *>;
 using TypeResult = ActionResult<ParsedType>;
-using MatchPatternResult = ActionResult<MatchPattern *>;
 using BaseResult = ActionResult<CXXBaseSpecifier *>;
 using MemInitResult = ActionResult<CXXCtorInitializer *>;
 
@@ -266,7 +265,6 @@ using MultiTemplateParamsArg = MutableArrayRef<TemplateParameterList *>;
 inline ExprResult ExprError() { return ExprResult(true); }
 inline StmtResult StmtError() { return StmtResult(true); }
 inline TypeResult TypeError() { return TypeResult(true); }
-inline MatchPatternResult MatchPatternError() { return MatchPatternResult(true); }
 
 inline ExprResult ExprError(const StreamingDiagnostic &) { return ExprError(); }
 inline StmtResult StmtError(const StreamingDiagnostic &) { return StmtError(); }
