@@ -3951,7 +3951,7 @@ private:
 
   bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces);
   bool ParseMatchCase(MatchCase& Case);
-  MatchPatternResult ParsePattern();
+  ActionResult<MatchPattern *> ParsePattern();
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through

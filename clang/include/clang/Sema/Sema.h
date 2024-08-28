@@ -10684,9 +10684,9 @@ public:
                                   ArrayRef<MatchCase> Patterns,
                                   SourceRange Braces);
 
-  MatchPatternResult ActOnWildcardPattern(SourceLocation WildcardLoc);
-  MatchPatternResult ActOnOptionalPattern(SourceLocation QuestionLoc,
-                                          MatchPattern *SubPattern);
+  ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
+  ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
+                                                    MatchPattern *SubPattern);
 
   ///@}
 
