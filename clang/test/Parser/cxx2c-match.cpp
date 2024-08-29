@@ -23,6 +23,7 @@ void test_match_no_rhs(int i) {
 void test_match_structures(int x) {
   x match _;
   x match ? _;
+  x match 0;
   x match { _ => 0; };
   x match { _ if true => 0; };
   x match constexpr { _ => 0; };
@@ -42,49 +43,50 @@ void test_match_structures(int x) {
   x match { ? _ => 0; _ => 1; };
 }
 
-void test_match_test_precedence(int* p) {
-  // unary is tighter than match
-  *p match 0;
-  *p match 0 + 1;
-  // match binds tighter than bin ops.
-  4 + 2 match 0;
-  4 * 2 match 0;
-  true == 2 match 0;
-  4 * (2) match 0;
-  2 match 0 + 1;
-  2 match 0 * 1;
-  2 match 0 == 1;
-  (2) match 0 * 1;
-  // except .* and ->*
-  struct S { int i; } s;
-  s.*&S::i match 0;
-  &s->*&S::i match 0;
-  2 match s.*&S::i;
-  2 match &s->*&S::i;
+void test_match_precedence(int* p) {
+  /* MatchTestExpr */ {
+    // unary is tighter than match
+    *p match 0;
+    *p match 0 + 1;
+    // match binds tighter than bin ops.
+    4 + 2 match 0;
+    4 * 2 match 0;
+    true == 2 match 0;
+    4 * (2) match 0;
+    2 match 0 + 1;
+    2 match 0 * 1;
+    2 match 0 == 1;
+    (2) match 0 * 1;
+    // except .* and ->*
+    struct S { int i; } s;
+    s.*&S::i match 0;
+    &s->*&S::i match 0;
+    2 match s.*&S::i;
+    2 match &s->*&S::i;
+  }
+  /* MatchSelectExpr */ {
+    // unary is tighter than match
+    *p match { _ => 0; };
+    *p match { _ => 0; } + 1;
+
+    // match binds tighter than bin ops.
+    4 + 2 match { _ => 0; };
+    4 * 2 match { _ => 0; };
+    4 == 2 match { _ => 0; };
+    4 * (2) match { _ => 0; };
+    2 match { _ => 0; } + 1;
+    2 match { _ => 0; } * 1;
+    2 match { _ => 0; } == 1;
+    (2) match { _ => 0; } * 1;
+
+    // except .* and ->*
+    struct S { int i; } s;
+    s.*&S::i match { _ => 0; };
+    &s->*&S::i match { _ => 0; };
+    2 match { _ => s; } .* &S::i;
+    2 match { _ => &s; } ->* &S::i;
+  }
 }
-
-void test_match_select_precedence(int* p) {
-  // unary is tighter than match
-  *p match { _ => 0; };
-  *p match { _ => 0; } + 1;
-  // match binds tighter than bin ops.
-  4 + 2 match { _ => 0; };
-  4 * 2 match { _ => 0; };
-  4 == 2 match { _ => 0; };
-  4 * (2) match { _ => 0; };
-  2 match { _ => 0; } + 1;
-  2 match { _ => 0; } * 1;
-  2 match { _ => 0; } == 1;
-  (2) match { _ => 0; } * 1;
-  // except .* and ->*
-  struct S { int i; } s;
-  s.*&S::i match { _ => 0; };
-  &s->*&S::i match { _ => 0; };
-  2 match { _ => s; } .* &S::i;
-  2 match { _ => &s; } ->* &S::i;
-}
-
-
 
 void test_wildcard_pattern(int x) {
   x match _;
