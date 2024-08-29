@@ -2932,6 +2932,11 @@ private:
   mutable IdentifierInfo *Ident_GNU_final;
   mutable IdentifierInfo *Ident_override;
 
+  /// C++2c contextual keywords.
+  mutable IdentifierInfo *Ident_match;
+  mutable IdentifierInfo *Ident_let;
+  mutable IdentifierInfo *Ident_wildcard;
+
   /// Representation of a class that has been parsed, including
   /// any member function declarations or definitions that need to be
   /// parsed after the corresponding top-level class is complete.

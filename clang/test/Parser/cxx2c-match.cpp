@@ -20,6 +20,28 @@ void test_match_no_rhs(int i) {
   42 match -> void; // expected-error {{expected '{'}}
 }
 
+void test_match_structures(int x) {
+  x match _;
+  x match ? _;
+  x match { _ => 0; };
+  x match { _ if true => 0; };
+  x match constexpr { _ => 0; };
+  x match constexpr { _ if true => 0; };
+  x match -> int { _ => 0; };
+  x match -> auto { _ => 0; };
+  x match -> decltype(auto) { _ => 0; };
+  x match -> int { _ if true => 0; };
+  x match -> auto { _ if true => 0; };
+  x match -> decltype(auto) { _ if true => 0; };
+  x match constexpr -> int { _ => 0; };
+  x match constexpr -> auto { _ => 0; };
+  x match constexpr -> decltype(auto) { _ => 0; };
+  x match constexpr -> int { _ if true => 0; };
+  x match constexpr -> auto { _ if true => 0; };
+  x match constexpr -> decltype(auto) { _ if true => 0; };
+  x match { ? _ => 0; _ => 1; };
+}
+
 void test_match_test_precedence(int* p) {
   // unary is tighter than match
   *p match 0;
@@ -37,8 +59,8 @@ void test_match_test_precedence(int* p) {
   struct S { int i; } s;
   s.*&S::i match 0;
   &s->*&S::i match 0;
-  2 match s .* &S::i;
-  2 match &s ->* &S::i;
+  2 match s.*&S::i;
+  2 match &s->*&S::i;
 }
 
 void test_match_select_precedence(int* p) {
@@ -62,27 +84,7 @@ void test_match_select_precedence(int* p) {
   2 match { _ => &s; } ->* &S::i;
 }
 
-void test_match_structures(int x) {
-  x match _;
-  x match ? _;
-  x match { _ => 0; };
-  x match { _ if true => 0; };
-  x match constexpr { _ => 0; };
-  x match constexpr { _ if true => 0; };
-  x match -> int { _ => 0; };
-  x match -> auto { _ => 0; };
-  x match -> decltype(auto) { _ => 0; };
-  x match -> int { _ if true => 0; };
-  x match -> auto { _ if true => 0; };
-  x match -> decltype(auto) { _ if true => 0; };
-  x match constexpr -> int { _ => 0; };
-  x match constexpr -> auto { _ => 0; };
-  x match constexpr -> decltype(auto) { _ => 0; };
-  x match constexpr -> int { _ if true => 0; };
-  x match constexpr -> auto { _ if true => 0; };
-  x match constexpr -> decltype(auto) { _ if true => 0; };
-  x match { ? _ => 0; _ => 1; };
-}
+
 
 void test_wildcard_pattern(int x) {
   x match _;

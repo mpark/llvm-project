@@ -3965,16 +3965,6 @@ bool Parser::ParseMatchCase(MatchCase& Case) {
 
 ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
   switch (Tok.getKind()) {
-    case tok::identifier: {
-      StringRef name = Tok.getIdentifierInfo()->getName();
-      if (name == "_") {
-        return Actions.ActOnWildcardPattern(ConsumeToken());
-      }
-      // else if (name == "let") {
-      //   return ParseBindingPattern();
-      // }
-      return true;
-    }
     case tok::question: {
       SourceLocation QuestionLoc = ConsumeToken();
       ActionResult<MatchPattern *> Pattern = ParsePattern(LHS);
@@ -3982,6 +3972,16 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
         return true;
       }
       return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
+    }
+    case tok::identifier: {
+      IdentifierInfo *II = Tok.getIdentifierInfo();
+      if (II == Ident_wildcard) {
+        return Actions.ActOnWildcardPattern(ConsumeToken());
+      }
+      // else if (name == "let") {
+      //   return ParseBindingPattern();
+      // }
+      [[fallthrough]];
     }
     default: {
       ExprResult Expr = [=] {

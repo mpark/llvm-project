@@ -537,6 +537,9 @@ void Parser::Initialize() {
   Ident_abstract = nullptr;
   Ident_override = nullptr;
   Ident_GNU_final = nullptr;
+  Ident_match = nullptr;
+  Ident_let = nullptr;
+  Ident_wildcard = nullptr;
 
   Ident_super = &PP.getIdentifierTable().get("super");
 
@@ -590,6 +593,12 @@ void Parser::Initialize() {
     PP.SetPoisonReason(Ident__abnormal_termination,diag::err_seh___finally_block);
     PP.SetPoisonReason(Ident___abnormal_termination,diag::err_seh___finally_block);
     PP.SetPoisonReason(Ident_AbnormalTermination,diag::err_seh___finally_block);
+  }
+
+  if (getLangOpts().PatternMatching) {
+    Ident_match = PP.getIdentifierInfo("match");
+    Ident_let = PP.getIdentifierInfo("let");
+    Ident_wildcard = PP.getIdentifierInfo("_");
   }
 
   Actions.Initialize();
