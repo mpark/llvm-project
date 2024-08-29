@@ -186,6 +186,7 @@ def ConceptSpecializationExpr : StmtNode<Expr>;
 def RequiresExpr : StmtNode<Expr>;
 
 // Pattern matching expression
+def MatchTestExpr : StmtNode<Expr>;
 def MatchSelectExpr : StmtNode<Expr>;
 
 // Obj-C Expressions.

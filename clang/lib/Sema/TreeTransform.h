@@ -17401,6 +17401,13 @@ ExprResult TreeTransform<Derived>::TransformHLSLOutArgExpr(HLSLOutArgExpr *E) {
   return getDerived().TransformExpr(E->getArgLValue());
 }
 
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *S) {
+  return ExprError();
+}
+
+template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *S) {
   return ExprError();
