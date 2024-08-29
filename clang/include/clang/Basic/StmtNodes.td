@@ -216,6 +216,7 @@ def ExplDependentCallExpr : StmtNode<Expr>;
 def CXXExpansionSelectExpr : StmtNode<Expr>;
 
 // Pattern matching expression
+def MatchTestExpr : StmtNode<Expr>;
 def MatchSelectExpr : StmtNode<Expr>;
 
 // Obj-C Expressions.

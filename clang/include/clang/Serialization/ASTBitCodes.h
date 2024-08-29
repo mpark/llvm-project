@@ -1991,6 +1991,7 @@ enum StmtCode {
   EXPR_REQUIRES,                          // RequiresExpr
   EXPR_CXX_EXPANSION_SELECT,              // CXXExpansionSelectExpr
 
+  EXPR_MATCH_TEST,                        // MatchTestExpr
   EXPR_MATCH_SELECT,                      // MatchSelectExpr
 
   // CUDA

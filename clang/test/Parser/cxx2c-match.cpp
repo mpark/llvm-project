@@ -20,7 +20,28 @@ void test_match_no_rhs(int i) {
   42 match -> void; // expected-error {{expected '{'}}
 }
 
-void test_precedence(int* p) {
+void test_match_test_precedence(int* p) {
+  // unary is tighter than match
+  *p match 0;
+  *p match 0 + 1;
+  // match binds tighter than bin ops.
+  4 + 2 match 0;
+  4 * 2 match 0;
+  true == 2 match 0;
+  4 * (2) match 0;
+  2 match 0 + 1;
+  2 match 0 * 1;
+  2 match 0 == 1;
+  (2) match 0 * 1;
+  // except .* and ->*
+  struct S { int i; } s;
+  s.*&S::i match 0;
+  &s->*&S::i match 0;
+  2 match s .* &S::i;
+  2 match &s ->* &S::i;
+}
+
+void test_match_select_precedence(int* p) {
   // unary is tighter than match
   *p match { _ => 0; };
   *p match { _ => 0; } + 1;
@@ -41,7 +62,9 @@ void test_precedence(int* p) {
   2 match { _ => &s; } ->* &S::i;
 }
 
-void test_structures(int x) {
+void test_match_structures(int x) {
+  x match _;
+  x match ? _;
   x match { _ => 0; };
   x match { _ if true => 0; };
   x match constexpr { _ => 0; };
@@ -62,11 +85,21 @@ void test_structures(int x) {
 }
 
 void test_wildcard_pattern(int x) {
+  x match _;
+  bool b = x match _;
   x match { _ => 0; };
 }
 
+void test_expression_pattern(int x, int y) {
+  x match 0;
+  x match (1 + 2);
+  x match y;
+}
+
 void test_optional_pattern(int* p) {
+  p match ? _;
+  p match ? 0;
   p match { ? _ => 0; };
-  p match { ??_ => 0; };
-  p match { ???_ => 0; };
+  p match { ?? _ => 0; };
+  p match { ??? 1 => 0; };
 }
