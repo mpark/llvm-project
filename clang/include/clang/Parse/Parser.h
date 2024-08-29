@@ -1879,6 +1879,13 @@ private:
 
   ExprResult ParseRHSOfBinaryExpression(ExprResult LHS,
                                         prec::Level MinPrec);
+
+  ExprResult ParseRHSExprOfBinaryExpression(ExprResult &LHS,
+                                            ExprResult *TernaryMiddle,
+                                            bool &RHSIsInitList,
+                                            prec::Level ThisPrec,
+                                            prec::Level &NextTokPrec);
+
   /// Control what ParseCastExpression will parse.
   enum CastParseKind {
     AnyCastExpr = 0,
@@ -3951,7 +3958,7 @@ private:
 
   bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces);
   bool ParseMatchCase(MatchCase& Case);
-  ActionResult<MatchPattern *> ParsePattern();
+  ActionResult<MatchPattern *> ParsePattern(ExprResult *LHS = nullptr);
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through

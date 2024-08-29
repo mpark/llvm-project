@@ -421,6 +421,7 @@ public:
   void VisitEmbedExpr(const EmbedExpr *S);
   void VisitAtomicExpr(const AtomicExpr *AE);
 
+  void VisitMatchTestExpr(const MatchTestExpr *Node);
   void VisitMatchSelectExpr(const MatchSelectExpr *Node);
   void Visit(const MatchPattern *Node);
 };

@@ -2460,6 +2460,10 @@ void ASTStmtReader::VisitSEHTryStmt(SEHTryStmt *S) {
 // Pattern Matching
 //===----------------------------------------------------------------------===//
 
+void ASTStmtReader::VisitMatchTestExpr(MatchTestExpr *E) {
+  VisitExpr(E);
+}
+
 void ASTStmtReader::VisitMatchSelectExpr(MatchSelectExpr *E) {
   VisitExpr(E);
 }

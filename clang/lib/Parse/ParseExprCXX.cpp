@@ -4245,23 +4245,36 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
-ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc) {
-  bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
-  TypeResult TrailingReturnType;
-  if (Tok.is(tok::arrow)) {
-    SourceRange Range;
-    TrailingReturnType =
-        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
-    if (TrailingReturnType.isInvalid())
+ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
+                                       SourceLocation MatchLoc) {
+  if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
+    bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
+    TypeResult TrailingReturnType;
+    if (Tok.is(tok::arrow)) {
+      SourceRange Range;
+      TrailingReturnType =
+          ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
+      if (TrailingReturnType.isInvalid())
+        return ExprError();
+    }
+    SmallVector<MatchCase, 32> Cases;
+    SourceRange Braces;
+    if (ParseMatchBody(Cases, Braces)) {
       return ExprError();
+    }
+    if (LHS.isInvalid()) {
+      return ExprError();
+    }
+    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
+                                        TrailingReturnType.get(), Cases,
+                                        Braces);
+  } else {
+    ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
+    if (LHS.isInvalid() || Pattern.isInvalid()) {
+      return ExprError();
+    }
+    return Actions.ActOnMatchTestExpr(LHS.get(), MatchLoc, Pattern.get());
   }
-  SmallVector<MatchCase, 32> Cases;
-  SourceRange Braces;
-  if (ParseMatchBody(Cases, Braces)) {
-    return ExprError();
-  }
-  return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
-                                      TrailingReturnType.get(), Cases, Braces);
 }
 
 bool Parser::ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces) {
@@ -4307,7 +4320,7 @@ bool Parser::ParseMatchCase(MatchCase& Case) {
   return false;
 }
 
-ActionResult<MatchPattern *> Parser::ParsePattern() {
+ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
   switch (Tok.getKind()) {
     case tok::identifier: {
       StringRef name = Tok.getIdentifierInfo()->getName();
@@ -4321,12 +4334,32 @@ ActionResult<MatchPattern *> Parser::ParsePattern() {
     }
     case tok::question: {
       SourceLocation QuestionLoc = ConsumeToken();
-      ActionResult<MatchPattern *> Pattern = ParsePattern();
+      ActionResult<MatchPattern *> Pattern = ParsePattern(LHS);
       if (Pattern.isInvalid()) {
         return true;
       }
       return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
     }
-    default: return true;
+    default: {
+      ExprResult Expr = [=] {
+        if (!LHS) {
+          return ParseExpression();
+        }
+        bool RHSIsInitList = false;
+        prec::Level NextTokPrec;
+        ExprResult Expr = ParseRHSExprOfBinaryExpression(
+            *LHS, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
+        assert(!RHSIsInitList &&
+               "RHS of a match test expression cannot be an init list.");
+        assert(NextTokPrec < prec::Match &&
+               "The precedence of the operator to the right of the RHS cannot "
+               "be tighter than match");
+        return Expr;
+      }();
+      if (Expr.isInvalid()) {
+        return true;
+      }
+      return Actions.ActOnExpressionPattern(Expr.get());
+    }
   }
 }

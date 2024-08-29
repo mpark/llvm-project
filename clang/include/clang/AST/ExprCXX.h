@@ -5708,6 +5708,46 @@ public:
   }
 };
 
+class MatchTestExpr final : public Expr {
+  Expr *Subject;
+  SourceLocation MatchLoc;
+  MatchPattern *Pattern;
+
+public:
+  explicit MatchTestExpr(const ASTContext &Ctx, Expr *Subject,
+                         SourceLocation MatchLoc, MatchPattern *Pattern)
+      : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
+        Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern) {}
+
+  explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
+
+  const Expr* getSubject() const { return Subject; }
+  Expr* getSubject() { return Subject; }
+
+  const MatchPattern* getPattern() const { return Pattern; }
+  MatchPattern* getPattern() { return Pattern; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY {
+    return Subject->getBeginLoc();
+  }
+
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return Pattern->getEndLoc();
+  }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == MatchTestExprClass;
+  }
+};
+
 struct MatchCase {
   MatchPattern *Pattern;
   Expr *Guard;
