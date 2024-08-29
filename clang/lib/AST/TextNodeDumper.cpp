@@ -3503,6 +3503,8 @@ void TextNodeDumper::VisitConvertVectorExpr(const ConvertVectorExpr *S) {
     printFPOptions(S->getStoredFPFeatures());
 }
 
+void TextNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {}
+
 void TextNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";

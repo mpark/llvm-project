@@ -13,14 +13,19 @@
 #ifndef LLVM_CLANG_AST_PATTERN_H
 #define LLVM_CLANG_AST_PATTERN_H
 
-#include "clang/AST/Stmt.h"
+#include "clang/Basic/SourceLocation.h"
+#include "llvm/Support/ErrorHandling.h"
 
 namespace clang {
+
+class ASTContext;
+class Expr;
 
 class MatchPattern {
 public:
   enum MatchPatternClass {
     WildcardPatternClass,
+    ExpressionPatternClass,
     OptionalPatternClass,
   };
 
@@ -92,10 +97,34 @@ public:
 
   SourceLocation getEndLoc() const { return getBeginLoc(); }
 
-  llvm::iterator_range<MatchPattern **> children() { return {nullptr, nullptr}; }
+  llvm::iterator_range<MatchPattern **> children() {
+    return {nullptr, nullptr};
+  }
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<WildcardPattern *>(this)->children();
+  }
+};
+
+class ExpressionPattern final : public MatchPattern {
+  Expr *SubExpr;
+
+public:
+  explicit ExpressionPattern(Expr *SubExpr);
+
+  explicit ExpressionPattern() {}
+
+  SourceLocation getEndLoc() const;
+
+  const Expr *getExpr() const { return SubExpr; }
+  Expr *getExpr() { return SubExpr; }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {nullptr, nullptr};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<ExpressionPattern *>(this)->children();
   }
 };
 
