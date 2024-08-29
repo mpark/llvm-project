@@ -3241,6 +3241,7 @@ void StmtPrinter::VisitHLSLOutArgExpr(HLSLOutArgExpr *Node) {
   PrintExpr(Node->getArgLValue());
 }
 
+void StmtPrinter::VisitMatchTestExpr(MatchTestExpr *Node) {}
 void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {}
 
 //===----------------------------------------------------------------------===//

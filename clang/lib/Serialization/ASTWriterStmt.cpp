@@ -2661,6 +2661,11 @@ void ASTStmtWriter::VisitOpaqueValueExpr(OpaqueValueExpr *E) {
 // Pattern Matching
 //===----------------------------------------------------------------------===//
 
+void ASTStmtWriter::VisitMatchTestExpr(MatchTestExpr *E) {
+  VisitExpr(E);
+  Code = serialization::EXPR_MATCH_TEST;
+}
+
 void ASTStmtWriter::VisitMatchSelectExpr(MatchSelectExpr *E) {
   VisitExpr(E);
   Code = serialization::EXPR_MATCH_SELECT;
