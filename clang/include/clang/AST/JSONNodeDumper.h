@@ -321,8 +321,9 @@ public:
   void VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *Node);
   void VisitLambdaExpr(const LambdaExpr *LE);
 
+  void VisitMatchTestExpr(const MatchTestExpr *Node);
   void VisitMatchSelectExpr(const MatchSelectExpr *Node);
-  void Visit(const MatchPattern *);
+  void Visit(const MatchPattern *Node);
 
   void VisitObjCEncodeExpr(const ObjCEncodeExpr *OEE);
   void VisitObjCMessageExpr(const ObjCMessageExpr *OME);

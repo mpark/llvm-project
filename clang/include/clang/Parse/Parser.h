@@ -3939,6 +3939,11 @@ private:
   /// Parse a binary expression that starts with \p LHS and has a
   /// precedence of at least \p MinPrec.
   ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec);
+  ExprResult ParseRHSExprOfBinaryExpression(ExprResult &LHS,
+                                            ExprResult *TernaryMiddle,
+                                            bool &RHSIsInitList,
+                                            prec::Level ThisPrec,
+                                            prec::Level &NextTokPrec);
 
   bool isRevertibleTypeTrait(const IdentifierInfo *Id,
                              clang::tok::TokenKind *Kind = nullptr);
@@ -4487,7 +4492,7 @@ private:
 
   bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
   bool ParseMatchCase(MatchCase &Case);
-  ActionResult<MatchPattern *> ParsePattern();
+  ActionResult<MatchPattern *> ParsePattern(ExprResult *LHS = nullptr);
 
   ///@}
 

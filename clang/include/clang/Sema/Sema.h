@@ -11241,6 +11241,8 @@ public:
   ///@{
 
 public:
+  ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
+                                MatchPattern *Pattern);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                                   bool IsConstexpr,
                                   ParsedType TrailingReturnType,
@@ -11248,6 +11250,7 @@ public:
                                   SourceRange Braces);
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
+  ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
 
