@@ -2984,6 +2984,8 @@ void TextNodeDumper::VisitAtomicExpr(const AtomicExpr *AE) {
   OS << ' ' << AE->getOpAsString();
 }
 
+void TextNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {}
+
 void TextNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";

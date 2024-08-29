@@ -256,6 +256,7 @@ void JSONNodeDumper::Visit(const ConceptReference *CR) {
                       [CR, this] { writeSourceRange(CR->getSourceRange()); });
 }
 
+void JSONNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {}
 void JSONNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {}
 void JSONNodeDumper::Visit(const MatchPattern *Node) {}
 
