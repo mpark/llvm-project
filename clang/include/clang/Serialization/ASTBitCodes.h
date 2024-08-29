@@ -1931,6 +1931,7 @@ enum StmtCode {
   EXPR_CONCEPT_SPECIALIZATION,            // ConceptSpecializationExpr
   EXPR_REQUIRES,                          // RequiresExpr
 
+  EXPR_MATCH_TEST,                        // MatchTestExpr
   EXPR_MATCH_SELECT,                      // MatchSelectExpr
 
   // CUDA

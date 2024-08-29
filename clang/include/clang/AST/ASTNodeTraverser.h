@@ -160,7 +160,7 @@ public:
       // Some statements have custom mechanisms for dumping their children.
       if (isa<DeclStmt>(S) || isa<GenericSelectionExpr>(S) ||
           isa<RequiresExpr>(S) || isa<OpenACCWaitConstruct>(S) ||
-          isa<MatchSelectExpr>(S))
+          isa<MatchTestExpr>(S) || isa<MatchSelectExpr>(S))
         return;
 
       if (Traversal == TK_IgnoreUnlessSpelledInSource &&
@@ -976,6 +976,11 @@ public:
     Visit(Node->getExpr());
   }
 
+  void VisitMatchTestExpr(const MatchTestExpr *Node) {
+    Visit(Node->getSubject());
+    VisitMatchPattern(Node->getPattern());
+  }
+
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
     Visit(Node->getSubject());
     for (unsigned I = 0, E = Node->getNumCases(); I < E; ++I) {
@@ -995,6 +1000,10 @@ public:
 
       if (!Node) {
         return;
+      }
+
+      if (Node->getMatchPatternClass() == MatchPattern::ExpressionPatternClass) {
+        Visit(static_cast<const ExpressionPattern*>(Node)->getExpr());
       }
 
       for (const MatchPattern *SubPattern : Node->children())
