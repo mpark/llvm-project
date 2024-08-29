@@ -2734,6 +2734,10 @@ void StmtProfiler::VisitTemplateArgument(const TemplateArgument &Arg) {
   }
 }
 
+void StmtProfiler::VisitMatchTestExpr(const MatchTestExpr *S) {
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
   VisitStmt(S);
 }
