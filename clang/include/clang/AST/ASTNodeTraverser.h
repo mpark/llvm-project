@@ -1006,8 +1006,8 @@ public:
         Visit(static_cast<const ExpressionPattern*>(Node)->getExpr());
       }
 
-      for (const MatchPattern *SubPattern : Node->children())
-        VisitMatchPattern(SubPattern);
+      for (const MatchPattern *Pattern : Node->children())
+        VisitMatchPattern(Pattern);
     });
   }
 
