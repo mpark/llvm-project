@@ -29,6 +29,7 @@ public:
   enum MatchPatternClass {
     WildcardPatternClass,
     ExpressionPatternClass,
+    BindingPatternClass,
     OptionalPatternClass,
     DecompositionPatternClass,
   };
@@ -122,6 +123,28 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<ExpressionPattern *>(this)->children();
+  }
+};
+
+class BindingPattern final : public MatchPattern {
+  BindingDecl *Binding;
+
+public:
+  explicit BindingPattern(BindingDecl *Binding)
+    : MatchPattern(BindingPatternClass), Binding(Binding) {}
+
+  SourceLocation getBeginLoc() const;
+  SourceLocation getEndLoc() const;
+
+  const BindingDecl *getBinding() const { return Binding; }
+  BindingDecl *getBinding() { return Binding; }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {nullptr, nullptr};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<BindingPattern *>(this)->children();
   }
 };
 
