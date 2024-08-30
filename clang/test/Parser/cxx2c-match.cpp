@@ -107,3 +107,13 @@ void test_optional_pattern(int* p) {
   p match { ?? _ => 0; };
   p match { ??? 1 => 0; };
 }
+
+void test_structured_bindings_pattern() {
+  int xs[2] = { 1, 2 };
+  xs match [_, _];
+  xs match [_, 3];
+  xs match [1, 2];
+  int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
+  xs match [[_, _, _], [_, _, _]];
+  xs match [[1, _, _], [4, 5, _]];
+}
