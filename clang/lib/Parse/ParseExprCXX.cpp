@@ -4298,6 +4298,8 @@ bool Parser::ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Bra
 }
 
 bool Parser::ParseMatchCase(MatchCase& Case) {
+  ParseScope MatchCaseScope(this, Scope::DeclScope);
+
   ActionResult<MatchPattern *> Pattern = ParsePattern();
   if (Pattern.isInvalid()) {
     SkipUntil(tok::kw_if, tok::equalgreater, StopAtSemi | StopBeforeMatch);
@@ -4332,15 +4334,16 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
       return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
     }
     case tok::l_square:
-      return ParseDecompositionPattern();
+      return ParseDecompositionPattern(/*BindingOnly=*/false);
     case tok::identifier: {
       IdentifierInfo *II = Tok.getIdentifierInfo();
       if (II == Ident_wildcard) {
         return Actions.ActOnWildcardPattern(ConsumeToken());
+      } else if (II == Ident_let) {
+        SourceLocation LetLoc = ConsumeToken();
+        (void)LetLoc; // TODO: Store it somewhere.
+        return ParseBindingPattern();
       }
-      // else if (name == "let") {
-      //   return ParseBindingPattern();
-      // }
       [[fallthrough]];
     }
     default: {
@@ -4367,7 +4370,21 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
   }
 }
 
-ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
+ActionResult<MatchPattern *> Parser::ParseBindingPattern() {
+  switch (Tok.getKind()) {
+  case tok::identifier: {
+    IdentifierInfo* II = Tok.getIdentifierInfo();
+    return Actions.ActOnBindingPattern(ConsumeToken(), II);
+  }
+  case tok::l_square:
+    return ParseDecompositionPattern(/*BindingOnly=*/true);
+  default:
+    Diag(Tok, diag::err_expected_either) << tok::identifier << tok::l_square;
+    return true;
+  }
+}
+
+ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly) {
   assert(Tok.is(tok::l_square) && "Not a decomposition pattern");
   BalancedDelimiterTracker T(*this, tok::l_square);
   if (T.expectAndConsume())
@@ -4375,7 +4392,8 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
 
   SmallVector<MatchPattern *, 4> Patterns;
   do {
-    ActionResult<MatchPattern *> Pattern = ParsePattern();
+    ActionResult<MatchPattern *> Pattern =
+        BindingOnly ? ParseBindingPattern() : ParsePattern();
     if (Pattern.isInvalid()) {
       T.skipToEnd();
       return true;
