@@ -1972,8 +1972,7 @@ MatchSelectExpr::MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
     : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary), Subject(Subject),
       MatchLoc(MatchLoc), IsConstexpr(IsConstexpr), NumCases(Cases.size()),
       Braces(Braces) {
-  std::uninitialized_copy(Cases.begin(), Cases.end(),
-                          getTrailingObjects<MatchCase>());
+  std::uninitialized_copy(Cases.begin(), Cases.end(), getCases());
 
   // TODO: setDependence(computeDependence(this));
 }
