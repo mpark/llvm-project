@@ -11,6 +11,17 @@ void test_match_is_not_keyword() {
   }
 }
 
+void test_let_is_not_keyword() {
+  int let;
+  (void)let;
+  int foo(int let);
+  {
+    struct let {};
+    let let;
+    (void)let;
+  }
+}
+
 void test_match_no_rhs(int i) {
   42 match; // expected-error {{expected expression}}
             // TODO: improve this error message.
@@ -100,6 +111,23 @@ void test_expression_pattern(int x, int y) {
   x match y;
 }
 
+void test_binding_pattern(int i) {
+  i match { let => 0; }; // expected-error {{expected identifier or '['}}
+  {
+    int let = 42;
+    i match { (let) => 0; };
+  }
+  {
+    constexpr int let[2] = {1, 2};
+    constexpr int idx = 0;
+    i match { (let[idx]) => 0; };
+  }
+  i match { let x => 0; };
+  i match { let [x] => 0; };
+  i match { let [x, y] => 0; };
+  i match { [let x, let y] => 0; };
+}
+
 void test_optional_pattern(int* p) {
   p match ? _;
   p match ? 0;
@@ -108,7 +136,7 @@ void test_optional_pattern(int* p) {
   p match { ??? 1 => 0; };
 }
 
-void test_structured_bindings_pattern() {
+void test_decomposition_pattern() {
   int xs[2] = { 1, 2 };
   xs match [_, _];
   xs match [_, 3];
