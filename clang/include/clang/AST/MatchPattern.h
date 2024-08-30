@@ -14,12 +14,15 @@
 #define LLVM_CLANG_AST_PATTERN_H
 
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/TrailingObjects.h"
 
 namespace clang {
 
 class ASTContext;
 class Expr;
+class BindingDecl;
 
 class MatchPattern {
 public:
@@ -27,6 +30,7 @@ public:
     WildcardPatternClass,
     ExpressionPatternClass,
     OptionalPatternClass,
+    DecompositionPatternClass,
   };
 
 protected:
@@ -41,15 +45,13 @@ protected:
 
 private:
   MatchPatternClass Class;
-  SourceLocation PatternLoc;
 
 public:
   // Only allow allocation of Stmts using the allocator in ASTContext
   // or by doing a placement new.
-  void* operator new(size_t bytes, const ASTContext& C,
-                     unsigned alignment = 8);
+  void *operator new(size_t bytes, const ASTContext &C, unsigned alignment = 8);
 
-  void* operator new(size_t bytes, const ASTContext* C,
+  void *operator new(size_t bytes, const ASTContext *C,
                      unsigned alignment = 8) {
     return operator new(bytes, *C, alignment);
   }
@@ -62,15 +64,10 @@ public:
   void operator delete(void *, void *) noexcept {}
 
 protected:
-  explicit MatchPattern(MatchPatternClass MPC, SourceLocation PatternLoc)
-      : Class(MPC), PatternLoc(PatternLoc) {}
-
-  explicit MatchPattern() {}
+  explicit MatchPattern(MatchPatternClass MPC) : Class(MPC) {}
 
 public:
-  MatchPatternClass getMatchPatternClass() const {
-    return Class; 
-  }
+  MatchPatternClass getMatchPatternClass() const { return Class; }
 
   const char *getMatchPatternClassName() const;
 
@@ -78,7 +75,7 @@ public:
     return {getBeginLoc(), getEndLoc()};
   }
 
-  SourceLocation getBeginLoc() const { return PatternLoc; }
+  SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
 
   llvm::iterator_range<MatchPattern **> children();
@@ -89,13 +86,14 @@ public:
 };
 
 class WildcardPattern final : public MatchPattern {
+  SourceLocation WildcardLoc;
+
 public:
   explicit WildcardPattern(SourceLocation WildcardLoc)
-      : MatchPattern(WildcardPatternClass, WildcardLoc) {}
+      : MatchPattern(WildcardPatternClass), WildcardLoc(WildcardLoc) {}
 
-  explicit WildcardPattern() {}
-
-  SourceLocation getEndLoc() const { return getBeginLoc(); }
+  SourceLocation getBeginLoc() const { return WildcardLoc; }
+  SourceLocation getEndLoc() const { return WildcardLoc; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {nullptr, nullptr};
@@ -112,8 +110,7 @@ class ExpressionPattern final : public MatchPattern {
 public:
   explicit ExpressionPattern(Expr *SubExpr);
 
-  explicit ExpressionPattern() {}
-
+  SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
 
   const Expr *getExpr() const { return SubExpr; }
@@ -129,25 +126,70 @@ public:
 };
 
 class OptionalPattern final : public MatchPattern {
-  MatchPattern *SubPattern;
+  SourceLocation QuestionLoc;
+  MatchPattern *Pattern;
 
 public:
-  explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *SubPattern)
-      : MatchPattern(OptionalPatternClass, QuestionLoc),
-        SubPattern(SubPattern) {}
+  explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
+      : MatchPattern(OptionalPatternClass), QuestionLoc(QuestionLoc),
+        Pattern(Pattern) {}
 
-  explicit OptionalPattern() {}
+  SourceLocation getBeginLoc() const { return QuestionLoc; }
+  SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
 
-  SourceLocation getEndLoc() const { return SubPattern->getEndLoc(); }
-
-  MatchPattern *getSubPattern() { return SubPattern; }
+  MatchPattern *getSubPattern() { return Pattern; }
 
   llvm::iterator_range<MatchPattern **> children() {
-    return {&SubPattern, &SubPattern + 1};
+    return {&Pattern, &Pattern + 1};
   }
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<OptionalPattern *>(this)->children();
+  }
+};
+
+class DecompositionPattern final
+    : public MatchPattern,
+      private llvm::TrailingObjects<DecompositionPattern, MatchPattern *> {
+  friend class TrailingObjects;
+
+  unsigned NumPatterns;
+  SourceRange Squares;
+
+  explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
+                                SourceRange Squares);
+
+  explicit DecompositionPattern(unsigned NumPatterns)
+      : MatchPattern(DecompositionPatternClass), NumPatterns(NumPatterns) {}
+
+  const MatchPattern *const *getPatterns() const {
+    return getTrailingObjects<MatchPattern *>();
+  }
+
+  MatchPattern **getPatterns() { return getTrailingObjects<MatchPattern *>(); }
+
+public:
+
+  unsigned numTrailingObjects(OverloadToken<MatchPattern *>) const { return NumPatterns; }
+
+  static DecompositionPattern *Create(const ASTContext &Ctx,
+                                      ArrayRef<MatchPattern *> Patterns,
+                                      SourceRange Squares);
+
+  static DecompositionPattern *CreateEmpty(const ASTContext &Ctx,
+                                           unsigned NumPatterns);
+
+  unsigned getNumPatterns() const { return NumPatterns; }
+
+  SourceLocation getBeginLoc() const { return Squares.getBegin(); }
+  SourceLocation getEndLoc() const { return Squares.getEnd(); }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {getPatterns(), getPatterns() + NumPatterns};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<DecompositionPattern *>(this)->children();
   }
 };
 
