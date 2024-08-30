@@ -3983,6 +3983,7 @@ bool Parser::ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Bra
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     MatchCase Case;
     if (ParseMatchCase(Case)) {
+      T.skipToEnd();
       return true;
     }
     Result.push_back(Case);
@@ -4026,6 +4027,8 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
       }
       return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
     }
+    case tok::l_square:
+      return ParseDecompositionPattern();
     case tok::identifier: {
       IdentifierInfo *II = Tok.getIdentifierInfo();
       if (II == Ident_wildcard) {
@@ -4039,7 +4042,7 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
     default: {
       ExprResult Expr = [=] {
         if (!LHS) {
-          return ParseExpression();
+          return ParseConstantExpression();
         }
         bool RHSIsInitList = false;
         prec::Level NextTokPrec;
@@ -4058,4 +4061,24 @@ ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
       return Actions.ActOnExpressionPattern(Expr.get());
     }
   }
+}
+
+ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
+  assert(Tok.is(tok::l_square) && "Not a decomposition pattern");
+  BalancedDelimiterTracker T(*this, tok::l_square);
+  if (T.expectAndConsume())
+    return true;
+
+  SmallVector<MatchPattern *, 4> Patterns;
+  do {
+    ActionResult<MatchPattern *> Pattern = ParsePattern();
+    if (Pattern.isInvalid()) {
+      T.skipToEnd();
+      return true;
+    }
+    Patterns.push_back(Pattern.get());
+  } while (TryConsumeToken(tok::comma));
+  T.consumeClose();
+
+  return Actions.ActOnDecompositionPattern(Patterns, T.getRange());
 }
