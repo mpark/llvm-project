@@ -11358,6 +11358,9 @@ public:
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
+                            SourceRange Squares);
 
   ///@}
 
