@@ -985,8 +985,15 @@ public:
         return;
       }
 
-      if (Node->getMatchPatternClass() == MatchPattern::ExpressionPatternClass) {
-        Visit(static_cast<const ExpressionPattern*>(Node)->getExpr());
+      switch (Node->getMatchPatternClass()) {
+      case MatchPattern::ExpressionPatternClass:
+        Visit(static_cast<const ExpressionPattern *>(Node)->getExpr());
+        break;
+      case MatchPattern::BindingPatternClass:
+        Visit(static_cast<const BindingPattern *>(Node)->getBinding());
+        break;
+      default:
+        break;
       }
 
       for (const MatchPattern *Pattern : Node->children())

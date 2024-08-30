@@ -10688,6 +10688,8 @@ public:
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr);
+  ActionResult<MatchPattern *> ActOnBindingPattern(SourceLocation NameLoc,
+                                                   IdentifierInfo *Name);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
