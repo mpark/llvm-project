@@ -1381,9 +1381,13 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
       return TPResult::True;
 
     const Token &Next = NextToken();
-    // In 'foo bar', 'foo' is always a type name outside of Objective-C.
-    if (!getLangOpts().ObjC && Next.is(tok::identifier))
+    // In 'foo bar', 'foo' is always a type name outside of Objective-C
+    // and pattern matching `match` expression.
+    if (!getLangOpts().ObjC && Next.is(tok::identifier) &&
+        (!getLangOpts().PatternMatching ||
+         Next.getIdentifierInfo() != Ident_match)) {
       return TPResult::True;
+    }
 
     // If this identifier was reverted from a token ID, and the next token
     // is a '(', we assume it to be a use of a type trait, so this
