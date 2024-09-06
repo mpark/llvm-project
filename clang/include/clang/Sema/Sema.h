@@ -10731,7 +10731,9 @@ public:
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                            SourceRange Squares);
+                            SourceRange Squares, bool BindingOnly);
+
+  bool CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern);
 
   ///@}
 
