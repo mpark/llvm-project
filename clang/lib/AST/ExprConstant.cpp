@@ -11928,6 +11928,9 @@ public:
   bool VisitConceptSpecializationExpr(const ConceptSpecializationExpr *E);
   bool VisitRequiresExpr(const RequiresExpr *E);
   // FIXME: Missing: array subscript of vector, member of vector
+
+  bool evaluateMatchPattern(const MatchPattern *Pattern);
+  bool VisitMatchTestExpr(const MatchTestExpr *E);
 };
 
 class FixedPointExprEvaluator
@@ -14991,6 +14994,32 @@ bool IntExprEvaluator::VisitConceptSpecializationExpr(
 
 bool IntExprEvaluator::VisitRequiresExpr(const RequiresExpr *E) {
   return Success(E->isSatisfied(), E);
+}
+
+bool IntExprEvaluator::evaluateMatchPattern(const MatchPattern *Pattern) {
+  switch (Pattern->getMatchPatternClass()) {
+  case MatchPattern::WildcardPatternClass:
+    return true;
+  case MatchPattern::ExpressionPatternClass:
+    bool Result;
+    if (!EvaluateAsBooleanCondition(
+            static_cast<const ExpressionPattern *>(Pattern)->getCond(), Result,
+            Info))
+      return false;
+    return Result;
+  case MatchPattern::BindingPatternClass:
+    return false;
+  case MatchPattern::OptionalPatternClass:
+    return false;
+  case MatchPattern::DecompositionPatternClass:
+    return false;
+  }
+  llvm_unreachable("unknown match pattern kind");
+}
+
+bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
+  EvaluateDecl(Info, E->getSubjectVar());
+  return Success(evaluateMatchPattern(E->getPattern()), E);
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
