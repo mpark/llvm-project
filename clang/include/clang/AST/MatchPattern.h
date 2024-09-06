@@ -1,4 +1,4 @@
-//===--- Pattern.h - Classes for representing C++ patterns ----*- C++ -*-===//
+//===- MatchPattern.h - Classes for representing C++ patterns ---*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -106,16 +106,21 @@ public:
 };
 
 class ExpressionPattern final : public MatchPattern {
-  Expr *SubExpr;
+  Expr *E;
+  Expr *Cond;
 
 public:
-  explicit ExpressionPattern(Expr *SubExpr);
+  explicit ExpressionPattern(Expr *E);
 
   SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
 
-  const Expr *getExpr() const { return SubExpr; }
-  Expr *getExpr() { return SubExpr; }
+  const Expr *getExpr() const { return E; }
+  Expr *getExpr() { return E; }
+  const Expr *getCond() const { return Cond; }
+  Expr *getCond() { return Cond; }
+
+  void setCond(Expr *Cond) { this->Cond = Cond; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {nullptr, nullptr};
@@ -131,7 +136,7 @@ class BindingPattern final : public MatchPattern {
 
 public:
   explicit BindingPattern(BindingDecl *Binding)
-    : MatchPattern(BindingPatternClass), Binding(Binding) {}
+      : MatchPattern(BindingPatternClass), Binding(Binding) {}
 
   SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
@@ -178,9 +183,10 @@ class DecompositionPattern final
 
   unsigned NumPatterns;
   SourceRange Squares;
+  bool BindingOnly;
 
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                                SourceRange Squares);
+                                SourceRange Squares, bool BindingOnly);
 
   explicit DecompositionPattern(unsigned NumPatterns)
       : MatchPattern(DecompositionPatternClass), NumPatterns(NumPatterns) {}
@@ -192,12 +198,13 @@ class DecompositionPattern final
   MatchPattern **getPatterns() { return getTrailingObjects<MatchPattern *>(); }
 
 public:
-
-  unsigned numTrailingObjects(OverloadToken<MatchPattern *>) const { return NumPatterns; }
+  unsigned numTrailingObjects(OverloadToken<MatchPattern *>) const {
+    return NumPatterns;
+  }
 
   static DecompositionPattern *Create(const ASTContext &Ctx,
                                       ArrayRef<MatchPattern *> Patterns,
-                                      SourceRange Squares);
+                                      SourceRange Squares, bool BindingOnly);
 
   static DecompositionPattern *CreateEmpty(const ASTContext &Ctx,
                                            unsigned NumPatterns);
@@ -206,6 +213,7 @@ public:
 
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
+  SourceRange getSquares() const { return Squares; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {getPatterns(), getPatterns() + NumPatterns};
