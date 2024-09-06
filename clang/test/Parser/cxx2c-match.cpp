@@ -1,24 +1,46 @@
-// RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-value -verify %s
+// RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
 
 void test_match_is_not_keyword() {
   int match;
-  (void)match;
   int foo(int match);
   {
+    struct foo {};
     struct match {};
-    match match;
-    (void)match;
+    {
+      {
+        match foo;
+        match match;
+      }
+      foo match;
+    }
+    {
+      {
+        match foo{};
+        match match{};
+      }
+      foo match{};
+    }
+    {
+      {
+        match foo = {};
+        match match = {};
+      }
+      foo match = {};
+    }
+  }
+  {
+    using B = bool;
+    bool match = true;
+    !(B)match;
   }
 }
 
 void test_let_is_not_keyword() {
   int let;
-  (void)let;
   int foo(int let);
   {
     struct let {};
     let let;
-    (void)let;
   }
 }
 
@@ -74,12 +96,14 @@ void test_match_precedence(int* p) {
     &s->*&S::i match 0;
     2 match s.*&S::i;
     2 match &s->*&S::i;
+    // unary parenthesized
+    !(p match nullptr);
+    !((p) match nullptr);
   }
   /* MatchSelectExpr */ {
     // unary is tighter than match
     *p match { _ => 0; };
     *p match { _ => 0; } + 1;
-
     // match binds tighter than bin ops.
     4 + 2 match { _ => 0; };
     4 * 2 match { _ => 0; };
@@ -89,13 +113,15 @@ void test_match_precedence(int* p) {
     2 match { _ => 0; } * 1;
     2 match { _ => 0; } == 1;
     (2) match { _ => 0; } * 1;
-
     // except .* and ->*
     struct S { int i; } s;
     s.*&S::i match { _ => 0; };
     &s->*&S::i match { _ => 0; };
     2 match { _ => s; } .* &S::i;
     2 match { _ => &s; } ->* &S::i;
+    // unary parenthesized
+    !(p match { _ => 0; });
+    !((p) match { _ => 0; });
   }
 }
 
