@@ -4402,5 +4402,5 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly)
   } while (TryConsumeToken(tok::comma));
   T.consumeClose();
 
-  return Actions.ActOnDecompositionPattern(Patterns, T.getRange());
+  return Actions.ActOnDecompositionPattern(Patterns, T.getRange(), BindingOnly);
 }

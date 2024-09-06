@@ -960,6 +960,7 @@ public:
   }
 
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
+    Visit(Node->getSubjectVar());
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
   }
