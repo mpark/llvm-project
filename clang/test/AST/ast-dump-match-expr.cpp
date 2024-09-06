@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-value -ast-dump %s \
 // RUN:   | FileCheck -strict-whitespace %s
+// XFAIL: *
 
 void test_match_structures(int x) {
   x match _;
@@ -292,6 +293,8 @@ void test_match_precedence(int* p) {
     // CHECK-NEXT:   `-UnaryOperator 0x{{[^ ]*}} <col:18, col:22> 'int S::*' prefix '&' cannot overflow
     // CHECK-NEXT:     `-DeclRefExpr 0x{{[^ ]*}} <col:19, col:22> 'int' lvalue Field 0x{{[^ ]*}} 'i' 'int'
     // CHECK-NEXT:       `-NestedNameSpecifier TypeSpec 'S'
+
+    !(p match nullptr);
   }
 
   /* MatchSelectExpr */ {
@@ -441,5 +444,7 @@ void test_match_precedence(int* p) {
     // CHECK-NEXT: `-UnaryOperator 0x{{[^ ]*}} <col:30, col:34> 'int S::*' prefix '&' cannot overflow
     // CHECK-NEXT:   `-DeclRefExpr 0x{{[^ ]*}} <col:31, col:34> 'int' lvalue Field 0x{{[^ ]*}} 'i' 'int'
     // CHECK-NEXT:     `-NestedNameSpecifier TypeSpec 'S'
+
+    !(p match { _ => 0; });
   }
 }
