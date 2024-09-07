@@ -11929,7 +11929,7 @@ public:
   bool VisitRequiresExpr(const RequiresExpr *E);
   // FIXME: Missing: array subscript of vector, member of vector
 
-  bool evaluateMatchPattern(const MatchPattern *Pattern);
+  bool evaluateMatchPattern(bool &Result, const MatchPattern *Pattern);
   bool VisitMatchTestExpr(const MatchTestExpr *E);
 };
 
@@ -14996,21 +14996,28 @@ bool IntExprEvaluator::VisitRequiresExpr(const RequiresExpr *E) {
   return Success(E->isSatisfied(), E);
 }
 
-bool IntExprEvaluator::evaluateMatchPattern(const MatchPattern *Pattern) {
+bool IntExprEvaluator::evaluateMatchPattern(bool &Result,
+                                            const MatchPattern *Pattern) {
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
+    Result = true;
     return true;
   case MatchPattern::ExpressionPatternClass:
-    bool Result;
-    if (!EvaluateAsBooleanCondition(
+    return EvaluateAsBooleanCondition(
             static_cast<const ExpressionPattern *>(Pattern)->getCond(), Result,
-            Info))
-      return false;
-    return Result;
+            Info);
   case MatchPattern::BindingPatternClass:
     return false;
-  case MatchPattern::OptionalPatternClass:
-    return false;
+  case MatchPattern::OptionalPatternClass: {
+    const OptionalPattern* P = static_cast<const OptionalPattern *>(Pattern);
+    bool B;
+    if (!EvaluateAsBooleanCondition(P->getCond(), B, Info) ||
+        (B && !evaluateMatchPattern(B, P->getSubPattern()))) {
+      return false;
+    }
+    Result = B;
+    return true;
+  }
   case MatchPattern::DecompositionPatternClass:
     return false;
   }
@@ -15018,8 +15025,9 @@ bool IntExprEvaluator::evaluateMatchPattern(const MatchPattern *Pattern) {
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
-  EvaluateDecl(Info, E->getSubjectVar());
-  return Success(evaluateMatchPattern(E->getPattern()), E);
+  bool Result;
+  return EvaluateDecl(Info, E->getSubjectVar()) &&
+         evaluateMatchPattern(Result, E->getPattern()) && Success(Result, E);
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
