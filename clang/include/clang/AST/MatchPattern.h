@@ -156,6 +156,7 @@ public:
 class OptionalPattern final : public MatchPattern {
   SourceLocation QuestionLoc;
   MatchPattern *Pattern;
+  Expr *Cond;
 
 public:
   explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
@@ -165,7 +166,13 @@ public:
   SourceLocation getBeginLoc() const { return QuestionLoc; }
   SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
 
+  const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
+
+  const Expr *getCond() const { return Cond; }
+  Expr *getCond() { return Cond; }
+
+  void setCond(Expr *Cond) { this->Cond = Cond; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {&Pattern, &Pattern + 1};

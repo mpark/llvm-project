@@ -189,10 +189,18 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     break;
   }
   case MatchPattern::OptionalPatternClass: {
-    return false;
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-    (void)P;
-    break;
+    ExprResult Cond =
+        CheckBooleanCondition(P->getBeginLoc(), Subject);
+    if (Cond.isInvalid()) {
+      return true;
+    }
+    P->setCond(Cond.get());
+    ExprResult Deref = ActOnUnaryOp(getCurScope(), P->getBeginLoc(), tok::TokenKind::star, Subject);
+    if (Deref.isInvalid()) {
+      return true;
+    }
+    return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
   }
   case MatchPattern::DecompositionPatternClass:
     return false;
