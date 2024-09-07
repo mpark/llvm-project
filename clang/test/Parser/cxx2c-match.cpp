@@ -55,7 +55,7 @@ void test_match_no_rhs(int i) {
 
 void test_match_structures(int x) {
   x match _;
-  x match ? _;
+  &x match ? _;
   x match 0;
   x match { _ => 0; };
   x match { _ if true => 0; };
