@@ -3961,8 +3961,10 @@ private:
   // C++ Pattern Matching
   ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc);
 
-  bool ParseMatchBody(SmallVectorImpl<MatchCase> &Result, SourceRange& Braces);
-  bool ParseMatchCase(MatchCase& Case);
+  bool ParseMatchBody(Expr *Subject, SmallVectorImpl<MatchCase> &Result,
+                      SourceRange &Braces);
+  bool ParseMatchCase(Expr *Subject, MatchCase& Case);
+  StmtResult ParseMatchHandler();
   ActionResult<MatchPattern *> ParsePattern(ExprResult *LHS = nullptr);
   ActionResult<MatchPattern *> ParseBindingPattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern(bool BindingOnly);

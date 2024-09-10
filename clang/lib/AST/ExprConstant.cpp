@@ -1922,6 +1922,9 @@ static bool EvaluateFixedPointOrInteger(const Expr *E, APFixedPoint &Result,
 static bool EvaluateFixedPoint(const Expr *E, APFixedPoint &Result,
                                EvalInfo &Info);
 
+static bool EvaluateMatchPattern(const MatchPattern *E, bool &Result,
+                                 EvalInfo &Info);
+
 //===----------------------------------------------------------------------===//
 // Misc utilities
 //===----------------------------------------------------------------------===//
@@ -8532,6 +8535,22 @@ public:
     return StmtVisitorTy::Visit(E->getSelectedExpr());
   }
 
+  bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
+    if (!EvaluateDecl(Info, E->getSubjectVar())) {
+      return false;
+    }
+    bool Result;
+    for (const MatchCase &Case : E->getCases()) {
+      if (!EvaluateMatchPattern(Case.Pattern, Result, Info)) {
+        return false;
+      }
+      if (Result) {
+        return this->Visit(Case.Handler);
+      }
+    }
+    return Error(E);
+  }
+
   /// Visit a value which is evaluated, but whose value is ignored.
   void VisitIgnoredValue(const Expr *E) {
     EvaluateIgnoredValue(Info, E);
@@ -14996,23 +15015,29 @@ bool IntExprEvaluator::VisitRequiresExpr(const RequiresExpr *E) {
   return Success(E->isSatisfied(), E);
 }
 
-bool IntExprEvaluator::evaluateMatchPattern(bool &Result,
-                                            const MatchPattern *Pattern) {
+static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
+                                 EvalInfo &Info) {
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
     Result = true;
     return true;
-  case MatchPattern::ExpressionPatternClass:
-    return EvaluateAsBooleanCondition(
-            static_cast<const ExpressionPattern *>(Pattern)->getCond(), Result,
-            Info);
-  case MatchPattern::BindingPatternClass:
-    return false;
+  case MatchPattern::ExpressionPatternClass: {
+    const auto *P = static_cast<const ExpressionPattern *>(Pattern);
+    return EvaluateAsBooleanCondition(P->getCond(), Result, Info);
+  }
+  case MatchPattern::BindingPatternClass: {
+    const auto *P = static_cast<const BindingPattern *>(Pattern);
+    if (!EvaluateDecl(Info, P->getBinding())) {
+      return false;
+    }
+    Result = true;
+    return true;
+  }
   case MatchPattern::OptionalPatternClass: {
-    const OptionalPattern* P = static_cast<const OptionalPattern *>(Pattern);
+    const auto *P = static_cast<const OptionalPattern *>(Pattern);
     bool B;
     if (!EvaluateAsBooleanCondition(P->getCond(), B, Info) ||
-        (B && !evaluateMatchPattern(B, P->getSubPattern()))) {
+        (B && !EvaluateMatchPattern(P->getSubPattern(), B, Info))) {
       return false;
     }
     Result = B;
@@ -15027,7 +15052,8 @@ bool IntExprEvaluator::evaluateMatchPattern(bool &Result,
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
   return EvaluateDecl(Info, E->getSubjectVar()) &&
-         evaluateMatchPattern(Result, E->getPattern()) && Success(Result, E);
+         EvaluateMatchPattern(E->getPattern(), Result, Info) &&
+         Success(Result, E);
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {

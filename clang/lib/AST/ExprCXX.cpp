@@ -1973,7 +1973,7 @@ MatchSelectExpr::MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
     : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary), Subject(Subject),
       MatchLoc(MatchLoc), IsConstexpr(IsConstexpr), NumCases(Cases.size()),
       Braces(Braces) {
-  std::uninitialized_copy(Cases.begin(), Cases.end(), getCases());
+  std::uninitialized_copy(Cases.begin(), Cases.end(), getCases().begin());
 
   // TODO: setDependence(computeDependence(this));
 }
