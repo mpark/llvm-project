@@ -6019,9 +6019,6 @@ class MatchSelectExpr final
   explicit MatchSelectExpr(unsigned NumCases, EmptyShell Empty)
       : Expr(MatchSelectExprClass, Empty), NumCases(NumCases) {}
 
-  const MatchCase *getCases() const { return getTrailingObjects<MatchCase>(); }
-  MatchCase *getCases() { return getTrailingObjects<MatchCase>(); }
-
 public:
   unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
     return NumCases;
@@ -6039,11 +6036,21 @@ public:
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
 
+  const VarDecl *getSubjectVar() const {
+    const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(getSubject());
+    if (!DRE) {
+      return nullptr;
+    }
+    const VarDecl *VD = cast<VarDecl>(DRE->getDecl());
+    assert(VD->isImplicit() && "holding var for binding decl not implicit");
+    return VD;
+  }
+
+  ArrayRef<MatchCase> getCases() const {
+    return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
+  }
+
   unsigned getNumCases() const { return NumCases; }
-
-  const MatchCase &getCase(unsigned I) const { return getCases()[I]; }
-
-  MatchCase &getCase(unsigned I) { return getCases()[I]; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return Subject->getBeginLoc();
