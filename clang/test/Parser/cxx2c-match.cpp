@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
+// RUN: %clang_cc1 -std=c++23 -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
 
 void test_match_is_not_keyword() {
   int match;
@@ -73,7 +73,7 @@ void test_match_structures(int x) {
   x match constexpr -> int { _ if true => 0; };
   x match constexpr -> auto { _ if true => 0; };
   x match constexpr -> decltype(auto) { _ if true => 0; };
-  x match { ? _ => 0; _ => 1; };
+  &x match { ? _ => 0; _ => 1; };
 }
 
 void test_match_precedence(int* p) {
@@ -147,19 +147,27 @@ void test_binding_pattern(int i) {
     constexpr int let[2] = {1, 2};
     constexpr int idx = 0;
     i match { (let[idx]) => 0; };
+    // i match { (let x) => 0; };
   }
+  i match let x;
+  x; // expected-error {{use of undeclared identifier 'x'}}
   i match { let x => 0; };
+  i match { let x => x; };
   i match { let [x] => 0; };
+  i match { let [x] => x; };
   i match { let [x, y] => 0; };
+  i match { let [x, y] => x + y; };
   i match { [let x, let y] => 0; };
+  i match { [let x, let y] =>  x + y; };
 }
 
 void test_optional_pattern(int* p) {
   p match ? _;
   p match ? 0;
   p match { ? _ => 0; };
-  p match { ?? _ => 0; };
-  p match { ??? 1 => 0; };
+  int **pp = &p;
+  pp match { ?? _ => 0; };
+  &pp match { ??? 1 => 0; };
 }
 
 void test_decomposition_pattern() {
@@ -170,4 +178,26 @@ void test_decomposition_pattern() {
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
   xs match [[_, _, _], [_, _, _]];
   xs match [[1, _, _], [4, 5, _]];
+}
+
+int test_structured_jump_statements(char c) {
+  foo:
+  c match {
+    'a' => break;        // expected-error {{'break' statement not in loop or switch statement}}
+    'b' => continue;     // expected-error {{'continue' statement not in loop statement}}
+    'c' => return;       // expected-error {{non-void function 'test_structured_jump_statements' should return a value}}
+    'd' => return 42;
+    'e' => co_return 42; // expected-error {{std::coroutine_traits type was not found}}
+    'f' => goto foo;     // expected-error {{cannot jump from this goto statement to its label}}
+  };
+
+  while (true) {
+    c match {
+      'a' => break;
+      'b' => continue;
+      'c' => return;     // expected-error {{non-void function 'test_structured_jump_statements' should return a value}}
+      'd' => return 42;
+      'e' => goto foo;   // expected-error {{cannot jump from this goto statement to its label}}
+    };
+  }
 }

@@ -29,3 +29,19 @@ static_assert(![]() -> bool { int x = 0, *p = &x; return &p match ?? 1; }());
 static_assert(![]() -> bool { int** pp = nullptr; return pp match ? _; }());
 static_assert(![]() -> bool { int** pp = nullptr; return pp match ?? _; }());
 static_assert(![]() -> bool { int** pp = nullptr; return pp match ?? 0; }());
+
+static_assert([]() -> bool { return 0 match let _; }());
+static_assert([]() -> bool { return 0 match let x; }());
+static_assert([]() -> bool { int x = 0; return &x match ? let x; }());
+
+constexpr int test(char c) {
+  return c match {
+    'a' => 1;
+    'b' => 2;
+    let x => int(x);
+  };
+}
+
+static_assert(test('a') == 1);
+static_assert(test('b') == 2);
+static_assert(test('c') == 99);
