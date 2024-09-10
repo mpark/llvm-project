@@ -82,34 +82,22 @@ static bool FinishForRangeVarDecl(Sema &SemaRef, VarDecl *Decl, Expr *Init,
   return false;
 }
 
-ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
-                                    MatchPattern *Pattern) {
-  const auto DepthStr = std::to_string(getCurScope()->getDepth());
+ExprResult Sema::ActOnMatchSubject(Expr *Subject) {
   SourceLocation SubjectLoc = Subject->getBeginLoc();
-  VarDecl *SubjectVar =
-      BuildForRangeVarDecl(*this, SubjectLoc, Context.getAutoRRefDeductType(),
-                           std::string("__match") + DepthStr);
+  VarDecl *SubjectVar = BuildForRangeVarDecl(
+      *this, SubjectLoc, Context.getAutoRRefDeductType(), "__match");
   if (FinishForRangeVarDecl(*this, SubjectVar, Subject, SubjectLoc,
                             diag::err_for_range_deduction_failure)) {
     return ExprError();
   }
-  // Claim the type doesn't contain auto: we've already done the checking.
-  DeclGroupPtrTy RangeGroup =
-      BuildDeclaratorGroup(MutableArrayRef<Decl *>((Decl **)&SubjectVar, 1));
-  StmtResult SubjectDecl = ActOnDeclStmt(RangeGroup, SubjectLoc, SubjectLoc);
-  if (SubjectDecl.isInvalid()) {
-    return ExprError();
-  }
-  ExprResult SubjectRef =
-      BuildDeclRefExpr(SubjectVar, SubjectVar->getType().getNonReferenceType(),
-                       VK_LValue, SubjectVar->getLocation());
-  if (SubjectRef.isInvalid()) {
-    return ExprError();
-  }
-  if (CheckCompleteMatchPattern(SubjectRef.get(), Pattern)) {
-    return ExprError();
-  }
-  return new (Context) MatchTestExpr(Context, SubjectRef.get(), MatchLoc, Pattern);
+  return BuildDeclRefExpr(SubjectVar,
+                          SubjectVar->getType().getNonReferenceType(),
+                          VK_LValue, SubjectVar->getLocation());
+}
+
+ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
+                                    MatchPattern *Pattern) {
+  return new (Context) MatchTestExpr(Context, Subject, MatchLoc, Pattern);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
@@ -152,6 +140,7 @@ ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation NameLoc,
                                                        IdentifierInfo *Name) {
   BindingDecl *Binding =
       BindingDecl::Create(Context, CurContext, NameLoc, Name);
+  PushOnScopeChains(Binding, getCurScope());
   return new (Context) BindingPattern(Binding);
 }
 

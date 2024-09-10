@@ -11346,6 +11346,7 @@ public:
   ///@{
 
 public:
+  ExprResult ActOnMatchSubject(Expr *Subject);
   ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                 MatchPattern *Pattern);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
