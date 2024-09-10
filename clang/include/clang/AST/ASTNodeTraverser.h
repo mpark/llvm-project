@@ -967,9 +967,8 @@ public:
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
     Visit(Node->getSubject());
-    for (unsigned I = 0, E = Node->getNumCases(); I < E; ++I) {
-      getNodeDelegate().AddChild([=] {
-        const MatchCase &Case = Node->getCase(I);
+    for (const MatchCase &Case : Node->getCases()) {
+      getNodeDelegate().AddChild([&] {
         VisitMatchPattern(Case.Pattern);
         if (Case.Guard)
           Visit(Case.Guard);
