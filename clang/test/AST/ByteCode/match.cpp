@@ -10,39 +10,39 @@ void test_decltypes() {
   static_assert(__is_same(decltype(&x match ? 0), bool));
 }
 
-static_assert([]() -> bool { return 0 match _; }());
-static_assert([]() -> bool { int x = 0; return x match _; }());
-static_assert([]() -> bool { int* p = nullptr; return p match _; }());
+static_assert([]() { return 0 match _; }());
+static_assert([]() { int x = 0; return x match _; }());
+static_assert([]() { int* p = nullptr; return p match _; }());
 
-static_assert([]() -> bool { return 0 match 0; }());
-static_assert(![]() -> bool { return 0 match 1; }());
-static_assert([]() -> bool { int x = 0; return x match 0; }());
-static_assert(![]() -> bool { int y = 1; return 0 match y; }());
-static_assert([]() -> bool { int x = 0, y = 0; return x match y; }());
-static_assert(![]() -> bool { int x = 0, y = 1; return x match y; }());
+static_assert([]() { return 0 match 0; }());
+static_assert(![]() { return 0 match 1; }());
+static_assert([]() { int x = 0; return x match 0; }());
+static_assert(![]() { int y = 1; return 0 match y; }());
+static_assert([]() { int x = 0, y = 0; return x match y; }());
+static_assert(![]() { int x = 0, y = 1; return x match y; }());
 
-static_assert([]() -> bool { int x = 0; return &x match ? _; }());
-static_assert([]() -> bool { int x = 0; return &x match ? 0; }());
-static_assert(![]() -> bool { int x = 0; return &x match ? 1; }());
-static_assert([]() -> bool { int x = 0, y = 0; return &x match ? y; }());
-static_assert(![]() -> bool { int x = 0, y = 1; return &x match ? y; }());
-static_assert(![]() -> bool { int* p = nullptr; return p match ? _; }());
-static_assert(![]() -> bool { int* p = nullptr; return p match ? 0; }());
+static_assert([]() { int x = 0; return &x match ? _; }());
+static_assert([]() { int x = 0; return &x match ? 0; }());
+static_assert(![]() { int x = 0; return &x match ? 1; }());
+static_assert([]() { int x = 0, y = 0; return &x match ? y; }());
+static_assert(![]() { int x = 0, y = 1; return &x match ? y; }());
+static_assert(![]() { int* p = nullptr; return p match ? _; }());
+static_assert(![]() { int* p = nullptr; return p match ? 0; }());
 
-static_assert([]() -> bool { int x = 0, *p = &x; return &p match ?? _; }());
-static_assert([]() -> bool { int x = 0, *p = &x; return &p match ?? 0; }());
-static_assert(![]() -> bool { int x = 0, *p = &x; return &p match ?? 1; }());
+static_assert([]() { int x = 0, *p = &x; return &p match ?? _; }());
+static_assert([]() { int x = 0, *p = &x; return &p match ?? 0; }());
+static_assert(![]() { int x = 0, *p = &x; return &p match ?? 1; }());
 
-static_assert([]() -> bool { int x = 0, *p = &x; return &p match ? _; }());
-static_assert([]() -> bool { int x = 0, *p = &x; return &p match ?? 0; }());
-static_assert(![]() -> bool { int x = 0, *p = &x; return &p match ?? 1; }());
-static_assert(![]() -> bool { int** pp = nullptr; return pp match ? _; }());
-static_assert(![]() -> bool { int** pp = nullptr; return pp match ?? _; }());
-static_assert(![]() -> bool { int** pp = nullptr; return pp match ?? 0; }());
+static_assert([]() { int x = 0, *p = &x; return &p match ? _; }());
+static_assert([]() { int x = 0, *p = &x; return &p match ?? 0; }());
+static_assert(![]() { int x = 0, *p = &x; return &p match ?? 1; }());
+static_assert(![]() { int** pp = nullptr; return pp match ? _; }());
+static_assert(![]() { int** pp = nullptr; return pp match ?? _; }());
+static_assert(![]() { int** pp = nullptr; return pp match ?? 0; }());
 
-static_assert([]() -> bool { return 0 match let _; }());
-static_assert([]() -> bool { return 0 match let x; }());
-static_assert([]() -> bool { int x = 0; return &x match ? let x; }());
+static_assert([]() { return 0 match let _; }());
+static_assert([]() { return 0 match let x; }());
+static_assert([]() { int x = 0; return &x match ? let x; }());
 
 constexpr int test(char c) {
   return c match {
