@@ -16423,7 +16423,6 @@ public:
   bool VisitRequiresExpr(const RequiresExpr *E);
   // FIXME: Missing: array subscript of vector, member of vector
 
-  bool evaluateMatchPattern(bool &Result, const MatchPattern *Pattern);
   bool VisitMatchTestExpr(const MatchTestExpr *E);
 };
 
@@ -20601,7 +20600,25 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
     return true;
   }
   case MatchPattern::DecompositionPatternClass:
-    return false;
+    const auto *P = static_cast<const DecompositionPattern *>(Pattern);
+    if (!EvaluateDecl(Info, P->getDecomposedDecl(),
+                      /*EvaluateConditionDecl=*/true)) {
+      return false;
+    }
+    bool B = true;
+    for (const MatchPattern *C : P->children()) {
+      if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass) {
+        continue;
+      }
+      if (!EvaluateMatchPattern(C, B, Info)) {
+        return false;
+      }
+      if (!B) {
+        break;
+      }
+    }
+    Result = B;
+    return true;
   }
   llvm_unreachable("unknown match pattern kind");
 }
@@ -22900,6 +22917,8 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXParenListInitExprClass:
   case Expr::HLSLOutArgExprClass:
   case Expr::CXXExpansionSelectExprClass:
+  case Expr::MatchTestExprClass:
+  case Expr::MatchSelectExprClass:
     return ICEDiag(IK_NotICE, E->getBeginLoc());
 
   case Expr::MemberExprClass: {
