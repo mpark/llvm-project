@@ -4114,8 +4114,9 @@ StmtResult Parser::ParseMatchHandler() {
     SemiError = "co_return";
     break;
   default: {
-    ExprResult E =
-        Tok.is(tok::l_brace) ? ParseInitializer() : ParseExpression();
+    ExprResult E = Tok.is(tok::l_brace)
+                       ? ParseInitializer()
+                       : Actions.ActOnStmtExprResult(ParseExpression());
     Result = E.isInvalid() ? StmtError() : StmtResult(E.get());
     break;
   }
