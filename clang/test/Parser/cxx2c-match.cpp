@@ -153,12 +153,15 @@ void test_binding_pattern(int i) {
   x; // expected-error {{use of undeclared identifier 'x'}}
   i match { let x => 0; };
   i match { let x => x; };
-  i match { let [x] => 0; };
-  i match { let [x] => x; };
-  i match { let [x, y] => 0; };
-  i match { let [x, y] => x + y; };
-  i match { [let x, let y] => 0; };
-  i match { [let x, let y] =>  x + y; };
+  i match { let [x] => 0; }; // expected-error {{cannot decompose non-class, non-array type 'int'}}
+  int i1[1] = {0};
+  i1 match { let [x] => 0; };
+  i1 match { let [x] => x; };
+  int i2[2] = {0, 0};
+  i2 match { let [x, y] => 0; };
+  i2 match { let [x, y] => x + y; };
+  i2 match { [let x, let y] => 0; };
+  i2 match { [let x, let y] =>  x + y; };
 }
 
 void test_optional_pattern(int* p) {
@@ -176,8 +179,8 @@ void test_decomposition_pattern() {
   xs match [_, 3];
   xs match [1, 2];
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
-  xs match [[_, _, _], [_, _, _]];
-  xs match [[1, _, _], [4, 5, _]];
+  xss match [[_, _, _], [_, _, _]];
+  xss match [[1, _, _], [4, 5, _]];
 }
 
 int test_structured_jump_statements(char c) {
