@@ -1,5 +1,15 @@
 // RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-value %s
 
+void test_decltypes() {
+  constexpr int x = 0;
+  constexpr int y = 0;
+  static_assert(__is_same(decltype(0 match _), bool));
+  static_assert(__is_same(decltype(x match 0), bool));
+  static_assert(__is_same(decltype(x match y), bool));
+  static_assert(__is_same(decltype(&x match ? _), bool));
+  static_assert(__is_same(decltype(&x match ? 0), bool));
+}
+
 static_assert([]() -> bool { return 0 match _; }());
 static_assert([]() -> bool { int x = 0; return x match _; }());
 static_assert([]() -> bool { int* p = nullptr; return p match _; }());
