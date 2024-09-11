@@ -179,43 +179,55 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-    ExprResult Cond =
-        CheckBooleanCondition(P->getBeginLoc(), Subject);
+    ExprResult Cond = CheckBooleanCondition(P->getBeginLoc(), Subject);
     if (Cond.isInvalid()) {
       return true;
     }
     P->setCond(Cond.get());
-    ExprResult Deref = ActOnUnaryOp(getCurScope(), P->getBeginLoc(), tok::TokenKind::star, Subject);
+    ExprResult Deref = ActOnUnaryOp(getCurScope(), P->getBeginLoc(),
+                                    tok::TokenKind::star, Subject);
     if (Deref.isInvalid()) {
       return true;
     }
     return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
   }
   case MatchPattern::DecompositionPatternClass:
-    return false;
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
-    SmallVector<BindingDecl*, 8> Bindings(P->getNumPatterns());
+    QualType Type = Context.getAutoRRefDeductType();
+    SourceLocation Loc = P->getBeginLoc();
+    TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    SmallVector<BindingDecl*, 8> Bindings;
+    Bindings.reserve(P->getNumPatterns());
+    for (MatchPattern *C : P->children()) {
+      BindingDecl *Binding =
+          C->getMatchPatternClass() == MatchPattern::BindingPatternClass
+              ? static_cast<BindingPattern *>(C)->getBinding()
+              : BindingDecl::Create(Context, CurContext, C->getBeginLoc(),
+                                    nullptr);
+      Bindings.push_back(Binding);
+    }
+    DecompositionDecl *Decomposed = DecompositionDecl::Create(
+        Context, CurContext, Loc, Loc, Type, TInfo, SC_None, Bindings);
+    // TODO: Consider ActOnInitializerError
+    AddInitializerToDecl(Decomposed, Subject, /*DirectInit=*/false);
+    if (Decomposed->isInvalidDecl()) {
+      return true;
+    }
+    P->setDecomposedDecl(Decomposed);
     unsigned I = 0;
     for (MatchPattern *C : P->children()) {
+      BindingDecl *Binding = Bindings[I];
       switch (C->getMatchPatternClass()) {
-      case MatchPattern::WildcardPatternClass:
-        Bindings.push_back(nullptr);
-        break;
       case MatchPattern::BindingPatternClass:
-        Bindings.push_back(static_cast<BindingPattern *>(C)->getBinding());
         break;
-      default: {
-        std::string Name = "__decomp" + std::to_string(I);
-        IdentifierInfo *II = &PP.getIdentifierTable().get(Name);
-        Bindings.push_back(
-            BindingDecl::Create(Context, CurContext, C->getBeginLoc(), II));
-      }
+      default:
+        if (CheckCompleteMatchPattern(Binding->getBinding(), C)) {
+          return true;
+        }
+        break;
       }
       ++I;
     }
-    DecompositionDecl::Create(Context, CurContext, P->getBeginLoc(),
-                              P->getSquares().getBegin(), QualType(), nullptr,
-                              {}, Bindings);
     break;
   }
   return false;
