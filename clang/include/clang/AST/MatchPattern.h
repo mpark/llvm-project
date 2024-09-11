@@ -23,6 +23,7 @@ namespace clang {
 class ASTContext;
 class Expr;
 class BindingDecl;
+class DecompositionDecl;
 
 class MatchPattern {
 public:
@@ -191,6 +192,7 @@ class DecompositionPattern final
   unsigned NumPatterns;
   SourceRange Squares;
   bool BindingOnly;
+  DecompositionDecl *Decomposed;
 
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares, bool BindingOnly);
@@ -217,6 +219,12 @@ public:
                                            unsigned NumPatterns);
 
   unsigned getNumPatterns() const { return NumPatterns; }
+
+  DecompositionDecl *getDecomposedDecl() const { return Decomposed; }
+
+  void setDecomposedDecl(DecompositionDecl *Decomposed) {
+    this->Decomposed = Decomposed;
+  }
 
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
