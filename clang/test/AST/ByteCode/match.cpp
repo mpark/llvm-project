@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -fpattern-matching -Wno-unused-value %s
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value %s
 
 void test_decltypes() {
   constexpr int x = 0;
@@ -102,3 +102,15 @@ static_assert(!fizzbuzz(
   {N, N, N, N, Buzz, Fizz, N, N, Fizz, Buzz, N, Fizz, N, N, FizzBuzz},
   {2, 4, 3, 5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0       }
 ));
+
+constexpr int test_trailing_return_type(int x) {
+  return x match -> int {
+    0 => 0;
+    1 => 3.0;
+    2 => 'c';
+  };
+}
+
+static_assert(test_trailing_return_type(0) == 0);
+static_assert(test_trailing_return_type(1) == 3);
+static_assert(test_trailing_return_type(2) == 99);
