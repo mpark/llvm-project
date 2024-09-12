@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++23 -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
 
 void test_match_is_not_keyword() {
   int match;
@@ -203,4 +203,35 @@ int test_structured_jump_statements(char c) {
       'e' => goto foo;   // expected-error {{cannot jump from this goto statement to its label}}
     };
   }
+}
+
+void test_deduced_return_type(int x) {
+  x match {
+    0 => 0;
+    1 => 0.0;     // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
+    2 => 'c';     // expected-error {{'auto' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
+    3 => "hello"; // expected-error {{'auto' in return type deduced as 'const char *' here but deduced as 'int' in earlier return statement}}
+  };
+
+  x match -> auto {
+    0 => 0;
+    1 => 0.0;     // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
+    2 => 'c';     // expected-error {{'auto' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
+    3 => "hello"; // expected-error {{'auto' in return type deduced as 'const char *' here but deduced as 'int' in earlier return statement}}
+  };
+
+  x match -> decltype(auto) {
+    0 => 0;
+    1 => 0.0;     // expected-error {{'decltype(auto)' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
+    2 => 'c';     // expected-error {{'decltype(auto)' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
+    3 => "hello"; // expected-error {{'decltype(auto)' in return type deduced as 'const char (&)[6]' here but deduced as 'int' in earlier return statement}}
+  };
+}
+
+void test_trailing_return_type(int x) {
+  x match -> int {
+    0 => 0;
+    1 => 0.0;
+    2 => 'c';
+  };
 }
