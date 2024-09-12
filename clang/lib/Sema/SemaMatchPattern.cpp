@@ -14,6 +14,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Sema/Initialization.h"
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/TemplateDeduction.h"
@@ -95,34 +96,45 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject) {
                           VK_LValue, SubjectVar->getLocation());
 }
 
+StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
+                                       ExprResult ER) {
+  if (ER.isInvalid()) {
+    return StmtError();
+  }
+  Expr *E = ER.get();
+  SourceLocation Loc = E->getBeginLoc();
+  if (const AutoType *AT = RetTy->getContainedAutoType()) {
+    QualType Deduced;
+    if (DeduceAutoTypeFromExpr(OrigResultType, Loc, E, Deduced, AT)) {
+      return StmtError();
+    }
+    RetTy = Deduced;
+  }
+  Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
+  auto Entity = InitializedEntity::InitializeStmtExprResult(Loc, RetTy);
+  ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
+  if (ER.isInvalid()) {
+    return StmtError();
+  }
+  E = ER.get();
+  CheckReturnValExpr(E, RetTy, E->getBeginLoc());
+  ER = ActOnFinishFullExpr(E, E->getBeginLoc(),
+                           /*DiscardedValue=*/false);
+  if (ER.isInvalid()) {
+    return StmtError();
+  }
+  return ER.get();
+}
+
 ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                     MatchPattern *Pattern) {
   return new (Context) MatchTestExpr(Context, Subject, MatchLoc, Pattern);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
-                                      bool IsConstexpr,
-                                      ParsedType TrailingReturnType,
+                                      bool IsConstexpr, QualType RetTy,
                                       ArrayRef<MatchCase> Cases,
                                       SourceRange Braces) {
-  TypeSourceInfo *TSI = nullptr;
-  QualType RetTy;
-  if (TrailingReturnType) {
-    RetTy = GetTypeFromParser(TrailingReturnType, &TSI);
-  } else {
-    RetTy = Context.getAutoDeductType();
-    TSI = Context.CreateTypeSourceInfo(RetTy);
-  }
-
-  TypeLoc OrigResultType = TSI->getTypeLoc();
-  for (const MatchCase& Case : Cases) {
-    if (const AutoType *AT = RetTy->getContainedAutoType()) {
-      if (Expr *E = dyn_cast<Expr>(Case.Handler)) {
-        DeduceAutoTypeFromExpr(OrigResultType, E->getBeginLoc(), E, RetTy, AT);
-      }
-    }
-  }
-
   return MatchSelectExpr::Create(Context, Subject, MatchLoc, IsConstexpr, RetTy,
                                  Cases, Braces);
 }
