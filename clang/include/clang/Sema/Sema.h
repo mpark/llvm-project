@@ -10679,12 +10679,13 @@ public:
 
 public:
   ExprResult ActOnMatchSubject(Expr *Subject);
+  StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
+                                   ExprResult ER);
   ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                 MatchPattern *Pattern);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
-                                  bool IsConstexpr,
-                                  ParsedType TrailingReturnType,
-                                  ArrayRef<MatchCase> Patterns,
+                                  bool IsConstexpr, QualType RetTy,
+                                  ArrayRef<MatchCase> Cases,
                                   SourceRange Braces);
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);

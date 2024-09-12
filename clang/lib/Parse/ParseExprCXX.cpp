@@ -4249,25 +4249,30 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
                                        SourceLocation MatchLoc) {
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
     bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
-    TypeResult TrailingReturnType;
+    QualType RetTy;
+    TypeSourceInfo *TSI = nullptr;
     if (Tok.is(tok::arrow)) {
       SourceRange Range;
-      TrailingReturnType =
+      TypeResult TrailingReturnType =
           ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
       if (TrailingReturnType.isInvalid())
         return ExprError();
+      RetTy = Actions.GetTypeFromParser(TrailingReturnType.get(), &TSI);
+    } else {
+      RetTy = Actions.Context.getAutoDeductType();
+      TSI = Actions.Context.CreateTypeSourceInfo(RetTy);
     }
+    TypeLoc OrigResultType = TSI->getTypeLoc();
     SmallVector<MatchCase, 32> Cases;
     SourceRange Braces;
     if (LHS.isInvalid()) {
       return ExprError();
     }
-    if (ParseMatchBody(LHS.get(), Cases, Braces)) {
+    if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces)) {
       return ExprError();
     }
-    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
-                                        TrailingReturnType.get(), Cases,
-                                        Braces);
+    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr, RetTy,
+                                        Cases, Braces);
   } else {
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
     if (LHS.isInvalid() || Pattern.isInvalid() ||
@@ -4278,7 +4283,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
   }
 }
 
-bool Parser::ParseMatchBody(Expr *Subject, SmallVectorImpl<MatchCase> &Result,
+bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
+                            QualType &RetTy, SmallVectorImpl<MatchCase> &Result,
                             SourceRange &Braces) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
@@ -4288,7 +4294,7 @@ bool Parser::ParseMatchBody(Expr *Subject, SmallVectorImpl<MatchCase> &Result,
     return true;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     MatchCase Case;
-    if (ParseMatchCase(Subject, Case)) {
+    if (ParseMatchCase(Subject, OrigResultType, RetTy, Case)) {
       SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
       TryConsumeToken(tok::semi);
       continue;
@@ -4300,7 +4306,8 @@ bool Parser::ParseMatchBody(Expr *Subject, SmallVectorImpl<MatchCase> &Result,
   return false;
 }
 
-bool Parser::ParseMatchCase(Expr *Subject, MatchCase& Case) {
+bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
+                            QualType &RetTy, MatchCase &Case) {
   ParseScope MatchCaseScope(this, Scope::DeclScope);
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();
@@ -4322,12 +4329,55 @@ bool Parser::ParseMatchCase(Expr *Subject, MatchCase& Case) {
       Actions.CheckCompleteMatchPattern(Subject, Pattern.get())) {
     return true;
   }
-  StmtResult Handler = ParseMatchHandler();
+  StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy);
   if (Guard.isInvalid() || Handler.isInvalid()) {
     return true;
   }
   Case = {Pattern.get(), Guard.get(), Handler.get()};
   return false;
+}
+
+StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
+  const char *SemiError = nullptr;
+  StmtResult Result;
+  switch (Tok.getKind()) {
+  default:
+    Result = Actions.ActOnMatchExprHandler(
+        OrigResultType, RetTy,
+        Tok.is(tok::l_brace) ? ParseBraceInitializer() : ParseExpression());
+    if (Result.isInvalid() ||
+        ExpectAndConsumeSemi(diag::err_expected_semi_after_expr)) {
+      return StmtError();
+    }
+    return Result;
+  case tok::semi:
+    return Actions.ActOnNullStmt(ConsumeToken(), Tok.hasLeadingEmptyMacro());
+  case tok::kw_break:
+    Result = ParseBreakStatement();
+    SemiError = "break";
+    break;
+  case tok::kw_continue:
+    Result = ParseContinueStatement();
+    SemiError = "continue";
+    break;
+  case tok::kw_goto: {
+    Diag(Tok, diag::err_goto_into_protected_scope);
+    return StmtError();
+  }
+  case tok::kw_return:
+    Result = ParseReturnStatement();
+    SemiError = "return";
+    break;
+  case tok::kw_co_return:
+    Result = ParseReturnStatement();
+    SemiError = "co_return";
+    break;
+  }
+  if (Result.isInvalid() ||
+      ExpectAndConsumeSemi(diag::err_expected_semi_after_stmt, SemiError)) {
+    return StmtError();
+  }
+  return Result;
 }
 
 ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
@@ -4410,47 +4460,4 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly)
   T.consumeClose();
 
   return Actions.ActOnDecompositionPattern(Patterns, T.getRange(), BindingOnly);
-}
-
-StmtResult Parser::ParseMatchHandler() {
-  const char *SemiError = nullptr;
-  StmtResult Result;
-  switch (Tok.getKind()) {
-  case tok::semi: {
-    bool HasLeadingEmptyMacro = Tok.hasLeadingEmptyMacro();
-    return Actions.ActOnNullStmt(ConsumeToken(), HasLeadingEmptyMacro);
-  }
-  case tok::kw_break:
-    Result = ParseBreakStatement();
-    SemiError = "break";
-    break;
-  case tok::kw_continue:
-    Result = ParseContinueStatement();
-    SemiError = "continue";
-    break;
-  case tok::kw_goto: {
-    Diag(Tok, diag::err_goto_into_protected_scope);
-    return StmtError();
-  }
-  case tok::kw_return:
-    Result = ParseReturnStatement();
-    SemiError = "return";
-    break;
-  case tok::kw_co_return:
-    Result = ParseReturnStatement();
-    SemiError = "co_return";
-    break;
-  default: {
-    ExprResult E = Tok.is(tok::l_brace)
-                       ? ParseInitializer()
-                       : Actions.ActOnStmtExprResult(ParseExpression());
-    Result = E.isInvalid() ? StmtError() : StmtResult(E.get());
-    break;
-  }
-  }
-  if (Result.isInvalid() ||
-      ExpectAndConsumeSemi(diag::err_expected_semi_after_stmt, SemiError)) {
-    return StmtError();
-  }
-  return Result;
 }
