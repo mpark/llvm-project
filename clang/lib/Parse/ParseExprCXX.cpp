@@ -4380,68 +4380,180 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
   return Result;
 }
 
-ActionResult<MatchPattern *> Parser::ParsePattern(ExprResult *LHS) {
+ActionResult<MatchPattern *>
+Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr, TypeCastState State) {
   switch (Tok.getKind()) {
-    case tok::question: {
-      SourceLocation QuestionLoc = ConsumeToken();
-      ActionResult<MatchPattern *> Pattern = ParsePattern(LHS);
-      if (Pattern.isInvalid()) {
-        return true;
-      }
-      return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
+  case tok::l_paren:
+    return ParseParenPattern();
+  case tok::question:
+    return ParseOptionalPattern(LHSOfMatchTestExpr);
+  case tok::l_square:
+    return ParseDecompositionPattern();
+  case tok::identifier: {
+    IdentifierInfo *II = Tok.getIdentifierInfo();
+    if (II == Ident_wildcard) {
+      return ParseWildcardPattern();
+    } else if (II == Ident_let) {
+      return ParseBindingPattern(ConsumeToken());
     }
-    case tok::l_square:
-      return ParseDecompositionPattern(/*BindingOnly=*/false);
-    case tok::identifier: {
-      IdentifierInfo *II = Tok.getIdentifierInfo();
-      if (II == Ident_wildcard) {
-        return Actions.ActOnWildcardPattern(ConsumeToken());
-      } else if (II == Ident_let) {
-        SourceLocation LetLoc = ConsumeToken();
-        (void)LetLoc; // TODO: Store it somewhere.
-        return ParseBindingPattern();
-      }
-      [[fallthrough]];
-    }
-    default: {
-      ExprResult Expr = [=] {
-        if (!LHS) {
-          return ParseConstantExpression();
-        }
-        bool RHSIsInitList = false;
-        prec::Level NextTokPrec;
-        ExprResult Expr = ParseRHSExprOfBinaryExpression(
-            *LHS, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
-        assert(!RHSIsInitList &&
-               "RHS of a match test expression cannot be an init list.");
-        assert(NextTokPrec < prec::Match &&
-               "The precedence of the operator to the right of the RHS cannot "
-               "be tighter than match");
-        return Expr;
-      }();
-      if (Expr.isInvalid()) {
-        return true;
-      }
-      return Actions.ActOnExpressionPattern(Expr.get());
-    }
+    [[fallthrough]];
+  }
+  default:
+    return ParseExpressionPattern(LHSOfMatchTestExpr, State);
   }
 }
 
-ActionResult<MatchPattern *> Parser::ParseBindingPattern() {
+ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
+  return Actions.ActOnWildcardPattern(ConsumeToken());
+}
+
+ActionResult<MatchPattern *>
+Parser::ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, TypeCastState State) {
+  ExprResult Expr = [&] {
+    if (!LHSOfMatchTestExpr) {
+      return ParseAssignmentExpression(State);
+    }
+    bool RHSIsInitList = false;
+    prec::Level NextTokPrec;
+    ExprResult Expr = ParseRHSExprOfBinaryExpression(
+        *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
+    assert(!RHSIsInitList &&
+           "RHS of a match test expression cannot be an init list.");
+    assert(NextTokPrec < prec::Match &&
+           "The precedence of the operator to the right of the RHS cannot "
+           "be tighter than match");
+    return Expr;
+  }();
+  if (Expr.isInvalid()) {
+    return true;
+  }
+  return Actions.ActOnExpressionPattern(Expr.get());
+}
+
+ActionResult<MatchPattern *> Parser::ParseParenPattern() {
+  assert(Tok.is(tok::l_paren) && "Not a parenthesized pattern");
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.expectAndConsume())
+    return true;
+
+  ActionResult<MatchPattern *> Result;
+  switch (Tok.getKind()) {
+  case tok::question:
+    Result = ParseOptionalPattern();
+    break;
+  case tok::l_square:
+    Result = ParseDecompositionPattern();
+    break;
+  case tok::identifier: {
+    IdentifierInfo *II = Tok.getIdentifierInfo();
+    if (II == Ident_wildcard) {
+      Result = ParseWildcardPattern();
+    } else if (II == Ident_let) {
+      Result = ParseBindingPattern(ConsumeToken());
+    }
+    break;
+  }
+  default: break;
+  }
+  if (Result.isUsable()) {
+    if (T.consumeClose()) {
+      return true;
+    }
+    return Actions.ActOnParenPattern(T.getRange(), Result.get());
+  }
+
+  ParenParseOption ExprType = CastExpr;
+  ParsedType CastTy;
+  SourceLocation RParenLoc;
+  bool Fallback = false;
+  ExprResult ER = ParseExpressionWithLeadingParen(
+      ExprType, /*stopIfCastExpr=*/false, /*isTypeCast=*/false, CastTy,
+      RParenLoc, T, Fallback);
+  if (!Fallback) {
+    // In the non-fallback cases, the close paren is already consumed.
+    return Actions.ActOnExpressionPattern(ER.get());
+  }
+
+  InMessageExpressionRAIIObject InMessage(*this, false);
+  Result = ParsePattern(nullptr, MaybeTypeCast);
+  if (Result.isInvalid()) {
+    SkipUntil(tok::r_paren, StopAtSemi);
+    return true;
+  }
+  if (Result.get()->getMatchPatternClass() !=
+      MatchPattern::ExpressionPatternClass) {
+    if (T.consumeClose())
+      return true;
+    return Actions.ActOnParenPattern(T.getRange(), Result.get());
+  }
+  Expr *E = Result.getAs<ExpressionPattern>()->getExpr();
+  if (ExprType >= FoldExpr && isFoldOperator(Tok) &&
+      NextToken().is(tok::ellipsis)) {
+    ExprType = FoldExpr;
+    ExprResult ER = ParseFoldExpression(E, T);
+    if (ER.isInvalid()) {
+      return true;
+    }
+    // Fold expr parsing consumes the close paren.
+    return Actions.ActOnExpressionPattern(ER.get());
+  }
+  ExprType = SimpleExpr;
+
+  if (T.consumeClose()) {
+    return true;
+  }
+  ER = Actions.ActOnParenExpr(T.getOpenLocation(), T.getCloseLocation(), E);
+  if (ER.isInvalid()) {
+    return true;
+  }
+  switch (ExprType) {
+  case SimpleExpr:   break;    // Nothing else to do.
+  case CompoundStmt: break;  // Nothing else to do.
+  case CompoundLiteral:
+    // We parsed '(' type-name ')' '{' ... '}'.  If any suffixes of
+    // postfix-expression exist, parse them now.
+    break;
+  case CastExpr:
+    // We have parsed the cast-expression and no postfix-expr pieces are
+    // following.
+    return Actions.ActOnExpressionPattern(ER.get());
+  case FoldExpr:
+    // We only parsed a fold-expression. There might be postfix-expr pieces
+    // afterwards; parse them now.
+    break;
+  }
+  ER = ParsePostfixExpressionSuffix(ER);
+  ER = ParseRHSOfBinaryExpression(ER, prec::Comma);
+  return Actions.ActOnExpressionPattern(ER.get());
+}
+
+ActionResult<MatchPattern *>
+Parser::ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr) {
+  assert(Tok.is(tok::question) && "Not an optional pattern");
+  SourceLocation QuestionLoc = ConsumeToken();
+  ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
+  if (Pattern.isInvalid()) {
+    return true;
+  }
+  return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
+}
+
+ActionResult<MatchPattern *> Parser::ParseBindingPattern(SourceLocation LetLoc) {
   switch (Tok.getKind()) {
   case tok::identifier: {
     IdentifierInfo* II = Tok.getIdentifierInfo();
-    return Actions.ActOnBindingPattern(ConsumeToken(), II);
+    return Actions.ActOnBindingPattern(LetLoc, ConsumeToken(), II);
   }
   case tok::l_square:
-    return ParseDecompositionPattern(/*BindingOnly=*/true);
+    return ParseDecompositionPattern(&LetLoc);
   default:
     Diag(Tok, diag::err_expected_either) << tok::identifier << tok::l_square;
     return true;
   }
 }
 
-ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly) {
+ActionResult<MatchPattern *>
+Parser::ParseDecompositionPattern(SourceLocation *LetLoc) {
   assert(Tok.is(tok::l_square) && "Not a decomposition pattern");
   BalancedDelimiterTracker T(*this, tok::l_square);
   if (T.expectAndConsume())
@@ -4450,7 +4562,7 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly)
   SmallVector<MatchPattern *, 4> Patterns;
   do {
     ActionResult<MatchPattern *> Pattern =
-        BindingOnly ? ParseBindingPattern() : ParsePattern();
+        LetLoc ? ParseBindingPattern(*LetLoc) : ParsePattern();
     if (Pattern.isInvalid()) {
       T.skipToEnd();
       return true;
@@ -4459,5 +4571,5 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern(bool BindingOnly)
   } while (TryConsumeToken(tok::comma));
   T.consumeClose();
 
-  return Actions.ActOnDecompositionPattern(Patterns, T.getRange(), BindingOnly);
+  return Actions.ActOnDecompositionPattern(Patterns, T.getRange(), LetLoc);
 }
