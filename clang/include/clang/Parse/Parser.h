@@ -1964,11 +1964,15 @@ private:
     CompoundLiteral, // Also allow '(' type-name ')' '{' ... '}'
     CastExpr         // Also allow '(' type-name ')' <anything>
   };
+  ExprResult
+  ParseExpressionWithLeadingParen(ParenParseOption &ExprType,
+                                  bool stopIfCastExpr, bool isTypeCast,
+                                  ParsedType &CastTy, SourceLocation &RParenLoc,
+                                  BalancedDelimiterTracker &T, bool &Fallback);
   ExprResult ParseParenExpression(ParenParseOption &ExprType,
-                                        bool stopIfCastExpr,
-                                        bool isTypeCast,
-                                        ParsedType &CastTy,
-                                        SourceLocation &RParenLoc);
+                                  bool stopIfCastExpr, bool isTypeCast,
+                                  ParsedType &CastTy,
+                                  SourceLocation &RParenLoc);
 
   ExprResult ParseCXXAmbiguousParenExpression(
       ParenParseOption &ExprType, ParsedType &CastTy,
@@ -3966,9 +3970,19 @@ private:
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
-  ActionResult<MatchPattern *> ParsePattern(ExprResult *LHS = nullptr);
-  ActionResult<MatchPattern *> ParseBindingPattern();
-  ActionResult<MatchPattern *> ParseDecompositionPattern(bool BindingOnly);
+
+  ActionResult<MatchPattern *>
+  ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
+               TypeCastState State = NotTypeCast);
+  ActionResult<MatchPattern *> ParseWildcardPattern();
+  ActionResult<MatchPattern *>
+  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, TypeCastState State);
+  ActionResult<MatchPattern *> ParseParenPattern();
+  ActionResult<MatchPattern *>
+  ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
+  ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
+  ActionResult<MatchPattern *>
+  ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);
 
   //===--------------------------------------------------------------------===//
   // Preprocessor code-completion pass-through

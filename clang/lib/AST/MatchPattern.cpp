@@ -31,6 +31,8 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "ExpressionPattern";
   case BindingPatternClass:
     return "BindingPattern";
+  case ParenPatternClass:
+    return "ParenPattern";
   case OptionalPatternClass:
     return "OptionalPattern";
   case DecompositionPatternClass:
@@ -47,6 +49,8 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const ExpressionPattern *>(this)->getBeginLoc();
   case BindingPatternClass:
     return static_cast<const BindingPattern *>(this)->getBeginLoc();
+  case ParenPatternClass:
+    return static_cast<const ParenPattern *>(this)->getBeginLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getBeginLoc();
   case DecompositionPatternClass:
@@ -63,6 +67,8 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const ExpressionPattern *>(this)->getEndLoc();
   case BindingPatternClass:
     return static_cast<const BindingPattern *>(this)->getEndLoc();
+  case ParenPatternClass:
+    return static_cast<const ParenPattern *>(this)->getEndLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getEndLoc();
   case DecompositionPatternClass:
@@ -79,6 +85,8 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<ExpressionPattern *>(this)->children();
   case BindingPatternClass:
     return static_cast<BindingPattern *>(this)->children();
+  case ParenPatternClass:
+    return static_cast<ParenPattern *>(this)->children();
   case OptionalPatternClass:
     return static_cast<OptionalPattern *>(this)->children();
   case DecompositionPatternClass:
@@ -96,10 +104,6 @@ SourceLocation ExpressionPattern::getBeginLoc() const {
 
 SourceLocation ExpressionPattern::getEndLoc() const {
   return E->getEndLoc();
-}
-
-SourceLocation BindingPattern::getBeginLoc() const {
-  return Binding->getBeginLoc();
 }
 
 SourceLocation BindingPattern::getEndLoc() const {
