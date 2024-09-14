@@ -31,6 +31,7 @@ public:
     WildcardPatternClass,
     ExpressionPatternClass,
     BindingPatternClass,
+    ParenPatternClass,
     OptionalPatternClass,
     DecompositionPatternClass,
   };
@@ -133,13 +134,15 @@ public:
 };
 
 class BindingPattern final : public MatchPattern {
+  SourceLocation LetLoc;
   BindingDecl *Binding;
 
 public:
-  explicit BindingPattern(BindingDecl *Binding)
-      : MatchPattern(BindingPatternClass), Binding(Binding) {}
+  explicit BindingPattern(SourceLocation LetLoc, BindingDecl *Binding)
+      : MatchPattern(BindingPatternClass), LetLoc(LetLoc), Binding(Binding) {}
 
-  SourceLocation getBeginLoc() const;
+  SourceLocation getLetLoc() const { return LetLoc; }
+  SourceLocation getBeginLoc() const { return getLetLoc(); }
   SourceLocation getEndLoc() const;
 
   const BindingDecl *getBinding() const { return Binding; }
@@ -151,6 +154,30 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<BindingPattern *>(this)->children();
+  }
+};
+
+class ParenPattern final : public MatchPattern {
+  SourceRange Parens;
+  MatchPattern *Pattern;
+
+public:
+  explicit ParenPattern(SourceRange Parens, MatchPattern *Pattern)
+      : MatchPattern(ParenPatternClass), Parens(Parens), Pattern(Pattern) {}
+
+  SourceLocation getBeginLoc() const { return Parens.getBegin(); }
+  SourceLocation getEndLoc() const { return Parens.getEnd(); }
+  SourceRange getParens() const { return Parens; }
+
+  const MatchPattern *getSubPattern() const { return Pattern; }
+  MatchPattern *getSubPattern() { return Pattern; }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {&Pattern, &Pattern + 1};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<ParenPattern *>(this)->children();
   }
 };
 

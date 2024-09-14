@@ -135,20 +135,45 @@ void test_expression_pattern(int x, int y) {
   x match 0;
   x match (1 + 2);
   x match y;
-}
-
-void test_binding_pattern(int i) {
-  i match { let => 0; }; // expected-error {{expected identifier or '['}}
+  int _ = 0;
+  x match +_;
+  x match -_;
+  x match y + 1;
+  x match _ + 1;
+  x match {
+    y + 1 => 0;
+    _ + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    _ => 0;
+  };
+  x match (int)y;
+  using Int = int;
+  x match (Int)y;
+  x match (Int)(y);
+  x match (((Int)(y)));
+  constexpr auto id = [](auto &&x) -> auto && {
+    return static_cast<decltype(x)>(x);
+  };
   {
     int let = 42;
-    i match { (let) => 0; };
+    x match id(let);
+    x match { id(let) => 0; };
   }
   {
     constexpr int let[2] = {1, 2};
     constexpr int idx = 0;
-    i match { (let[idx]) => 0; };
-    // i match { (let x) => 0; };
+    x match { id(let[idx]) => 0; };
   }
+  x match {
+    y++ => 0;
+    y++ * 2 => 0;
+    (y++) => 0;
+    (y)++ * 2 => 0;
+    _ => 0;
+  };
+}
+
+void test_binding_pattern(int i) {
+  i match { let => 0; }; // expected-error {{expected identifier or '['}}
   i match let x;
   x; // expected-error {{use of undeclared identifier 'x'}}
   i match { let x => 0; };
@@ -164,7 +189,7 @@ void test_binding_pattern(int i) {
   i2 match { [let x, let y] =>  x + y; };
 }
 
-void test_optional_pattern(int* p) {
+void test_optional_pattern(int *p) {
   p match ? _;
   p match ? 0;
   p match { ? _ => 0; };
@@ -181,6 +206,17 @@ void test_decomposition_pattern() {
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
   xss match [[_, _, _], [_, _, _]];
   xss match [[1, _, _], [4, 5, _]];
+}
+
+void test_paren_pattern(int *p, int a, int b) {
+  p match { (let x) => 0; };
+  p match { ? (let x) => 0; };
+  int **pp = &p;
+  pp match { ?(? _) => 0; };
+  pp match { ?(? (let x)) => 0; };
+  p match {
+    ? (a) + b => 0;
+  };
 }
 
 int test_structured_jump_statements(char c) {
