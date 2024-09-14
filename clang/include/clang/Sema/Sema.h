@@ -11349,6 +11349,7 @@ public:
   ExprResult ActOnMatchSubject(Expr *Subject);
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
+
   ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                 MatchPattern *Pattern);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
@@ -11358,8 +11359,11 @@ public:
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr);
-  ActionResult<MatchPattern *> ActOnBindingPattern(SourceLocation NameLoc,
+  ActionResult<MatchPattern *> ActOnBindingPattern(SourceLocation LetLoc,
+                                                   SourceLocation NameLoc,
                                                    IdentifierInfo *Name);
+  ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
+                                                 MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
