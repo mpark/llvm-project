@@ -2776,18 +2776,13 @@ bool Parser::tryParseOpenMPArrayShapingCastPart() {
   return !ErrorFound;
 }
 
-ExprResult
-Parser::ParseParenExpression(ParenParseOption &ExprType, bool StopIfCastExpr,
-                             ParenExprKind ParenBehavior,
-                             TypoCorrectionTypeBehavior CorrectionBehavior,
-                             ParsedType &CastTy, SourceLocation &RParenLoc) {
-  assert(Tok.is(tok::l_paren) && "Not a paren expr!");
+ExprResult Parser::ParseExpressionWithLeadingParen(
+    ParenParseOption &ExprType, bool StopIfCastExpr,
+    ParenExprKind ParenBehavior,
+    TypoCorrectionTypeBehavior CorrectionBehavior, ParsedType &CastTy,
+    SourceLocation &RParenLoc, BalancedDelimiterTracker &T, bool &Fallback) {
   ColonProtectionRAIIObject ColonProtection(*this, false);
-  BalancedDelimiterTracker T(*this, tok::l_paren);
-  if (T.consumeOpen())
-    return ExprError();
   SourceLocation OpenLoc = T.getOpenLocation();
-
   PreferredType.enterParenExpr(Tok.getLocation(), OpenLoc);
 
   ExprResult Result(true);
@@ -3089,20 +3084,8 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool StopIfCastExpr,
     }
     return Result;
   } else {
-    InMessageExpressionRAIIObject InMessage(*this, false);
-
-    Result = ParseExpression(TypoCorrectionTypeBehavior::AllowBoth);
-    if (ExprType >= ParenParseOption::FoldExpr &&
-        isFoldOperator(Tok) && NextToken().is(tok::ellipsis)) {
-      ExprType = ParenParseOption::FoldExpr;
-      return ParseFoldExpression(Result, T);
-    }
-    ExprType = ParenParseOption::SimpleExpr;
-
-    // Don't build a paren expression unless we actually match a ')'.
-    if (!Result.isInvalid() && Tok.is(tok::r_paren))
-      Result =
-          Actions.ActOnParenExpr(OpenLoc, Tok.getLocation(), Result.get());
+    Fallback = true;
+    return ExprEmpty();
   }
 
   // Match the ')'.
@@ -3116,6 +3099,87 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool StopIfCastExpr,
   return Result;
 }
 
+/// ParseParenExpression - This parses the unit that starts with a '(' token,
+/// based on what is allowed by ExprType.  The actual thing parsed is returned
+/// in ExprType. If stopIfCastExpr is true, it will only return the parsed type,
+/// not the parsed cast-expression.
+///
+/// \verbatim
+///       primary-expression: [C99 6.5.1]
+///         '(' expression ')'
+/// [GNU]   '(' compound-statement ')'      (if !ParenExprOnly)
+///       postfix-expression: [C99 6.5.2]
+///         '(' type-name ')' '{' initializer-list '}'
+///         '(' type-name ')' '{' initializer-list ',' '}'
+///       cast-expression: [C99 6.5.4]
+///         '(' type-name ')' cast-expression
+/// [ARC]   bridged-cast-expression
+/// [ARC] bridged-cast-expression:
+///         (__bridge type-name) cast-expression
+///         (__bridge_transfer type-name) cast-expression
+///         (__bridge_retained type-name) cast-expression
+///       fold-expression: [C++1z]
+///         '(' cast-expression fold-operator '...' ')'
+///         '(' '...' fold-operator cast-expression ')'
+///         '(' cast-expression fold-operator '...'
+///                 fold-operator cast-expression ')'
+/// [OPENMP] Array shaping operation
+///       '(' '[' expression ']' { '[' expression ']' } cast-expression
+/// \endverbatim
+ExprResult Parser::ParseParenExpression(ParenParseOption &ExprType,
+                                        bool StopIfCastExpr,
+                                        ParenExprKind ParenBehavior,
+                                        TypoCorrectionTypeBehavior
+                                            CorrectionBehavior,
+                                        ParsedType &CastTy,
+                                        SourceLocation &RParenLoc) {
+  assert(Tok.is(tok::l_paren) && "Not a paren expr!");
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.consumeOpen())
+    return ExprError();
+
+  bool Fallback = false;
+  ExprResult Result = ParseExpressionWithLeadingParen(
+      ExprType, StopIfCastExpr, ParenBehavior, CorrectionBehavior, CastTy,
+      RParenLoc, T, Fallback);
+  if (!Fallback) {
+    return Result;
+  }
+
+  InMessageExpressionRAIIObject InMessage(*this, false);
+  Result = ParseExpression(TypoCorrectionTypeBehavior::AllowBoth);
+
+  if (ExprType >= ParenParseOption::FoldExpr && isFoldOperator(Tok) &&
+      NextToken().is(tok::ellipsis)) {
+    ExprType = ParenParseOption::FoldExpr;
+    return ParseFoldExpression(Result, T);
+  }
+  ExprType = ParenParseOption::SimpleExpr;
+
+  // Don't build a paren expression unless we actually match a ')'.
+  if (!Result.isInvalid() && Tok.is(tok::r_paren))
+    Result = Actions.ActOnParenExpr(T.getOpenLocation(), Tok.getLocation(),
+                                    Result.get());
+
+  // Match the ')'.
+  if (Result.isInvalid()) {
+    SkipUntil(tok::r_paren, StopAtSemi);
+    return ExprError();
+  }
+
+  T.consumeClose();
+  RParenLoc = T.getCloseLocation();
+  return Result;
+}
+
+/// ParseCompoundLiteralExpression - We have parsed the parenthesized type-name
+/// and we are at the left brace.
+///
+/// \verbatim
+///       postfix-expression: [C99 6.5.2]
+///         '(' type-name ')' '{' initializer-list '}'
+///         '(' type-name ')' '{' initializer-list ',' '}'
+/// \endverbatim
 ExprResult
 Parser::ParseCompoundLiteralExpression(ParsedType Ty,
                                        SourceLocation LParenLoc,

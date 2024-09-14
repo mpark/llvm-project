@@ -4340,6 +4340,11 @@ private:
   /// [OPENMP] Array shaping operation
   ///       '(' '[' expression ']' { '[' expression ']' } cast-expression
   /// \endverbatim
+  ExprResult ParseExpressionWithLeadingParen(
+      ParenParseOption &ExprType, bool StopIfCastExpr,
+      ParenExprKind ParenBehavior,
+      TypoCorrectionTypeBehavior CorrectionBehavior, ParsedType &CastTy,
+      SourceLocation &RParenLoc, BalancedDelimiterTracker &T, bool &Fallback);
   ExprResult ParseParenExpression(ParenParseOption &ExprType,
                                   bool StopIfCastExpr,
                                   ParenExprKind ParenBehavior,
@@ -4499,9 +4504,20 @@ private:
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
-  ActionResult<MatchPattern *> ParsePattern(ExprResult *LHS = nullptr);
-  ActionResult<MatchPattern *> ParseBindingPattern();
-  ActionResult<MatchPattern *> ParseDecompositionPattern(bool BindingOnly);
+  ActionResult<MatchPattern *>
+  ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
+               TypoCorrectionTypeBehavior CorrectionBehavior =
+                   TypoCorrectionTypeBehavior::AllowNonTypes);
+  ActionResult<MatchPattern *> ParseWildcardPattern();
+  ActionResult<MatchPattern *>
+  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr,
+                         TypoCorrectionTypeBehavior CorrectionBehavior);
+  ActionResult<MatchPattern *> ParseParenPattern();
+  ActionResult<MatchPattern *>
+  ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
+  ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
+  ActionResult<MatchPattern *>
+  ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);
 
   ///@}
 
