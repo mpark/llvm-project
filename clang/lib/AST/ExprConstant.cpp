@@ -15163,6 +15163,15 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
     Result = true;
     return true;
   }
+  case MatchPattern::ParenPatternClass: {
+    const auto *P = static_cast<const ParenPattern *>(Pattern);
+    bool B;
+    if (!EvaluateMatchPattern(P->getSubPattern(), B, Info)) {
+      return false;
+    }
+    Result = B;
+    return true;
+  }
   case MatchPattern::OptionalPatternClass: {
     const auto *P = static_cast<const OptionalPattern *>(Pattern);
     bool B;
