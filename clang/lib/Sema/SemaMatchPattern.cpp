@@ -148,12 +148,21 @@ ActionResult<MatchPattern *> Sema::ActOnExpressionPattern(Expr *E) {
   return new (Context) ExpressionPattern(E);
 }
 
-ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation NameLoc,
+ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation LetLoc,
+                                                       SourceLocation NameLoc,
                                                        IdentifierInfo *Name) {
   BindingDecl *Binding =
       BindingDecl::Create(Context, CurContext, NameLoc, Name);
   PushOnScopeChains(Binding, getCurScope());
-  return new (Context) BindingPattern(Binding);
+  return new (Context) BindingPattern(LetLoc, Binding);
+}
+
+ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
+                                                     MatchPattern *SubPattern) {
+  assert(SubPattern->getMatchPatternClass() !=
+             MatchPattern::ExpressionPatternClass &&
+         "Parenthesized pattern shouldn't contain an expression.");
+  return new (Context) ParenPattern(Parens, SubPattern);
 }
 
 ActionResult<MatchPattern *>
@@ -188,6 +197,10 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     BindingDecl *BD = P->getBinding();
     BD->setBinding(Subject->getType(), Subject);
     break;
+  }
+  case MatchPattern::ParenPatternClass: {
+    ParenPattern *P = static_cast<ParenPattern *>(Pattern);
+    return CheckCompleteMatchPattern(Subject, P->getSubPattern());
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
