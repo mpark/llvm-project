@@ -4072,8 +4072,17 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     }
     [[fallthrough]];
   }
-  default:
+  default: {
+    {
+      ColonProtectionRAIIObject ColonRAII(*this);
+      ActionResult<MatchPattern *> Pattern =
+          TryParseAlternativePattern(LHSOfMatchTestExpr);
+      if (Pattern.isInvalid() || Pattern.isUsable()) {
+        return Pattern;
+      }
+    }
     return ParseExpressionPattern(LHSOfMatchTestExpr, CorrectionBehavior);
+  }
   }
 }
 
@@ -4214,6 +4223,25 @@ Parser::ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr) {
     return true;
   }
   return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
+}
+
+ActionResult<MatchPattern *>
+Parser::TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr) {
+  if (!isCXXTypeId(TentativeCXXTypeIdContext::InAlternativePattern)) {
+    return false;
+  }
+  SourceRange TypeRange;
+  TypeResult Ty = ParseTypeName(&TypeRange);
+
+  // Match the ':'.
+  assert(Tok.is(tok::colon) && "Not an alternative pattern");
+  SourceLocation ColonLoc = ConsumeToken();
+  ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
+  if (Ty.isInvalid() || Pattern.isInvalid()) {
+    return true;
+  }
+  return Actions.ActOnAlternativePattern(TypeRange, Ty.get(), ColonLoc,
+                                         Pattern.get());
 }
 
 ActionResult<MatchPattern *> Parser::ParseBindingPattern(SourceLocation LetLoc) {

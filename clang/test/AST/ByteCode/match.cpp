@@ -147,3 +147,58 @@ constexpr int test_trailing_return_type(int x) {
 static_assert(test_trailing_return_type(0) == 0);
 static_assert(test_trailing_return_type(1) == 3);
 static_assert(test_trailing_return_type(2) == 99);
+
+struct Base { virtual ~Base() = default; };
+
+struct DerivedA : Base {
+  int x;
+  constexpr DerivedA(int x) : x(x) {}
+};
+
+struct DerivedB : Base {
+  char c;
+  constexpr DerivedB(char c) : c(c) {}
+};
+
+constexpr int test_alternative_pattern_const(const Base &base) {
+  return base match {
+    DerivedA: let a => ({
+      static_assert(__is_same(decltype(a), const DerivedA));
+      static_assert(__is_same(decltype((a)), const DerivedA &));
+      static_assert(__is_same(decltype(a.x), int));
+      static_assert(__is_same(decltype((a.x)), const int&));
+      a.x * 2;
+    });
+    const DerivedB: let b => ({
+      static_assert(__is_same(decltype(b), const DerivedB));
+      static_assert(__is_same(decltype((b)), const DerivedB &));
+      static_assert(__is_same(decltype(b.c), char));
+      static_assert(__is_same(decltype((b.c)), const char&));
+      (int)b.c;
+    });
+    _ => 0;
+  };
+}
+
+static_assert(test_alternative_pattern_const(DerivedA{101}) == 202);
+static_assert(test_alternative_pattern_const(DerivedB{'a'}) == 97);
+
+constexpr int test_alternative_pattern_non_const(DerivedA derived) {
+  Base &base = derived;
+  return base match {
+    DerivedA: [let x] => ({
+      static_assert(__is_same(decltype(x), int));
+      static_assert(__is_same(decltype((x)), int&));
+      x * 2;
+    });
+    DerivedB: [let c] => ({
+      static_assert(__is_same(decltype(c), char));
+      static_assert(__is_same(decltype((c)), char&));
+      (int)c;
+    });
+    _ => 0;
+  };
+}
+
+static_assert(test_alternative_pattern_non_const(DerivedA{101}) == 202);
+static_assert(test_alternative_pattern_non_const(DerivedA{202}) == 404);
