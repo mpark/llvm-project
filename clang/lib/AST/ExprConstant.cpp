@@ -15198,6 +15198,17 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
     Result = B;
     return true;
   }
+  case MatchPattern::AlternativePatternClass: {
+    const auto *P = static_cast<const AlternativePattern *>(Pattern);
+    bool B;
+    if (!EvaluateDecl(Info, P->getVar()) ||
+        !EvaluateAsBooleanCondition(P->getCond(), B, Info) ||
+        (B && !EvaluateMatchPattern(P->getSubPattern(), B, Info))) {
+      return false;
+    }
+    Result = B;
+    return true;
+  }
   case MatchPattern::DecompositionPatternClass:
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);
     if (!EvaluateDecl(Info, P->getDecomposedDecl())) {
