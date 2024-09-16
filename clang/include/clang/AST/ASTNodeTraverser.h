@@ -1039,7 +1039,6 @@ public:
   }
 
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
-    Visit(Node->getSubjectVar());
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
   }
@@ -1059,11 +1058,9 @@ public:
   void VisitMatchPattern(const MatchPattern* Node) {
     getNodeDelegate().AddChild([=] {
       getNodeDelegate().Visit(Node);
-
       if (!Node) {
         return;
       }
-
       switch (Node->getMatchPatternClass()) {
       case MatchPattern::ExpressionPatternClass:
         Visit(static_cast<const ExpressionPattern *>(Node)->getExpr());
@@ -1079,7 +1076,6 @@ public:
       default:
         break;
       }
-
       for (const MatchPattern *Pattern : Node->children())
         VisitMatchPattern(Pattern);
     });
