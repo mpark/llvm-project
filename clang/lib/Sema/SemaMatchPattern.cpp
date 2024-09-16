@@ -22,78 +22,16 @@
 using namespace clang;
 using namespace sema;
 
-// NOTE: BuildForRangeVarDecl and FinishForRangeVarDecl are copied from
-//       SemaStmt.cpp for now for prototyping purposes.
-
-/// Build a variable declaration for a for-range statement.
-static VarDecl *BuildForRangeVarDecl(Sema &SemaRef, SourceLocation Loc,
-                                     QualType Type, StringRef Name) {
+static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
+                             TypeSourceInfo *TSI, Expr *Init) {
   DeclContext *DC = SemaRef.CurContext;
-  IdentifierInfo *II = &SemaRef.PP.getIdentifierTable().get(Name);
-  TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
-  VarDecl *Decl = VarDecl::Create(SemaRef.Context, DC, Loc, Loc, II, Type,
-                                  TInfo, SC_None);
+  VarDecl *Decl = VarDecl::Create(SemaRef.Context, DC, Loc, {}, /*Id=*/nullptr,
+                                  Type, TSI, SC_None);
   Decl->setImplicit();
-  return Decl;
-}
-
-/// Finish building a variable declaration for a for-range statement.
-/// \return true if an error occurs.
-static bool FinishForRangeVarDecl(Sema &SemaRef, VarDecl *Decl, Expr *Init,
-                                  SourceLocation Loc, int DiagID) {
-  if (Decl->getType()->isUndeducedType()) {
-    ExprResult Res = SemaRef.CorrectDelayedTyposInExpr(Init);
-    if (!Res.isUsable()) {
-      Decl->setInvalidDecl();
-      return true;
-    }
-    Init = Res.get();
-  }
-
-  // Deduce the type for the iterator variable now rather than leaving it to
-  // AddInitializerToDecl, so we can produce a more suitable diagnostic.
-  QualType InitType;
-  if (!isa<InitListExpr>(Init) && Init->getType()->isVoidType()) {
-    SemaRef.Diag(Loc, DiagID) << Init->getType();
-  } else {
-    TemplateDeductionInfo Info(Init->getExprLoc());
-    TemplateDeductionResult Result = SemaRef.DeduceAutoType(
-        Decl->getTypeSourceInfo()->getTypeLoc(), Init, InitType, Info);
-    if (Result != TemplateDeductionResult::Success &&
-        Result != TemplateDeductionResult::AlreadyDiagnosed)
-      SemaRef.Diag(Loc, DiagID) << Init->getType();
-  }
-
-  if (InitType.isNull()) {
-    Decl->setInvalidDecl();
-    return true;
-  }
-  Decl->setType(InitType);
-
-  // In ARC, infer lifetime.
-  // FIXME: ARC may want to turn this into 'const __unsafe_unretained' if
-  // we're doing the equivalent of fast iteration.
-  if (SemaRef.getLangOpts().ObjCAutoRefCount &&
-      SemaRef.ObjC().inferObjCARCLifetime(Decl))
-    Decl->setInvalidDecl();
-
+  // TODO: Consider ActOnInitializerError
   SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false);
   SemaRef.FinalizeDeclaration(Decl);
-  SemaRef.CurContext->addDecl(Decl);
-  return false;
-}
-
-ExprResult Sema::ActOnMatchSubject(Expr *Subject) {
-  SourceLocation SubjectLoc = Subject->getBeginLoc();
-  VarDecl *SubjectVar = BuildForRangeVarDecl(
-      *this, SubjectLoc, Context.getAutoRRefDeductType(), "__match");
-  if (FinishForRangeVarDecl(*this, SubjectVar, Subject, SubjectLoc,
-                            diag::err_for_range_deduction_failure)) {
-    return ExprError();
-  }
-  return BuildDeclRefExpr(SubjectVar,
-                          SubjectVar->getType().getNonReferenceType(),
-                          VK_LValue, SubjectVar->getLocation());
+  return Decl;
 }
 
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
@@ -117,9 +55,8 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
     return StmtError();
   }
   E = ER.get();
-  CheckReturnValExpr(E, RetTy, E->getBeginLoc());
-  ER = ActOnFinishFullExpr(E, E->getBeginLoc(),
-                           /*DiscardedValue=*/false);
+  CheckReturnValExpr(E, RetTy, Loc);
+  ER = ActOnFinishFullExpr(E, Loc, /*DiscardedValue=*/false);
   if (ER.isInvalid()) {
     return StmtError();
   }
@@ -203,8 +140,22 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::BindingPatternClass: {
     BindingPattern *P = static_cast<BindingPattern *>(Pattern);
+    QualType Type = Subject->getType();
+    if (!Subject->refersToBitField()) {
+      SourceLocation Loc = P->getBeginLoc();
+      QualType Deduced = Context.getAutoRRefDeductType();
+      TypeSourceInfo *TSI =
+          SemaRef.Context.getTrivialTypeSourceInfo(Deduced, Loc);
+      VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, TSI, Subject);
+      if (HoldingVar->isInvalidDecl()) {
+        return true;
+      }
+      Subject = BuildDeclRefExpr(HoldingVar,
+                                 HoldingVar->getType().getNonReferenceType(),
+                                 VK_LValue, HoldingVar->getLocation());
+    }
     BindingDecl *BD = P->getBinding();
-    BD->setBinding(Subject->getType(), Subject);
+    BD->setBinding(Type, Subject);
     break;
   }
   case MatchPattern::ParenPatternClass: {
@@ -213,13 +164,24 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-    ExprResult Cond = CheckBooleanCondition(P->getBeginLoc(), Subject);
+    SourceLocation Loc = P->getBeginLoc();
+    QualType Type = Context.getAutoRRefDeductType();
+    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Subject);
+    if (CondVar->isInvalidDecl()) {
+      return true;
+    }
+    P->setCondVar(CondVar);
+    DeclRefExpr *DRE =
+        BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
+                         VK_LValue, CondVar->getLocation());
+    ExprResult Cond = CheckBooleanCondition(Loc, DRE);
     if (Cond.isInvalid()) {
       return true;
     }
     P->setCond(Cond.get());
-    ExprResult Deref = ActOnUnaryOp(getCurScope(), P->getBeginLoc(),
-                                    tok::TokenKind::star, Subject);
+    ExprResult Deref =
+        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::star, DRE);
     if (Deref.isInvalid()) {
       return true;
     }
@@ -229,7 +191,8 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     SourceLocation Loc = P->getBeginLoc();
     QualType Type = P->getTypeSourceInfo()->getType();
-    Type = Context.getPointerType(Subject->getType().isConstQualified() ? Type.withConst() : Type);
+    Type = Context.getPointerType(
+        Subject->getType().isConstQualified() ? Type.withConst() : Type);
     TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
     ExprResult AddrOf =
         ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::amp, Subject);
@@ -241,15 +204,11 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     if (Cast.isInvalid()) {
       return true;
     }
-    VarDecl *CondVar =
-        VarDecl::Create(Context, CurContext, Loc, Loc, /*Id=*/nullptr,
-                        TSI->getType(), TSI, SC_None);
-    // TODO: Consider ActOnInitializerError
-    AddInitializerToDecl(CondVar, Cast.get(), /*DirectInit=*/false);
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Cast.get());
     if (CondVar->isInvalidDecl()) {
       return true;
     }
-    P->setVar(CondVar);
+    P->setCondVar(CondVar);
     DeclRefExpr *DRE =
         BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
                          VK_LValue, CondVar->getLocation());
@@ -267,38 +226,39 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::DecompositionPatternClass:
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
-    QualType Type = Context.getAutoRRefDeductType();
     SourceLocation Loc = P->getBeginLoc();
+    QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
     SmallVector<BindingDecl*, 8> Bindings;
     Bindings.reserve(P->getNumPatterns());
     for (MatchPattern *C : P->children()) {
-      BindingDecl *Binding =
-          C->getMatchPatternClass() == MatchPattern::BindingPatternClass
-              ? static_cast<BindingPattern *>(C)->getBinding()
-              : BindingDecl::Create(Context, CurContext, C->getBeginLoc(),
-                                    nullptr);
+      BindingDecl *Binding = [&] {
+        if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass) {
+          return static_cast<BindingPattern *>(C)->getBinding();
+        } else {
+          BindingDecl *Binding = BindingDecl::Create(Context, CurContext,
+                                                     C->getBeginLoc(), nullptr);
+          Binding->setImplicit();
+          return Binding;
+        }
+      }();
       Bindings.push_back(Binding);
     }
     DecompositionDecl *Decomposed = DecompositionDecl::Create(
         Context, CurContext, Loc, Loc, Type, TInfo, SC_None, Bindings);
+    P->setDecomposedDecl(Decomposed);
+    Decomposed->setImplicit();
     // TODO: Consider ActOnInitializerError
     AddInitializerToDecl(Decomposed, Subject, /*DirectInit=*/false);
     if (Decomposed->isInvalidDecl()) {
       return true;
     }
-    P->setDecomposedDecl(Decomposed);
     unsigned I = 0;
     for (MatchPattern *C : P->children()) {
       BindingDecl *Binding = Bindings[I];
-      switch (C->getMatchPatternClass()) {
-      case MatchPattern::BindingPatternClass:
-        break;
-      default:
-        if (CheckCompleteMatchPattern(Binding->getBinding(), C)) {
-          return true;
-        }
-        break;
+      if (C->getMatchPatternClass() != MatchPattern::BindingPatternClass &&
+          CheckCompleteMatchPattern(Binding->getBinding(), C)) {
+        return true;
       }
       ++I;
     }

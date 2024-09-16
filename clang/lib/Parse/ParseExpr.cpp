@@ -493,9 +493,6 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // Special case handling for match expressions.
     if (NextTokPrec == prec::Match) {
       ParseScope MatchScope(this, Scope::DeclScope);
-      if (LHS.isUsable()) {
-        LHS = Actions.ActOnMatchSubject(LHS.get());
-      }
       LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation());
       NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
                                        getLangOpts().CPlusPlus11,

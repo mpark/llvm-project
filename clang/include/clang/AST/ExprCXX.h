@@ -5724,16 +5724,6 @@ public:
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
 
-  const VarDecl *getSubjectVar() const {
-    const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(getSubject());
-    if (!DRE) {
-      return nullptr;
-    }
-    const VarDecl *VD = cast<VarDecl>(DRE->getDecl());
-    assert(VD->isImplicit() && "holding var for binding decl not implicit");
-    return VD;
-  }
-
   const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
 
@@ -5798,16 +5788,6 @@ public:
 
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
-
-  const VarDecl *getSubjectVar() const {
-    const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(getSubject());
-    if (!DRE) {
-      return nullptr;
-    }
-    const VarDecl *VD = cast<VarDecl>(DRE->getDecl());
-    assert(VD->isImplicit() && "holding var for binding decl not implicit");
-    return VD;
-  }
 
   ArrayRef<MatchCase> getCases() const {
     return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
