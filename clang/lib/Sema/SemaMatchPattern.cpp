@@ -172,6 +172,15 @@ Sema::ActOnOptionalPattern(SourceLocation QuestionLoc,
 }
 
 ActionResult<MatchPattern *>
+Sema::ActOnAlternativePattern(SourceRange TypeRange, ParsedType Ty,
+                              SourceLocation ColonLoc,
+                              MatchPattern *SubPattern) {
+  TypeSourceInfo *TSI = nullptr;
+  GetTypeFromParser(Ty, &TSI);
+  return new (Context) AlternativePattern(TypeRange, TSI, ColonLoc, SubPattern);
+}
+
+ActionResult<MatchPattern *>
 Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares, bool BindingOnly) {
   return DecompositionPattern::Create(Context, Patterns, Squares, BindingOnly);
@@ -211,6 +220,46 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     P->setCond(Cond.get());
     ExprResult Deref = ActOnUnaryOp(getCurScope(), P->getBeginLoc(),
                                     tok::TokenKind::star, Subject);
+    if (Deref.isInvalid()) {
+      return true;
+    }
+    return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
+  }
+  case MatchPattern::AlternativePatternClass: {
+    AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
+    SourceLocation Loc = P->getBeginLoc();
+    QualType Type = P->getTypeSourceInfo()->getType();
+    Type = Context.getPointerType(Subject->getType().isConstQualified() ? Type.withConst() : Type);
+    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    ExprResult AddrOf =
+        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::amp, Subject);
+    if (AddrOf.isInvalid()) {
+      return true;
+    }
+    ExprResult Cast =
+        BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, AddrOf.get(), {}, {});
+    if (Cast.isInvalid()) {
+      return true;
+    }
+    VarDecl *CondVar =
+        VarDecl::Create(Context, CurContext, Loc, Loc, /*Id=*/nullptr,
+                        TSI->getType(), TSI, SC_None);
+    // TODO: Consider ActOnInitializerError
+    AddInitializerToDecl(CondVar, Cast.get(), /*DirectInit=*/false);
+    if (CondVar->isInvalidDecl()) {
+      return true;
+    }
+    P->setVar(CondVar);
+    DeclRefExpr *DRE =
+        BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
+                         VK_LValue, CondVar->getLocation());
+    ExprResult Cond = CheckBooleanCondition(Loc, DRE);
+    if (Cond.isInvalid()) {
+      return true;
+    }
+    P->setCond(Cond.get());
+    ExprResult Deref =
+        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::star, DRE);
     if (Deref.isInvalid()) {
       return true;
     }
