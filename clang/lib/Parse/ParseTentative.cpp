@@ -592,6 +592,10 @@ bool Parser::isCXXTypeId(TentativeCXXTypeIdContext Context, bool &isAmbiguous) {
                Tok.is(tok::comma)) {
       TPR = TPResult::True;
       isAmbiguous = true;
+    } else if (Context == TentativeCXXTypeIdContext::InAlternativePattern &&
+               Tok.is(tok::colon)) {
+      TPR = TPResult::True;
+      isAmbiguous = true;
     // We are supposed to be inside a template argument, so if after
     // the abstract declarator we encounter a '>', '>>' (in C++0x), or
     // ','; or, in C++0x, an ellipsis immediately preceding such, this

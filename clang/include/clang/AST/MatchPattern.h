@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_AST_PATTERN_H
 #define LLVM_CLANG_AST_PATTERN_H
 
+#include "clang/AST/Type.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -24,6 +25,7 @@ class ASTContext;
 class Expr;
 class BindingDecl;
 class DecompositionDecl;
+class VarDecl;
 
 class MatchPattern {
 public:
@@ -33,6 +35,7 @@ public:
     BindingPatternClass,
     ParenPatternClass,
     OptionalPatternClass,
+    AlternativePatternClass,
     DecompositionPatternClass,
   };
 
@@ -208,6 +211,50 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<OptionalPattern *>(this)->children();
+  }
+};
+
+class AlternativePattern final : public MatchPattern {
+  SourceRange TypeRange;
+  TypeSourceInfo* TInfo;
+  SourceLocation ColonLoc;
+  MatchPattern *Pattern;
+
+  VarDecl *Var;
+  Expr *Cond;
+
+public:
+  explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
+                              SourceLocation ColonLoc, MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass), TypeRange(TypeRange),
+        TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {}
+
+  SourceLocation getBeginLoc() const { return TypeRange.getBegin(); }
+  SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
+
+  TypeSourceInfo *getTypeSourceInfo() const {
+    return TInfo;
+  }
+
+  const MatchPattern *getSubPattern() const { return Pattern; }
+  MatchPattern *getSubPattern() { return Pattern; }
+
+  const VarDecl *getVar() const { return Var; }
+  VarDecl *getVar() { return Var; }
+
+  void setVar(VarDecl *Var) { this->Var = Var; }
+
+  const Expr *getCond() const { return Cond; }
+  Expr *getCond() { return Cond; }
+
+  void setCond(Expr *Cond) { this->Cond = Cond; }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {&Pattern, &Pattern + 1};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<AlternativePattern *>(this)->children();
   }
 };
 
