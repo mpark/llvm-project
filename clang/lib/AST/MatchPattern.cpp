@@ -35,6 +35,8 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "ParenPattern";
   case OptionalPatternClass:
     return "OptionalPattern";
+  case AlternativePatternClass:
+    return "AlternativePattern";
   case DecompositionPatternClass:
     return "DecompositionPattern";
   }
@@ -53,6 +55,8 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const ParenPattern *>(this)->getBeginLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getBeginLoc();
+  case AlternativePatternClass:
+    return static_cast<const AlternativePattern *>(this)->getBeginLoc();
   case DecompositionPatternClass:
     return static_cast<const DecompositionPattern *>(this)->getBeginLoc();
   }
@@ -71,6 +75,8 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const ParenPattern *>(this)->getEndLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getEndLoc();
+  case AlternativePatternClass:
+    return static_cast<const AlternativePattern *>(this)->getEndLoc();
   case DecompositionPatternClass:
     return static_cast<const DecompositionPattern *>(this)->getEndLoc();
   }
@@ -89,6 +95,8 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<ParenPattern *>(this)->children();
   case OptionalPatternClass:
     return static_cast<OptionalPattern *>(this)->children();
+  case AlternativePatternClass:
+    return static_cast<AlternativePattern *>(this)->children();
   case DecompositionPatternClass:
     return static_cast<DecompositionPattern *>(this)->children();
   }
