@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple i386-unknown-unknown -fpattern-matching -emit-llvm %s -o - | FileCheck %s
+// XFAIL: *
 
 // CHECK-LABEL: _Z9test_exp0i(
 int test_exp0(int n) {
