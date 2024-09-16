@@ -500,8 +500,6 @@ class CFGBuilder {
   JumpTarget SEHLeaveJumpTarget;
   CFGBlock *SwitchTerminatedBlock = nullptr;
   CFGBlock *DefaultCaseBlock = nullptr;
-  CFGBlock *InspectTerminatedBlock = nullptr;
-  CFGBlock *LastInspectPattern = nullptr;
 
   // This can point to either a C++ try, an Objective-C @try, or an SEH __try.
   // try and @try can be mixed and generally work the same.
@@ -638,15 +636,6 @@ private:
   CFGBlock *VisitNoRecurse(Expr *E, AddStmtChoice asc);
   CFGBlock *VisitOMPExecutableDirective(OMPExecutableDirective *D,
                                         AddStmtChoice asc);
-
-  CFGBlock *VisitInspectExpr(InspectExpr *Terminator);
-  CFGBlock *VisitMatchExpr(MatchExpr *Terminator);
-  CFGBlock *VisitWildcardPatternStmt(WildcardPatternStmt *Terminator);
-  CFGBlock *VisitIdentifierPatternStmt(IdentifierPatternStmt *Terminator);
-  CFGBlock *VisitExpressionPatternStmt(ExpressionPatternStmt *Terminator);
-  CFGBlock *
-  VisitStructuredBindingPatternStmt(StructuredBindingPatternStmt *Terminator);
-  CFGBlock *VisitAlternativePatternStmt(AlternativePatternStmt *Terminator);
 
   void maybeAddScopeBeginForVarDecl(CFGBlock *B, const VarDecl *VD,
                                     const Stmt *S) {
@@ -2409,12 +2398,6 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
     case Stmt::SwitchStmtClass:
       return VisitSwitchStmt(cast<SwitchStmt>(S));
 
-    case Stmt::InspectExprClass:
-      return VisitInspectExpr(cast<InspectExpr>(S));
-
-    case Stmt::MatchExprClass:
-      return VisitMatchExpr(cast<MatchExpr>(S));
-
     case Stmt::UnaryOperatorClass:
       return VisitUnaryOperator(cast<UnaryOperator>(S), asc);
 
@@ -2423,22 +2406,6 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
 
     case Stmt::ArrayInitLoopExprClass:
       return VisitArrayInitLoopExpr(cast<ArrayInitLoopExpr>(S), asc);
-
-    case Stmt::WildcardPatternStmtClass:
-      return VisitWildcardPatternStmt(cast<WildcardPatternStmt>(S));
-
-    case Stmt::IdentifierPatternStmtClass:
-      return VisitIdentifierPatternStmt(cast<IdentifierPatternStmt>(S));
-
-    case Stmt::ExpressionPatternStmtClass:
-      return VisitExpressionPatternStmt(cast<ExpressionPatternStmt>(S));
-
-    case Stmt::StructuredBindingPatternStmtClass:
-      return VisitStructuredBindingPatternStmt(
-          cast<StructuredBindingPatternStmt>(S));
-
-    case Stmt::AlternativePatternStmtClass:
-      return VisitAlternativePatternStmt(cast<AlternativePatternStmt>(S));
   }
 }
 
@@ -4596,270 +4563,6 @@ CFGBlock *CFGBuilder::VisitDefaultStmt(DefaultStmt *Terminator) {
   Succ = DefaultCaseBlock;
 
   return DefaultCaseBlock;
-}
-
-CFGBlock *CFGBuilder::VisitInspectExpr(InspectExpr *IE) {
-  // "inspect" can be a control-flow-like statement when the resulting type is
-  // void, otherwise it's like any other expression.
-  CFGBlock *InspectSuccessor = nullptr;
-
-  // Save local scope position because in case of condition variable ScopePos
-  // won't be restored when traversing AST.
-  SaveAndRestore<LocalScope::const_iterator> save_scope_pos(ScopePos);
-
-  // Create local scope for inspect init-stmt if one exists.
-  if (Stmt *Init = IE->getInit())
-    addLocalScopeForStmt(Init);
-
-  // Create local scope for possible condition variable.
-  // Store scope position. Add implicit destructor.
-  if (VarDecl *VD = IE->getConditionVariable())
-    addLocalScopeForVarDecl(VD);
-  addAutomaticObjHandling(ScopePos, save_scope_pos.get(), IE);
-
-  if (Block) {
-    if (badCFG)
-      return nullptr;
-    InspectSuccessor = Block;
-  } else
-    InspectSuccessor = Succ;
-
-  // Save the current "switch" context.
-  SaveAndRestore<CFGBlock *> save_inspect(InspectTerminatedBlock);
-  SaveAndRestore<JumpTarget> save_break(BreakJumpTarget);
-
-  // Create a new block that will contain the inspect expression.
-  InspectTerminatedBlock = createBlock(false);
-
-  // Now process the inspect body.  The code after the inspect is the implicit
-  // successor.
-  Succ = InspectSuccessor;
-  BreakJumpTarget = JumpTarget(InspectSuccessor, ScopePos);
-
-  // When visiting the body, the patterns should automatically get linked
-  // up to the inspect.  We also don't keep a pointer to the body, since all
-  // control-flow from the inspect goes to patterns.
-  assert(IE->getBody() && "inspect must contain a non-NULL body");
-  Block = nullptr;
-
-  // FIXME: Determine if the inspect condition can be explicitly evaluated.
-  // See switch handling for examples.
-  assert(IE->getCond() && "inspect condition must be non-NULL");
-
-  SaveAndRestore<CFGBlock *> save_nextpat(LastInspectPattern);
-  addStmt(IE->getBody());
-  if (Block) {
-    if (badCFG)
-      return nullptr;
-  }
-  // The last pattern is actually the first one, given that the CFG is
-  // built bottom-up.
-  addSuccessor(InspectTerminatedBlock, LastInspectPattern);
-
-  // FIXME: create inspectExclusivelyCovered and inspectCond to implement
-  // something along the lines of switchExclusivelyCovered.
-
-  // Add the terminator and condition in the inspect block.
-  InspectTerminatedBlock->setTerminator(IE);
-  Block = InspectTerminatedBlock;
-  CFGBlock *LastBlock = addStmt(IE->getCond());
-
-  // If the InspectExpr contains a condition variable, add both the
-  // InspectExpr and the condition variable initialization to the CFG.
-  if (VarDecl *VD = IE->getConditionVariable()) {
-    if (Expr *Init = VD->getInit()) {
-      autoCreateBlock();
-      appendStmt(Block, IE->getConditionVariableDeclStmt());
-      LastBlock = addStmt(Init);
-      maybeAddScopeBeginForVarDecl(LastBlock, VD, Init);
-    }
-  }
-
-  // Finally, if the InspectExpr contains a C++17 init-stmt, add it to the CFG.
-  if (Stmt *Init = IE->getInit()) {
-    autoCreateBlock();
-    LastBlock = addStmt(Init);
-  }
-
-  return LastBlock;
-}
-
-CFGBlock *CFGBuilder::VisitMatchExpr(MatchExpr *IE) {
-  // "inspect" can be a control-flow-like statement when the resulting type is
-  // void, otherwise it's like any other expression.
-  CFGBlock *InspectSuccessor = nullptr;
-
-  // Save local scope position because in case of condition variable ScopePos
-  // won't be restored when traversing AST.
-  SaveAndRestore<LocalScope::const_iterator> save_scope_pos(ScopePos);
-
-  // Create local scope for inspect init-stmt if one exists.
-  // if (Stmt *Init = IE->getInit())
-  //   addLocalScopeForStmt(Init);
-
-  // Create local scope for possible condition variable.
-  // Store scope position. Add implicit destructor.
-  // if (VarDecl *VD = IE->getConditionVariable())
-  //   addLocalScopeForVarDecl(VD);
-  addAutomaticObjHandling(ScopePos, save_scope_pos.get(), IE);
-
-  if (Block) {
-    if (badCFG)
-      return nullptr;
-    InspectSuccessor = Block;
-  } else
-    InspectSuccessor = Succ;
-
-  // Save the current "switch" context.
-  SaveAndRestore<CFGBlock *> save_inspect(InspectTerminatedBlock);
-  SaveAndRestore<JumpTarget> save_break(BreakJumpTarget);
-
-  // Create a new block that will contain the inspect expression.
-  InspectTerminatedBlock = createBlock(false);
-
-  // Now process the inspect body.  The code after the inspect is the implicit
-  // successor.
-  Succ = InspectSuccessor;
-  BreakJumpTarget = JumpTarget(InspectSuccessor, ScopePos);
-
-  // When visiting the body, the patterns should automatically get linked
-  // up to the inspect.  We also don't keep a pointer to the body, since all
-  // control-flow from the inspect goes to patterns.
-  assert(IE->getBody() && "inspect must contain a non-NULL body");
-  Block = nullptr;
-
-  // FIXME: Determine if the inspect condition can be explicitly evaluated.
-  // See switch handling for examples.
-  assert(IE->getCond() && "inspect condition must be non-NULL");
-
-  SaveAndRestore<CFGBlock *> save_nextpat(LastInspectPattern);
-  addStmt(IE->getBody());
-  if (Block) {
-    if (badCFG)
-      return nullptr;
-  }
-  // The last pattern is actually the first one, given that the CFG is
-  // built bottom-up.
-  addSuccessor(InspectTerminatedBlock, LastInspectPattern);
-
-  // FIXME: create inspectExclusivelyCovered and inspectCond to implement
-  // something along the lines of switchExclusivelyCovered.
-
-  // Add the terminator and condition in the inspect block.
-  InspectTerminatedBlock->setTerminator(IE);
-  Block = InspectTerminatedBlock;
-  CFGBlock *LastBlock = addStmt(IE->getCond());
-
-  // If the InspectExpr contains a condition variable, add both the
-  // InspectExpr and the condition variable initialization to the CFG.
-  // if (VarDecl *VD = IE->getConditionVariable()) {
-  //   if (Expr *Init = VD->getInit()) {
-  //     autoCreateBlock();
-  //     appendStmt(Block, IE->getConditionVariableDeclStmt());
-  //     LastBlock = addStmt(Init);
-  //     maybeAddScopeBeginForVarDecl(LastBlock, VD, Init);
-  //   }
-  // }
-
-  // Finally, if the InspectExpr contains a C++17 init-stmt, add it to the CFG.
-  // if (Stmt *Init = IE->getInit()) {
-  //   autoCreateBlock();
-  //   LastBlock = addStmt(Init);
-  // }
-
-  return LastBlock;
-}
-
-CFGBlock *CFGBuilder::VisitWildcardPatternStmt(WildcardPatternStmt *WPS) {
-  CFGBlock *CurrentPatBlock = createBlock(false);
-  if (Stmt *Sub = WPS->getSubStmt()) {
-    Block = CurrentPatBlock;
-    addStmt(Sub);
-    // The pattern action always jump out of the inspect.
-    if (!BreakJumpTarget.block)
-      badCFG = true;
-    else
-      addSuccessor(CurrentPatBlock, BreakJumpTarget.block);
-    CurrentPatBlock->setTerminator(Sub);
-  }
-
-  if (badCFG)
-    return nullptr;
-
-  addSuccessor(CurrentPatBlock,
-               LastInspectPattern ? LastInspectPattern : BreakJumpTarget.block);
-  LastInspectPattern = CurrentPatBlock;
-
-  Succ = LastInspectPattern;
-  return Succ;
-}
-
-CFGBlock *
-CFGBuilder::VisitIdentifierPatternStmt(IdentifierPatternStmt *Terminator) {
-  return nullptr;
-}
-
-CFGBlock *CFGBuilder::VisitExpressionPatternStmt(ExpressionPatternStmt *EPS) {
-  // Start with the match block as CurrentPatBlock, the (potential) successors
-  // here are:
-  //  1. Pattern guard
-  //  2. Pattern action
-  //  3. Next Pattern
-  CFGBlock *MatchPatBlock = createBlock(false);
-  Stmt *Cond = EPS->getMatchCond();
-  Block = MatchPatBlock;
-  addStmt(Cond);
-  MatchPatBlock->setTerminator(Cond);
-  if (badCFG)
-    return nullptr;
-
-  CFGBlock *PrevBlock = MatchPatBlock;
-  if (EPS->hasPatternGuard()) {
-    Stmt *Guard = EPS->getPatternGuard();
-    CFGBlock *GuardPatBlock = createBlock(false);
-    Block = GuardPatBlock;
-    addStmt(Guard);
-    GuardPatBlock->setTerminator(Guard);
-    addSuccessor(PrevBlock, GuardPatBlock);
-    addSuccessor(GuardPatBlock, LastInspectPattern ? LastInspectPattern
-                                                   : BreakJumpTarget.block);
-    PrevBlock = GuardPatBlock;
-  }
-
-  CFGBlock *ActionPatBlock = nullptr;
-  if (Stmt *Sub = EPS->getSubStmt()) {
-    ActionPatBlock = createBlock(false);
-    Block = ActionPatBlock;
-    addStmt(Sub);
-    ActionPatBlock->setTerminator(Sub);
-    if (PrevBlock)
-      addSuccessor(PrevBlock, ActionPatBlock);
-    addSuccessor(ActionPatBlock, BreakJumpTarget.block);
-  }
-
-  if (!BreakJumpTarget.block)
-    badCFG = true;
-
-  // We could get a bad CFG from addStmt or the line above.
-  if (badCFG)
-    return nullptr;
-
-  addSuccessor(MatchPatBlock,
-               LastInspectPattern ? LastInspectPattern : BreakJumpTarget.block);
-  LastInspectPattern = MatchPatBlock;
-
-  Succ = LastInspectPattern;
-  return Succ;
-}
-
-CFGBlock *CFGBuilder::VisitStructuredBindingPatternStmt(
-    StructuredBindingPatternStmt *Terminator) {
-  return nullptr;
-}
-
-CFGBlock *
-CFGBuilder::VisitAlternativePatternStmt(AlternativePatternStmt *Terminator) {
-  return nullptr;
 }
 
 CFGBlock *CFGBuilder::VisitCXXTryStmt(CXXTryStmt *Terminator) {

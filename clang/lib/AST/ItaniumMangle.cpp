@@ -5771,8 +5771,8 @@ recurse:
     Diags.Report(DiagID);
     return;
   }
-  case Expr::MatchExprClass:
-  case Expr::InspectExprClass:
+  case Expr::MatchTestExprClass:
+  case Expr::MatchSelectExprClass:
     assert(0 && "not implemented");
   }
 

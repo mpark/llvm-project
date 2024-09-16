@@ -355,14 +355,6 @@ public:
   SwitchCase *getSwitchCaseWithID(unsigned ID) {
     return Reader->getSwitchCaseWithID(ID);
   }
-
-  void recordInspectPatternID(PatternStmt *SC, unsigned ID) {
-    Reader->RecordInspectPatternID(SC, ID);
-  }
-
-  PatternStmt *getInspectPatternWithID(unsigned ID) {
-    return Reader->getInspectPatternWithID(ID);
-  }
 };
 
 /// Helper class that saves the current stream position and

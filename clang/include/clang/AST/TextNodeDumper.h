@@ -256,13 +256,6 @@ public:
 
   void VisitIfStmt(const IfStmt *Node);
   void VisitSwitchStmt(const SwitchStmt *Node);
-  void VisitInspectExpr(const InspectExpr *Node);
-  void VisitMatchExpr(const MatchExpr *Node);
-  void VisitWildcardPatternStmt(const WildcardPatternStmt *Node);
-  void VisitIdentifierPatternStmt(const IdentifierPatternStmt *Node);
-  void VisitExpressionPatternStmt(const ExpressionPatternStmt *Node);
-  void VisitStructuredBindingPatternStmt(const StructuredBindingPatternStmt *S);
-  void VisitAlternativePatternStmt(const AlternativePatternStmt *Node);
   void VisitWhileStmt(const WhileStmt *Node);
   void VisitLabelStmt(const LabelStmt *Node);
   void VisitGotoStmt(const GotoStmt *Node);

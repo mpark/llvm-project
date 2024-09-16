@@ -113,11 +113,6 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
   case Stmt::DefaultStmtClass:
   case Stmt::CaseStmtClass:
   case Stmt::SEHLeaveStmtClass:
-  case Stmt::WildcardPatternStmtClass:
-  case Stmt::IdentifierPatternStmtClass:
-  case Stmt::ExpressionPatternStmtClass:
-  case Stmt::StructuredBindingPatternStmtClass:
-  case Stmt::AlternativePatternStmtClass:
     llvm_unreachable("should have emitted these statements as simple");
 
 #define STMT(Type, Base)
@@ -500,20 +495,6 @@ bool CodeGenFunction::EmitSimpleStmt(const Stmt *S,
   case Stmt::SEHLeaveStmtClass:
     EmitSEHLeaveStmt(cast<SEHLeaveStmt>(*S));
     break;
-  case Stmt::WildcardPatternStmtClass:
-    EmitWildcardPatternStmt(cast<WildcardPatternStmt>(*S));
-    break;
-  case Stmt::IdentifierPatternStmtClass:
-    EmitIdentifierPatternStmt(cast<IdentifierPatternStmt>(*S));
-    break;
-  case Stmt::ExpressionPatternStmtClass:
-    EmitExpressionPatternStmt(cast<ExpressionPatternStmt>(*S));
-    break;
-  case Stmt::StructuredBindingPatternStmtClass:
-    EmitStructuredBindingPatternStmt(cast<StructuredBindingPatternStmt>(*S));
-    break;
-  case Stmt::AlternativePatternStmtClass:
-    EmitAlternativePatternStmt(cast<AlternativePatternStmt>(*S));
   }
   return true;
 }
@@ -2318,6 +2299,8 @@ void CodeGenFunction::EmitSwitchStmt(const SwitchStmt &S) {
   CaseRangeBlock = SavedCRBlock;
 }
 
+// FIXME(mpark): Update to emit code for MatchTestExpr and MatchSelectExpr.
+#if 0
 static const char *GetPatternName(const PatternStmt *S) {
   if (!S)
     return "";
@@ -2506,6 +2489,7 @@ void CodeGenFunction::EmitAlternativePatternStmt(
     const AlternativePatternStmt &S) {
   assert(0 && "not implemented");
 }
+#endif
 
 static std::string
 SimplifyConstraint(const char *Constraint, const TargetInfo &Target,

@@ -264,13 +264,6 @@ def err_expected_lbrace_in_compound_literal : Error<
   "expected '{' in compound literal">;
 def err_expected_while : Error<"expected 'while' in do/while loop">;
 
-// pattern matching
-def err_expected_equalarrow_after : Error<"expected '=>' after %0">;
-def err_expected_constantexpr : Error<"expected constant-expression">;
-def err_expected_id_or_literal : Error<"expected identifier or literal">;
-def err_expected_patlist_comma_or_rsquare : Error<
-  "expected ',' or ']' in pattern list">;
-
 def err_expected_semi_after_stmt : Error<"expected ';' after %0 statement">;
 def err_expected_semi_after_expr : Error<"expected ';' after expression">;
 def err_extraneous_token_before_semi : Error<"extraneous '%0' before ';'">;
@@ -623,8 +616,6 @@ def err_expected_member_or_base_name : Error<
   "expected class member or base class name">;
 def err_expected_lbrace_after_base_specifiers : Error<
   "expected '{' after base class list">;
-def err_expected_lbrace_after_bang : Error<
-  "expected '{' after '!'">;
 def err_missing_end_of_definition : Error<
   "missing '}' at end of definition of %q0">;
 def note_missing_end_of_definition_before : Note<

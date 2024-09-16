@@ -1710,7 +1710,6 @@ def fembed_offload_object_EQ : Joined<["-"], "fembed-offload-object=">,
   Visibility<[ClangOption, CC1Option, FC1Option]>,
   HelpText<"Embed Offloading device-side binary into host object file as a section.">,
   MarshallingInfoStringVector<CodeGenOpts<"OffloadObjects">>;
-
 def fembed_bitcode_EQ : Joined<["-"], "fembed-bitcode=">,
     Group<f_Group>, Flags<[NoXarchOption]>,
     Visibility<[ClangOption, CC1Option, CC1AsOption]>, MetaVarName<"<option>">,
@@ -1729,14 +1728,6 @@ defm gnu_inline_asm : BoolFOption<"gnu-inline-asm",
   NegFlag<SetFalse, [], [ClangOption, CC1Option],
           "Disable GNU style inline asm">,
   PosFlag<SetTrue>>;
-
-defm pattern_matching : BoolFOption<"pattern-matching",
-  LangOpts<"PatternMatching">, DefaultFalse,
-  NegFlag<SetFalse, [], [ClangOption, CC1Option],
-          "Disable C++ Pattern Matching">,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable C++ Pattern Matching">,
-  BothFlags<[], [ClangOption, CC1Option]>>;
 
 def fprofile_sample_use : Flag<["-"], "fprofile-sample-use">, Group<f_Group>,
     Visibility<[ClangOption, CLOption]>;
