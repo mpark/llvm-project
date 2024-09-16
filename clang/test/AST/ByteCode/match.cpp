@@ -10,12 +10,21 @@ void test_decltypes() {
   static_assert(__is_same(decltype(&x match ? 0), bool));
 }
 
-static_assert([]() { return 0 match _; }());
+static_assert(0 match _);
+static_assert(0 match 0);
+static_assert(!(0 match 1));
+
+constexpr int x = 0;
+static_assert(x match _);
+static_assert(x match 0);
+
+constexpr int y = 1;
+static_assert(!(0 match y));
+static_assert(!(x match y));
+
 static_assert([]() { int x = 0; return x match _; }());
 static_assert([]() { int* p = nullptr; return p match _; }());
 
-static_assert([]() { return 0 match 0; }());
-static_assert(![]() { return 0 match 1; }());
 static_assert([]() { int x = 0; return x match 0; }());
 static_assert(![]() { int y = 1; return 0 match y; }());
 static_assert([]() { int x = 0, y = 0; return x match y; }());
@@ -202,3 +211,15 @@ constexpr auto test_alternative_pattern_non_const(DerivedA derived) {
 
 static_assert(test_alternative_pattern_non_const(DerivedA{101}) == 202);
 static_assert(test_alternative_pattern_non_const(DerivedA{202}) == 404);
+
+constexpr auto test_bitfields(int x) {
+  struct S { int i : 6; } s{x};
+  return s.i match {
+    8 => 0;
+    let n => n;
+  };
+}
+
+static_assert(test_bitfields(8) == 0);
+static_assert(test_bitfields(2) == 2);
+static_assert(test_bitfields(4) == 4);
