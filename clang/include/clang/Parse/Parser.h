@@ -153,6 +153,7 @@ enum class TentativeCXXTypeIdContext {
   InTrailingReturnType,
   AsGenericSelectionArgument,
   AsReflectionOperand,
+  InAlternativePattern
 };
 
 /// The kind of attribute specifier we have found.
@@ -4515,6 +4516,8 @@ private:
   ActionResult<MatchPattern *> ParseParenPattern();
   ActionResult<MatchPattern *>
   ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
+  ActionResult<MatchPattern *>
+  TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
   ActionResult<MatchPattern *>
   ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);
