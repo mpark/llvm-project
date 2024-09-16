@@ -112,7 +112,7 @@ public:
 
 class ExpressionPattern final : public MatchPattern {
   Expr *E;
-  Expr *Cond;
+  Expr *Cond = nullptr;
 
 public:
   explicit ExpressionPattern(Expr *E);
@@ -122,6 +122,7 @@ public:
 
   const Expr *getExpr() const { return E; }
   Expr *getExpr() { return E; }
+
   const Expr *getCond() const { return Cond; }
   Expr *getCond() { return Cond; }
 
@@ -187,7 +188,8 @@ public:
 class OptionalPattern final : public MatchPattern {
   SourceLocation QuestionLoc;
   MatchPattern *Pattern;
-  Expr *Cond;
+  VarDecl *CondVar = nullptr;
+  Expr *Cond = nullptr;
 
 public:
   explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
@@ -199,6 +201,11 @@ public:
 
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
+
+  const VarDecl *getCondVar() const { return CondVar; }
+  VarDecl *getCondVar() { return CondVar; }
+
+  void setCondVar(VarDecl *CondVar) { this->CondVar = CondVar; }
 
   const Expr *getCond() const { return Cond; }
   Expr *getCond() { return Cond; }
@@ -219,9 +226,8 @@ class AlternativePattern final : public MatchPattern {
   TypeSourceInfo* TInfo;
   SourceLocation ColonLoc;
   MatchPattern *Pattern;
-
-  VarDecl *Var;
-  Expr *Cond;
+  VarDecl *CondVar = nullptr;
+  Expr *Cond = nullptr;
 
 public:
   explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
@@ -239,10 +245,10 @@ public:
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
 
-  const VarDecl *getVar() const { return Var; }
-  VarDecl *getVar() { return Var; }
+  const VarDecl *getCondVar() const { return CondVar; }
+  VarDecl *getCondVar() { return CondVar; }
 
-  void setVar(VarDecl *Var) { this->Var = Var; }
+  void setCondVar(VarDecl *CondVar) { this->CondVar = CondVar; }
 
   const Expr *getCond() const { return Cond; }
   Expr *getCond() { return Cond; }
@@ -266,7 +272,7 @@ class DecompositionPattern final
   unsigned NumPatterns;
   SourceRange Squares;
   bool BindingOnly;
-  DecompositionDecl *Decomposed;
+  DecompositionDecl *Decomposed = nullptr;
 
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares, bool BindingOnly);
