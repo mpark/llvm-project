@@ -368,19 +368,10 @@ public:
   SwitchCase *getSwitchCaseWithID(unsigned ID) {
     return Reader->getSwitchCaseWithID(ID);
   }
-
   /// P2996 hack: Use the 'Sema' object from the ASTReader to get a
   /// metafunction callback during deserialization of a CXXMetafunctionExpr.
   const CXXMetafunctionExpr::ImplFn &getMetafunctionCb(unsigned ID) {
     return Reader->getSema()->getMetafunctionCb(ID);
-  }
-
-  void recordInspectPatternID(PatternStmt *SC, unsigned ID) {
-    Reader->RecordInspectPatternID(SC, ID);
-  }
-
-  PatternStmt *getInspectPatternWithID(unsigned ID) {
-    return Reader->getInspectPatternWithID(ID);
   }
 };
 
