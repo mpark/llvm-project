@@ -44,7 +44,7 @@ static_assert([]() { return 0 match let _; }());
 static_assert([]() { return 0 match let x; }());
 static_assert([]() { int x = 0; return &x match ? let x; }());
 
-constexpr int test(char c) {
+constexpr auto test(char c) {
   return c match {
     'a' => 1;
     'b' => 2;
@@ -56,7 +56,7 @@ static_assert(test('a') == 1);
 static_assert(test('b') == 2);
 static_assert(test('c') == 99);
 
-constexpr int test_decomposition_pattern(const int (&xs)[2]) {
+constexpr auto test_decomposition_pattern(const int (&xs)[2]) {
   return xs match {
     [0, 0] => -1;
     [let x, 0] => x * 2;
@@ -88,7 +88,7 @@ struct Result {
   constexpr bool operator==(const Result&) const noexcept = default;
 };
 
-constexpr Result test_nested_decomposition_pattern(const S& s) {
+constexpr auto test_nested_decomposition_pattern(const S& s) {
   return s match -> Result {
     [let c, [0, 0]] => {c, -1};
     [let c, [let x, 0]] => {c, x * 2};
@@ -136,7 +136,7 @@ static_assert(!fizzbuzz(
   {2, 4, 3,    5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0   }
 ));
 
-constexpr int test_trailing_return_type(int x) {
+constexpr auto test_trailing_return_type(int x) {
   return x match -> int {
     0 => 0;
     1 => 3.0;
@@ -160,7 +160,7 @@ struct DerivedB : Base {
   constexpr DerivedB(char c) : c(c) {}
 };
 
-constexpr int test_alternative_pattern_const(const Base &base) {
+constexpr auto test_alternative_pattern_const(const Base &base) {
   return base match {
     DerivedA: let a => ({
       static_assert(__is_same(decltype(a), const DerivedA));
@@ -183,7 +183,7 @@ constexpr int test_alternative_pattern_const(const Base &base) {
 static_assert(test_alternative_pattern_const(DerivedA{101}) == 202);
 static_assert(test_alternative_pattern_const(DerivedB{'a'}) == 97);
 
-constexpr int test_alternative_pattern_non_const(DerivedA derived) {
+constexpr auto test_alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
     DerivedA: [let x] => ({
