@@ -1878,14 +1878,6 @@ defm gnu_inline_asm : BoolFOption<"gnu-inline-asm",
           "Disable GNU style inline asm">,
   PosFlag<SetTrue>>;
 
-defm pattern_matching : BoolFOption<"pattern-matching",
-  LangOpts<"PatternMatching">, DefaultFalse,
-  NegFlag<SetFalse, [], [ClangOption, CC1Option],
-          "Disable C++ Pattern Matching">,
-  PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable C++ Pattern Matching">,
-  BothFlags<[], [ClangOption, CC1Option]>>;
-
 def fno_profile_sample_use : Flag<["-"], "fno-profile-sample-use">, Group<f_Group>,
     Visibility<[ClangOption, CLOption, FlangOption, FC1Option]>;
 def fprofile_sample_use_EQ : Joined<["-"], "fprofile-sample-use=">,

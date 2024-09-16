@@ -9243,20 +9243,6 @@ def err_typecheck_missing_return_type_incompatible : Error<
   "return type must match previous return type}0,1 when %select{block "
   "literal|lambda expression}2 has unspecified explicit return type">;
 
-def err_typecheck_pattern_type_incompatible : Error<
-  "%select{%diff{resulting expression type $ must match previous resulting expression type $|"
-  "resulting expression type must match previous resulting expression type}0,1 when "
-  "inspect expression has unspecified explicit resulting type"
-  "|%diff{resulting expression type $ must match trailing result type $|"
-  "resulting expression type must match trailing result type}0,1}2">;
-
-def err_typecheck_no_valid_return_type : Error<
-  "no valid type can be deduced for inspect expression">;
-def err_empty_stbind_pattern : Error<
-  "empty structured binding pattern is invalid">;
-def note_stbind_decomposed_elements : Note<
-  "pattern list must match number of decomposed elements">;
-
 def warn_compatible_implicit_pointer_conv : Warning<
   "implicit conversion when %select{"
   "%diff{assigning to $ from type $|assigning to type from type}0,1|"
