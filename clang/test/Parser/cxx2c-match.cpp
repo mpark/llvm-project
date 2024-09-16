@@ -198,6 +198,19 @@ void test_optional_pattern(int *p) {
   &pp match { ??? 1 => 0; };
 }
 
+void test_alternative_pattern() {
+  struct Base { virtual ~Base() = default; };
+  struct Derived : Base {};
+
+  Derived d;
+  Base &b = d;
+  b match Derived: _;
+  b match {
+    Derived: let x => 0;
+    _ => 0;
+  };
+}
+
 void test_decomposition_pattern() {
   int xs[2] = { 1, 2 };
   xs match [_, _];

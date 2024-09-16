@@ -2661,6 +2661,7 @@ private:
     TypeIdAsTemplateArgument,
     TypeIdInTrailingReturnType,
     TypeIdAsGenericSelectionArgument,
+    TypeIdInAlternativePattern,
   };
 
   /// isTypeIdInParens - Assumes that a '(' was parsed and now we want to know
@@ -3980,6 +3981,8 @@ private:
   ActionResult<MatchPattern *> ParseParenPattern();
   ActionResult<MatchPattern *>
   ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
+  ActionResult<MatchPattern *>
+  TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
   ActionResult<MatchPattern *>
   ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);

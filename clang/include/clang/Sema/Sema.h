@@ -10696,6 +10696,9 @@ public:
                                                    IdentifierInfo *Name);
   ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
                                                  MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnAlternativePattern(SourceRange TypeRange, ParsedType Ty,
+                          SourceLocation ColonLoc, MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
