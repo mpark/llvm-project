@@ -992,6 +992,11 @@ public:
       case MatchPattern::BindingPatternClass:
         Visit(static_cast<const BindingPattern *>(Node)->getBinding());
         break;
+      case MatchPattern::AlternativePatternClass: {
+        auto *P = static_cast<const AlternativePattern *>(Node);
+        Visit(P->getTypeSourceInfo()->getType());
+        break;
+      }
       default:
         break;
       }
