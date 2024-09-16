@@ -42,7 +42,7 @@ class Scope {
 public:
   /// ScopeFlags - These are bitfields that are or'd together when creating a
   /// scope, which defines the sorts of things the scope contains.
-  enum ScopeFlags : uint64_t {
+  enum ScopeFlags {
     // A bitfield value representing no scopes.
     NoScope = 0,
 
@@ -151,7 +151,6 @@ public:
     /// template scope in between), the outer scope does not increase the
     /// depth of recursion.
     LambdaScope = 0x8000000,
-
     /// This is the scope of an OpenACC Compute Construct, which restricts
     /// jumping into/out of it. We also use this to represent 'combined'
     /// constructs, since they have the same behavior.
@@ -166,15 +165,6 @@ public:
 
     /// This is a scope of friend declaration.
     FriendScope = 0x80000000,
-
-    /// This is the scope of a C++ match statement.
-    MatchScope = 0x100000000ULL,
-
-    /// This is the scope of a C++ inspect statement.
-    InspectScope = 0x200000000ULL,
-
-    /// This is the scope of a C++ pattern statement.
-    PatternScope = 0x400000000ULL,
   };
 
 private:
@@ -184,7 +174,7 @@ private:
 
   /// Flags - This contains a set of ScopeFlags, which indicates how the scope
   /// interrelates with other control flow statements.
-  uint64_t Flags;
+  unsigned Flags;
 
   /// Depth - This is the depth of this scope.  The translation-unit scope has
   /// depth 0.
@@ -267,18 +257,18 @@ private:
   /// directly precedes it, if any.
   LabelDecl *PrecedingLabel;
 
-  void setFlags(Scope *Parent, uint64_t F);
+  void setFlags(Scope *Parent, unsigned F);
 
 public:
-  Scope(Scope *Parent, uint64_t ScopeFlags, DiagnosticsEngine &Diag)
+  Scope(Scope *Parent, unsigned ScopeFlags, DiagnosticsEngine &Diag)
       : ErrorTrap(Diag) {
     Init(Parent, ScopeFlags);
   }
 
   /// getFlags - Return the flags for this scope.
-  uint64_t getFlags() const { return Flags; }
+  unsigned getFlags() const { return Flags; }
 
-  void setFlags(uint64_t F) { setFlags(getParent(), F); }
+  void setFlags(unsigned F) { setFlags(getParent(), F); }
 
   /// Get the label that precedes this scope.
   LabelDecl *getPrecedingLabel() const { return PrecedingLabel; }
@@ -518,49 +508,6 @@ public:
     // just check BreakScope and not SwitchScope.
     return (getFlags() & Scope::BreakScope) &&
            !(getFlags() & Scope::SwitchScope);
-  }
-
-  /// isInspectScope - Return true if this scope is an inspect scope.
-  bool isInspectScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::InspectScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope))
-        return false;
-    }
-    return false;
-  }
-
-  /// Return true if this scope is an inspect scope.
-  bool isMatchScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::MatchScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope))
-        return false;
-    }
-    return false;
-  }
-
-  /// isPatternScope - Return true if this scope is an pattern scope.
-  bool isPatternScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::PatternScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope |
-                Scope::InspectScope))
-        return false;
-    }
-    return false;
   }
 
   /// Determines whether this scope is the OpenMP directive scope
