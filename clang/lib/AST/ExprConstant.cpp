@@ -8536,9 +8536,6 @@ public:
   }
 
   bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
-    if (!EvaluateDecl(Info, E->getSubjectVar())) {
-      return false;
-    }
     bool Result;
     for (const MatchCase &Case : E->getCases()) {
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info)) {
@@ -15019,44 +15016,38 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
     return Result = true;
+  case MatchPattern::BindingPatternClass: {
+    const auto *P = static_cast<const BindingPattern *>(Pattern);
+    const BindingDecl *BD = P->getBinding();
+    assert(BD && "missing a binding decl in the binding pattern");
+    if (const VarDecl *VD = BD->getHoldingVar())
+      if (!EvaluateVarDecl(Info, VD))
+        return false;
+    return Result = true;
+  }
   case MatchPattern::ExpressionPatternClass: {
     const auto *P = static_cast<const ExpressionPattern *>(Pattern);
     return EvaluateAsBooleanCondition(P->getCond(), Result, Info);
   }
-  case MatchPattern::BindingPatternClass: {
-    const auto *P = static_cast<const BindingPattern *>(Pattern);
-    if (!EvaluateDecl(Info, P->getBinding())) {
-      return false;
-    }
-    return Result = true;
-  }
   case MatchPattern::ParenPatternClass: {
     const auto *P = static_cast<const ParenPattern *>(Pattern);
-    if (!EvaluateMatchPattern(P->getSubPattern(), Result, Info)) {
-      return false;
-    }
-    return true;
+    return EvaluateMatchPattern(P->getSubPattern(), Result, Info);
   }
   case MatchPattern::OptionalPatternClass: {
     const auto *P = static_cast<const OptionalPattern *>(Pattern);
-    if (!EvaluateAsBooleanCondition(P->getCond(), Result, Info) ||
-        (Result && !EvaluateMatchPattern(P->getSubPattern(), Result, Info))) {
-      return false;
-    }
-    return true;
+    return EvaluateVarDecl(Info, P->getCondVar()) &&
+           EvaluateAsBooleanCondition(P->getCond(), Result, Info) &&
+           (!Result || EvaluateMatchPattern(P->getSubPattern(), Result, Info));
   }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
-    if (!EvaluateDecl(Info, P->getVar()) ||
-        !EvaluateAsBooleanCondition(P->getCond(), Result, Info) ||
-        (Result && !EvaluateMatchPattern(P->getSubPattern(), Result, Info))) {
-      return false;
-    }
-    return true;
+    return EvaluateVarDecl(Info, P->getCondVar()) &&
+           EvaluateAsBooleanCondition(P->getCond(), Result, Info) &&
+           (!Result || EvaluateMatchPattern(P->getSubPattern(), Result, Info));
   }
   case MatchPattern::DecompositionPatternClass:
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);
-    if (!EvaluateDecl(Info, P->getDecomposedDecl())) {
+    if (!EvaluateVarDecl(Info, P->getDecomposedDecl())) {
       return false;
     }
     Result = true;
@@ -15078,8 +15069,7 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
-  return EvaluateDecl(Info, E->getSubjectVar()) &&
-         EvaluateMatchPattern(E->getPattern(), Result, Info) &&
+  return EvaluateMatchPattern(E->getPattern(), Result, Info) &&
          Success(Result, E);
 }
 
