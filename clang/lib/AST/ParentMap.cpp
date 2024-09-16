@@ -14,7 +14,6 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/StmtObjC.h"
-#include "clang/AST/StmtCXX.h"
 #include "llvm/ADT/DenseMap.h"
 
 using namespace clang;
