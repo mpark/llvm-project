@@ -274,32 +274,7 @@ void ASTStmtReader::VisitSwitchStmt(SwitchStmt *S) {
   }
 }
 
-void ASTStmtReader::VisitInspectExpr(InspectExpr *S) {
-  VisitStmt(S);
-
-  bool HasInit = Record.readInt();
-  bool HasVar = Record.readInt();
-
-  S->setCond(Record.readSubExpr());
-  if (HasInit)
-    S->setInit(Record.readSubStmt());
-  if (HasVar)
-    S->setConditionVariable(Record.getContext(), readDeclAs<VarDecl>());
-
-  S->setInspectLoc(readSourceLocation());
-
-  PatternStmt *PrevSC = nullptr;
-  for (auto E = Record.size(); Record.getIdx() != E;) {
-    PatternStmt *SC = Record.getInspectPatternWithID(Record.readInt());
-    if (PrevSC)
-      PrevSC->setNextPattern(SC);
-    else
-      S->setPatternList(SC);
-
-    PrevSC = SC;
-  }
-}
-
+/* FIXME(mpark): Update to support MatchTestExpr and MatchSelectExpr
 void ASTStmtReader::VisitMatchExpr(MatchExpr *S) {
   VisitStmt(S);
 
@@ -325,46 +300,7 @@ void ASTStmtReader::VisitMatchExpr(MatchExpr *S) {
     PrevSC = SC;
   }
 }
-
-void ASTStmtReader::VisitPatternStmt(PatternStmt *S) {
-  VisitStmt(S);
-
-  bool HasPatternGuard = Record.readInt();
-
-  Record.recordInspectPatternID(S, Record.readInt());
-  S->setPatternLoc(readSourceLocation());
-  S->setColonLoc(readSourceLocation());
-
-  if (HasPatternGuard) {
-    S->setPatternGuard(Record.readSubExpr());
-  }
-}
-
-void ASTStmtReader::VisitWildcardPatternStmt(WildcardPatternStmt *S) {
-  VisitPatternStmt(S);
-  S->setSubStmt(Record.readSubStmt());
-}
-
-void ASTStmtReader::VisitIdentifierPatternStmt(IdentifierPatternStmt *S) {
-  VisitPatternStmt(S);
-  S->setVar(Record.readSubStmt());
-  S->setSubStmt(Record.readSubStmt());
-}
-
-void ASTStmtReader::VisitExpressionPatternStmt(ExpressionPatternStmt *S) {
-  VisitPatternStmt(S);
-  S->setMatchCond(cast<Expr>(Record.readSubStmt()));
-  S->setSubStmt(Record.readSubStmt());
-}
-
-void ASTStmtReader::VisitStructuredBindingPatternStmt(
-    StructuredBindingPatternStmt *S) {
-  assert(0 && "not implemented");
-}
-
-void ASTStmtReader::VisitAlternativePatternStmt(AlternativePatternStmt *S) {
-  assert(0 && "not implemented");
-}
+*/
 
 void ASTStmtReader::VisitWhileStmt(WhileStmt *S) {
   VisitStmt(S);
@@ -3102,42 +3038,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
           /* HasVar=*/Record[ASTStmtReader::NumStmtFields + 1]);
       break;
 
-    case EXPR_INSPECT:
-      S = InspectExpr::CreateEmpty(
-          Context,
-          /* HasInit=*/Record[ASTStmtReader::NumStmtFields],
-          /* HasVar=*/Record[ASTStmtReader::NumStmtFields + 1]);
-      break;
-
+    // FIXME(mpark): Update to support EXPR_MATCH_TEST and EXPR_MATCH_SELECT
+    #if 0
     case EXPR_MATCH:
       S = MatchExpr::CreateEmpty(Context,
                                  /* HasInit=*/false,
                                  /* HasVar=*/false);
       break;
-
-    case STMT_WILDCARDPATTERN:
-      S = WildcardPatternStmt::CreateEmpty(
-          Context,
-          /* HasPatternGuard=*/Record[ASTStmtReader::NumStmtFields]);
-      break;
-
-    case STMT_IDENTIFIERPATTERN:
-      S = IdentifierPatternStmt::CreateEmpty(
-          Context,
-          /* HasPatternGuard=*/Record[ASTStmtReader::NumStmtFields]);
-      break;
-
-    case STMT_EXPRESSIONPATTERN:
-      S = ExpressionPatternStmt::CreateEmpty(
-          Context,
-          /* HasPatternGuard=*/Record[ASTStmtReader::NumStmtFields]);
-      break;
-
-    case STMT_ALTERNATIVEPATTERN:
-      S = AlternativePatternStmt::CreateEmpty(
-          Context,
-          /* HasPatternGuard=*/Record[ASTStmtReader::NumStmtFields]);
-      break;
+    #endif
 
     case STMT_WHILE:
       S = WhileStmt::CreateEmpty(

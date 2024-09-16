@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fpattern-matching -Wno-string-compare %s
+// XFAIL: *
 
 void noParen() {
   inspect 42 { // expected-error {{expected '(' after 'inspect'}}

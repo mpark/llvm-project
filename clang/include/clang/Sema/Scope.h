@@ -153,7 +153,6 @@ public:
     /// template scope in between), the outer scope does not increase the
     /// depth of recursion.
     LambdaScope = 0x8000000,
-
     /// This is the scope of an OpenACC Compute Construct, which restricts
     /// jumping into/out of it.
     OpenACCComputeConstructScope = 0x10000000,
@@ -163,15 +162,6 @@ public:
 
     /// This is a scope of friend declaration.
     FriendScope = 0x40000000,
-
-    /// This is the scope of a C++ match statement.
-    MatchScope = 0x80000000,
-
-    /// This is the scope of a C++ inspect statement.
-    InspectScope = 0x100000000,
-
-    /// This is the scope of a C++ pattern statement.
-    PatternScope = 0x200000000,
   };
 
 private:
@@ -504,49 +494,6 @@ public:
     // just check BreakScope and not SwitchScope.
     return (getFlags() & Scope::BreakScope) &&
            !(getFlags() & Scope::SwitchScope);
-  }
-
-  /// isInspectScope - Return true if this scope is an inspect scope.
-  bool isInspectScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::InspectScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope))
-        return false;
-    }
-    return false;
-  }
-
-  /// Return true if this scope is an inspect scope.
-  bool isMatchScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::MatchScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope))
-        return false;
-    }
-    return false;
-  }
-
-  /// isPatternScope - Return true if this scope is an pattern scope.
-  bool isPatternScope() const {
-    for (const Scope *S = this; S; S = S->getParent()) {
-      if (S->getFlags() & Scope::PatternScope)
-        return true;
-      else if (S->getFlags() &
-               (Scope::FnScope | Scope::ClassScope | Scope::BlockScope |
-                Scope::TemplateParamScope | Scope::FunctionPrototypeScope |
-                Scope::AtCatchScope | Scope::ObjCMethodScope |
-                Scope::InspectScope))
-        return false;
-    }
-    return false;
   }
 
   /// Determines whether this scope is the OpenMP directive scope

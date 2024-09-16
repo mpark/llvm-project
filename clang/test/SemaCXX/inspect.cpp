@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fpattern-matching -Wno-string-compare %s
+// XFAIL: *
 
 void a() {
   inspect(42) {

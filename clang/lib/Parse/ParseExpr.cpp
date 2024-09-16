@@ -975,7 +975,6 @@ ExprResult Parser::ParseBuiltinPtrauthTypeDiscriminator() {
 /// [G++]   binary-type-trait '(' type-id ',' type-id ')'           [TODO]
 /// [EMBT]  array-type-trait '(' type-id ',' integer ')'
 /// [clang] '^' block-literal
-/// [C++2b]   'inspect-expression'
 ///
 ///       constant: [C99 6.4.4]
 ///         integer-constant
@@ -1881,10 +1880,6 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
         getCurScope(), PreferredType.get(Tok.getLocation()));
     return ExprError();
   }
-  case tok::kw_inspect: { // C++2b Pattern Matching: inspect-statement
-    Res = ParseInspectExpr();
-    break;
-  }
 #define TRANSFORM_TYPE_TRAIT_DEF(_, Trait) case tok::kw___##Trait:
 #include "clang/Basic/TransformTypeTraits.def"
     // HACK: libstdc++ uses some of the transform-type-traits as alias
@@ -1970,12 +1965,6 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
         << FixItHint::CreateInsertion(Res.get()->getBeginLoc(), "(")
         << FixItHint::CreateInsertion(PP.getLocForEndOfToken(PrevTokLocation),
                                       ")");
-  }
-
-  if (Tok.getKind() == tok::kw_match) {
-    // FIXME: not sure we should attribute that back to Res.
-    Res = ParseMatchExpr(Res);
-    return Res;
   }
 
   // These can be followed by postfix-expr pieces.

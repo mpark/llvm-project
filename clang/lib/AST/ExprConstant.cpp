@@ -17058,8 +17058,6 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::SYCLUniqueStableNameExprClass:
   case Expr::CXXParenListInitExprClass:
   case Expr::HLSLOutArgExprClass:
-  case Expr::MatchTestExprClass:
-  case Expr::MatchSelectExprClass:
     return ICEDiag(IK_NotICE, E->getBeginLoc());
 
   case Expr::InitListExprClass: {
@@ -17362,8 +17360,8 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
       return ICEDiag(IK_NotICE, E->getBeginLoc());
     return CheckICE(cast<CastExpr>(E)->getSubExpr(), Ctx);
   }
-  case Expr::MatchExprClass:
-  case Expr::InspectExprClass:
+  case Expr::MatchTestExprClass:
+  case Expr::MatchSelectExprClass:
     assert(0 && "not implemented");
   }
 

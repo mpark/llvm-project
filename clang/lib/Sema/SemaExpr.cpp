@@ -15827,27 +15827,10 @@ ExprResult Sema::ActOnStmtExprResult(ExprResult ER) {
   if (Cast && Cast->getCastKind() == CK_ARCConsumeObject)
     return Cast->getSubExpr();
 
-  QualType T = E->getType().getUnqualifiedType();
-  // If the inspect expr has a trailing return type it's possible
-  // to perform implicit conversion during the copy initialization.
-  if (getCurScope()->isPatternScope()) {
-    MatchExpr *IE = getCurFunction()->MatchStack.back().getPointer();
-    if (IE->hasExplicitResultType()) {
-      QualType ER = IE->getType();
-
-      // Catch this edge case where we can't make a valid
-      // statement expression result from a void type.
-      // All other cases should be caught elsewhere when
-      // we explore convertibility between the pattern
-      // substatement and the inspect return type.
-      if (!ER.getTypePtr()->isVoidType())
-        T = ER;
-    }
-  }
-
   // FIXME: Provide a better location for the initialization.
   return PerformCopyInitialization(
-      InitializedEntity::InitializeStmtExprResult(E->getBeginLoc(), T),
+      InitializedEntity::InitializeStmtExprResult(
+          E->getBeginLoc(), E->getType().getUnqualifiedType()),
       SourceLocation(), E);
 }
 
@@ -20344,9 +20327,6 @@ Sema::ConditionResult Sema::ActOnCondition(Scope *S, SourceLocation Loc,
   case ConditionKind::Switch:
     Cond = CheckSwitchCondition(Loc, SubExpr);
     break;
-
-  case ConditionKind::Inspect:
-    Cond = CheckInspectCondition(Loc, SubExpr);
   }
   if (Cond.isInvalid()) {
     Cond = CreateRecoveryExpr(SubExpr->getBeginLoc(), SubExpr->getEndLoc(),

@@ -84,7 +84,7 @@ def err_typecheck_converted_constant_expression_indirect : Error<
 def err_expr_not_cce : Error<
   "%select{case value|enumerator value|non-type template argument|"
   "array size|explicit specifier argument|noexcept specifier argument|"
-  "call to 'size()'|call to 'data()'|pattern}0 is not a constant expression">;
+  "call to 'size()'|call to 'data()'}0 is not a constant expression">;
 def ext_cce_narrowing : ExtWarn<
   "%select{case value|enumerator value|non-type template argument|"
   "array size|explicit specifier argument|noexcept specifier argument|"
@@ -8527,21 +8527,6 @@ def err_typecheck_missing_return_type_incompatible : Error<
   "%diff{return type $ must match previous return type $|"
   "return type must match previous return type}0,1 when %select{block "
   "literal|lambda expression}2 has unspecified explicit return type">;
-
-def err_typecheck_pattern_type_incompatible : Error<
-  "%select{%diff{resulting expression type $ must match previous resulting expression type $|"
-  "resulting expression type must match previous resulting expression type}0,1 when "
-  "inspect expression has unspecified explicit resulting type"
-  "|%diff{resulting expression type $ must match trailing result type $|"
-  "resulting expression type must match trailing result type}0,1}2"
-  >;
-
-def err_typecheck_no_valid_return_type : Error<
-  "no valid type can be deduced for inspect expression">;
-def err_empty_stbind_pattern : Error<
-  "empty structured binding pattern is invalid">;
-def note_stbind_decomposed_elements : Note<
-  "pattern list must match number of decomposed elements">;
 
 def note_incomplete_class_and_qualified_id : Note<
   "conformance of forward class %0 to protocol %1 can not be confirmed">;

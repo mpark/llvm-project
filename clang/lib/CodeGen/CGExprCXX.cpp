@@ -2336,61 +2336,7 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
-static const char *GetPatternName(const PatternStmt *S) {
-  if (!S)
-    return "";
-  if (const auto *WPS = dyn_cast<WildcardPatternStmt>(S))
-    return "pat.wildcard";
-  if (const auto *IPS = dyn_cast<IdentifierPatternStmt>(S))
-    return "pat.id";
-  if (const auto *EPS = dyn_cast<ExpressionPatternStmt>(S))
-    return "pat.exp";
-  if (const auto *EPS = dyn_cast<StructuredBindingPatternStmt>(S))
-    return "pat.stbind";
-  if (const auto *AP = dyn_cast<AlternativePatternStmt>(S))
-    return "pat.alt";
-  llvm_unreachable("unexpected pattern type");
-}
-
-RValue CodeGenFunction::EmitInspectExpr(const InspectExpr &S) {
-  // FIXME: check if we can constant fold to simple integer,
-  // just like switch does.
-
-  Address InspectResAddr = Address::invalid();
-  if (!S.getType()->isVoidType())
-    InspectResAddr = CreateMemTemp(S.getType(), "inspect.result");
-
-  if (S.getInit())
-    EmitStmt(S.getInit());
-
-  if (S.getConditionVariable())
-    EmitDecl(*S.getConditionVariable());
-
-  // FIXME: what do do about empty inspect statements, will
-  // it get to this point?
-
-  // FIXME: for integral types we should use LLVM switch instruction,
-  // just like switch statements do.
-
-  // Save inspect context in order to support multiple nested ones.
-  auto PrevInspectCtx = InspectCtx;
-
-  InspectCtx.InspectResult = InspectResAddr;
-  InspectCtx.InspectExit = createBasicBlock("inspect.epilogue");
-  InspectCtx.NextPattern = createBasicBlock(GetPatternName(S.getPatternList()));
-
-  // Emit inspect body.
-  EmitStmt(S.getBody());
-  EmitBlock(InspectCtx.InspectExit);
-
-  InspectCtx = PrevInspectCtx;
-
-  if (S.getType()->isVoidType())
-    return RValue::getIgnored();
-
-  return convertTempToRValue(InspectResAddr, S.getType(), SourceLocation());
-}
-
+/* FIXME(mpark): Update to emit MatchTestExpr and MatchSelectExpr
 RValue CodeGenFunction::EmitMatchExpr(const MatchExpr &S) {
   // FIXME: check if we can constant fold to simple integer,
   // just like switch does.
@@ -2429,3 +2375,4 @@ RValue CodeGenFunction::EmitMatchExpr(const MatchExpr &S) {
 
   return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
 }
+*/

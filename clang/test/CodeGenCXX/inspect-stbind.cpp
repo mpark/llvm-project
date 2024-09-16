@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple i386-unknown-unknown -fpattern-matching -emit-llvm %s -o - | FileCheck %s
+// XFAIL: *
 
 struct s { int a, b, c; };
 

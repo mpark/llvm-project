@@ -1584,27 +1584,6 @@ enum StmtCode {
   /// A MS-style AsmStmt record.
   STMT_MSASM,
 
-  /// A WildcardPatternStmt record.
-  STMT_WILDCARDPATTERN,
-
-  /// An IdentifierPatternStmt record.
-  STMT_IDENTIFIERPATTERN,
-
-  /// An ExpressionPatternStmt record.
-  STMT_EXPRESSIONPATTERN,
-
-  /// A StructuredBindingPatternStmt record.
-  STMT_STRUCTUREDBINDINGPATTERN,
-
-  /// An AlternativePatternStmt record.
-  STMT_ALTERNATIVEPATTERN,
-
-  /// An InspectExpr record.
-  EXPR_INSPECT,
-
-  /// An MatchExpr record.
-  EXPR_MATCH,
-
   /// A constant expression context.
   EXPR_CONSTANT,
 

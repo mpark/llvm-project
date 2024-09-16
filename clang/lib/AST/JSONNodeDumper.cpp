@@ -1667,40 +1667,6 @@ void JSONNodeDumper::VisitCaseStmt(const CaseStmt *CS) {
   attributeOnlyIfTrue("isGNURange", CS->caseStmtIsGNURange());
 }
 
-void JSONNodeDumper::VisitInspectExpr(const InspectExpr *SS) {
-  attributeOnlyIfTrue("hasInit", SS->hasInitStorage());
-  attributeOnlyIfTrue("hasVar", SS->hasVarStorage());
-}
-
-void JSONNodeDumper::VisitMatchExpr(const MatchExpr *SS) {
-  // attributeOnlyIfTrue("hasInit", SS->hasInitStorage());
-  // attributeOnlyIfTrue("hasVar", SS->hasVarStorage());
-}
-
-void JSONNodeDumper::VisitWildcardPatrternStmt(const WildcardPatternStmt *SS) {
-  assert(0 && "not implemented");
-}
-
-void JSONNodeDumper::VisitIdentifierPatternStmt(
-    const IdentifierPatternStmt *SS) {
-  assert(0 && "not implemented");
-}
-
-void JSONNodeDumper::VisitExpressionPatternStmt(
-    const ExpressionPatternStmt *SS) {
-  assert(0 && "not implemented");
-}
-
-void JSONNodeDumper::VisitStructuredBindingPatternStmt(
-    const StructuredBindingPatternStmt *SS) {
-  assert(0 && "not implemented");
-}
-
-void JSONNodeDumper::VisitAlternativePatternStmt(
-    const AlternativePatternStmt *SS) {
-  assert(0 && "not implemented");
-}
-
 void JSONNodeDumper::VisitLabelStmt(const LabelStmt *LS) {
   JOS.attribute("name", LS->getName());
   JOS.attribute("declId", createPointerRepresentation(LS->getDecl()));
