@@ -2169,8 +2169,8 @@ public:
   void VisitUnaryExprOrTypeTraitExpr(const UnaryExprOrTypeTraitExpr *E);
   void VisitStmt(const Stmt *S);
   void VisitSwitchStmt(const SwitchStmt *S);
-  void VisitMatchExpr(const MatchExpr *S);
-  void VisitInspectExpr(const InspectExpr *S);
+  // FIXME(mpark): Update to support MatcTestExpr and MatchSelectExpr.
+  // void VisitMatchExpr(const MatchExpr *S);
   void VisitWhileStmt(const WhileStmt *W);
   void VisitTypeTraitExpr(const TypeTraitExpr *E);
   void VisitArrayTypeTraitExpr(const ArrayTypeTraitExpr *E);
@@ -3225,15 +3225,12 @@ void EnqueueVisitor::VisitSwitchStmt(const SwitchStmt *S) {
   AddDecl(S->getConditionVariable());
 }
 
-void EnqueueVisitor::VisitInspectExpr(const InspectExpr *S) {
-  AddStmt(S->getCond());
-  AddDecl(S->getConditionVariable());
-}
-
+/* FIXME(mpark): Update to support MatcTestExpr and MatchSelectExpr.
 void EnqueueVisitor::VisitMatchExpr(const MatchExpr *S) {
   AddStmt(S->getCond());
   // AddDecl(S->getConditionVariable());
 }
+*/
 
 void EnqueueVisitor::VisitWhileStmt(const WhileStmt *W) {
   AddStmt(W->getBody());
@@ -6073,20 +6070,9 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("IfStmt");
   case CXCursor_SwitchStmt:
     return cxstring::createRef("SwitchStmt");
+  // FIXME(mpark): Update to support MatchTestExpr and MatchSelectExpr.
   // case CXCursor_MatchExpr:
   //   return cxstring::createRef("MatchExpr");
-  case CXCursor_InspectExpr:
-    return cxstring::createRef("InspectExpr");
-  case CXCursor_WildcardPatternStmt:
-    return cxstring::createRef("WildcardPatternStmt");
-  case CXCursor_IdentifierPatternStmt:
-    return cxstring::createRef("IdentifierPatternStmt");
-  case CXCursor_ExpressionPatternStmt:
-    return cxstring::createRef("ExpressionPatternStmt");
-  case CXCursor_StructuredBindingPatternStmt:
-    return cxstring::createRef("StructuredBindingPatternStmt");
-  case CXCursor_AlternativePatternStmt:
-    return cxstring::createRef("AlternativePatternStmt");
   case CXCursor_WhileStmt:
     return cxstring::createRef("WhileStmt");
   case CXCursor_DoStmt:

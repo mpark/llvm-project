@@ -2206,32 +2206,12 @@ enum CXCursorKind {
    */
   CXCursor_OpenACCUpdateConstruct = 331,
 
-  /** An inspect statement.
-   */
-  CXCursor_InspectExpr = 340,
-  // FIXME: add CXCursor_MatchExpr = 307,
+  /*
+  FIXME(mpark): Add CXCursor_MatchTestExpr = 34X,
+  FIXME(mpark): Add CXCursor_MatchSelectExpr = 34X,
+  */
 
-  /** A wildcard pattern statement.
-   */
-  CXCursor_WildcardPatternStmt = 341,
-
-  /** An identifier pattern statement.
-   */
-  CXCursor_IdentifierPatternStmt = 342,
-
-  /** An expression pattern statement.
-   */
-  CXCursor_ExpressionPatternStmt = 343,
-
-  /** An structured bindings pattern statement.
-   */
-  CXCursor_StructuredBindingPatternStmt = 344,
-
-  /** An alternative pattern statement.
-   */
-  CXCursor_AlternativePatternStmt = 345,
-
-  CXCursor_LastStmt = CXCursor_AlternativePatternStmt,
+  CXCursor_LastStmt = CXCursor_OpenACCUpdateConstruct,
 
   /**
    * Cursor that represents the translation unit itself.
