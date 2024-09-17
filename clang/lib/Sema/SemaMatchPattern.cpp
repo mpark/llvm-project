@@ -64,8 +64,10 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
 }
 
 ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
-                                    MatchPattern *Pattern) {
-  return new (Context) MatchTestExpr(Context, Subject, MatchLoc, Pattern);
+                                    MatchPattern *Pattern, SourceLocation IfLoc,
+                                    Expr *Guard) {
+  return new (Context)
+      MatchTestExpr(Context, Subject, MatchLoc, Pattern, IfLoc, Guard);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
