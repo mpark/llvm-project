@@ -88,10 +88,10 @@ ActionResult<MatchPattern *> Sema::ActOnExpressionPattern(Expr *E) {
 ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation LetLoc,
                                                        SourceLocation NameLoc,
                                                        IdentifierInfo *Name) {
-  BindingDecl *Binding =
-      BindingDecl::Create(Context, CurContext, NameLoc, Name);
-  PushOnScopeChains(Binding, getCurScope());
-  return new (Context) BindingPattern(LetLoc, Binding);
+  BindingDecl *BD =
+      BindingDecl::Create(Context, CurContext, NameLoc, Name, QualType());
+  PushOnScopeChains(BD, getCurScope(), /*AddToContext=*/false);
+  return new (Context) BindingPattern(LetLoc, BD);
 }
 
 ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
@@ -124,14 +124,15 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
 }
 
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
+  SourceLocation Loc = Pattern->getBeginLoc();
+  Scope *S = getCurScope();
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
     break;
   case MatchPattern::ExpressionPatternClass: {
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
     ExprResult Cond =
-        ActOnBinOp(getCurScope(), P->getBeginLoc(), tok::TokenKind::equalequal,
-                   Subject, P->getExpr());
+        ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject, P->getExpr());
     if (Cond.isInvalid()) {
       return true;
     }
@@ -142,7 +143,6 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     BindingPattern *P = static_cast<BindingPattern *>(Pattern);
     QualType Type = Subject->getType();
     if (!Subject->refersToBitField()) {
-      SourceLocation Loc = P->getBeginLoc();
       QualType Deduced = Context.getAutoRRefDeductType();
       TypeSourceInfo *TSI =
           SemaRef.Context.getTrivialTypeSourceInfo(Deduced, Loc);
@@ -164,7 +164,6 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-    SourceLocation Loc = P->getBeginLoc();
     QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
     VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Subject);
@@ -180,8 +179,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       return true;
     }
     P->setCond(Cond.get());
-    ExprResult Deref =
-        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::star, DRE);
+    ExprResult Deref = ActOnUnaryOp(S, Loc, tok::TokenKind::star, DRE);
     if (Deref.isInvalid()) {
       return true;
     }
@@ -189,13 +187,11 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-    SourceLocation Loc = P->getBeginLoc();
     QualType Type = P->getTypeSourceInfo()->getType();
     Type = Context.getPointerType(
         Subject->getType().isConstQualified() ? Type.withConst() : Type);
     TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
-    ExprResult AddrOf =
-        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::amp, Subject);
+    ExprResult AddrOf = ActOnUnaryOp(S, Loc, tok::TokenKind::amp, Subject);
     if (AddrOf.isInvalid()) {
       return true;
     }
@@ -217,8 +213,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       return true;
     }
     P->setCond(Cond.get());
-    ExprResult Deref =
-        ActOnUnaryOp(getCurScope(), Loc, tok::TokenKind::star, DRE);
+    ExprResult Deref = ActOnUnaryOp(S, Loc, tok::TokenKind::star, DRE);
     if (Deref.isInvalid()) {
       return true;
     }
@@ -226,23 +221,20 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::DecompositionPatternClass:
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
-    SourceLocation Loc = P->getBeginLoc();
     QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
     SmallVector<BindingDecl*, 8> Bindings;
     Bindings.reserve(P->getNumPatterns());
     for (MatchPattern *C : P->children()) {
-      BindingDecl *Binding = [&] {
-        if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass) {
-          return static_cast<BindingPattern *>(C)->getBinding();
-        } else {
-          BindingDecl *Binding = BindingDecl::Create(Context, CurContext,
-                                                     C->getBeginLoc(), nullptr);
-          Binding->setImplicit();
-          return Binding;
-        }
-      }();
-      Bindings.push_back(Binding);
+      BindingDecl *BD = nullptr;
+      if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass) {
+        BD = static_cast<BindingPattern *>(C)->getBinding();
+      } else {
+        BD = BindingDecl::Create(Context, CurContext, C->getBeginLoc(), nullptr,
+                                 QualType());
+        BD->setImplicit();
+      }
+      Bindings.push_back(BD);
     }
     DecompositionDecl *Decomposed = DecompositionDecl::Create(
         Context, CurContext, Loc, Loc, Loc, Type, TInfo, SC_None, Bindings);
@@ -255,9 +247,9 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     }
     unsigned I = 0;
     for (MatchPattern *C : P->children()) {
-      BindingDecl *Binding = Bindings[I];
+      BindingDecl *BD = Bindings[I];
       if (C->getMatchPatternClass() != MatchPattern::BindingPatternClass &&
-          CheckCompleteMatchPattern(Binding->getBinding(), C)) {
+          CheckCompleteMatchPattern(BD->getBinding(), C)) {
         return true;
       }
       ++I;
