@@ -223,3 +223,60 @@ constexpr auto test_bitfields(int x) {
 static_assert(test_bitfields(8) == 0);
 static_assert(test_bitfields(2) == 2);
 static_assert(test_bitfields(4) == 4);
+
+struct Tuple {
+  template <int I>
+  constexpr const int& get() const {
+    if constexpr (I == 0) {
+      return x;
+    } else {
+      return y;
+    }
+  }
+
+  int x;
+  int y;
+};
+
+namespace std {
+  template <typename T>
+  struct tuple_size;
+
+  template <typename T>
+  struct tuple_size<const T> {
+    static constexpr int value = std::tuple_size<T>::value;
+  };
+
+  template <>
+  struct tuple_size<Tuple> {
+    static constexpr int value = 2;
+  };
+
+  template <int I, typename E>
+  struct tuple_element;
+
+  template <int I, class T>
+  struct tuple_element<I, const T> {
+    using type = typename std::tuple_element<I, T>::type const;
+  };
+
+  template <int I>
+  struct tuple_element<I, Tuple> {
+    using type = int;
+  };
+}
+
+constexpr int test_tuple_like_decomposition_pattern(const Tuple &tup) {
+  return tup match {
+    [0, 0] => -1;
+    [0, let y] => y * 2;
+    [let x, 0] => x * 4;
+    let [x, y] => x * y;
+    _ => 0;
+  };
+}
+
+static_assert(test_tuple_like_decomposition_pattern({0, 0}) == -1);
+static_assert(test_tuple_like_decomposition_pattern({0, 2}) == 4);
+static_assert(test_tuple_like_decomposition_pattern({2, 0}) == 8);
+static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
