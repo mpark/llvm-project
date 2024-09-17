@@ -280,3 +280,12 @@ static_assert(test_tuple_like_decomposition_pattern({0, 0}) == -1);
 static_assert(test_tuple_like_decomposition_pattern({0, 2}) == 4);
 static_assert(test_tuple_like_decomposition_pattern({2, 0}) == 8);
 static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
+
+constexpr bool test_match_test_with_guard(const int (&xs)[2]) {
+  return xs match let [x, y] if (x == y);
+}
+
+static_assert(test_match_test_with_guard({0, 0}));
+static_assert(!test_match_test_with_guard({0, 1}));
+static_assert(test_match_test_with_guard({1, 1}));
+static_assert(!test_match_test_with_guard({2, 3}));
