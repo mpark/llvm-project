@@ -15021,7 +15021,7 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
     const BindingDecl *BD = P->getBinding();
     assert(BD && "missing a binding decl in the binding pattern");
     if (const VarDecl *VD = BD->getHoldingVar())
-      if (!EvaluateVarDecl(Info, VD))
+      if (!EvaluateDecl(Info, VD))
         return false;
     return Result = true;
   }
@@ -15035,19 +15035,19 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
   }
   case MatchPattern::OptionalPatternClass: {
     const auto *P = static_cast<const OptionalPattern *>(Pattern);
-    return EvaluateVarDecl(Info, P->getCondVar()) &&
+    return EvaluateDecl(Info, P->getCondVar()) &&
            EvaluateAsBooleanCondition(P->getCond(), Result, Info) &&
            (!Result || EvaluateMatchPattern(P->getSubPattern(), Result, Info));
   }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
-    return EvaluateVarDecl(Info, P->getCondVar()) &&
+    return EvaluateDecl(Info, P->getCondVar()) &&
            EvaluateAsBooleanCondition(P->getCond(), Result, Info) &&
            (!Result || EvaluateMatchPattern(P->getSubPattern(), Result, Info));
   }
   case MatchPattern::DecompositionPatternClass:
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);
-    if (!EvaluateVarDecl(Info, P->getDecomposedDecl())) {
+    if (!EvaluateDecl(Info, P->getDecomposedDecl())) {
       return false;
     }
     Result = true;
