@@ -4292,7 +4292,24 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get())) {
       return ExprError();
     }
-    return Actions.ActOnMatchTestExpr(LHS.get(), MatchLoc, Pattern.get());
+    SourceLocation IfLoc;
+    ExprResult Guard = ExprEmpty();
+    if (TryConsumeToken(tok::kw_if, IfLoc)) {
+      bool RHSIsInitList = false;
+      prec::Level NextTokPrec;
+      Guard = ParseRHSExprOfBinaryExpression(LHS, nullptr, RHSIsInitList,
+                                             prec::Match, NextTokPrec);
+      assert(!RHSIsInitList &&
+             "RHS of a match test expression cannot be an init list.");
+      assert(NextTokPrec < prec::Match &&
+             "The precedence of the operator to the right of the RHS cannot "
+             "be tighter than match");
+      if (Guard.isInvalid()) {
+        return ExprError();
+      }
+    }
+    return Actions.ActOnMatchTestExpr(LHS.get(), MatchLoc, Pattern.get(), IfLoc,
+                                      Guard.get());
   }
 }
 
@@ -4329,7 +4346,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
               StopAtSemi | StopBeforeMatch);
   }
   SourceLocation IfLoc;
-  ExprResult Guard;
+  ExprResult Guard = ExprEmpty();
   if (TryConsumeToken(tok::kw_if, IfLoc)) {
     Guard = ParseExpression();
     if (Guard.isInvalid()) {
@@ -4346,7 +4363,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   if (Guard.isInvalid() || Handler.isInvalid()) {
     return true;
   }
-  Case = {Pattern.get(), Guard.get(), Handler.get()};
+  Case = {Pattern.get(), IfLoc, Guard.get(), Handler.get()};
   return false;
 }
 
