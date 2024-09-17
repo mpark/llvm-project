@@ -5556,12 +5556,16 @@ class MatchTestExpr final : public Expr {
   Expr *Subject;
   SourceLocation MatchLoc;
   MatchPattern *Pattern;
+  SourceLocation IfLoc;
+  Expr *Guard;
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, Expr *Subject,
-                         SourceLocation MatchLoc, MatchPattern *Pattern)
+                         SourceLocation MatchLoc, MatchPattern *Pattern,
+                         SourceLocation IfLoc, Expr *Guard)
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
-        Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern) {}
+        Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern), IfLoc(IfLoc),
+        Guard(Guard) {}
 
   explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
 
@@ -5571,12 +5575,15 @@ public:
   const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
 
+  const Expr* getGuard() const { return Guard; }
+  Expr* getGuard() { return Guard; }
+
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return getSubject()->getBeginLoc();
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
-    return Pattern->getEndLoc();
+    return Guard ? Guard->getEndLoc() : Pattern->getEndLoc();
   }
 
   child_range children() {
@@ -5594,9 +5601,9 @@ public:
 
 struct MatchCase {
   MatchPattern *Pattern;
+  SourceLocation IfLoc;
   Expr *Guard;
   Stmt *Handler;
-  SourceLocation IfLoc, FatArrowLoc;
 };
 
 class MatchSelectExpr final
