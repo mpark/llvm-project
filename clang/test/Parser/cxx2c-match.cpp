@@ -284,3 +284,7 @@ void test_trailing_return_type(int x) {
     2 => 'c';
   };
 }
+
+bool test_match_test_with_guard(const int (&xs)[2]) {
+  return xs match let [x, y] if (x == y);
+}
