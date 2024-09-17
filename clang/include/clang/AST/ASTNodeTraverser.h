@@ -962,6 +962,9 @@ public:
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
+    const Expr *Guard = Node->getGuard();
+    if (Guard)
+      Visit(Guard);
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
