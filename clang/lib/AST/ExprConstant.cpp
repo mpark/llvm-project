@@ -9460,12 +9460,13 @@ public:
   bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
     bool Result;
     for (const MatchCase &Case : E->getCases()) {
-      if (!EvaluateMatchPattern(Case.Pattern, Result, Info)) {
+      if (!EvaluateMatchPattern(Case.Pattern, Result, Info))
         return false;
-      }
-      if (Result) {
+      if (Result && Case.Guard)
+        if (!EvaluateAsBooleanCondition(Case.Guard, Result, Info))
+          return false;
+      if (Result)
         return this->Visit(Case.Handler);
-      }
     }
     return Error(E);
   }
@@ -20629,8 +20630,13 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
-  return EvaluateMatchPattern(E->getPattern(), Result, Info) &&
-         Success(Result, E);
+  if (!EvaluateMatchPattern(E->getPattern(), Result, Info))
+    return false;
+  if (const Expr *Guard = E->getGuard(); Result && Guard) {
+    if (!EvaluateAsBooleanCondition(Guard, Result, Info))
+      return false;
+  }
+  return Success(Result, E);
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
