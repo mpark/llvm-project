@@ -1849,7 +1849,10 @@ public:
     IsTypeCast
   };
 
-  ExprResult ParseExpression(TypeCastState isTypeCast = NotTypeCast);
+  using InjectedDeclSet = llvm::SmallPtrSet<Decl *, 4>;
+
+  ExprResult ParseExpression(TypeCastState isTypeCast = NotTypeCast,
+                             InjectedDeclSet *Decls = nullptr);
   ExprResult ParseConstantExpressionInExprEvalContext(
       TypeCastState isTypeCast = NotTypeCast);
   ExprResult ParseConstantExpression();
@@ -1860,7 +1863,8 @@ public:
   ParseConstraintLogicalAndExpression(bool IsTrailingRequiresClause);
   ExprResult ParseConstraintLogicalOrExpression(bool IsTrailingRequiresClause);
   // Expr that doesn't include commas.
-  ExprResult ParseAssignmentExpression(TypeCastState isTypeCast = NotTypeCast);
+  ExprResult ParseAssignmentExpression(TypeCastState isTypeCast = NotTypeCast,
+                                       InjectedDeclSet *Decls = nullptr);
   ExprResult ParseConditionalExpression();
 
   ExprResult ParseMSAsmIdentifier(llvm::SmallVectorImpl<Token> &LineToks,
@@ -1878,8 +1882,8 @@ private:
 
   ExprResult ParseExpressionWithLeadingExtension(SourceLocation ExtLoc);
 
-  ExprResult ParseRHSOfBinaryExpression(ExprResult LHS,
-                                        prec::Level MinPrec);
+  ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
+                                        InjectedDeclSet *Decls = nullptr);
 
   ExprResult ParseRHSExprOfBinaryExpression(ExprResult &LHS,
                                             ExprResult *TernaryMiddle,
@@ -2112,6 +2116,7 @@ private:
                                           SourceLocation Loc,
                                           Sema::ConditionKind CK,
                                           bool MissingOK,
+                                          InjectedDeclSet *InjectedDecls,
                                           ForRangeInfo *FRI = nullptr,
                                           bool EnterForConditionScope = false);
   DeclGroupPtrTy ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
@@ -2213,7 +2218,8 @@ private:
                                  Sema::ConditionResult &CondResult,
                                  SourceLocation Loc, Sema::ConditionKind CK,
                                  SourceLocation &LParenLoc,
-                                 SourceLocation &RParenLoc);
+                                 SourceLocation &RParenLoc,
+                                 InjectedDeclSet *InjectedDecls = nullptr);
   StmtResult ParseIfStatement(SourceLocation *TrailingElseLoc);
   StmtResult ParseSwitchStatement(SourceLocation *TrailingElseLoc);
   StmtResult ParseWhileStatement(SourceLocation *TrailingElseLoc);
@@ -3943,7 +3949,8 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
-  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc);
+  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                 InjectedDeclSet *InjectedDecls);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
