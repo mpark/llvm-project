@@ -4329,27 +4329,30 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();
   if (Pattern.isInvalid()) {
-    SkipUntil(tok::r_brace, tok::kw_if, tok::equalgreater,
+    SkipUntil(tok::kw_if, tok::equalgreater, tok::r_brace,
               StopAtSemi | StopBeforeMatch);
+    if (Tok.isOneOf(tok::semi, tok::r_brace))
+      return true;
+  } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get())) {
+    return true;
   }
   SourceLocation IfLoc;
   ExprResult Guard = ExprEmpty();
   if (TryConsumeToken(tok::kw_if, IfLoc)) {
     Guard = ParseExpression();
     if (Guard.isInvalid()) {
-      SkipUntil(tok::r_brace, tok::equalgreater, StopAtSemi | StopBeforeMatch);
+      SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
+      if (Tok.isOneOf(tok::semi, tok::r_brace))
+        return true;
     }
   }
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after,
-                       "pattern") ||
-      Pattern.isInvalid() ||
-      Actions.CheckCompleteMatchPattern(Subject, Pattern.get())) {
+                       "pattern")) {
     return true;
   }
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy);
-  if (Guard.isInvalid() || Handler.isInvalid()) {
+  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
-  }
   Case = {Pattern.get(), IfLoc, Guard.get(), Handler.get()};
   return false;
 }
