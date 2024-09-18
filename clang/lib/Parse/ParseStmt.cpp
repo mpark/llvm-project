@@ -1367,13 +1367,14 @@ bool Parser::ParseParenExprOrCondition(StmtResult *InitStmt,
                                        SourceLocation Loc,
                                        Sema::ConditionKind CK,
                                        SourceLocation &LParenLoc,
-                                       SourceLocation &RParenLoc) {
+                                       SourceLocation &RParenLoc,
+                                       InjectedDeclSet *InjectedDecls) {
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
   SourceLocation Start = Tok.getLocation();
 
   if (getLangOpts().CPlusPlus) {
-    Cond = ParseCXXCondition(InitStmt, Loc, CK, false);
+    Cond = ParseCXXCondition(InitStmt, Loc, CK, false, InjectedDecls);
   } else {
     ExprResult CondExpr = ParseExpression();
 
@@ -1582,12 +1583,13 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   SourceLocation LParen;
   SourceLocation RParen;
   std::optional<bool> ConstexprCondition;
+  InjectedDeclSet InjectedDecls;
   if (!IsConsteval) {
 
     if (ParseParenExprOrCondition(&InitStmt, Cond, IfLoc,
                                   IsConstexpr ? Sema::ConditionKind::ConstexprIf
                                               : Sema::ConditionKind::Boolean,
-                                  LParen, RParen))
+                                  LParen, RParen, &InjectedDecls))
       return StmtError();
 
     if (IsConstexpr)
@@ -1614,7 +1616,13 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   //    would have to notify ParseStatement not to create a new scope. It's
   //    simpler to let it create a new scope.
   //
-  ParseScope InnerScope(this, Scope::DeclScope, C99orCXX, IsBracedThen);
+  ParseScope InnerScope(this, Scope::DeclScope | Scope::ThenScope, C99orCXX);
+  {
+    Scope *S = getCurScope();
+    for (Decl *D : InjectedDecls)
+      Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
+                                /*AddToContext=*/false);
+  }
 
   MisleadingIndentationChecker MIChecker(*this, MSK_if, IfLoc);
 
@@ -1665,8 +1673,7 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     // The substatement in a selection-statement (each substatement, in the else
     // form of the if statement) implicitly defines a local scope.
     //
-    ParseScope InnerScope(this, Scope::DeclScope, C99orCXX,
-                          Tok.is(tok::l_brace));
+    ParseScope InnerScope(this, Scope::DeclScope, C99orCXX, Tok.is(tok::l_brace));
 
     MisleadingIndentationChecker MIChecker(*this, MSK_else, ElseLoc);
     bool ShouldEnter = ConstexprCondition && *ConstexprCondition;
@@ -2248,7 +2255,8 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc) {
         SecondPart = ParseCXXCondition(
             /*InitStmt=*/nullptr, ForLoc, CK,
             // FIXME: recovery if we don't see another semi!
-            /*MissingOK=*/true, MightBeForRangeStmt ? &ForRangeInfo : nullptr,
+            /*MissingOK=*/true, /*InjectedDecls=*/nullptr,
+            MightBeForRangeStmt ? &ForRangeInfo : nullptr,
             /*EnterForConditionScope=*/true);
 
         if (ForRangeInfo.ParsedForRangeDecl()) {
