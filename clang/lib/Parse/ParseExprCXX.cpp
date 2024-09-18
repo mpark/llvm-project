@@ -1963,6 +1963,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
                                              SourceLocation Loc,
                                              Sema::ConditionKind CK,
                                              bool MissingOK,
+                                             InjectedDeclSet *InjectedDecls,
                                              ForRangeInfo *FRI) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
   PreferredType.enterCondition(Actions, Tok.getLocation());
@@ -2057,7 +2058,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       }
       ConsumeToken();
       *InitStmt = Actions.ActOnNullStmt(SemiLoc);
-      return ParseCondition(nullptr, Loc, CK, MissingOK);
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls);
     }
 
     // The evaluation context must stay active through ActOnCondition below, so
@@ -2070,17 +2071,29 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
         /*ExprContext=*/Sema::ExpressionEvaluationContextRecord::EK_Other,
         /*ShouldEnter=*/CK == Sema::ConditionKind::ConstexprIf);
 
-    // Parse the expression.
-    ExprResult Expr = ParseExpression(); // expression
+    InjectedDeclSet Decls;
+    ExprResult Expr = ParseExpression(TypoCorrectionTypeBehavior::AllowNonTypes,
+                                      &Decls);
 
     if (Expr.isInvalid())
       return Sema::ConditionError();
+
+    if (isa<MatchTestExpr>(Expr.get())) {
+      if (InjectedDecls) {
+        *InjectedDecls = Decls;
+      } else {
+        Scope *S = getCurScope();
+        for (Decl *D : Decls)
+          Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
+                                    /*AddToContext=*/false);
+      }
+    }
 
     if (InitStmt && Tok.is(tok::semi)) {
       WarnOnInit();
       *InitStmt = Actions.ActOnExprStmt(Expr.get());
       ConsumeToken();
-      return ParseCondition(nullptr, Loc, CK, MissingOK);
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls);
     }
 
     return Actions.ActOnCondition(getCurScope(), Loc, Expr.get(), CK,
@@ -2100,7 +2113,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
                                   attrs, DeclSpecAttrs, /*RequireSemi=*/true);
     }
     *InitStmt = Actions.ActOnDeclStmt(DG, DeclStart, DeclEnd);
-    return ParseCondition(nullptr, Loc, CK, MissingOK);
+    return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls);
   }
 
   case ConditionOrInitStatement::ForRangeDecl: {
@@ -3921,8 +3934,8 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
-ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
-                                       SourceLocation MatchLoc) {
+ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                       InjectedDeclSet *InjectedDecls) {
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
     bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
     QualType RetTy;
@@ -3950,10 +3963,15 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
     return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr, RetTy,
                                         Cases, Braces);
   } else {
+    ParseScope MatchTestScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
     if (LHS.isInvalid() || Pattern.isInvalid() ||
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get())) {
       return ExprError();
+    }
+    if (InjectedDecls) {
+      Scope::decl_range DR = getCurScope()->decls();
+      *InjectedDecls = {DR.begin(), DR.end()};
     }
     SourceLocation IfLoc;
     ExprResult Guard = ExprEmpty();
@@ -3964,7 +3982,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
                                              prec::Match, NextTokPrec);
       assert(!RHSIsInitList &&
              "RHS of a match test expression cannot be an init list.");
-      assert(NextTokPrec < prec::Match &&
+      assert(NextTokPrec <= prec::Match &&
              "The precedence of the operator to the right of the RHS cannot "
              "be tighter than match");
       if (Guard.isInvalid()) {
@@ -4127,7 +4145,7 @@ Parser::ParseExpressionPattern(
         *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
     assert(!RHSIsInitList &&
            "RHS of a match test expression cannot be an init list.");
-    assert(NextTokPrec < prec::Match &&
+    assert(NextTokPrec <= prec::Match &&
            "The precedence of the operator to the right of the RHS cannot "
            "be tighter than match");
     return Expr;
