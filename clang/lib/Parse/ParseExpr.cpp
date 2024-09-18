@@ -45,10 +45,10 @@
 #include <optional>
 using namespace clang;
 
-ExprResult
-Parser::ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior) {
-  ExprResult LHS(ParseAssignmentExpression(CorrectionBehavior));
-  return ParseRHSOfBinaryExpression(LHS, prec::Comma);
+ExprResult Parser::ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior,
+                                   InjectedDeclSet *InjectedDecls) {
+  ExprResult LHS(ParseAssignmentExpression(CorrectionBehavior, InjectedDecls));
+  return ParseRHSOfBinaryExpression(LHS, prec::Comma, InjectedDecls);
 }
 
 ExprResult
@@ -75,7 +75,7 @@ Parser::ParseExpressionWithLeadingExtension(SourceLocation ExtLoc) {
 }
 
 ExprResult Parser::ParseAssignmentExpression(
-    TypoCorrectionTypeBehavior CorrectionBehavior) {
+    TypoCorrectionTypeBehavior CorrectionBehavior, InjectedDeclSet *Decls) {
   if (Tok.is(tok::code_completion)) {
     cutOffParsing();
     Actions.CodeCompletion().CodeCompleteExpression(
@@ -91,7 +91,7 @@ ExprResult Parser::ParseAssignmentExpression(
   ExprResult LHS =
       ParseCastExpression(CastParseKind::AnyCastExpr,
                           /*isAddressOfOperand=*/false, CorrectionBehavior);
-  return ParseRHSOfBinaryExpression(LHS, prec::Assignment);
+  return ParseRHSOfBinaryExpression(LHS, prec::Assignment, Decls);
 }
 
 ExprResult Parser::ParseConditionalExpression() {
@@ -316,8 +316,9 @@ bool Parser::isFoldOperator(const Token &Tok) const {
                                            true, getLangOpts().PatternMatching));
 }
 
-ExprResult
-Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
+ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
+                                              prec::Level MinPrec,
+                                              InjectedDeclSet *Decls) {
   prec::Level NextTokPrec = getBinOpPrecedence(Tok,
                                                GreaterThanIsOperator,
                                                getLangOpts().CPlusPlus11,
@@ -400,7 +401,7 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // Special case handling for match expressions.
     if (NextTokPrec == prec::Match) {
       ParseScope MatchScope(this, Scope::DeclScope);
-      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation());
+      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation(), Decls);
       NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
                                        getLangOpts().CPlusPlus11,
                                        getLangOpts().PatternMatching);

@@ -304,3 +304,27 @@ static_assert(test_match_pattern_guards({0, 0}) == 0);
 static_assert(test_match_pattern_guards({-1, 2}) == 2);
 static_assert(test_match_pattern_guards({3, 0}) == 3);
 static_assert(test_match_pattern_guards({4, 7}) == 11);
+
+constexpr int test_match_in_if_condition(const int *p) {
+  if (p match ? let v) {
+    return v;
+  }
+  return -1;
+}
+
+static_assert(test_match_in_if_condition(nullptr) == -1);
+static_assert(test_match_in_if_condition(&x) == 0);
+static_assert(test_match_in_if_condition(&y) == 1);
+
+constexpr int test_match_in_while_condition() {
+  int i = 0;
+  auto next = [&]() -> int* {
+    return i < 4 ? &i : nullptr;
+  };
+  while (next() match ? let v) {
+    ++v;
+  }
+  return i;
+}
+
+static_assert(test_match_in_while_condition() == 4);
