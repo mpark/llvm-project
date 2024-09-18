@@ -1984,7 +1984,9 @@ Parser::ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
 Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
                                              SourceLocation Loc,
                                              Sema::ConditionKind CK,
-                                             bool MissingOK, ForRangeInfo *FRI,
+                                             bool MissingOK,
+                                             InjectedDeclSet *InjectedDecls,
+                                             ForRangeInfo *FRI,
                                              bool AfterInitStmt) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
   PreferredType.enterCondition(Actions, Tok.getLocation());
@@ -2054,7 +2056,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       } else
         *InitStmt = DeclStmt;
       ExtensionGuard.reset();
-      return ParseCondition(nullptr, Loc, CK, MissingOK, /*FRI=*/nullptr,
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
+                            /*FRI=*/nullptr,
                             /*AfterInitStmt=*/true);
     }
 
@@ -2069,7 +2072,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
         Diag(Null.get()->getBeginLoc(),
              diag::err_c2y_first_condition_clause_is_not_declaration);
       ExtensionGuard.reset();
-      return ParseCondition(nullptr, Loc, CK, MissingOK, /*FRI=*/nullptr,
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
+                            /*FRI=*/nullptr,
                             /*AfterInitStmt=*/true);
     }
   }
@@ -2092,7 +2096,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       ConsumeToken();
       *InitStmt = Actions.ActOnNullStmt(SemiLoc);
       ExtensionGuard.reset();
-      return ParseCondition(nullptr, Loc, CK, MissingOK, /*FRI=*/nullptr,
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
+                            /*FRI=*/nullptr,
                             /*AfterInitStmt=*/true);
     }
 
@@ -2107,18 +2112,33 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
         /*ShouldEnter=*/CK == Sema::ConditionKind::ConstexprIf);
 
     ExtensionGuard.reset();
+    InjectedDeclSet Decls;
     ExprResult Expr = ExtLoc.isValid()
-                          ? ParseExpressionWithLeadingExtension(ExtLoc)
-                          : ParseExpression();
+                          ? ParseExpressionWithLeadingExtension(ExtLoc, &Decls)
+                          : ParseExpression(
+                                TypoCorrectionTypeBehavior::AllowNonTypes,
+                                &Decls);
 
     if (Expr.isInvalid())
       return Sema::ConditionError();
+
+    if (isa<MatchTestExpr>(Expr.get())) {
+      if (InjectedDecls) {
+        *InjectedDecls = Decls;
+      } else {
+        Scope *S = getCurScope();
+        for (Decl *D : Decls)
+          Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
+                                    /*AddToContext=*/false);
+      }
+    }
 
     if (InitStmt && Tok.is(tok::semi)) {
       WarnOnInit();
       *InitStmt = Actions.ActOnExprStmt(Expr.get());
       ConsumeToken();
-      return ParseCondition(nullptr, Loc, CK, MissingOK, /*FRI=*/nullptr,
+      return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
+                            /*FRI=*/nullptr,
                             /*AfterInitStmt=*/true);
     }
 
@@ -2140,7 +2160,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
     }
     *InitStmt = Actions.ActOnDeclStmt(DG, DeclStart, DeclEnd);
     ExtensionGuard.reset();
-    return ParseCondition(nullptr, Loc, CK, MissingOK, /*FRI=*/nullptr,
+    return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
+                          /*FRI=*/nullptr,
                           /*AfterInitStmt=*/true);
   }
 
@@ -3971,8 +3992,8 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
-ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
-                                       SourceLocation MatchLoc) {
+ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                       InjectedDeclSet *InjectedDecls) {
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
     bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
     QualType RetTy;
@@ -4000,10 +4021,15 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
     return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr, RetTy,
                                         Cases, Braces);
   } else {
+    ParseScope MatchTestScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
     if (LHS.isInvalid() || Pattern.isInvalid() ||
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get())) {
       return ExprError();
+    }
+    if (InjectedDecls) {
+      Scope::decl_range DR = getCurScope()->decls();
+      *InjectedDecls = {DR.begin(), DR.end()};
     }
     SourceLocation IfLoc;
     ExprResult Guard = ExprEmpty();
@@ -4014,7 +4040,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS,
                                              prec::Match, NextTokPrec);
       assert(!RHSIsInitList &&
              "RHS of a match test expression cannot be an init list.");
-      assert(NextTokPrec < prec::Match &&
+      assert(NextTokPrec <= prec::Match &&
              "The precedence of the operator to the right of the RHS cannot "
              "be tighter than match");
       if (Guard.isInvalid()) {
@@ -4177,7 +4203,7 @@ Parser::ParseExpressionPattern(
         *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
     assert(!RHSIsInitList &&
            "RHS of a match test expression cannot be an init list.");
-    assert(NextTokPrec < prec::Match &&
+    assert(NextTokPrec <= prec::Match &&
            "The precedence of the operator to the right of the RHS cannot "
            "be tighter than match");
     return Expr;
