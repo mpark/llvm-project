@@ -3841,8 +3841,11 @@ public:
   ///         assignment-expression ...[opt]
   ///         expression ',' assignment-expression ...[opt]
   /// \endverbatim
+  using InjectedDeclSet = llvm::SmallPtrSet<Decl *, 4>;
+
   ExprResult ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior =
-                                 TypoCorrectionTypeBehavior::AllowNonTypes);
+                                 TypoCorrectionTypeBehavior::AllowNonTypes,
+                             InjectedDeclSet *Decls = nullptr);
 
   ExprResult ParseConstantExpressionInExprEvalContext(
       TypoCorrectionTypeBehavior CorrectionBehavior =
@@ -3885,7 +3888,8 @@ public:
   /// Parse an expr that doesn't include (top-level) commas.
   ExprResult
   ParseAssignmentExpression(TypoCorrectionTypeBehavior CorrectionBehavior =
-                                TypoCorrectionTypeBehavior::AllowNonTypes);
+                                TypoCorrectionTypeBehavior::AllowNonTypes,
+                            InjectedDeclSet *Decls = nullptr);
 
   ExprResult ParseConditionalExpression();
 
@@ -3955,11 +3959,13 @@ private:
   /// This routine is called when a leading '__extension__' is seen and
   /// consumed.  This is necessary because the token gets consumed in the
   /// process of disambiguating between an expression and a declaration.
-  ExprResult ParseExpressionWithLeadingExtension(SourceLocation ExtLoc);
+  ExprResult ParseExpressionWithLeadingExtension(
+      SourceLocation ExtLoc, InjectedDeclSet *InjectedDecls = nullptr);
 
   /// Parse a binary expression that starts with \p LHS and has a
   /// precedence of at least \p MinPrec.
-  ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec);
+  ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
+                                        InjectedDeclSet *Decls = nullptr);
   ExprResult ParseRHSExprOfBinaryExpression(ExprResult &LHS,
                                             ExprResult *TernaryMiddle,
                                             bool &RHSIsInitList,
@@ -4514,7 +4520,8 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
-  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc);
+  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                 InjectedDeclSet *InjectedDecls);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
@@ -5159,6 +5166,7 @@ private:
   /// \returns The parsed condition.
   Sema::ConditionResult ParseCondition(StmtResult *InitStmt, SourceLocation Loc,
                                        Sema::ConditionKind CK, bool MissingOK,
+                                       InjectedDeclSet *InjectedDecls = nullptr,
                                        ForRangeInfo *FRI = nullptr,
                                        bool AfterInitStmt = false);
   DeclGroupPtrTy ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
@@ -7638,7 +7646,8 @@ public:
                                  Sema::ConditionResult &CondResult,
                                  SourceLocation Loc, Sema::ConditionKind CK,
                                  SourceLocation &LParenLoc,
-                                 SourceLocation &RParenLoc);
+                                 SourceLocation &RParenLoc,
+                                 InjectedDeclSet *InjectedDecls = nullptr);
 
   /// ParseIfStatement
   /// \verbatim
