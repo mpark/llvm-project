@@ -224,7 +224,7 @@ static_assert(test_bitfields(8) == 0);
 static_assert(test_bitfields(2) == 2);
 static_assert(test_bitfields(4) == 4);
 
-struct Tuple {
+struct Pair {
   template <int I>
   constexpr const int& get() const {
     if constexpr (I == 0) {
@@ -248,7 +248,7 @@ namespace std {
   };
 
   template <>
-  struct tuple_size<Tuple> {
+  struct tuple_size<Pair> {
     static constexpr int value = 2;
   };
 
@@ -261,12 +261,12 @@ namespace std {
   };
 
   template <int I>
-  struct tuple_element<I, Tuple> {
+  struct tuple_element<I, Pair> {
     using type = int;
   };
 }
 
-constexpr int test_tuple_like_decomposition_pattern(const Tuple &tup) {
+constexpr int test_tuple_like_decomposition_pattern(const Pair &tup) {
   return tup match {
     [0, 0] => -1;
     [0, let y] => y * 2;
@@ -289,3 +289,18 @@ static_assert(test_match_test_with_guard({0, 0}));
 static_assert(!test_match_test_with_guard({0, 1}));
 static_assert(test_match_test_with_guard({1, 1}));
 static_assert(!test_match_test_with_guard({2, 3}));
+
+constexpr auto test_match_pattern_guards(const Pair& p) {
+  return p match {
+    let [x, y] if x < 0 && y < 0 => 0;
+    let [x, y] if x < 0 => y;
+    let [x, y] if y < 0 => x;
+    let [x, y] => x + y;
+  };
+}
+
+static_assert(test_match_pattern_guards({-1, -2}) == 0);
+static_assert(test_match_pattern_guards({0, 0}) == 0);
+static_assert(test_match_pattern_guards({-1, 2}) == 2);
+static_assert(test_match_pattern_guards({3, 0}) == 3);
+static_assert(test_match_pattern_guards({4, 7}) == 11);
