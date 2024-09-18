@@ -1292,12 +1292,13 @@ bool Parser::ParseParenExprOrCondition(StmtResult *InitStmt,
                                        SourceLocation Loc,
                                        Sema::ConditionKind CK,
                                        SourceLocation &LParenLoc,
-                                       SourceLocation &RParenLoc) {
+                                       SourceLocation &RParenLoc,
+                                       InjectedDeclSet *InjectedDecls) {
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
   SourceLocation Start = Tok.getLocation();
 
-  Cond = ParseCondition(InitStmt, Loc, CK, false);
+  Cond = ParseCondition(InitStmt, Loc, CK, false, InjectedDecls);
 
   // If the parser was confused by the condition and we don't have a ')', try to
   // recover by skipping ahead to a semi and bailing out.  If condexp is
@@ -1516,13 +1517,14 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   Sema::ConditionResult Cond;
   SourceLocation LParen;
   SourceLocation RParen;
+  InjectedDeclSet InjectedDecls;
   std::optional<bool> ConstexprCondition;
   if (!IsConsteval) {
 
     if (ParseParenExprOrCondition(&InitStmt, Cond, IfLoc,
                                   IsConstexpr ? Sema::ConditionKind::ConstexprIf
                                               : Sema::ConditionKind::Boolean,
-                                  LParen, RParen))
+                                  LParen, RParen, &InjectedDecls))
       return StmtError();
 
     if (IsConstexpr)
@@ -1570,7 +1572,21 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     EnterExpressionEvaluationContext PotentiallyDiscarded(
         Actions, Context, nullptr,
         Sema::ExpressionEvaluationContextRecord::EK_Other, ShouldEnter);
-    ThenStmt = ParseStatement(&InnerStatementTrailingElseLoc);
+    if (IsBracedThen && !InjectedDecls.empty()) {
+      ParseScope CompoundScope(this,
+                               Scope::DeclScope | Scope::CompoundStmtScope);
+      for (Decl *D : InjectedDecls)
+        Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), getCurScope(),
+                                  /*AddToContext=*/false);
+      StackHandler.runWithSufficientStackSpace(Tok.getLocation(), [&, this]() {
+        ThenStmt = ParseCompoundStatementBody();
+      });
+    } else {
+      for (Decl *D : InjectedDecls)
+        Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), getCurScope(),
+                                  /*AddToContext=*/false);
+      ThenStmt = ParseStatement(&InnerStatementTrailingElseLoc);
+    }
   }
 
   if (Tok.isNot(tok::kw_else))
@@ -2218,7 +2234,8 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
         SecondPart = ParseCondition(
             /*InitStmt=*/nullptr, ForLoc, CK,
             // FIXME: recovery if we don't see another semi!
-            /*MissingOK=*/true, MightBeForRangeStmt ? &ForRangeInfo : nullptr);
+            /*MissingOK=*/true, /*InjectedDecls=*/nullptr,
+            MightBeForRangeStmt ? &ForRangeInfo : nullptr);
 
         if (ForRangeInfo.ParsedForRangeDecl()) {
           DiagCompat(FirstPart.get() ? FirstPart.get()->getBeginLoc()

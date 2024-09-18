@@ -286,5 +286,121 @@ void test_trailing_return_type(int x) {
 }
 
 bool test_match_test_with_guard(const int (&xs)[2]) {
-  return xs match let [x, y] if (x == y);
+  bool result = xs match let [x, y] if (x == y);
+  x; // expected-error {{use of undeclared identifier 'x'}}
+  y; // expected-error {{use of undeclared identifier 'y'}}
+  return result;
+}
+
+void test_match_in_condition(const int *p, const int (*q)[2]) {
+  p match ? let v;
+  v; // expected-error {{use of undeclared identifier 'v'}}
+  if (p match ? let v) v;
+  else v; // expected-error {{use of undeclared identifier 'v'}}
+  if (p match ? let v) // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  else
+    int v;
+  if (p match ? let v) {
+    v;
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  }
+  if (int i = 0; p match ? let v) {
+    i;
+    v;
+  } else {
+    i;
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  }
+  if (p match ? let v) { // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  } else {
+    int v;
+  }
+  if (int i = 0; // expected-note {{previous definition is here}}
+      p match ? let v) { // expected-note {{previous definition is here}}
+    int i; // expected-error {{redefinition of 'i'}}
+    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  } else {
+    int v;
+  }
+  if (int i = 0; // expected-note {{previous definition is here}}
+      p match ? let v) { // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  } else {
+    int i; // expected-error {{redefinition of 'i'}}
+    int v;
+  }
+  if ((p match ? let v)) {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  }
+  if (int i = 0; (p match ? let v)) {
+    i;
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  } else {
+    i;
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  }
+  if (!(p match ? let v)) {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+  }
+  if (q match ? [0, let v] match let w) {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w;
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (p match ? 0 match let w) {
+    w;
+  } else {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (p match ? (0 match let w)) {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  } else {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (q match ? let [v, w]) {
+    v;
+    w;
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (q match ? let [v, w] + 1) {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  auto next = []() -> int* { return nullptr; };
+  for (int i = 0; next() match (? let elem); ++i) elem;
+  for (int i = 0;
+       next() match (? let elem); // expected-note {{previous definition is here}}
+       ++i)
+    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  for (int i = 0; next() match (? let elem); ++i) {
+    elem;
+  }
+  for (int i = 0;
+       next() match (? let elem); // expected-note {{previous definition is here}}
+       ++i) {
+    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  }
+  while (next() match (? let elem)) elem;
+  while (next() match (? let elem)) // expected-note {{previous definition is here}}
+    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  while (next() match (? let elem)) {
+    elem;
+  }
+  while (next() match (? let elem)) { // expected-note {{previous definition is here}}
+    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  }
 }
