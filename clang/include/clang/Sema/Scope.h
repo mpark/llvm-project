@@ -162,6 +162,9 @@ public:
 
     /// This is a scope of friend declaration.
     FriendScope = 0x40000000,
+
+    /// This is a scope of the then substatement of an if statement.
+    ThenScope = 0x80000000,
   };
 
 private:
@@ -591,6 +594,9 @@ public:
 
   /// Determine whether this scope is a friend scope.
   bool isFriendScope() const { return getFlags() & Scope::FriendScope; }
+
+  /// Determine whether this scope is a then scope.
+  bool isThenScope() const { return getFlags() & Scope::ThenScope; }
 
   /// Returns if rhs has a higher scope depth than this.
   ///

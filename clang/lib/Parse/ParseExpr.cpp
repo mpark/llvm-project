@@ -131,9 +131,10 @@ using namespace clang;
 ///         assignment-expression ...[opt]
 ///         expression ',' assignment-expression ...[opt]
 /// \endverbatim
-ExprResult Parser::ParseExpression(TypeCastState isTypeCast) {
-  ExprResult LHS(ParseAssignmentExpression(isTypeCast));
-  return ParseRHSOfBinaryExpression(LHS, prec::Comma);
+ExprResult Parser::ParseExpression(TypeCastState isTypeCast,
+                                   InjectedDeclSet *InjectedDecls) {
+  ExprResult LHS(ParseAssignmentExpression(isTypeCast, InjectedDecls));
+  return ParseRHSOfBinaryExpression(LHS, prec::Comma, InjectedDecls);
 }
 
 /// This routine is called when the '@' is seen and consumed.
@@ -168,7 +169,8 @@ Parser::ParseExpressionWithLeadingExtension(SourceLocation ExtLoc) {
 }
 
 /// Parse an expr that doesn't include (top-level) commas.
-ExprResult Parser::ParseAssignmentExpression(TypeCastState isTypeCast) {
+ExprResult Parser::ParseAssignmentExpression(TypeCastState isTypeCast,
+                                             InjectedDeclSet *Decls) {
   if (Tok.is(tok::code_completion)) {
     cutOffParsing();
     Actions.CodeCompletion().CodeCompleteExpression(
@@ -184,7 +186,7 @@ ExprResult Parser::ParseAssignmentExpression(TypeCastState isTypeCast) {
   ExprResult LHS = ParseCastExpression(AnyCastExpr,
                                        /*isAddressOfOperand=*/false,
                                        isTypeCast);
-  return ParseRHSOfBinaryExpression(LHS, prec::Assignment);
+  return ParseRHSOfBinaryExpression(LHS, prec::Assignment, Decls);
 }
 
 ExprResult Parser::ParseConditionalExpression() {
@@ -427,8 +429,9 @@ bool Parser::isFoldOperator(const Token &Tok) const {
 
 /// Parse a binary expression that starts with \p LHS and has a
 /// precedence of at least \p MinPrec.
-ExprResult
-Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
+ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
+                                              prec::Level MinPrec,
+                                              InjectedDeclSet *Decls) {
   prec::Level NextTokPrec = getBinOpPrecedence(Tok,
                                                GreaterThanIsOperator,
                                                getLangOpts().CPlusPlus11,
@@ -493,7 +496,7 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // Special case handling for match expressions.
     if (NextTokPrec == prec::Match) {
       ParseScope MatchScope(this, Scope::DeclScope);
-      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation());
+      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation(), Decls);
       NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
                                        getLangOpts().CPlusPlus11,
                                        getLangOpts().PatternMatching);
