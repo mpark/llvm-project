@@ -15042,9 +15042,14 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
   }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
-    return EvaluateDecl(Info, P->getCondVar()) &&
+    const VarDecl *CondVar = P->getCondVar();
+    const VarDecl *BindingVar = P->getBindingVar();
+    return EvaluateDecl(Info, P->getHoldingVar()) &&
+           (!CondVar || EvaluateDecl(Info, CondVar)) &&
            EvaluateAsBooleanCondition(P->getCond(), Result, Info) &&
-           (!Result || EvaluateMatchPattern(P->getSubPattern(), Result, Info));
+           (!Result ||
+            ((!BindingVar || EvaluateDecl(Info, BindingVar)) &&
+             EvaluateMatchPattern(P->getSubPattern(), Result, Info)));
   }
   case MatchPattern::DecompositionPatternClass:
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);
