@@ -14,6 +14,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
@@ -32,6 +33,344 @@ static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
   SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false);
   SemaRef.FinalizeDeclaration(Decl);
   return Decl;
+}
+
+// Copied from SemaDeclCXX.cpp
+static std::string printTemplateArgs(const PrintingPolicy &PrintingPolicy,
+                                     TemplateArgumentListInfo &Args,
+                                     const TemplateParameterList *Params) {
+  SmallString<128> SS;
+  llvm::raw_svector_ostream OS(SS);
+  bool First = true;
+  unsigned I = 0;
+  for (auto &Arg : Args.arguments()) {
+    if (!First)
+      OS << ", ";
+    Arg.getArgument().print(PrintingPolicy, OS,
+                            TemplateParameterList::shouldIncludeTypeForArgument(
+                                PrintingPolicy, Params, I));
+    First = false;
+    I++;
+  }
+  return std::string(OS.str());
+}
+
+// Copied from SemaDeclCXX.cpp
+static bool lookupStdTypeTraitMember(Sema &S, LookupResult &TraitMemberLookup,
+                                     SourceLocation Loc, StringRef Trait,
+                                     TemplateArgumentListInfo &Args,
+                                     unsigned DiagID) {
+  auto DiagnoseMissing = [&] {
+    if (DiagID)
+      S.Diag(Loc, DiagID) << printTemplateArgs(S.Context.getPrintingPolicy(),
+                                               Args, /*Params*/ nullptr);
+    return true;
+  };
+
+  // FIXME: Factor out duplication with lookupPromiseType in SemaCoroutine.
+  NamespaceDecl *Std = S.getStdNamespace();
+  if (!Std)
+    return DiagnoseMissing();
+
+  // Look up the trait itself, within namespace std. We can diagnose various
+  // problems with this lookup even if we've been asked to not diagnose a
+  // missing specialization, because this can only fail if the user has been
+  // declaring their own names in namespace std or we don't support the
+  // standard library implementation in use.
+  LookupResult Result(S, &S.PP.getIdentifierTable().get(Trait), Loc,
+                      Sema::LookupOrdinaryName);
+  if (!S.LookupQualifiedName(Result, Std))
+    return DiagnoseMissing();
+  if (Result.isAmbiguous())
+    return true;
+
+  ClassTemplateDecl *TraitTD = Result.getAsSingle<ClassTemplateDecl>();
+  if (!TraitTD) {
+    Result.suppressDiagnostics();
+    NamedDecl *Found = *Result.begin();
+    S.Diag(Loc, diag::err_std_type_trait_not_class_template) << Trait;
+    S.Diag(Found->getLocation(), diag::note_declared_at);
+    return true;
+  }
+
+  // Build the template-id.
+  QualType TraitTy = S.CheckTemplateIdType(TemplateName(TraitTD), Loc, Args);
+  if (TraitTy.isNull())
+    return true;
+  if (!S.isCompleteType(Loc, TraitTy)) {
+    if (DiagID)
+      S.RequireCompleteType(
+          Loc, TraitTy, DiagID,
+          printTemplateArgs(S.Context.getPrintingPolicy(), Args,
+                            TraitTD->getTemplateParameters()));
+    return true;
+  }
+
+  CXXRecordDecl *RD = TraitTy->getAsCXXRecordDecl();
+  assert(RD && "specialization of class template is not a class?");
+
+  // Look up the member of the trait type.
+  S.LookupQualifiedName(TraitMemberLookup, RD);
+  return TraitMemberLookup.isAmbiguous();
+}
+
+// Copied from SemaDeclCXX.cpp
+static TemplateArgumentLoc
+getTrivialIntegralTemplateArgument(Sema &S, SourceLocation Loc, QualType T,
+                                   uint64_t I) {
+  TemplateArgument Arg(S.Context, S.Context.MakeIntValue(I, T), T);
+  return S.getTrivialTemplateArgumentLoc(Arg, T, Loc);
+}
+
+// Copied from SemaDeclCXX.cpp
+static TemplateArgumentLoc
+getTrivialTypeTemplateArgument(Sema &S, SourceLocation Loc, QualType T) {
+  return S.getTrivialTemplateArgumentLoc(TemplateArgument(T), QualType(), Loc);
+}
+
+// Copied and modified IsTupleLike from SemaDeclCXX.cpp
+namespace {
+enum class IsVariantLike { VariantLike, NotVariantLike, Error };
+}
+
+// Copied and modified isTupleLike from SemaDeclCXX.cpp
+static IsVariantLike isVariantLike(Sema &S, SourceLocation Loc, QualType T,
+                                   llvm::APSInt &Size) {
+  EnterExpressionEvaluationContext ContextRAII(
+      S, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+
+  DeclarationName Value = S.PP.getIdentifierInfo("value");
+  LookupResult R(S, Value, Loc, Sema::LookupOrdinaryName);
+
+  // Form template argument list for variant_size<T>.
+  TemplateArgumentListInfo Args(Loc, Loc);
+  Args.addArgument(getTrivialTypeTemplateArgument(S, Loc, T));
+
+  // If there's no variant_size specialization or the lookup of 'value' is
+  // empty, it's not variant-like.
+  if (lookupStdTypeTraitMember(S, R, Loc, "variant_size", Args, /*DiagID*/ 0) ||
+      R.empty())
+    return IsVariantLike::NotVariantLike;
+
+  // If we get this far, we've committed to the variant interpretation, but
+  // we can still fail if there actually isn't a usable ::value.
+
+  struct ICEDiagnoser : Sema::VerifyICEDiagnoser {
+    LookupResult &R;
+    TemplateArgumentListInfo &Args;
+    ICEDiagnoser(LookupResult &R, TemplateArgumentListInfo &Args)
+        : R(R), Args(Args) {}
+    Sema::SemaDiagnosticBuilder diagnoseNotICE(Sema &S,
+                                               SourceLocation Loc) override {
+      return S.Diag(Loc, diag::err_decomp_decl_std_tuple_size_not_constant)
+             << printTemplateArgs(S.Context.getPrintingPolicy(), Args,
+                                  /*Params*/ nullptr);
+    }
+  } Diagnoser(R, Args);
+
+  ExprResult E =
+      S.BuildDeclarationNameExpr(CXXScopeSpec(), R, /*NeedsADL*/ false);
+  if (E.isInvalid())
+    return IsVariantLike::Error;
+
+  E = S.VerifyIntegerConstantExpression(E.get(), &Size, Diagnoser);
+  if (E.isInvalid())
+    return IsVariantLike::Error;
+
+  return IsVariantLike::VariantLike;
+}
+
+// Copied and modified getTupleLikeElementType from SemaDeclCXX.cpp
+/// \return std::variant_alternative<I, T>::type.
+static QualType getVariantLikeAlternativeType(Sema &S, SourceLocation Loc,
+                                              unsigned I, QualType T) {
+  // Form template argument list for variant_alternative<I, T>.
+  TemplateArgumentListInfo Args(Loc, Loc);
+  Args.addArgument(
+      getTrivialIntegralTemplateArgument(S, Loc, S.Context.getSizeType(), I));
+  Args.addArgument(getTrivialTypeTemplateArgument(S, Loc, T));
+
+  DeclarationName TypeDN = S.PP.getIdentifierInfo("type");
+  LookupResult R(S, TypeDN, Loc, Sema::LookupOrdinaryName);
+  if (lookupStdTypeTraitMember(
+          S, R, Loc, "variant_alternative", Args,
+          diag::err_decomp_decl_std_tuple_element_not_specialized))
+    return QualType();
+
+  auto *TD = R.getAsSingle<TypeDecl>();
+  if (!TD) {
+    R.suppressDiagnostics();
+    S.Diag(Loc, diag::err_decomp_decl_std_tuple_element_not_specialized)
+        << printTemplateArgs(S.Context.getPrintingPolicy(), Args,
+                             /*Params*/ nullptr);
+    if (!R.empty())
+      S.Diag(R.getRepresentativeDecl()->getLocation(), diag::note_declared_at);
+    return QualType();
+  }
+
+  return S.Context.getTypeDeclType(TD);
+}
+
+static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
+                                        AlternativePattern *P, QualType Type,
+                                        const llvm::APSInt &VariantSize) {
+  SourceLocation Loc = P->getBeginLoc();
+
+  DeclRefExpr *DRE = S.BuildDeclRefExpr(HoldingVar, Type, VK_LValue,
+                                        HoldingVar->getLocation());
+
+  if (S.RequireCompleteType(Loc, Type, diag::err_for_range_incomplete_type))
+    return true;
+
+  DeclarationNameInfo IndexNameInfo(S.PP.getIdentifierInfo("index"), Loc);
+  LookupResult IndexMemberLookup(S, IndexNameInfo, Sema::LookupMemberName);
+  OverloadCandidateSet CandidateSet(Loc, OverloadCandidateSet::CSK_Normal);
+
+  if (CXXRecordDecl *D = Type->getAsCXXRecordDecl()) {
+    S.LookupQualifiedName(IndexMemberLookup, D);
+    if (IndexMemberLookup.isAmbiguous())
+      return true;
+  }
+
+  ExprResult IndexExpr;
+  Sema::ForRangeStatus Status =
+      S.BuildForRangeBeginEndCall(Loc, Loc, IndexNameInfo, IndexMemberLookup,
+                                  &CandidateSet, DRE, &IndexExpr);
+  if (Status != Sema::FRS_Success)
+    return true;
+  if (IndexExpr.isInvalid())
+    return true;
+
+  unsigned NumAlternatives = VariantSize.getLimitedValue(UINT_MAX);
+  // TODO(mpark): Cache this.
+  llvm::SmallVector<QualType, 8> Alternatives;
+  Alternatives.reserve(NumAlternatives);
+  for (unsigned I = 0; I < NumAlternatives; ++I) {
+    Alternatives.push_back(
+        getVariantLikeAlternativeType(S, Loc, I, Type.getUnqualifiedType()));
+  }
+  QualType TargetType = P->getTypeSourceInfo()->getType();
+  unsigned I = 0;
+  for (; I < NumAlternatives; ++I) {
+    if (S.Context.hasSameType(Alternatives[I], TargetType)) {
+      break;
+    }
+  }
+  if (I == NumAlternatives) {
+    return true;
+  }
+
+  ExprResult TargetIndex = S.ActOnIntegerConstant(Loc, I);
+  if (TargetIndex.isInvalid())
+    return true;
+
+  ExprResult Cond =
+      S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::equalequal,
+                   IndexExpr.get(), TargetIndex.get());
+  if (Cond.isInvalid()) {
+    return true;
+  }
+  P->setCond(Cond.get());
+
+  DeclarationName GetDN = S.PP.getIdentifierInfo("get");
+
+  LookupResult MemberGet(S, GetDN, Loc, Sema::LookupMemberName);
+  bool UseMemberGet = false;
+  if (S.isCompleteType(HoldingVar->getLocation(), Type)) {
+    if (auto *RD = Type->getAsCXXRecordDecl())
+      S.LookupQualifiedName(MemberGet, RD);
+    if (MemberGet.isAmbiguous())
+      return true;
+    //   ... and if that finds at least one declaration that is a function
+    //   template whose first template parameter is a non-type parameter ...
+    for (NamedDecl *D : MemberGet) {
+      if (FunctionTemplateDecl *FTD =
+              dyn_cast<FunctionTemplateDecl>(D->getUnderlyingDecl())) {
+        TemplateParameterList *TPL = FTD->getTemplateParameters();
+        if (TPL->size() != 0 &&
+            isa<NonTypeTemplateParmDecl>(TPL->getParam(0))) {
+          //   ... the initializer is e.get<i>().
+          UseMemberGet = true;
+          break;
+        }
+      }
+    }
+  }
+
+  ExprResult E = DRE;
+  TemplateArgumentListInfo Args(Loc, Loc);
+  Args.addArgument(
+      getTrivialIntegralTemplateArgument(S, Loc, S.Context.getSizeType(), I));
+
+  if (UseMemberGet) {
+    //   if [lookup of member get] finds at least one declaration, the
+    //   initializer is e.get<i>().
+    E = S.BuildMemberReferenceExpr(E.get(), Type, Loc, false, CXXScopeSpec(),
+                                   SourceLocation(), nullptr, MemberGet, &Args,
+                                   nullptr);
+    if (E.isInvalid())
+      return true;
+
+    E = S.BuildCallExpr(nullptr, E.get(), Loc, std::nullopt, Loc);
+  } else {
+    //   Otherwise, the initializer is get<i>(e), where get is looked up
+    //   in the associated namespaces.
+    Expr *Get = UnresolvedLookupExpr::Create(
+        S.Context, nullptr, NestedNameSpecifierLoc(), SourceLocation(),
+        DeclarationNameInfo(GetDN, Loc), /*RequiresADL=*/true, &Args,
+        UnresolvedSetIterator(), UnresolvedSetIterator(),
+        /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
+
+    Expr *Arg = E.get();
+    E = S.BuildCallExpr(nullptr, Get, Loc, Arg, Loc);
+  }
+  if (E.isInvalid())
+    return true;
+
+  Expr *Init = E.get();
+
+  //   Given the type T designated by std::variant_alternative<i, E>::type,
+  QualType T = getVariantLikeAlternativeType(S, Loc, I, Type);
+  if (T.isNull())
+    return true;
+
+  //   each vi is a variable of type "reference to T" initialized with the
+  //   initializer, where the reference is an lvalue reference if the
+  //   initializer is an lvalue and an rvalue reference otherwise
+  QualType RefType = S.BuildReferenceType(T, E.get()->isLValue(), Loc, {});
+  if (RefType.isNull())
+    return true;
+  auto *RefVD = VarDecl::Create(S.Context, HoldingVar->getDeclContext(), Loc,
+                                Loc, nullptr, RefType,
+                                S.Context.getTrivialTypeSourceInfo(T, Loc),
+                                HoldingVar->getStorageClass());
+  RefVD->setLexicalDeclContext(HoldingVar->getLexicalDeclContext());
+  RefVD->setTSCSpec(HoldingVar->getTSCSpec());
+  RefVD->setImplicit();
+  if (HoldingVar->isInlineSpecified())
+    RefVD->setInlineSpecified();
+  RefVD->getLexicalDeclContext()->addHiddenDecl(RefVD);
+
+  InitializedEntity Entity = InitializedEntity::InitializeBinding(RefVD);
+  InitializationKind Kind = InitializationKind::CreateCopy(Loc, Loc);
+  InitializationSequence Seq(S, Entity, Kind, Init);
+  E = Seq.Perform(S, Entity, Kind, Init);
+  if (E.isInvalid())
+    return true;
+  E = S.ActOnFinishFullExpr(E.get(), Loc, /*DiscardedValue*/ false);
+  if (E.isInvalid())
+    return true;
+  RefVD->setInit(E.get());
+  S.CheckCompleteVariableDeclaration(RefVD);
+
+  P->setBindingVar(RefVD);
+
+  E = S.BuildDeclRefExpr(RefVD, RefVD->getType().getNonReferenceType(),
+                         VK_LValue, RefVD->getLocation());
+  if (E.isInvalid())
+    return true;
+
+  return S.CheckCompleteMatchPattern(E.get(), P->getSubPattern());
 }
 
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
@@ -145,8 +484,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     QualType Type = Subject->getType();
     if (!Subject->refersToBitField()) {
       QualType Deduced = Context.getAutoRRefDeductType();
-      TypeSourceInfo *TSI =
-          SemaRef.Context.getTrivialTypeSourceInfo(Deduced, Loc);
+      TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Deduced, Loc);
       VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, TSI, Subject);
       if (HoldingVar->isInvalidDecl()) {
         return true;
@@ -166,7 +504,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
     QualType Type = Context.getAutoRRefDeductType();
-    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Type, Loc);
     VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Subject);
     if (CondVar->isInvalidDecl()) {
       return true;
@@ -188,10 +526,31 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-    QualType Type = P->getTypeSourceInfo()->getType();
-    Type = Context.getPointerType(
-        Subject->getType().isConstQualified() ? Type.withConst() : Type);
-    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    QualType Deduced = Context.getAutoRRefDeductType();
+    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Deduced, Loc);
+    VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, TSI, Subject);
+    if (HoldingVar->isInvalidDecl()) {
+      return true;
+    }
+    P->setHoldingVar(HoldingVar);
+    SourceLocation Loc = P->getBeginLoc();
+    QualType Type = HoldingVar->getType();
+    Type = Type.getNonReferenceType();
+
+    llvm::APSInt VariantSize(32);
+    switch (isVariantLike(*this, Loc, Type, VariantSize)) {
+    case IsVariantLike::Error:
+      return true;
+    case IsVariantLike::VariantLike:
+      return checkVariantLikeAlternative(*this, HoldingVar, P, Type, VariantSize);
+    case IsVariantLike::NotVariantLike:
+      break;
+    }
+
+    QualType TargetType = P->getTypeSourceInfo()->getType();
+    TargetType = Context.getPointerType(
+        Type.isConstQualified() ? TargetType.withConst() : TargetType);
+    TSI = Context.getTrivialTypeSourceInfo(TargetType, Loc);
     ExprResult AddrOf = ActOnUnaryOp(S, Loc, tok::TokenKind::amp, Subject);
     if (AddrOf.isInvalid()) {
       return true;
@@ -201,7 +560,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     if (Cast.isInvalid()) {
       return true;
     }
-    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Cast.get());
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, TargetType, TSI, Cast.get());
     if (CondVar->isInvalidDecl()) {
       return true;
     }
@@ -223,7 +582,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   case MatchPattern::DecompositionPatternClass:
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
     QualType Type = Context.getAutoRRefDeductType();
-    TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
+    TypeSourceInfo *TInfo = Context.getTrivialTypeSourceInfo(Type, Loc);
     SmallVector<BindingDecl*, 8> Bindings;
     Bindings.reserve(P->getNumPatterns());
     for (MatchPattern *C : P->children()) {

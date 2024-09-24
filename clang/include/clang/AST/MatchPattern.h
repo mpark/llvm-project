@@ -226,8 +226,10 @@ class AlternativePattern final : public MatchPattern {
   TypeSourceInfo* TInfo;
   SourceLocation ColonLoc;
   MatchPattern *Pattern;
+  VarDecl *HoldingVar = nullptr;
   VarDecl *CondVar = nullptr;
   Expr *Cond = nullptr;
+  VarDecl *BindingVar = nullptr;
 
 public:
   explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
@@ -245,6 +247,11 @@ public:
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
 
+  const VarDecl *getHoldingVar() const { return HoldingVar; }
+  VarDecl *getHoldingVar() { return HoldingVar; }
+
+  void setHoldingVar(VarDecl *HoldingVar) { this->HoldingVar = HoldingVar; }
+
   const VarDecl *getCondVar() const { return CondVar; }
   VarDecl *getCondVar() { return CondVar; }
 
@@ -254,6 +261,11 @@ public:
   Expr *getCond() { return Cond; }
 
   void setCond(Expr *Cond) { this->Cond = Cond; }
+
+  const VarDecl *getBindingVar() const { return BindingVar; }
+  VarDecl *getBindingVar() { return BindingVar; }
+
+  void setBindingVar(VarDecl *BindingVar) { this->BindingVar = BindingVar; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {&Pattern, &Pattern + 1};
