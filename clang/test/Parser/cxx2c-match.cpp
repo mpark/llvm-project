@@ -58,21 +58,21 @@ void test_match_structures(int x) {
   &x match ? _;
   x match 0;
   x match { _ => 0; };
-  x match { _ if true => 0; };
+  x match { _ if (true) => 0; };
   x match constexpr { _ => 0; };
-  x match constexpr { _ if true => 0; };
+  x match constexpr { _ if (true) => 0; };
   x match -> int { _ => 0; };
   x match -> auto { _ => 0; };
   x match -> decltype(auto) { _ => 0; };
-  x match -> int { _ if true => 0; };
-  x match -> auto { _ if true => 0; };
-  x match -> decltype(auto) { _ if true => 0; };
+  x match -> int { _ if (true) => 0; };
+  x match -> auto { _ if (true) => 0; };
+  x match -> decltype(auto) { _ if (true) => 0; };
   x match constexpr -> int { _ => 0; };
   x match constexpr -> auto { _ => 0; };
   x match constexpr -> decltype(auto) { _ => 0; };
-  x match constexpr -> int { _ if true => 0; };
-  x match constexpr -> auto { _ if true => 0; };
-  x match constexpr -> decltype(auto) { _ if true => 0; };
+  x match constexpr -> int { _ if (true) => 0; };
+  x match constexpr -> auto { _ if (true) => 0; };
+  x match constexpr -> decltype(auto) { _ if (true) => 0; };
   &x match { ? _ => 0; _ => 1; };
 }
 
@@ -292,6 +292,19 @@ bool test_match_test_with_guard(const int (&xs)[2]) {
   return result;
 }
 
+int test_match_select_with_guards(const int (&p)[2]) {
+  return p match {
+    let [x, y] if (x < 0 && y < 0) => 0;
+    let [x, y] if (x < 0) => y;
+    let [x, y] if (bool b = y < 0) => [&] {
+      y;
+      b;
+      return x;
+    }();
+    let [x, y] => x + y;
+  };
+}
+
 void test_match_in_condition(const int *p, const int (*q)[2]) {
   p match ? let v;
   v; // expected-error {{use of undeclared identifier 'v'}}
@@ -402,5 +415,12 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
   }
   while (next() match (? let elem)) { // expected-note {{previous definition is here}}
     int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  }
+
+  auto f = [](int x, int y) { return true; };
+  if (q match ? let [x, y] if (bool b = f(x, y))) {
+    x;
+    y;
+    b;
   }
 }
