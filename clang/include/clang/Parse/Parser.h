@@ -4510,6 +4510,7 @@ private:
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case);
+  Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
@@ -8634,7 +8635,7 @@ private:
                    PrevSpliceCount;
     bool isActive;
 
-  public:
+public:
     explicit TentativeParsingAction(Parser &p, bool Unannotated = false)
         : P(p), PrevPreferredType(P.PreferredType) {
       PrevTok = P.Tok;
