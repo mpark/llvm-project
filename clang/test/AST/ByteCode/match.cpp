@@ -292,9 +292,9 @@ static_assert(!test_match_test_with_guard({2, 3}));
 
 constexpr auto test_match_pattern_guards(const Pair& p) {
   return p match {
-    let [x, y] if x < 0 && y < 0 => 0;
-    let [x, y] if x < 0 => y;
-    let [x, y] if y < 0 => x;
+    let [x, y] if (x < 0 && y < 0) => 0;
+    let [x, y] if (x < 0) => y;
+    let [x, y] if (y < 0) => x;
     let [x, y] => x + y;
   };
 }
