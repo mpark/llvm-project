@@ -8540,8 +8540,8 @@ public:
     for (const MatchCase &Case : E->getCases()) {
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info))
         return false;
-      if (Result && Case.Guard)
-        if (!EvaluateAsBooleanCondition(Case.Guard, Result, Info))
+      if (const auto &[CondVar, Cond] = Case.Guard; Result && Cond)
+        if (!EvaluateCond(Info, CondVar, Cond, Result))
           return false;
       if (Result)
         return this->Visit(Case.Handler);
@@ -15077,10 +15077,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
   if (!EvaluateMatchPattern(E->getPattern(), Result, Info))
     return false;
-  if (const Expr *Guard = E->getGuard(); Result && Guard) {
-    if (!EvaluateAsBooleanCondition(Guard, Result, Info))
+  if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
+    if (!EvaluateCond(Info, CondVar, Cond, Result))
       return false;
-  }
   return Success(Result, E);
 }
 

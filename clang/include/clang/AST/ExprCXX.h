@@ -5316,17 +5316,19 @@ public:
   }
 };
 
+using MatchGuard = std::pair<VarDecl*, Expr*>;
+
 class MatchTestExpr final : public Expr {
   Expr *Subject;
   SourceLocation MatchLoc;
   MatchPattern *Pattern;
   SourceLocation IfLoc;
-  Expr *Guard;
+  MatchGuard Guard;
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, Expr *Subject,
                          SourceLocation MatchLoc, MatchPattern *Pattern,
-                         SourceLocation IfLoc, Expr *Guard)
+                         SourceLocation IfLoc, MatchGuard Guard)
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
         Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern), IfLoc(IfLoc),
         Guard(Guard) {}
@@ -5339,15 +5341,15 @@ public:
   const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
 
-  const Expr* getGuard() const { return Guard; }
-  Expr* getGuard() { return Guard; }
+  const MatchGuard &getGuard() const { return Guard; }
+  MatchGuard &getGuard() { return Guard; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return getSubject()->getBeginLoc();
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
-    return Guard ? Guard->getEndLoc() : Pattern->getEndLoc();
+    return Guard.second ? Guard.second->getEndLoc() : Pattern->getEndLoc();
   }
 
   child_range children() {
@@ -5366,7 +5368,7 @@ public:
 struct MatchCase {
   MatchPattern *Pattern;
   SourceLocation IfLoc;
-  Expr *Guard;
+  MatchGuard Guard;
   Stmt *Handler;
 };
 

@@ -10623,7 +10623,7 @@ public:
 
   ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                 MatchPattern *Pattern, SourceLocation IfLoc,
-                                Expr *Guard);
+                                MatchGuard Guard);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                                   bool IsConstexpr, QualType RetTy,
                                   ArrayRef<MatchCase> Cases,

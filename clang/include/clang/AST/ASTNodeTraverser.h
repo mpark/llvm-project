@@ -962,9 +962,10 @@ public:
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
-    const Expr *Guard = Node->getGuard();
-    if (Guard)
-      Visit(Guard);
+    if (const auto &[CondVar, Cond] = Node->getGuard(); Cond) {
+      Visit(CondVar);
+      Visit(Cond);
+    }
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
@@ -972,8 +973,10 @@ public:
     for (const MatchCase &Case : Node->getCases()) {
       getNodeDelegate().AddChild([&] {
         VisitMatchPattern(Case.Pattern);
-        if (Case.Guard)
-          Visit(Case.Guard);
+        if (const auto &[CondVar, Cond] = Case.Guard; Cond) {
+          Visit(CondVar);
+          Visit(Cond);
+        }
         Visit(Case.Handler);
       });
     }
