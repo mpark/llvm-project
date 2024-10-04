@@ -406,7 +406,7 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
 
 ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
                                     MatchPattern *Pattern, SourceLocation IfLoc,
-                                    Expr *Guard) {
+                                    MatchGuard Guard) {
   return new (Context)
       MatchTestExpr(Context, Subject, MatchLoc, Pattern, IfLoc, Guard);
 }
