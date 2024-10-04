@@ -4296,25 +4296,15 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get())) {
       return ExprError();
     }
+    SourceLocation IfLoc;
+    Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);
+    if (Guard.isInvalid()) {
+      SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
+      return true;
+    }
     if (InjectedDecls) {
       Scope::decl_range DR = getCurScope()->decls();
       *InjectedDecls = {DR.begin(), DR.end()};
-    }
-    SourceLocation IfLoc;
-    ExprResult Guard = ExprEmpty();
-    if (TryConsumeToken(tok::kw_if, IfLoc)) {
-      bool RHSIsInitList = false;
-      prec::Level NextTokPrec;
-      Guard = ParseRHSExprOfBinaryExpression(LHS, nullptr, RHSIsInitList,
-                                             prec::Match, NextTokPrec);
-      assert(!RHSIsInitList &&
-             "RHS of a match test expression cannot be an init list.");
-      assert(NextTokPrec <= prec::Match &&
-             "The precedence of the operator to the right of the RHS cannot "
-             "be tighter than match");
-      if (Guard.isInvalid()) {
-        return ExprError();
-      }
     }
     return Actions.ActOnMatchTestExpr(LHS.get(), MatchLoc, Pattern.get(), IfLoc,
                                       Guard.get());
@@ -4354,28 +4344,37 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
               StopAtSemi | StopBeforeMatch);
     if (Tok.isOneOf(tok::semi, tok::r_brace))
       return true;
-  } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get())) {
+  } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get()))
     return true;
-  }
   SourceLocation IfLoc;
-  ExprResult Guard = ExprEmpty();
-  if (TryConsumeToken(tok::kw_if, IfLoc)) {
-    Guard = ParseExpression();
-    if (Guard.isInvalid()) {
-      SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
-      if (Tok.isOneOf(tok::semi, tok::r_brace))
-        return true;
-    }
+  Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);
+  if (Guard.isInvalid()) {
+    SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
+    if (Tok.isOneOf(tok::semi, tok::r_brace))
+      return true;
   }
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after,
-                       "pattern")) {
+                       "pattern"))
     return true;
-  }
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy);
   if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
   Case = {Pattern.get(), IfLoc, Guard.get(), Handler.get()};
   return false;
+}
+
+Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc) {
+  if (TryConsumeToken(tok::kw_if, IfLoc)) {
+    BalancedDelimiterTracker T(*this, tok::l_paren);
+    if (T.expectAndConsume(diag::err_expected_after, "if"))
+      return Sema::ConditionError();
+    Sema::ConditionResult Cond =
+        ParseCXXCondition(nullptr, IfLoc, Sema::ConditionKind::Boolean,
+                          /*MissingOK=*/false, /*InjectedDecls=*/nullptr);
+    T.consumeClose();
+    return Cond;
+  }
+  return {};
 }
 
 StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {

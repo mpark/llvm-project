@@ -3947,6 +3947,7 @@ private:
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case);
+  Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
 
   ActionResult<MatchPattern *>

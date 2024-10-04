@@ -2990,13 +2990,19 @@ DEF_TRAVERSE_STMT(RequiresExpr, {
 DEF_TRAVERSE_STMT(MatchTestExpr, {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
   // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getPattern());
+  if (const auto &[CondVar, Cond] = S->getGuard(); Cond) {
+    TRY_TO(TraverseDecl(CondVar));
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Cond);
+  }
 })
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
   for (const MatchCase &Case : S->getCases()) {
     // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Pattern);
-    if (Case.Guard)
-      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard);
+    if (const auto &[CondVar, Cond] = Case.Guard; Cond) {
+      TRY_TO(TraverseDecl(CondVar));
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Cond);
+    }
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Handler);
   }
 })
