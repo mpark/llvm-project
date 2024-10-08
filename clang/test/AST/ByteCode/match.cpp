@@ -226,12 +226,15 @@ static_assert(test_bitfields(4) == 4);
 
 struct Pair {
   template <int I>
+  constexpr int& get() {
+    if constexpr (I == 0) return x;
+    else return y;
+  }
+
+  template <int I>
   constexpr const int& get() const {
-    if constexpr (I == 0) {
-      return x;
-    } else {
-      return y;
-    }
+    if constexpr (I == 0) return x;
+    else return y;
   }
 
   int x;
@@ -396,3 +399,65 @@ static_assert(test_variant_like_alternative_pattern(2) == -1);
 static_assert(test_variant_like_alternative_pattern(3.0) == 7);
 static_assert(test_variant_like_alternative_pattern(4.0) == 8);
 static_assert(test_variant_like_alternative_pattern(0.f) == -1);
+
+// Not part of the proposal, but implemented to facilitate multi-value matching.
+constexpr bool test_structured_bindings_with_init_list() {
+  auto [x1, y1] = {0, 1};
+  static_assert(__is_same(decltype(x1), int&&));
+  static_assert(__is_same(decltype(y1), int&&));
+
+  int a = 2;
+  const int b = 3;
+
+  const auto& [x2, y2] = {a, b};
+  static_assert(__is_same(decltype(x2), int&));
+  static_assert(__is_same(decltype(y2), const int&));
+
+  auto&& [x3, y3] = {(int&&)a, (const int&&)b};
+  static_assert(__is_same(decltype(x3), int&&));
+  static_assert(__is_same(decltype(y3), const int&&));
+
+  return x1 == 0 && y1 == 1 && x2 == a && y2 == b && x3 == a && y3 == b;
+}
+
+static_assert(test_structured_bindings_with_init_list());
+
+constexpr int test_return_with_match_on_paren_list(int a, int b) {
+  return (a, b) match {
+    [0, 0] => 0;
+    let [x, y] => x + y;
+  };
+}
+
+static_assert(test_return_with_match_on_paren_list(0, 0) == 0);
+static_assert(test_return_with_match_on_paren_list(1, 2) == 3);
+
+constexpr int test_init_with_match_on_paren_list(int a, int b) {
+  int result = (a, b) match {
+    [0, 0] => 0;
+    let [x, y] => x + y;
+  };
+  return result;
+}
+
+static_assert(test_init_with_match_on_paren_list(0, 0) == 0);
+static_assert(test_init_with_match_on_paren_list(1, 2) == 3);
+
+constexpr int test_block_scope_with_match_on_paren_list(int a, int b) {
+  int result;
+  (a, b) match {
+    [0, 0] => result = 0;
+    let [x, y] => result = x + y;
+  };
+  return result;
+}
+
+static_assert(test_block_scope_with_match_on_paren_list(0, 0) == 0);
+static_assert(test_block_scope_with_match_on_paren_list(1, 2) == 3);
+
+static_assert([] { return (0, 0) match [0, 0]; }());
+static_assert([] { return !((0, 0) match [1, 1]); }());
+static_assert([] { return true && (0, 0) match [0, 0]; }());
+static_assert([] { return Pair(1, 2) match [1, 2]; }());
+static_assert([] { int x = 2; return (1, x)++ match 2; }());
+static_assert(-(1, 2) match -2);
