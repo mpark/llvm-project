@@ -12967,6 +12967,31 @@ QualType Sema::deduceVarTypeFromInitializer(VarDecl *VDecl,
     return Context.getQualifiedType(DeduceInit->getType(),
                                     Type.getQualifiers());
 
+  if (VDecl && isa<DecompositionDecl>(VDecl)) {
+    if (auto *IL = dyn_cast<InitListExpr>(DeduceInit)) {
+      RecordDecl *RD = Context.buildImplicitRecord("");
+      RD->startDefinition();
+      QualType FieldTy = Context.getAutoRRefDeductType();
+      TypeSourceInfo *TSI = Context.CreateTypeSourceInfo(FieldTy);
+      TypeLoc TLoc = TSI->getTypeLoc();
+      for (Expr *E : IL->inits()) {
+        QualType Deduced;
+        if (DeduceAutoTypeFromExpr(TLoc, E->getExprLoc(), E, Deduced,
+                                   FieldTy->getContainedAutoType()))
+          return QualType();
+        FieldDecl *Field =
+            FieldDecl::Create(Context, RD, SourceLocation(), SourceLocation(),
+                              /*Id=*/nullptr, Deduced, /*TInfo=*/nullptr,
+                              /*BitWidth=*/nullptr,
+                              /*Mutable=*/false, ICIS_NoInit);
+        Field->setAccess(AS_public);
+        RD->addDecl(Field);
+      }
+      RD->completeDefinition();
+      return Context.getTagDeclType(RD);
+    }
+  }
+
   QualType DeducedType;
   TemplateDeductionInfo Info(DeduceInit->getExprLoc());
   TemplateDeductionResult Result =
