@@ -4263,9 +4263,6 @@ ExprResult Parser::ParseBuiltinBitCast() {
 
 ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                        InjectedDeclSet *InjectedDecls) {
-  if (LHS.isUsable())
-    LHS = Actions.MaybeConvertParenExprToInitListExpr(LHS.get());
-
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
     bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
     QualType RetTy;

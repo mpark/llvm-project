@@ -6978,7 +6978,6 @@ public:
   /// This is not an AltiVec-style cast or or C++ direct-initialization, so turn
   /// the ParenListExpr into a sequence of comma binary operators.
   ExprResult MaybeConvertParenListExprToParenExpr(Scope *S, Expr *ME);
-  ExprResult MaybeConvertParenExprToInitListExpr(Expr *PE);
 
   ExprResult ActOnCompoundLiteral(SourceLocation LParenLoc, ParsedType Ty,
                                   SourceLocation RParenLoc, Expr *InitExpr);

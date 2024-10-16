@@ -7894,30 +7894,6 @@ Sema::MaybeConvertParenListExprToParenExpr(Scope *S, Expr *OrigExpr) {
   return ActOnParenExpr(E->getLParenLoc(), E->getRParenLoc(), Result.get());
 }
 
-ExprResult Sema::MaybeConvertParenExprToInitListExpr(Expr *OrigExpr) {
-  ParenExpr *E = dyn_cast<ParenExpr>(OrigExpr);
-  if (!E)
-    return OrigExpr;
-
-  Expr *SubExpr = E->getSubExpr();
-  SmallVector<Expr *, 4> Exprs;
-
-  while (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(SubExpr)) {
-    if (BinOp->getOpcode() != BO_Comma)
-      break;
-    Exprs.push_back(BinOp->getRHS());
-    SubExpr = BinOp->getLHS();
-  }
-
-  if (Exprs.empty())
-    return OrigExpr;
-
-  Exprs.push_back(SubExpr);
-  std::reverse(Exprs.begin(), Exprs.end());
-
-  return ActOnInitList(E->getLParen(), Exprs, E->getRParen());
-}
-
 ExprResult Sema::ActOnParenListExpr(SourceLocation L,
                                     SourceLocation R,
                                     MultiExprArg Val) {
