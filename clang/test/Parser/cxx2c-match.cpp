@@ -424,29 +424,3 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     b;
   }
 }
-
-// Not part of the proposal, but implemented to facilitate multi-value matching.
-void test_structured_bindings_with_init_list(int a, int b) {
-  auto [x1, y1] = {0, 1};
-  const auto& [x2, y2] = {a, b};
-  auto&& [x3, y3] = {(int&&)a, (int&&)b};
-}
-
-int test_match_on_braced_init_list(
-  int arg = (1, 2) match { [0, 0] => 0; let [x, y] => x + y; }
-) {
-  int a = (1, 2) match {
-    [0, 0] => 0;
-    let [x, y] => x + y;
-  };
-
-  struct S { int x; int y; };
-  bool b = true && (1, 2) match [0, 1];
-  bool c = S(1, 2) match [1, 2];
-  bool d = -(1, a) match 0;
-
-  return (1, 2) match {
-    [0, 0] => 0;
-    let [x, y] => x + y;
-  };
-}
