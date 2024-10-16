@@ -226,12 +226,10 @@ static_assert(test_bitfields(4) == 4);
 
 struct Pair {
   template <int I>
-  constexpr const int& get() const {
-    if constexpr (I == 0) {
-      return x;
-    } else {
-      return y;
-    }
+  constexpr auto&& get(this auto&& self) {
+    if constexpr (I == 0) return decltype(self)(self).x;
+    else if constexpr (I == 1) return decltype(self)(self).y;
+    else static_assert(false);
   }
 
   int x;
@@ -243,6 +241,7 @@ namespace std {
   struct tuple_size;
 
   template <typename T>
+  requires requires { tuple_size<T>::value; }
   struct tuple_size<const T> {
     static constexpr int value = std::tuple_size<T>::value;
   };
@@ -315,6 +314,41 @@ constexpr int test_match_in_if_condition(const int *p) {
 static_assert(test_match_in_if_condition(nullptr) == -1);
 static_assert(test_match_in_if_condition(&x) == 0);
 static_assert(test_match_in_if_condition(&y) == 1);
+
+struct Lifetime {
+  constexpr Lifetime(bool *flag, int n) : flag(flag), n(n) { *flag = true; }
+  constexpr ~Lifetime() { *flag = false; }
+  bool *flag;
+  int n;
+};
+
+constexpr bool test_match_in_if_condition_lifetime_extended(int n) {
+  bool flag = false;
+  if (Lifetime(&flag, n) match [? let b, 101]) {
+    return b;
+  } else if (n == 202) {
+    return flag;
+  }
+  return flag;
+}
+
+static_assert(test_match_in_if_condition_lifetime_extended(101));
+static_assert(test_match_in_if_condition_lifetime_extended(202));
+static_assert(!test_match_in_if_condition_lifetime_extended(303));
+
+constexpr bool test_match_in_if_condition_not_lifetime_extended(int n) {
+  bool flag = false;
+  if ((Lifetime(&flag, n) match [? let b, 101])) {
+    return flag;
+  } else if (n == 202) {
+    return flag;
+  }
+  return flag;
+}
+
+static_assert(!test_match_in_if_condition_not_lifetime_extended(101));
+static_assert(!test_match_in_if_condition_not_lifetime_extended(202));
+static_assert(!test_match_in_if_condition_not_lifetime_extended(303));
 
 constexpr int test_match_in_while_condition() {
   int i = 0;
