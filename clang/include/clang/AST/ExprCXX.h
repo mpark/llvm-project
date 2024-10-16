@@ -5319,6 +5319,7 @@ public:
 using MatchGuard = std::pair<VarDecl*, Expr*>;
 
 class MatchTestExpr final : public Expr {
+  VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
   MatchPattern *Pattern;
@@ -5326,14 +5327,18 @@ class MatchTestExpr final : public Expr {
   MatchGuard Guard;
 
 public:
-  explicit MatchTestExpr(const ASTContext &Ctx, Expr *Subject,
-                         SourceLocation MatchLoc, MatchPattern *Pattern,
-                         SourceLocation IfLoc, MatchGuard Guard)
+  explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
+                         Expr *Subject, SourceLocation MatchLoc,
+                         MatchPattern *Pattern, SourceLocation IfLoc,
+                         MatchGuard Guard)
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
-        Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern), IfLoc(IfLoc),
-        Guard(Guard) {}
+        HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
+        Pattern(Pattern), IfLoc(IfLoc), Guard(Guard) {}
 
   explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
+
+  const VarDecl* getHoldingVar() const { return HoldingVar; }
+  VarDecl* getHoldingVar() { return HoldingVar; }
 
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }

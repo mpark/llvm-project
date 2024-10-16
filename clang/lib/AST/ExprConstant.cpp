@@ -8538,6 +8538,7 @@ public:
   bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
     bool Result;
     for (const MatchCase &Case : E->getCases()) {
+      BlockScopeRAII Scope(Info);
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info))
         return false;
       if (const auto &[CondVar, Cond] = Case.Guard; Result && Cond)
@@ -15075,12 +15076,38 @@ static bool EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result,
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
-  if (!EvaluateMatchPattern(E->getPattern(), Result, Info))
-    return false;
-  if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
-    if (!EvaluateCond(Info, CondVar, Cond, Result))
+  if (const VarDecl *VD = E->getHoldingVar()) {
+    // This means that the subject and the bindings have the lifetime
+    // of a hypothetical condition variable, skip the `BlockScopeRAII`.
+    //
+    // Without `BlockScopeRAII`, the binding variables and such are
+    // in the surrounding block scope. This does *some* lifetime extension
+    // but not all since we only extend the temporaries that bind directly
+    // to the references.
+    //
+    // const T& f(const T&);
+    // T g();
+    //
+    // if (f(g()) match ...) // f(g()) is not extended properly currently.
+    if (!EvaluateDecl(Info, VD))
       return false;
-  return Success(Result, E);
+    if (!EvaluateMatchPattern(E->getPattern(), Result, Info))
+      return false;
+    if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
+      if (!EvaluateCond(Info, CondVar, Cond, Result))
+        return false;
+    return Success(Result, E);
+  } else {
+    BlockScopeRAII Scope(Info);
+    if (!EvaluateMatchPattern(E->getPattern(), Result, Info))
+      return false;
+    if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
+      if (!EvaluateCond(Info, CondVar, Cond, Result))
+        return false;
+    if (!Scope.destroy())
+      return false;
+    return Success(Result, E);
+  }
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {

@@ -4290,12 +4290,15 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr, RetTy,
                                         Cases, Braces);
   } else {
+    VarDecl *HoldingVar = nullptr;
+    if (InjectedDecls && LHS.isUsable()) {
+      LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
+    }
     ParseScope MatchTestScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
     if (LHS.isInvalid() || Pattern.isInvalid() ||
-        Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get())) {
+        Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get()))
       return ExprError();
-    }
     SourceLocation IfLoc;
     Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);
     if (Guard.isInvalid()) {
@@ -4306,8 +4309,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
       Scope::decl_range DR = getCurScope()->decls();
       *InjectedDecls = {DR.begin(), DR.end()};
     }
-    return Actions.ActOnMatchTestExpr(LHS.get(), MatchLoc, Pattern.get(), IfLoc,
-                                      Guard.get());
+    return Actions.ActOnMatchTestExpr(HoldingVar, LHS.get(), MatchLoc,
+                                      Pattern.get(), IfLoc, Guard.get());
   }
 }
 

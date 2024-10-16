@@ -24,10 +24,11 @@ using namespace clang;
 using namespace sema;
 
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
-                             TypeSourceInfo *TSI, Expr *Init) {
+                             Expr *Init) {
   DeclContext *DC = SemaRef.CurContext;
+  TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
   VarDecl *Decl = VarDecl::Create(SemaRef.Context, DC, Loc, {}, /*Id=*/nullptr,
-                                  Type, TSI, SC_None);
+                                  Type, TInfo, SC_None);
   Decl->setImplicit();
   // TODO: Consider ActOnInitializerError
   SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false);
@@ -373,6 +374,18 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   return S.CheckCompleteMatchPattern(E.get(), P->getSubPattern());
 }
 
+ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
+  QualType Deduced = Context.getAutoRRefDeductType();
+  VarDecl *VD = BuildVarDecl(*this, Subject->getExprLoc(), Deduced, Subject);
+  if (VD->isInvalidDecl()) {
+    return ExprError();
+  }
+  HoldingVar = VD;
+  return BuildDeclRefExpr(HoldingVar,
+                          HoldingVar->getType().getNonReferenceType(),
+                          VK_LValue, HoldingVar->getLocation());
+}
+
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                        ExprResult ER) {
   if (ER.isInvalid()) {
@@ -402,11 +415,12 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   return ER.get();
 }
 
-ExprResult Sema::ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
+ExprResult Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
+                                    SourceLocation MatchLoc,
                                     MatchPattern *Pattern, SourceLocation IfLoc,
                                     MatchGuard Guard) {
-  return new (Context)
-      MatchTestExpr(Context, Subject, MatchLoc, Pattern, IfLoc, Guard);
+  return new (Context) MatchTestExpr(Context, HoldingVar, Subject, MatchLoc,
+                                     Pattern, IfLoc, Guard);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
@@ -484,8 +498,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     QualType Type = Subject->getType();
     if (!Subject->refersToBitField()) {
       QualType Deduced = Context.getAutoRRefDeductType();
-      TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Deduced, Loc);
-      VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, TSI, Subject);
+      VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
       if (HoldingVar->isInvalidDecl()) {
         return true;
       }
@@ -495,6 +508,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     }
     BindingDecl *BD = P->getBinding();
     BD->setBinding(Type, Subject);
+    BD->setDecomposedDecl(nullptr);
     break;
   }
   case MatchPattern::ParenPatternClass: {
@@ -504,8 +518,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
     QualType Type = Context.getAutoRRefDeductType();
-    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Type, Loc);
-    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, TSI, Subject);
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, Subject);
     if (CondVar->isInvalidDecl()) {
       return true;
     }
@@ -527,8 +540,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     QualType Deduced = Context.getAutoRRefDeductType();
-    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(Deduced, Loc);
-    VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, TSI, Subject);
+    VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
     if (HoldingVar->isInvalidDecl()) {
       return true;
     }
@@ -550,17 +562,17 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     QualType TargetType = P->getTypeSourceInfo()->getType();
     TargetType = Context.getPointerType(
         Type.isConstQualified() ? TargetType.withConst() : TargetType);
-    TSI = Context.getTrivialTypeSourceInfo(TargetType, Loc);
     ExprResult AddrOf = ActOnUnaryOp(S, Loc, tok::TokenKind::amp, Subject);
     if (AddrOf.isInvalid()) {
       return true;
     }
+    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(TargetType, Loc);
     ExprResult Cast =
         BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, AddrOf.get(), {}, {});
     if (Cast.isInvalid()) {
       return true;
     }
-    VarDecl *CondVar = BuildVarDecl(*this, Loc, TargetType, TSI, Cast.get());
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, TargetType, Cast.get());
     if (CondVar->isInvalidDecl()) {
       return true;
     }

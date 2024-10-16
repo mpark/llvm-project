@@ -10617,13 +10617,13 @@ public:
   ///@{
 
 public:
-  ExprResult ActOnMatchSubject(Expr *Subject);
+  ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
 
-  ExprResult ActOnMatchTestExpr(Expr *Subject, SourceLocation MatchLoc,
-                                MatchPattern *Pattern, SourceLocation IfLoc,
-                                MatchGuard Guard);
+  ExprResult ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
+                                SourceLocation MatchLoc, MatchPattern *Pattern,
+                                SourceLocation IfLoc, MatchGuard Guard);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                                   bool IsConstexpr, QualType RetTy,
                                   ArrayRef<MatchCase> Cases,
