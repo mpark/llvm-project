@@ -914,6 +914,12 @@ public:
     return std::move(error());
   }
 
+#  if _LIBCPP_STD_VER >= 26
+
+  _LIBCPP_HIDE_FROM_ABI constexpr size_t index() const noexcept { return has_value() ? 0 : 1u; }
+
+#  endif
+
   // [expected.void.monadic], monadic
   template <class _Func>
     requires is_constructible_v<_Err, _Err&>
@@ -1638,6 +1644,12 @@ public:
     }
     return std::move(error());
   }
+
+#  if _LIBCPP_STD_VER >= 26
+
+  _LIBCPP_HIDE_FROM_ABI constexpr size_t index() const noexcept { return has_value() ? 0 : 1u; }
+
+#  endif
 
   // [expected.void.monadic], monadic
   template <class _Func>
