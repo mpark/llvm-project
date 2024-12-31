@@ -34,6 +34,9 @@ namespace std {
 
   // [expected.void], partial specialization of expected for void types
   template<class T, class E> requires is_void_v<T> class expected<T, E>;
+
+  // since C++26
+  // TODO: Add new API.
 }
 
 */
@@ -48,7 +51,216 @@ namespace std {
 #    include <__expected/expected.h>
 #    include <__expected/unexpect.h>
 #    include <__expected/unexpected.h>
-#  endif
+
+#    if _LIBCPP_STD_VER >= 26
+
+#      include <__fwd/expected.h>
+#      include <__fwd/variant.h>
+#      include <__memory/addressof.h>
+#      include <__type_traits/add_pointer.h>
+#      include <__type_traits/conditional.h>
+#      include <__type_traits/is_same.h>
+#      include <__type_traits/is_void.h>
+#      include <__utility/forward.h>
+#      include <__utility/move.h>
+#      include <__variant/helpers.h>
+
+_LIBCPP_PUSH_MACROS
+#      include <__undef_macros>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template <class _Tp, class _Ep>
+struct _LIBCPP_TEMPLATE_VIS variant_size<expected<_Tp, _Ep>> : integral_constant<size_t, 2> {};
+
+template <size_t _Ip, class _Tp, class _Ep>
+struct _LIBCPP_TEMPLATE_VIS variant_alternative<_Ip, expected<_Tp, _Ep>> {
+  static_assert(_Ip < 2, "Index out of bounds in std::variant_alternative<>");
+  using type = conditional_t<_Ip == 0, _Tp, _Ep>;
+};
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI constexpr bool holds_alternative(const expected<_Tp, _Ep>& __e) noexcept {
+  constexpr bool __u_is_t = is_same_v<_Up, _Tp>;
+  constexpr bool __u_is_e = is_same_v<_Up, _Ep>;
+  static_assert(__u_is_t || __u_is_e, "type not found in type list");
+  return __e.index() == 0 ? __u_is_t : __u_is_e;
+}
+
+[[noreturn]] inline _LIBCPP_HIDE_FROM_ABI constexpr _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS void
+__throw_bad_expected_access() {
+#    if _LIBCPP_HAS_EXCEPTIONS
+  throw bad_variant_access();
+#    else
+  _LIBCPP_VERBOSE_ABORT("bad_variant_access was thrown in -fno-exceptions mode");
+#    endif
+}
+
+template <size_t _Ip, class _Ep>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr auto&& __generic_expected_get(_Ep&& __e) {
+  if (__e.index() != _Ip) {
+    std::__throw_bad_expected_access();
+  }
+  if constexpr (_Ip == 0) {
+    return *std::forward<_Ep>(__e);
+  } else {
+    return std::forward<_Ep>(__e).error();
+  }
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI
+_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
+get(expected<_Tp, _Ep>& __e) {
+  static_assert(_Ip < 2u);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::__generic_expected_get<_Ip>(__e);
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI
+_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
+get(expected<_Tp, _Ep>&& __e) {
+  static_assert(_Ip < 2u);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::__generic_expected_get<_Ip>(std::move(__e));
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI
+_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
+get(const expected<_Tp, _Ep>& __e) {
+  static_assert(_Ip < 2u);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::__generic_expected_get<_Ip>(__e);
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI
+_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
+get(const expected<_Tp, _Ep>&& __e) {
+  static_assert(_Ip < 2u);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::__generic_expected_get<_Ip>(std::move(__e));
+}
+
+template <class _Up, class _Tp, class _Ep, class _Expected>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr auto&&
+__generic_expected_get(_Expected&& __e) {
+  constexpr bool __u_is_t = is_same_v<_Up, _Tp>;
+  constexpr bool __u_is_e = is_same_v<_Up, _Ep>;
+
+  if constexpr (!__u_is_t && !__u_is_e) {
+    std::__throw_bad_expected_access();
+  } else {
+    const size_t __i = __e.index();
+    if ((__u_is_t && __i != 0) || (__u_is_e && __i != 1)) {
+      std::__throw_bad_expected_access();
+    }
+
+    if constexpr (__u_is_t && __u_is_e) {
+      return __e.index() ? *std::forward<_Expected>(__e) : std::forward<_Expected>(__e).error();
+    } else if constexpr (__u_is_t) {
+      return *std::forward<_Expected>(__e);
+    } else {
+      return std::forward<_Expected>(__e).error();
+    }
+  }
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr _Up& get(expected<_Tp, _Ep>& __e) {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get<_Up, _Tp, _Ep>(__e);
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr _Up&& get(expected<_Tp, _Ep>&& __e) {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get<_Up, _Tp, _Ep>(std::move(__e));
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const _Up&
+get(const expected<_Tp, _Ep>& __e) {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get<_Up, _Tp, _Ep>(__e);
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const _Up&&
+get(const expected<_Tp, _Ep>&& __e) {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get<_Up, _Tp, _Ep>(std::move(__e));
+}
+
+template <class _Rp, size_t _Ip, class _Tp, class _Ep, class _Expected>
+_LIBCPP_HIDE_FROM_ABI constexpr auto* __generic_expected_get_if(_Expected* __e) noexcept {
+  if (!__e || __e->index() != _Ip)
+    return _Rp();
+  if constexpr (is_same_v<_Tp, _Ep>) {
+    return std::addressof(__e->index() == 0 ? **__e : __e->error());
+  } else if constexpr (_Ip == 0) {
+    return std::addressof(**__e);
+  } else {
+    return std::addressof(__e->error());
+  }
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>
+get_if(expected<_Tp, _Ep>* __e) noexcept {
+  static_assert(_Ip < 2);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::__generic_expected_get_if<add_pointer_t<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>, _Ip, _Tp, _Ep>(
+      __e);
+}
+
+template <size_t _Ip, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<const variant_alternative_t<_Ip, expected<_Tp, _Ep>>>
+get_if(const expected<_Tp, _Ep>* __e) noexcept {
+  static_assert(_Ip < 2);
+  static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
+  return std::
+      __generic_expected_get_if<add_pointer_t<const variant_alternative_t<_Ip, expected<_Tp, _Ep>>>, _Ip, _Tp, _Ep>(
+          __e);
+}
+
+template <class _Rp, class _Up, class _Tp, class _Ep, class _Expected>
+_LIBCPP_HIDE_FROM_ABI constexpr auto* __generic_expected_get_if(_Expected* __e) noexcept {
+  constexpr bool __u_is_t = is_same_v<_Up, _Tp>;
+  constexpr bool __u_is_e = is_same_v<_Up, _Ep>;
+  static_assert(__u_is_t || __u_is_e, "type not found in type list");
+  if (!__e || !holds_alternative<_Up>(*__e))
+    return _Rp();
+  if constexpr (__u_is_t && __u_is_e) {
+    return std::addressof(__e->index() == 0 ? **__e : __e->error());
+  } else if constexpr (__u_is_t) {
+    return std::addressof(**__e);
+  } else {
+    return std::addressof(__e->error());
+  }
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<_Up> get_if(expected<_Tp, _Ep>* __e) noexcept {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get_if<add_pointer_t<_Up>, _Up, _Tp, _Ep>(__e);
+}
+
+template <class _Up, class _Tp, class _Ep>
+_LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<const _Up> get_if(const expected<_Tp, _Ep>* __e) noexcept {
+  static_assert(!is_void_v<_Up>);
+  return std::__generic_expected_get_if<add_pointer_t<const _Up>, _Up, _Tp, _Ep>(__e);
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+_LIBCPP_POP_MACROS
+
+#    endif // _LIBCPP_STD_VER >= 26
+
+#  endif // _LIBCPP_STD_VER >= 23
 
 #  include <version>
 
