@@ -256,7 +256,10 @@ exception typeinfo
 exception version
 execution version
 expected cstdint
+expected cstdlib
+expected exception
 expected initializer_list
+expected typeinfo
 expected version
 experimental/iterator bitset
 experimental/iterator cctype
@@ -273,6 +276,7 @@ experimental/iterator cstring
 experimental/iterator ctime
 experimental/iterator cwchar
 experimental/iterator cwctype
+experimental/iterator exception
 experimental/iterator initializer_list
 experimental/iterator ios
 experimental/iterator iosfwd
@@ -568,12 +572,15 @@ iterator compare
 iterator concepts
 iterator cstdint
 iterator cstdio
+iterator cstdlib
 iterator cstring
 iterator cwchar
 iterator cwctype
+iterator exception
 iterator initializer_list
 iterator iosfwd
 iterator limits
+iterator typeinfo
 iterator variant
 iterator version
 latch climits
@@ -796,9 +803,11 @@ ranges compare
 ranges concepts
 ranges cstdint
 ranges cstdio
+ranges cstdlib
 ranges cstring
 ranges cwchar
 ranges cwctype
+ranges exception
 ranges initializer_list
 ranges iosfwd
 ranges iterator
@@ -807,6 +816,7 @@ ranges optional
 ranges span
 ranges stdexcept
 ranges tuple
+ranges typeinfo
 ranges variant
 ranges version
 ratio climits
@@ -1124,9 +1134,12 @@ valarray limits
 valarray version
 variant compare
 variant cstdint
+variant cstdlib
 variant cstring
+variant exception
 variant initializer_list
 variant limits
+variant typeinfo
 variant version
 vector array
 vector cctype

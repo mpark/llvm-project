@@ -426,6 +426,7 @@ set(files
   __fwd/byte.h
   __fwd/complex.h
   __fwd/deque.h
+  __fwd/expected.h
   __fwd/format.h
   __fwd/fstream.h
   __fwd/functional.h
@@ -901,6 +902,7 @@ set(files
   __utility/swap.h
   __utility/to_underlying.h
   __utility/unreachable.h
+  __variant/helpers.h
   __variant/monostate.h
   __vector/comparison.h
   __vector/container_traits.h
