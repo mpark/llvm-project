@@ -117,6 +117,10 @@ namespace std {
 #  include <initializer_list>
 #  include <typeinfo>
 
+#  if _LIBCPP_STD_VER >= 26
+#    include <__concepts/same_as.h>
+#  endif
+
 #  if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #    pragma GCC system_header
 #  endif
@@ -551,6 +555,25 @@ template <class _ValueType>
   }
   return nullptr;
 }
+
+#    if _LIBCPP_STD_VER >= 26
+
+template <class _Tp, same_as<any> _Any>
+_LIBCPP_HIDE_FROM_ABI const _Tp* try_cast(const _Any& __any) _NOEXCEPT {
+  return any_cast<_Tp>(&__any);
+}
+
+template <class _Tp, same_as<any> _Any>
+_LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any& __any) _NOEXCEPT {
+  return any_cast<_Tp>(&__any);
+}
+
+template <class _Tp, same_as<any> _Any>
+_LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any&& __any) _NOEXCEPT {
+  return any_cast<_Tp>(&__any);
+}
+
+#    endif // _LIBCPP_STD_VER >= 26
 
 _LIBCPP_END_NAMESPACE_STD
 
