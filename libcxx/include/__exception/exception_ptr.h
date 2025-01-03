@@ -194,7 +194,16 @@ _LIBCPP_HIDE_FROM_ABI exception_ptr make_exception_ptr(_Ep __e) _NOEXCEPT {
   return __copy_exception_ptr(std::addressof(__e), __GetExceptionInfo(__e));
 }
 
-#endif // defined(_LIBCPP_ABI_MICROSOFT)
+#endif // _LIBCPP_ABI_MICROSOFT
+
+// TODO #if _LIBCPP_STD_VER >= 26
+// TODO
+// TODO template <class _Ep>
+// TODO _LIBCPP_HIDE_FROM_ABI const _Ep* try_cast(const exception_ptr& __p) _NOEXCEPT {
+// TODO   return exception_ptr_cast<_Ep>(&__p);
+// TODO }
+// TODO
+// TODO #endif // _LIBCPP_STD_VER >= 26
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
 _LIBCPP_END_UNVERSIONED_NAMESPACE_STD
