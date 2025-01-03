@@ -171,6 +171,16 @@ _LIBCPP_HIDE_FROM_ABI exception_ptr make_exception_ptr(_Ep __e) _NOEXCEPT {
 }
 
 #endif // _LIBCPP_ABI_MICROSOFT
+
+// TODO #if _LIBCPP_STD_VER >= 26
+// TODO 
+// TODO template <class _Ep>
+// TODO _LIBCPP_HIDE_FROM_ABI const _Ep* try_cast(const exception_ptr& __p) _NOEXCEPT {
+// TODO   return exception_ptr_cast<_Ep>(&__p);
+// TODO }
+// TODO 
+// TODO #endif // _LIBCPP_STD_VER >= 26
+
 } // namespace std
 
 #endif // _LIBCPP___EXCEPTION_EXCEPTION_PTR_H
