@@ -11,9 +11,7 @@
 
 #include <__cstddef/size_t.h>
 #include <__fwd/variant.h>
-#include <__type_traits/add_const.h>
-#include <__type_traits/add_cv.h>
-#include <__type_traits/add_volatile.h>
+#include <__type_traits/add_cv_quals.h>
 #include <exception>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
