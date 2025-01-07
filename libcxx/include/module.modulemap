@@ -1199,6 +1199,7 @@ module std [system] {
   }
 
   module expected {
+    module fwd                    { header "__fwd/expected.h" }
     module bad_expected_access    { header "__expected/bad_expected_access.h" }
     module expected               { header "__expected/expected.h" }
     module unexpect               { header "__expected/unexpect.h" }
@@ -2053,6 +2054,7 @@ module std [system] {
 
   module variant {
     module fwd       { header "__fwd/variant.h" }
+    module helpers { header "__variant/helpers.h" }
     module monostate { header "__variant/monostate.h" }
 
     header "variant"
