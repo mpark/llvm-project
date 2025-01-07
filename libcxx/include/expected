@@ -54,6 +54,7 @@ namespace std {
 
 #    if _LIBCPP_STD_VER >= 26
 
+#      include <__cstddef/size_t.h>
 #      include <__fwd/expected.h>
 #      include <__fwd/variant.h>
 #      include <__memory/addressof.h>
