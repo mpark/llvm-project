@@ -5348,6 +5348,7 @@ public:
   RValue EmitAtomicExpr(AtomicExpr *E);
 
   void EmitFakeUse(Address Addr);
+  RValue EmitMatchTestExpr(const MatchTestExpr &S);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission
