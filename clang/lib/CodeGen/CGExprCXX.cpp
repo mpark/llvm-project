@@ -2378,9 +2378,28 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     break;
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "ExpressionPatternClass");
-    break;
+    auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
+    QualType LHSType = Subject->getType();
+    assert(PatternExpr->getCond() && "expected available cond-expr");
+
+    if (LHSType->isVoidType()) {
+      llvm_unreachable("is this possible?");
+    } else if (LHSType->isReferenceType()) {
+      llvm_unreachable("not implemented");
+    } else {
+      switch (getEvaluationKind(LHSType)) {
+      case TEK_Scalar:
+        return RValue::get(EmitScalarExpr(PatternExpr->getCond()));
+      case TEK_Complex:
+        llvm_unreachable("TEK_Complex not implemented");
+        break;
+      case TEK_Aggregate:
+        llvm_unreachable("TEK_Aggregate not implemented");
+        break;
+      }
+    }
+
+    llvm_unreachable("unknown expression pattern style");
   }
   case MatchPattern::MatchPatternClass::OptionalPatternClass: {
     llvm_unreachable("Pattern Matching: codegen not implemented for "
