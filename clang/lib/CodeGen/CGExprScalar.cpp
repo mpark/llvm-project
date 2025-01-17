@@ -956,11 +956,9 @@ public:
   Value *VisitPackIndexingExpr(PackIndexingExpr *E) {
     return Visit(E->getSelectedExpr());
   }
-  /* FIXME(mpark): Update to emit MatchTestExpr and MatchSelectExpr
-  Value *VisitMatchExpr(MatchExpr *IE) {
-    return CGF.EmitMatchExpr(*IE).getScalarVal();
+  Value *VisitMatchTestExpr(MatchTestExpr *IE) {
+    return CGF.EmitMatchTestExpr(*IE).getScalarVal();
   }
-  */
 };
 }  // end anonymous namespace.
 

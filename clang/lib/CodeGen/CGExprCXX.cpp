@@ -2336,43 +2336,83 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
-/* FIXME(mpark): Update to emit MatchTestExpr and MatchSelectExpr
-RValue CodeGenFunction::EmitMatchExpr(const MatchExpr &S) {
+RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   // FIXME: check if we can constant fold to simple integer,
   // just like switch does.
 
   Address MatchResAddr = Address::invalid();
   if (!S.getType()->isVoidType())
-    MatchResAddr = CreateMemTemp(S.getType(), "inspect.result");
+    MatchResAddr = CreateMemTemp(S.getType(), "match.result");
 
-  // if (S.getInit())
-  //   EmitStmt(S.getInit());
+  if (S.getHoldingVar()) {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "MatchTestExpr::HoldingVar");
+  }
 
-  // if (S.getConditionVariable())
-  //   EmitDecl(*S.getConditionVariable());
+  auto Guard = S.getGuard();
+  if (Guard.first || Guard.second) {
+    llvm_unreachable(
+        "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
+  }
 
-  // FIXME: what do do about empty inspect statements, will
-  // it get to this point?
+  const Expr *Subject = S.getSubject();
+  assert(Subject);
 
-  // FIXME: for integral types we should use LLVM switch instruction,
-  // just like switch statements do.
+  const MatchPattern *Pattern = S.getPattern();
+  MatchPattern::MatchPatternClass PatternStyle =
+      Pattern->getMatchPatternClass();
+  switch (PatternStyle) {
+  case MatchPattern::MatchPatternClass::AlternativePatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "AlternativePatternClass");
+    break;
+  }
+  case MatchPattern::MatchPatternClass::BindingPatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "BindingPatternClass");
+    break;
+  }
+  case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "DecompositionPatternClass");
+    break;
+  }
+  case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "ExpressionPatternClass");
+    break;
+  }
+  case MatchPattern::MatchPatternClass::OptionalPatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "OptionalPatternClass");
+    break;
+  }
+  case MatchPattern::MatchPatternClass::WildcardPatternClass: {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "WildcardPatternClass");
+    break;
+  }
+  default:
+    llvm_unreachable("Unknown match-test-pattern");
+  }
 
-  // Save inspect context in order to support multiple nested ones.
-  auto PrevMatchCtx = MatchCtx;
+  // TODO: create a match context to handle nested matches.
+  // auto PrevMatchCtx = MatchCtx;
 
-  MatchCtx.MatchResult = MatchResAddr;
-  MatchCtx.MatchExit = createBasicBlock("inspect.epilogue");
-  MatchCtx.NextPattern = createBasicBlock(GetPatternName(S.getPatternList()));
+  // MatchCtx.MatchResult = MatchResAddr;
+  // MatchCtx.MatchExit = createBasicBlock("inspect.epilogue");
+  // MatchCtx.NextPattern =
+  // createBasicBlock(GetPatternName(S.getPatternList()));
 
   // Emit inspect body.
-  EmitStmt(S.getBody());
-  EmitBlock(MatchCtx.MatchExit);
+  // EmitStmt(S.getBody());
+  // EmitBlock(MatchCtx.MatchExit);
 
-  MatchCtx = PrevMatchCtx;
+  // TODO: recover context.
+  // MatchCtx = PrevMatchCtx;
 
   if (S.getType()->isVoidType())
     return RValue::getIgnored();
 
   return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
 }
-*/

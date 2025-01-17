@@ -5059,8 +5059,7 @@ public:
 
   RValue EmitAtomicExpr(AtomicExpr *E);
 
-  // FIXME(mpark): Update to emit MatchTestExpr and MatchSelectExpr.
-  // RValue EmitMatchExpr(const MatchExpr &S);
+  RValue EmitMatchTestExpr(const MatchTestExpr &S);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission
