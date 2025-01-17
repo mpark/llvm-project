@@ -2407,9 +2407,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     break;
   }
   case MatchPattern::MatchPatternClass::WildcardPatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "WildcardPatternClass");
-    break;
+    // Regardless of what's in Subject, this always yields a boolean true.
+    return RValue::get(Builder.getTrue());
   }
   default:
     llvm_unreachable("Unknown match-test-pattern");
