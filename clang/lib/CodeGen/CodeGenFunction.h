@@ -5060,6 +5060,7 @@ public:
   RValue EmitAtomicExpr(AtomicExpr *E);
 
   RValue EmitMatchTestExpr(const MatchTestExpr &S);
+  RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission
