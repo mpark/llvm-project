@@ -2402,9 +2402,22 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     llvm_unreachable("unknown expression pattern style");
   }
   case MatchPattern::MatchPatternClass::OptionalPatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "OptionalPatternClass");
-    break;
+    auto *OptExpr = static_cast<const OptionalPattern *>(Pattern);
+    EmitVarDecl(*OptExpr->getCondVar());
+    const Expr *Cond = OptExpr->getCond();
+    assert(Cond && "expected available cond-expr");
+    QualType OptCheckType = Cond->getType();
+
+    llvm::BasicBlock *TestSubPatternBB = createBasicBlock("match.test");
+    llvm::BasicBlock *BailOptCheck = createBasicBlock("match.fail");
+    EmitBranchOnBoolExpr(Cond, TestSubPatternBB, BailOptCheck,
+                         getProfileCount(Cond));
+
+    EmitBlock(TestSubPatternBB);
+    EmitBranch(BailOptCheck);
+
+    EmitBlock(BailOptCheck);
+    return RValue::get(Builder.getFalse());
   }
   case MatchPattern::MatchPatternClass::WildcardPatternClass: {
     // Regardless of what's in Subject, this always yields a boolean true.
