@@ -2336,29 +2336,8 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
-RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
-  // FIXME: check if we can constant fold to simple integer,
-  // just like switch does.
-
-  Address MatchResAddr = Address::invalid();
-  if (!S.getType()->isVoidType())
-    MatchResAddr = CreateMemTemp(S.getType(), "match.result");
-
-  if (S.getHoldingVar()) {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "MatchTestExpr::HoldingVar");
-  }
-
-  auto Guard = S.getGuard();
-  if (Guard.first || Guard.second) {
-    llvm_unreachable(
-        "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
-  }
-
-  const Expr *Subject = S.getSubject();
-  assert(Subject);
-
-  const MatchPattern *Pattern = S.getPattern();
+RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
+                                         const Expr *Subject) {
   MatchPattern::MatchPatternClass PatternStyle =
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
@@ -2423,9 +2402,35 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     // Regardless of what's in Subject, this always yields a boolean true.
     return RValue::get(Builder.getTrue());
   }
-  default:
-    llvm_unreachable("Unknown match-test-pattern");
   }
+
+  llvm_unreachable("Unknown match-pattern");
+}
+
+RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
+  // FIXME: check if we can constant fold to simple integer,
+  // just like switch does.
+
+  Address MatchResAddr = Address::invalid();
+  if (!S.getType()->isVoidType())
+    MatchResAddr = CreateMemTemp(S.getType(), "match.result");
+
+  if (S.getHoldingVar()) {
+    llvm_unreachable("Pattern Matching: codegen not implemented for "
+                     "MatchTestExpr::HoldingVar");
+  }
+
+  auto Guard = S.getGuard();
+  if (Guard.first || Guard.second) {
+    llvm_unreachable(
+        "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
+  }
+
+  const Expr *Subject = S.getSubject();
+  assert(Subject);
+
+  RValue matchResult = EmitMatchPattern(S.getPattern(), Subject);
+  return matchResult;
 
   // TODO: create a match context to handle nested matches.
   // auto PrevMatchCtx = MatchCtx;
@@ -2442,8 +2447,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   // TODO: recover context.
   // MatchCtx = PrevMatchCtx;
 
-  if (S.getType()->isVoidType())
-    return RValue::getIgnored();
+  // if (S.getType()->isVoidType())
+  //   return RValue::getIgnored();
 
-  return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
+  // return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
 }
