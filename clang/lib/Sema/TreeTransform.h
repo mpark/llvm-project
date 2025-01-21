@@ -17425,8 +17425,29 @@ ExprResult TreeTransform<Derived>::TransformHLSLOutArgExpr(HLSLOutArgExpr *E) {
 
 template <typename Derived>
 ExprResult
-TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *S) {
-  return ExprError();
+TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
+  VarDecl *HoldingVar = nullptr;
+  if (VarDecl *HV = E->getHoldingVar()) {
+    HoldingVar =
+        cast<VarDecl>(getDerived().TransformDefinition(HV->getLocation(), HV));
+    if (!HoldingVar)
+      return ExprError();
+  }
+
+  ExprResult LHS = getDerived().TransformExpr(E->getSubject());
+  if (LHS.isInvalid())
+    return ExprError();
+
+  if (!getDerived().AlwaysRebuild() && LHS.get() == E->getSubject())
+    return E;
+
+  // TODO(mpark): Transform the expressions inside the pattern.
+  if (getSema().CheckCompleteMatchPattern(LHS.get(), E->getPattern()))
+    return ExprError();
+
+  return getSema().ActOnMatchTestExpr(HoldingVar, LHS.get(),
+                                      E->getMatchLoc(), E->getPattern(),
+                                      E->getIfLoc(), E->getGuard());
 }
 
 template <typename Derived>

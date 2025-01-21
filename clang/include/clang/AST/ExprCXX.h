@@ -5339,7 +5339,10 @@ public:
                          MatchGuard Guard)
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
         HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
-        Pattern(Pattern), IfLoc(IfLoc), Guard(Guard) {}
+        Pattern(Pattern), IfLoc(IfLoc), Guard(Guard) {
+    // Match test expressions are value-dependent if the subject is value-dependent.
+    setDependence(Subject->getDependence() & ~ExprDependence::Type);
+  }
 
   explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
 
@@ -5349,8 +5352,16 @@ public:
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
 
+  SourceLocation getMatchLoc() const LLVM_READONLY {
+    return MatchLoc;
+  }
+
   const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
+
+  SourceLocation getIfLoc() const LLVM_READONLY {
+    return IfLoc;
+  }
 
   const MatchGuard &getGuard() const { return Guard; }
   MatchGuard &getGuard() { return Guard; }
