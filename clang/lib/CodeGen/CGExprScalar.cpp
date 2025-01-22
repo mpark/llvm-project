@@ -1037,6 +1037,9 @@ public:
   Value *VisitMatchTestExpr(MatchTestExpr *IE) {
     return CGF.EmitMatchTestExpr(*IE).getScalarVal();
   }
+  Value *VisitMatchSelectExpr(MatchSelectExpr *IE) {
+    return CGF.EmitMatchSelectExpr(*IE).getScalarVal();
+  }
 };
 }  // end anonymous namespace.
 
