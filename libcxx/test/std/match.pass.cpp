@@ -61,19 +61,19 @@ void test_match_test_expr() {
   }());
 }
 
-// auto char_pattern(char c) {
-//   return c match {
-//     'a' => 1;
-//     'b' => 2;
-//     let x => int(x);
-//   };
-// }
+auto char_pattern(char c) {
+  return c match {
+    'a'   => 1;
+    'b'   => 2;
+    let x => int(x);
+  };
+}
 
-// void test_char_pattern() {
-//   check(char_pattern('a') == 1);
-//   check(char_pattern('b') == 2);
-//   check(char_pattern('c') == 99);
-// }
+void test_char_pattern() {
+  check(char_pattern('a') == 1);
+  check(char_pattern('b') == 2);
+  check(char_pattern('c') == 99);
+}
 
 // auto decomposition_pattern(const int (&xs)[2]) {
 //   return xs match {
@@ -452,7 +452,7 @@ void test_match_test_expr() {
 
 int main() {
   test_match_test_expr();
-  // test_char_pattern();
+  test_char_pattern();
   // test_decomposition_pattern();
   // test_nested_decomposition_pattern();
   // test_fizzbuzz();
