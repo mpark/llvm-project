@@ -5278,6 +5278,7 @@ public:
 
   void EmitFakeUse(Address Addr);
   RValue EmitMatchTestExpr(const MatchTestExpr &S);
+  RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
 
   //===--------------------------------------------------------------------===//
