@@ -2431,12 +2431,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
 }
 
 RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
-  // FIXME: check if we can constant fold to simple integer,
-  // just like switch does.
-
-  Address MatchResAddr = Address::invalid();
-  if (!S.getType()->isVoidType())
-    MatchResAddr = CreateMemTemp(S.getType(), "match.result");
+  // FIXME: all constant folding already implemented during Sema?
+  assert(!S.getType()->isVoidType() && "is this possible?");
 
   if (S.getHoldingVar()) {
     llvm_unreachable("Pattern Matching: codegen not implemented for "
@@ -2454,29 +2450,78 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
 
   RValue matchResult = EmitMatchPattern(S.getPattern(), Subject);
   return matchResult;
-
-  // TODO: create a match context to handle nested matches.
-  // auto PrevMatchCtx = MatchCtx;
-
-  // MatchCtx.MatchResult = MatchResAddr;
-  // MatchCtx.MatchExit = createBasicBlock("inspect.epilogue");
-  // MatchCtx.NextPattern =
-  // createBasicBlock(GetPatternName(S.getPatternList()));
-
-  // Emit inspect body.
-  // EmitStmt(S.getBody());
-  // EmitBlock(MatchCtx.MatchExit);
-
-  // TODO: recover context.
-  // MatchCtx = PrevMatchCtx;
-
-  // if (S.getType()->isVoidType())
-  //   return RValue::getIgnored();
-
-  // return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
 }
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
-  llvm_unreachable("Pattern Matching: codegen not implemented for "
-                   "EmitMatchSelectExpr");
+  // FIXME: check if we can constant fold to simple integer,
+  // just like switch does. Is this already handled in Sema?
+  llvm::ArrayRef<MatchCase> Cases = S.getCases();
+
+  assert(!S.getType()->isVoidType() && "is this possible?");
+  Address MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+  llvm::BasicBlock *SelectEndBB = nullptr;
+
+  unsigned CasePatternIdx = 0;
+  for (MatchCase MatchC : Cases) {
+    if (!SelectEndBB)
+      SelectEndBB = createBasicBlock("match.select.end");
+
+    // TODO: guard support
+    MatchGuard G = MatchC.Guard;
+    if (G.first || G.second) {
+      llvm_unreachable(
+          "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
+    }
+
+    RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+    llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
+    llvm::BasicBlock *NextPatternBB =
+        (CasePatternIdx == (Cases.size() - 1))
+            ? SelectEndBB
+            : createBasicBlock("match.select.next_pattern");
+    Builder.CreateCondBr(MatchResult.getScalarVal(), ExecuteActionBB,
+                         NextPatternBB);
+
+    // Handle all code for executing the action.
+    EmitBlock(ExecuteActionBB);
+
+    const Expr *E = dyn_cast<Expr>(MatchC.Handler);
+    if (!E) {
+      EmitStmt(MatchC.Handler);
+      CasePatternIdx++;
+      // TODO: break, continue, return, co_return, etc.
+      llvm_unreachable("MatchSelectExpr for stmt actions not yet implemented");
+    }
+
+    // No result to store, but evaluate the expression for side effects.
+    if (E->getType()->isVoidType()) {
+      llvm_unreachable("is this possible?");
+    } else if (E->getType()->isReferenceType()) {
+      // If the expr is a reference, take the address of the expression
+      // rather than the value.
+      llvm_unreachable(
+          "MatchSelectExpr for isReferenceType not yet implemented");
+    } else {
+      switch (getEvaluationKind(E->getType())) {
+      case TEK_Scalar:
+        Builder.CreateStore(EmitScalarExpr(E), MatchResAddr);
+        break;
+      case TEK_Complex:
+        llvm_unreachable("MatchSelectExpr for TEK_Complex not yet implemented");
+        break;
+      case TEK_Aggregate:
+        llvm_unreachable(
+            "MatchSelectExpr for TEK_Aggregate not yet implemented");
+        break;
+      }
+      EmitBranch(SelectEndBB);
+
+      // If match failed, try next one.
+      EmitBlock(NextPatternBB);
+      CasePatternIdx++;
+    }
+  }
+
+  assert(SelectEndBB && "expected at least one pattern");
+  return RValue::get(Builder.CreateLoad(MatchResAddr));
 }
