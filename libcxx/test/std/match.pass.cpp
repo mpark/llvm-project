@@ -53,9 +53,12 @@ void test_match_test_expr() {
   check(![]() { int** pp = nullptr; return pp match ?? _; }());
   check(![]() { int** pp = nullptr; return pp match ?? 0; }());
 
-  // check([]() { return 0 match let _; }());
-  // check([]() { return 0 match let x; }());
-  // check([]() { int x = 0; return &x match ? let x; }());
+  check([]() { return 0 match let _; }());
+  check([]() { return 0 match let x; }());
+  check([]() {
+    int x = 0;
+    return &x match ? let x;
+  }());
 }
 
 // auto char_pattern(char c) {
