@@ -2347,9 +2347,14 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     break;
   }
   case MatchPattern::MatchPatternClass::BindingPatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "BindingPatternClass");
-    break;
+    auto *BinPat = static_cast<const BindingPattern *>(Pattern);
+    const BindingDecl *D = BinPat->getBinding();
+    const VarDecl *Var = D->getHoldingVar();
+    assert(Var && "expected binding source");
+
+    EmitVarDecl(*Var);
+    // Binding declared, match is always true.
+    return RValue::get(Builder.getTrue());
   }
   case MatchPattern::MatchPatternClass::ParenPatternClass: {
     llvm_unreachable("Pattern Matching: codegen not implemented for "
