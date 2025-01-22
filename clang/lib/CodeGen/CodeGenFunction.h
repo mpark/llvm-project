@@ -5060,6 +5060,7 @@ public:
   RValue EmitAtomicExpr(AtomicExpr *E);
 
   RValue EmitMatchTestExpr(const MatchTestExpr &S);
+  RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
 
   //===--------------------------------------------------------------------===//

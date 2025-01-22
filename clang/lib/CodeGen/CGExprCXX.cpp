@@ -2475,3 +2475,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
 
   // return convertTempToRValue(MatchResAddr, S.getType(), SourceLocation());
 }
+
+RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
+  llvm_unreachable("Pattern Matching: codegen not implemented for "
+                   "EmitMatchSelectExpr");
+}
