@@ -75,26 +75,26 @@ void test_char_pattern() {
   check(char_pattern('c') == 99);
 }
 
-// auto decomposition_pattern(const int (&xs)[2]) {
-//   return xs match {
-//     [0, 0] => -1;
-//     [let x, 0] => x * 2;
-//     [0, let y] => y * 4;
-//     let [x, y] => x * y;
-//   };
-// }
+auto decomposition_pattern(const int (&xs)[2]) {
+  return xs match {
+    [ 0, 0 ]     => -1;
+    [ let x, 0 ] => x * 2;
+    [ 0, let y ] => y * 4;
+    let[x, y]    => x * y;
+  };
+}
 
-// void test_decomposition_pattern() {
-//   check(decomposition_pattern({0, 0}) == -1);
-//   check(decomposition_pattern({0, 0}) != 0);
-//   check(decomposition_pattern({1, 0}) == 2);
-//   check(decomposition_pattern({1, 0}) != 3);
-//   check(decomposition_pattern({2, 0}) == 4);
-//   check(decomposition_pattern({0, 1}) == 4);
-//   check(decomposition_pattern({0, 2}) == 8);
-//   check(decomposition_pattern({2, 3}) == 6);
-//   check(decomposition_pattern({3, 4}) == 12);
-// }
+void test_decomposition_pattern() {
+  check(decomposition_pattern({0, 0}) == -1);
+  check(decomposition_pattern({0, 0}) != 0);
+  check(decomposition_pattern({1, 0}) == 2);
+  check(decomposition_pattern({1, 0}) != 3);
+  check(decomposition_pattern({2, 0}) == 4);
+  check(decomposition_pattern({0, 1}) == 4);
+  check(decomposition_pattern({0, 2}) == 8);
+  check(decomposition_pattern({2, 3}) == 6);
+  check(decomposition_pattern({3, 4}) == 12);
+}
 
 // enum Color { Red, Blue };
 
@@ -453,7 +453,7 @@ void test_char_pattern() {
 int main() {
   test_match_test_expr();
   test_char_pattern();
-  // test_decomposition_pattern();
+  test_decomposition_pattern();
   // test_nested_decomposition_pattern();
   // test_fizzbuzz();
   // test_trailing_return_type();
