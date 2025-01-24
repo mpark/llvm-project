@@ -2336,6 +2336,43 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
+RValue CodeGenFunction::EmitDecompositionPattern(
+    const DecompositionPattern *DecompPattern) {
+  assert(DecompPattern->getNumPatterns() != 0 && "not implemented for empty.");
+
+  RawAddress FinalDecompResultAddr = CreateTempAlloca(
+      Builder.getInt1Ty(), getPointerAlign(), "match.decomp.result");
+
+  llvm::BasicBlock *DecompFailBB = createBasicBlock("match.decomp.fail");
+  llvm::BasicBlock *DecompPassBB = createBasicBlock("match.decomp.pass");
+  llvm::BasicBlock *DecompEndBB = createBasicBlock("match.decomp.end");
+  unsigned PatternIdx = 0;
+
+  for (auto *SubPattern : DecompPattern->children()) {
+    RValue MatchResult = EmitMatchPattern(SubPattern, nullptr);
+    llvm::BasicBlock *NextPatternBB =
+        (PatternIdx == (DecompPattern->getNumPatterns() - 1))
+            ? DecompPassBB
+            : createBasicBlock("match.decomp.next_pattern");
+    Builder.CreateCondBr(MatchResult.getScalarVal(), NextPatternBB,
+                         DecompFailBB);
+
+    EmitBlock(NextPatternBB);
+    PatternIdx++;
+  }
+
+  EmitBlock(DecompFailBB);
+  Builder.CreateStore(Builder.getFalse(), FinalDecompResultAddr);
+  EmitBranch(DecompEndBB);
+
+  EmitBlock(DecompPassBB);
+  Builder.CreateStore(Builder.getTrue(), FinalDecompResultAddr);
+  EmitBranch(DecompEndBB);
+
+  EmitBlock(DecompEndBB);
+  return RValue::get(Builder.CreateLoad(FinalDecompResultAddr));
+}
+
 RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
                                          const Expr *Subject) {
   MatchPattern::MatchPatternClass PatternStyle =
@@ -2349,10 +2386,16 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   case MatchPattern::MatchPatternClass::BindingPatternClass: {
     auto *BinPat = static_cast<const BindingPattern *>(Pattern);
     const BindingDecl *D = BinPat->getBinding();
+    assert(D && "expected binding declaration");
     const VarDecl *Var = D->getHoldingVar();
-    assert(Var && "expected binding source");
 
-    EmitVarDecl(*Var);
+    if (Var)
+      EmitVarDecl(*Var);
+    else {
+      llvm_unreachable("Unsure what to do here");
+      // (void)EmitLValue(D->getBinding());
+    }
+
     // Binding declared, match is always true.
     return RValue::get(Builder.getTrue());
   }
@@ -2362,9 +2405,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     break;
   }
   case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "DecompositionPatternClass");
-    break;
+    auto *DecompExpr = static_cast<const DecompositionPattern *>(Pattern);
+    return EmitDecompositionPattern(DecompExpr);
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
