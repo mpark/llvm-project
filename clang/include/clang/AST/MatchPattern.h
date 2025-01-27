@@ -321,6 +321,7 @@ public:
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
   SourceRange getSquares() const { return Squares; }
+  bool isBindingOnly() const { return BindingOnly; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {getPatterns(), getPatterns() + NumPatterns};
