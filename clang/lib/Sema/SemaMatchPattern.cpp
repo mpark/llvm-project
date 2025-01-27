@@ -481,6 +481,9 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
 }
 
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
+  if (Subject->isTypeDependent()) {
+    return false;
+  }
   SourceLocation Loc = Pattern->getBeginLoc();
   Scope *S = getCurScope();
   switch (Pattern->getMatchPatternClass()) {
