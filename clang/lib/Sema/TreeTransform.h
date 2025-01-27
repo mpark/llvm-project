@@ -4207,6 +4207,65 @@ public:
     return getSema().OpenACC().ActOnOpenACCAsteriskSizeExpr(AsteriskLoc);
   }
 
+  ActionResult<MatchPattern *> TransformPattern(MatchPattern* Pattern) {
+    switch (Pattern->getMatchPatternClass()) {
+    case MatchPattern::WildcardPatternClass:
+      return Pattern;
+    case MatchPattern::ExpressionPatternClass: {
+      ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
+      ExprResult E = getDerived().TransformExpr(P->getExpr());
+      if (E.isInvalid())
+        return true;
+      if (E.get() == P->getExpr())
+        return Pattern;
+      return getSema().ActOnExpressionPattern(E.get());
+    }
+    case MatchPattern::BindingPatternClass:
+      llvm_unreachable("not implemented");
+    case MatchPattern::ParenPatternClass: {
+      ParenPattern *P = static_cast<ParenPattern *>(Pattern);
+      auto Sub = TransformPattern(P->getSubPattern());
+      if (Sub.isInvalid())
+        return true;
+      if (Sub.get() == P->getSubPattern()) {
+        return Pattern;
+      }
+      return getSema().ActOnParenPattern(P->getParens(), Sub.get());
+    }
+    case MatchPattern::OptionalPatternClass: {
+      OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
+      auto Sub = TransformPattern(P->getSubPattern());
+      if (Sub.isInvalid())
+        return true;
+      if (Sub.get() == P->getSubPattern()) {
+        return Pattern;
+      }
+      return getSema().ActOnOptionalPattern(P->getBeginLoc(), Sub.get());
+    }
+    case MatchPattern::AlternativePatternClass:
+      llvm_unreachable("not implemented");
+    case MatchPattern::DecompositionPatternClass: {
+      DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
+      SmallVector<MatchPattern *, 4> Patterns;
+      Patterns.reserve(P->getNumPatterns());
+      auto Children = P->children();
+      for (MatchPattern* C : Children) {
+        auto Sub = TransformPattern(C);
+        if (Sub.isInvalid())
+          return true;
+        Patterns.push_back(Sub.get());
+      }
+      if (std::equal(Children.begin(), Children.end(), Patterns.begin(),
+                     Patterns.end())) {
+        return Pattern;
+      }
+      return getSema().ActOnDecompositionPattern(Patterns, P->getSquares(),
+                                                 P->isBindingOnly());
+    }
+    }
+    llvm_unreachable("unknown match pattern kind");
+  }
+
 private:
   TypeLoc TransformTypeInObjectScope(TypeLoc TL,
                                      QualType ObjectType,
@@ -17438,15 +17497,21 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
   if (LHS.isInvalid())
     return ExprError();
 
-  if (!getDerived().AlwaysRebuild() && LHS.get() == E->getSubject())
+  ActionResult<MatchPattern *> P =
+      getDerived().TransformPattern(E->getPattern());
+  if (P.isInvalid())
+    return ExprError();
+
+  // If nothing changed, just retain the existing expression.
+  if (!getDerived().AlwaysRebuild() && LHS.get() == E->getSubject() &&
+      P.get() == E->getPattern())
     return E;
 
-  // TODO(mpark): Transform the expressions inside the pattern.
-  if (getSema().CheckCompleteMatchPattern(LHS.get(), E->getPattern()))
+  if (getSema().CheckCompleteMatchPattern(LHS.get(), P.get()))
     return ExprError();
 
   return getSema().ActOnMatchTestExpr(HoldingVar, LHS.get(),
-                                      E->getMatchLoc(), E->getPattern(),
+                                      E->getMatchLoc(), P.get(),
                                       E->getIfLoc(), E->getGuard());
 }
 
