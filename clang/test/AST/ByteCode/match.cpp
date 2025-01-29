@@ -41,23 +41,39 @@ static_assert(![](int x, int y) { return x match y; }(0, 1));
 static_assert(![](auto x, auto y) -> bool { return x match y; }(0, 1));
 
 static_assert([](int x) { return &x match ? _; }(0));
+static_assert([](auto x) { return &x match ? _; }(0));
 static_assert([](int x) { return &x match ? 0; }(0));
+static_assert([](auto x) { return &x match ? 0; }(0));
 static_assert(![](int x) { return &x match ? 1; }(0));
+static_assert(![](auto x) { return &x match ? 1; }(0));
 static_assert([](int x, int y) { return &x match ? y; }(0, 0));
+static_assert([](auto x, auto y) { return &x match ? y; }(0, 0));
 static_assert(![](int x, int y) { return &x match ? y; }(0, 1));
+static_assert(![](auto x, auto y) { return &x match ? y; }(0, 1));
 static_assert(![](int *p) { return p match ? _; }(nullptr));
+static_assert(![](auto *p) { return p match ? _; }((int*)nullptr));
 static_assert(![](int *p) { return p match ? 0; }(nullptr));
+static_assert(![](auto *p) { return p match ? 0; }((int*)nullptr));
 
 static_assert([](int x) { int *p = &x; return &p match ?? _; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match ?? _; }(0));
 static_assert([](int x) { int *p = &x; return &p match ?? 0; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match ?? 0; }(0));
 static_assert(![](int x) { int *p = &x; return &p match ?? 1; }(0));
+static_assert(![](auto x) { auto *p = &x; return &p match ?? 1; }(0));
 
 static_assert([](int x) { int *p = &x; return &p match ? _; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match ? _; }(0));
 static_assert([](int x) { int *p = &x; return &p match ?? 0; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match ?? 0; }(0));
 static_assert(![](int x) { int *p = &x; return &p match ?? 1; }(0));
+static_assert(![](auto x) { auto *p = &x; return &p match ?? 1; }(0));
 static_assert(![](int **pp) { return pp match ? _; }(nullptr));
+static_assert(![](auto **pp) { return pp match ? _; }((int**)nullptr));
 static_assert(![](int **pp) { return pp match ?? _; }(nullptr));
+static_assert(![](auto **pp) { return pp match ?? _; }((int**)nullptr));
 static_assert(![](int **pp) { return pp match ?? 0; }(nullptr));
+static_assert(![](auto **pp) { return pp match ?? 0; }((int**)nullptr));
 
 constexpr bool test_simple_match(auto x, auto y) { return x match y; }
 
