@@ -481,6 +481,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   if (Subject->isTypeDependent()) {
     return false;
   }
+  // TODO(mpark): Skip if Pattern is type-dependent as well.
   SourceLocation Loc = Pattern->getBeginLoc();
   Scope *S = getCurScope();
   switch (Pattern->getMatchPatternClass()) {

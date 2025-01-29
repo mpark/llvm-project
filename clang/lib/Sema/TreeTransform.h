@@ -4207,7 +4207,8 @@ public:
     return getSema().OpenACC().ActOnOpenACCAsteriskSizeExpr(AsteriskLoc);
   }
 
-  ActionResult<MatchPattern *> TransformPattern(MatchPattern* Pattern) {
+  ActionResult<MatchPattern *> TransformPattern(MatchPattern *Pattern,
+                                                bool Rebuild) {
     switch (Pattern->getMatchPatternClass()) {
     case MatchPattern::WildcardPatternClass:
       return Pattern;
@@ -4216,7 +4217,19 @@ public:
       ExprResult E = getDerived().TransformExpr(P->getExpr());
       if (E.isInvalid())
         return true;
-      if (E.get() == P->getExpr())
+      // Even if the expression pattern is non-dependent, e.g. just a literal `0`
+      // we still rebuild the pattern if the subject is dependent.
+      // This is because at least for now, the matching conditions are tied to
+      // the pattern directly. So given something like:
+      //
+      //   void f(auto x) { return x match 0; }
+      //
+      // We want a pattern node for `0` for each instantiation such that each
+      // node can store the condition `x == 0` for each instantiation of `x`.
+      //
+      // This is likely more conservative than it needs to be... but it should
+      // be good enough for a prototype.
+      if (!Rebuild && E.get() == P->getExpr())
         return Pattern;
       return getSema().ActOnExpressionPattern(E.get());
     }
@@ -4224,7 +4237,7 @@ public:
       llvm_unreachable("not implemented");
     case MatchPattern::ParenPatternClass: {
       ParenPattern *P = static_cast<ParenPattern *>(Pattern);
-      auto Sub = TransformPattern(P->getSubPattern());
+      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
       if (Sub.isInvalid())
         return true;
       if (Sub.get() == P->getSubPattern()) {
@@ -4234,12 +4247,11 @@ public:
     }
     case MatchPattern::OptionalPatternClass: {
       OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-      auto Sub = TransformPattern(P->getSubPattern());
+      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
       if (Sub.isInvalid())
         return true;
-      if (Sub.get() == P->getSubPattern()) {
+      if (Sub.get() == P->getSubPattern())
         return Pattern;
-      }
       return getSema().ActOnOptionalPattern(P->getBeginLoc(), Sub.get());
     }
     case MatchPattern::AlternativePatternClass:
@@ -4250,7 +4262,7 @@ public:
       Patterns.reserve(P->getNumPatterns());
       auto Children = P->children();
       for (MatchPattern* C : Children) {
-        auto Sub = TransformPattern(C);
+        auto Sub = TransformPattern(C, Rebuild);
         if (Sub.isInvalid())
           return true;
         Patterns.push_back(Sub.get());
@@ -17497,8 +17509,8 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
   if (LHS.isInvalid())
     return ExprError();
 
-  ActionResult<MatchPattern *> P =
-      getDerived().TransformPattern(E->getPattern());
+  ActionResult<MatchPattern *> P = getDerived().TransformPattern(
+      E->getPattern(), LHS.get() == E->getSubject());
   if (P.isInvalid())
     return ExprError();
 
