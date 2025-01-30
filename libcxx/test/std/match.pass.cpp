@@ -175,30 +175,30 @@ void test_decomposition_pattern() {
 //   check(trailing_return_type(2) == 99);
 // }
 
-// struct Base { virtual ~Base() = default; };
+struct Base { virtual ~Base() = default; };
 
-// struct DerivedA : Base {
-//   int x;
-//   DerivedA(int x) : x(x) {}
-// };
+struct DerivedA : Base {
+  int x;
+  DerivedA(int x) : x(x) {}
+};
 
-// struct DerivedB : Base {
-//   char c;
-//   DerivedB(char c) : c(c) {}
-// };
+struct DerivedB : Base {
+  char c;
+  DerivedB(char c) : c(c) {}
+};
 
-// auto alternative_pattern_const(const Base &base) {
-//   return base match {
-//     DerivedA: let a => a.x * 2;
-//     const DerivedB: let b => (int)b.c;
-//     _ => 0;
-//   };
-// }
+auto alternative_pattern_const(const Base &base) {
+  return base match {
+    DerivedA: let a => a.x * 2;
+    const DerivedB: let b => (int)b.c;
+    _ => 0;
+  };
+}
 
-// void test_alternative_pattern_const() {
-//   check(alternative_pattern_const(DerivedA{101}) == 202);
-//   check(alternative_pattern_const(DerivedB{'a'}) == 97);
-// }
+void test_alternative_pattern_const() {
+  check(alternative_pattern_const(DerivedA{101}) == 202);
+  check(alternative_pattern_const(DerivedB{'a'}) == 97);
+}
 
 // auto alternative_pattern_non_const(DerivedA derived) {
 //   Base &base = derived;
@@ -457,7 +457,7 @@ int main() {
   // test_nested_decomposition_pattern();
   // test_fizzbuzz();
   // test_trailing_return_type();
-  // test_alternative_pattern_const();
+  test_alternative_pattern_const();
   // test_alternative_pattern_non_const();
   // test_bitfields();
   // test_tuple_like_decomposition_pattern();

@@ -5281,6 +5281,7 @@ public:
   RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
   RValue EmitDecompositionPattern(const DecompositionPattern *Pattern);
+  RValue EmitAlternativePattern(const AlternativePattern *Pattern);
 
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission
