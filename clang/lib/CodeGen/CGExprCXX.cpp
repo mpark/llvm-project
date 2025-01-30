@@ -2336,6 +2336,38 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
+RValue
+CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
+  assert(AltPattern->getHoldingVar() && "expected holding var");
+  EmitVarDecl(*AltPattern->getHoldingVar());
+  EmitVarDecl(*AltPattern->getCondVar());
+
+  RawAddress AltResultAddr = CreateTempAlloca(
+      Builder.getInt1Ty(), getPointerAlign(), "match.alt.result");
+
+  llvm::BasicBlock *AltTypeCheckFailBB =
+      createBasicBlock("match.alt.type.check.fail");
+  llvm::BasicBlock *AltTypeCheckPassBB =
+      createBasicBlock("match.alt.type.check.pass");
+  llvm::BasicBlock *AltEndBB = createBasicBlock("match.alt.end");
+
+  EmitBranchOnBoolExpr(AltPattern->getCond(), AltTypeCheckPassBB,
+                       AltTypeCheckFailBB,
+                       getProfileCount(AltPattern->getCond()));
+
+  EmitBlock(AltTypeCheckPassBB);
+  RValue MatchResult = EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
+  Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
+  EmitBranch(AltEndBB);
+
+  EmitBlock(AltTypeCheckFailBB);
+  Builder.CreateStore(Builder.getFalse(), AltResultAddr);
+  EmitBranch(AltEndBB);
+
+  EmitBlock(AltEndBB);
+  return RValue::get(Builder.CreateLoad(AltResultAddr));
+}
+
 RValue CodeGenFunction::EmitDecompositionPattern(
     const DecompositionPattern *DecompPattern) {
   assert(DecompPattern->getNumPatterns() != 0 && "not implemented for empty.");
@@ -2380,9 +2412,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
   case MatchPattern::MatchPatternClass::AlternativePatternClass: {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "AlternativePatternClass");
-    break;
+    auto *AltExpr = static_cast<const AlternativePattern *>(Pattern);
+    return EmitAlternativePattern(AltExpr);
   }
   case MatchPattern::MatchPatternClass::BindingPatternClass: {
     auto *BinPat = static_cast<const BindingPattern *>(Pattern);
