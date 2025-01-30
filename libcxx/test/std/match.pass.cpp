@@ -161,19 +161,19 @@ void test_decomposition_pattern() {
 //   ));
 // }
 
-// auto trailing_return_type(int x) {
-//   return x match -> int {
-//     0 => 0;
-//     1 => 3.0;
-//     2 => 'c';
-//   };
-// }
+auto trailing_return_type(int x) {
+  return x match -> int {
+    0 => 0;
+    1 => 3.0;
+    2 => 'c';
+  };
+}
 
-// void test_trailing_return_type() {
-//   check(trailing_return_type(0) == 0);
-//   check(trailing_return_type(1) == 3);
-//   check(trailing_return_type(2) == 99);
-// }
+void test_trailing_return_type() {
+  check(trailing_return_type(0) == 0);
+  check(trailing_return_type(1) == 3);
+  check(trailing_return_type(2) == 99);
+}
 
 struct Base { virtual ~Base() = default; };
 
@@ -214,19 +214,19 @@ void test_alternative_pattern_const() {
 //   check(alternative_pattern_non_const(DerivedA{202}) == 404);
 // }
 
-// auto bitfields(int x) {
-//   struct S { int i : 6; } s{x};
-//   return s.i match {
-//     8 => 0;
-//     let n => n;
-//   };
-// }
+auto bitfields(int x) {
+  struct S { int i : 6; } s{x};
+  return s.i match {
+    8 => 0;
+    let n => n;
+  };
+}
 
-// void test_bitfields() {
-//   check(bitfields(8) == 0);
-//   check(bitfields(2) == 2);
-//   check(bitfields(4) == 4);
-// }
+void test_bitfields() {
+  check(bitfields(8) == 0);
+  check(bitfields(2) == 2);
+  check(bitfields(4) == 4);
+}
 
 // struct Pair {
 //   template <int I>
@@ -456,10 +456,10 @@ int main() {
   test_decomposition_pattern();
   // test_nested_decomposition_pattern();
   // test_fizzbuzz();
-  // test_trailing_return_type();
+  test_trailing_return_type();
   test_alternative_pattern_const();
   // test_alternative_pattern_non_const();
-  // test_bitfields();
+  test_bitfields();
   // test_tuple_like_decomposition_pattern();
   // test_match_test_with_guard();
   // test_match_pattern_guards();
