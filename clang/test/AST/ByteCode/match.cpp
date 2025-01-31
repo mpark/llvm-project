@@ -75,12 +75,23 @@ static_assert(![](auto **pp) { return pp match ?? _; }((int**)nullptr));
 static_assert(![](int **pp) { return pp match ?? 0; }(nullptr));
 static_assert(![](auto **pp) { return pp match ?? 0; }((int**)nullptr));
 
-constexpr bool test_simple_match(auto x, auto y) { return x match y; }
+constexpr bool test_dependent_match_0(auto x, auto y) { return x match y; }
 
-static_assert(test_simple_match(0, 0));
-static_assert(test_simple_match(0.0, 0));
-static_assert(!test_simple_match(1, 0));
-static_assert(!test_simple_match(1.0, 0));
+static_assert(test_dependent_match_0(0, 0));
+static_assert(test_dependent_match_0(0.0, 0));
+static_assert(!test_dependent_match_0(1, 0));
+
+constexpr bool test_dependent_match_1(auto x) { return x match 0; }
+
+static_assert(test_dependent_match_1(0));
+static_assert(test_dependent_match_1(0.0));
+static_assert(!test_dependent_match_1(1));
+
+constexpr bool test_dependent_match_2(auto y) { return 0 match y; }
+
+static_assert(test_dependent_match_2(0));
+static_assert(test_dependent_match_2(0.0));
+static_assert(!test_dependent_match_2(1));
 
 constexpr auto test(char c) {
   return c match {
