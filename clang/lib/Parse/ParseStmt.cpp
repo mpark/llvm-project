@@ -619,7 +619,7 @@ StmtResult Parser::ParseSEHTryBlock() {
     return StmtError(Diag(Tok, diag::err_expected) << tok::l_brace);
 
   StmtResult TryBlock(ParseCompoundStatement(
-      StmtExprKind::None,
+      /*isStmtExpr=*/false,
       Scope::DeclScope | Scope::CompoundStmtScope | Scope::SEHTryScope));
   if (TryBlock.isInvalid())
     return TryBlock;
@@ -1025,8 +1025,8 @@ StmtResult Parser::ParseDefaultStatement(ParsedStmtContext StmtCtx) {
                                   SubStmt.get(), getCurScope());
 }
 
-StmtResult Parser::ParseCompoundStatement(StmtExprKind SEK) {
-  return ParseCompoundStatement(SEK,
+StmtResult Parser::ParseCompoundStatement(bool isStmtExpr) {
+  return ParseCompoundStatement(isStmtExpr,
                                 Scope::DeclScope | Scope::CompoundStmtScope);
 }
 
@@ -1052,7 +1052,7 @@ StmtResult Parser::ParseCompoundStatement(StmtExprKind SEK) {
 /// [GNU] label-declaration:
 /// [GNU]   '__label__' identifier-list ';'
 ///
-StmtResult Parser::ParseCompoundStatement(StmtExprKind SEK,
+StmtResult Parser::ParseCompoundStatement(bool isStmtExpr,
                                           unsigned ScopeFlags) {
   assert(Tok.is(tok::l_brace) && "Not a compound stmt!");
 
@@ -1061,7 +1061,7 @@ StmtResult Parser::ParseCompoundStatement(StmtExprKind SEK,
   ParseScope CompoundScope(this, ScopeFlags);
 
   // Parse the statements in the body.
-  return ParseCompoundStatementBody(SEK);
+  return ParseCompoundStatementBody(isStmtExpr);
 }
 
 /// Parse any pragmas at the start of the compound expression. We handle these
@@ -1199,7 +1199,7 @@ StmtResult Parser::handleExprStmt(ExprResult E, ParsedStmtContext StmtCtx) {
 /// followed by a label and invoke the ActOnCompoundStmt action.  This expects
 /// the '{' to be the current token, and consume the '}' at the end of the
 /// block.  It does not manipulate the scope stack.
-StmtResult Parser::ParseCompoundStatementBody(StmtExprKind SEK) {
+StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in compound statement ('{}')");
@@ -1213,7 +1213,6 @@ StmtResult Parser::ParseCompoundStatementBody(StmtExprKind SEK) {
   if (T.consumeOpen())
     return StmtError();
 
-  bool isStmtExpr = SEK != StmtExprKind::None;
   Sema::CompoundScopeRAII CompoundScope(Actions, isStmtExpr);
 
   // Parse any pragmas at the beginning of the compound statement.
@@ -2746,9 +2745,9 @@ StmtResult Parser::ParseCXXTryBlockCommon(SourceLocation TryLoc, bool FnTry) {
     return StmtError(Diag(Tok, diag::err_expected) << tok::l_brace);
 
   StmtResult TryBlock(ParseCompoundStatement(
-      StmtExprKind::None, Scope::DeclScope | Scope::TryScope |
-                              Scope::CompoundStmtScope |
-                              (FnTry ? Scope::FnTryCatchScope : 0)));
+      /*isStmtExpr=*/false, Scope::DeclScope | Scope::TryScope |
+                                Scope::CompoundStmtScope |
+                                (FnTry ? Scope::FnTryCatchScope : 0)));
   if (TryBlock.isInvalid())
     return TryBlock;
 

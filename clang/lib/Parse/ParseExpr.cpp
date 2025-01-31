@@ -3111,7 +3111,7 @@ ExprResult Parser::ParseExpressionWithLeadingParen(
 
       Actions.ActOnStartStmtExpr();
 
-      StmtResult Stmt(ParseCompoundStatement(StmtExprKind::GCCExt));
+      StmtResult Stmt(ParseCompoundStatement(true));
       ExprType = CompoundStmt;
 
       // If the substmt parsed correctly, build the AST node.

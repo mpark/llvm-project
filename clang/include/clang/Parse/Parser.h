@@ -1163,17 +1163,6 @@ private:
 
   void diagnoseUseOfC11Keyword(const Token &Tok);
 
-  /// Kinds of statement-expr styles: GCC extension, or P2806R0.
-  /// Used to track specific semantics during ParseCompoundStatement
-  enum class StmtExprKind {
-    /// Not a statement
-    None,
-    /// GCC extension
-    GCCExt,
-    /// D2806R0 do statement-expressions
-    Do
-  };
-
 public:
   //===--------------------------------------------------------------------===//
   // Scope manipulation
@@ -2221,12 +2210,13 @@ private:
                                 bool MissingCase = false,
                                 ExprResult Expr = ExprResult());
   StmtResult ParseDefaultStatement(ParsedStmtContext StmtCtx);
-  StmtResult ParseCompoundStatement(StmtExprKind SEK = StmtExprKind::None);
-  StmtResult ParseCompoundStatement(StmtExprKind SEK, unsigned ScopeFlags);
+  StmtResult ParseCompoundStatement(bool isStmtExpr = false);
+  StmtResult ParseCompoundStatement(bool isStmtExpr,
+                                    unsigned ScopeFlags);
   void ParseCompoundStatementLeadingPragmas();
   void DiagnoseLabelAtEndOfCompoundStatement();
   bool ConsumeNullStmt(StmtVector &Stmts);
-  StmtResult ParseCompoundStatementBody(StmtExprKind SEK = StmtExprKind::None);
+  StmtResult ParseCompoundStatementBody(bool isStmtExpr = false);
   bool ParseParenExprOrCondition(StmtResult *InitStmt,
                                  Sema::ConditionResult &CondResult,
                                  SourceLocation Loc, Sema::ConditionKind CK,
