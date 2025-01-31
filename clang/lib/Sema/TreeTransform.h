@@ -18931,7 +18931,7 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
     return ExprError();
 
   ActionResult<MatchPattern *> P = getDerived().TransformPattern(
-      E->getPattern(), LHS.get() == E->getSubject());
+      E->getPattern(), LHS.get() != E->getSubject());
   if (P.isInvalid())
     return ExprError();
 
