@@ -441,9 +441,9 @@ KEYWORD(_Float16                    , KEYALL)
 C23_KEYWORD(typeof                  , KEYGNU)
 C23_KEYWORD(typeof_unqual           , 0)
 
-// D2806R0: do statement-expressions
+// P2806: do expressions
 // FIXME: be more specific so we can hide behind a flag?
-KEYWORD(do_yield, KEYALL)
+KEYWORD(do_return, KEYALL)
 
 // ISO/IEC JTC1 SC22 WG14 N1169 Extension
 KEYWORD(_Accum                      , KEYFIXEDPOINT)

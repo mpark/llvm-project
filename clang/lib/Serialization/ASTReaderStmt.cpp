@@ -2405,6 +2405,18 @@ void ASTStmtReader::VisitMatchSelectExpr(MatchSelectExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
+// Do Expression
+//===----------------------------------------------------------------------===//
+
+void ASTStmtReader::VisitDoExpr(DoExpr *E) {
+  VisitExpr(E);
+}
+
+void ASTStmtReader::VisitDoreturnStmt(DoreturnStmt *S) {
+  VisitStmt(S);
+}
+
+//===----------------------------------------------------------------------===//
 // CUDA Expressions and Statements
 //===----------------------------------------------------------------------===//
 

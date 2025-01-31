@@ -3010,6 +3010,9 @@ DEF_TRAVERSE_STMT(MatchSelectExpr, {
   }
 })
 
+DEF_TRAVERSE_STMT(DoExpr, {})
+DEF_TRAVERSE_STMT(DoreturnStmt, {})
+
 // These literals (all of them) do not need any action.
 DEF_TRAVERSE_STMT(IntegerLiteral, {})
 DEF_TRAVERSE_STMT(FixedPointLiteral, {})

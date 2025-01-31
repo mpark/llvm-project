@@ -5453,6 +5453,35 @@ public:
   }
 };
 
+class DoExpr final : public Expr {
+  SourceLocation DoLoc;
+  Stmt *Body;
+
+public:
+  explicit DoExpr(SourceLocation DoLoc, QualType Ty, Stmt *Body)
+      : Expr(DoExprClass, Ty, VK_PRValue, OK_Ordinary), DoLoc(DoLoc), Body(Body) {}
+
+  explicit DoExpr(EmptyShell Empty) : Expr(DoExprClass, Empty) {}
+
+  CompoundStmt *getBody() { return cast<CompoundStmt>(Body); }
+  const CompoundStmt *getBody() const { return cast<CompoundStmt>(Body); }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return DoLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return Body->getEndLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == DoExprClass;
+  }
+
+  child_range children() { return child_range(&Body, &Body + 1); }
+
+  const_child_range children() const {
+    return const_child_range(&Body, &Body + 1);
+  }
+};
+
 } // namespace clang
 
 #endif // LLVM_CLANG_AST_EXPRCXX_H

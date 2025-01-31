@@ -1975,7 +1975,7 @@ private:
                                   ParsedType &CastTy,
                                   SourceLocation &RParenLoc);
 
-  ExprResult ParseDoStmtExpression();
+  ExprResult ParseDoExpression();
 
   ExprResult ParseCXXAmbiguousParenExpression(
       ParenParseOption &ExprType, ParsedType &CastTy,
@@ -2232,7 +2232,7 @@ private:
   StmtResult ParseContinueStatement();
   StmtResult ParseBreakStatement();
   StmtResult ParseReturnStatement();
-  StmtResult ParseDoYieldStatement();
+  StmtResult ParseDoReturnStatement();
   StmtResult ParseAsmStatement(bool &msAsm);
   StmtResult ParseMicrosoftAsmStatement(SourceLocation AsmLoc);
   StmtResult ParsePragmaLoopHint(StmtVector &Stmts, ParsedStmtContext StmtCtx,

@@ -3874,31 +3874,6 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
   return R;
 }
 
-StmtResult Sema::ActOnDoYieldStmt(SourceLocation YieldLoc, Expr *YieldValExp,
-                                  Scope *CurScope) {
-  // Correct typos, in case the containing function returns 'auto' and
-  // RetValExp should determine the deduced type.
-  ExprResult RetVal = CorrectDelayedTyposInExpr(
-      YieldValExp, nullptr, /*RecoverUncorrectedTypos=*/true);
-  if (RetVal.isInvalid())
-    return StmtError();
-
-  assert(0 && "not implemented");
-  // StmtResult R =
-  //     BuildReturnStmt(YieldLoc, RetVal.get(), /*AllowRecovery=*/true);
-  // if (R.isInvalid() || ExprEvalContexts.back().isDiscardedStatementContext())
-  //   return R;
-
-  // VarDecl *VD =
-  //     const_cast<VarDecl *>(cast<ReturnStmt>(R.get())->getNRVOCandidate());
-
-  // CurScope->updateNRVOCandidate(VD);
-
-  // CheckJumpOutOfSEHFinally(*this, YieldLoc, *CurScope->getFnParent());
-
-  // return R;
-}
-
 static bool CheckSimplerImplicitMovesMSVCWorkaround(const Sema &S,
                                                     const Expr *E) {
   if (!E || !S.getLangOpts().CPlusPlus23 || !S.getLangOpts().MSVCCompat)
@@ -4197,6 +4172,45 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
     FunctionScopes.back()->FirstReturnLoc = ReturnLoc;
 
   return Result;
+}
+
+StmtResult Sema::ActOnDoreturnStmt(SourceLocation DoreturnLoc,
+                                   Expr *Operand, Scope *CurScope) {
+  // Correct typos, in case the containing function returns 'auto' and
+  // RetValExp should determine the deduced type.
+  ExprResult ER = CorrectDelayedTyposInExpr(
+      Operand, nullptr, /*RecoverUncorrectedTypos=*/true);
+  if (ER.isInvalid())
+    return StmtError();
+
+  if (getCurFunction()->DoExprStack.empty()) {
+    Diag(DoreturnLoc, diag::err_do_return_not_in_do_expr);
+    return StmtError();
+  }
+
+  Expr *E = ER.get();
+  auto &[OrigResultType, Ty] = getCurFunction()->DoExprStack.back();
+  if (const AutoType *AT = Ty->getContainedAutoType()) {
+    QualType Deduced;
+    if (DeduceAutoTypeFromExpr(*OrigResultType, DoreturnLoc, E, Deduced, AT)) {
+      return StmtError();
+    }
+    Ty = Deduced;
+  }
+
+  Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
+  auto Entity = InitializedEntity::InitializeStmtExprResult(DoreturnLoc, Ty);
+  ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
+  if (ER.isInvalid()) {
+    return StmtError();
+  }
+  E = ER.get();
+  CheckReturnValExpr(E, Ty, DoreturnLoc);
+  ER = ActOnFinishFullExpr(E, DoreturnLoc, /*DiscardedValue=*/false);
+  if (ER.isInvalid()) {
+    return StmtError();
+  }
+  return new (Context) DoreturnStmt(DoreturnLoc, ER.get());
 }
 
 StmtResult

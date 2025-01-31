@@ -17533,6 +17533,30 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *S) {
   return ExprError();
 }
 
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformDoExpr(DoExpr *E) {
+  return ExprError();
+}
+
+
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformDoreturnStmt(DoreturnStmt *S) {
+  return StmtError();
+#if 0
+  ExprResult Result = getDerived().TransformInitializer(S->getRetValue(),
+                                                        /*NotCopyInit*/false);
+  if (Result.isInvalid())
+    return StmtError();
+
+  // FIXME: We always rebuild the return statement because there is no way
+  // to tell whether the return type of the function has changed.
+  return getDerived().RebuildReturnStmt(S->getReturnLoc(), Result.get());
+#endif
+}
+
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_LIB_SEMA_TREETRANSFORM_H

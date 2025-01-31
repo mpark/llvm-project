@@ -177,6 +177,10 @@ def RequiresExpr : StmtNode<Expr>;
 def MatchTestExpr : StmtNode<Expr>;
 def MatchSelectExpr : StmtNode<Expr>;
 
+// P2806 do expression
+def DoExpr : StmtNode<Expr>;
+def DoreturnStmt : StmtNode<Stmt>;
+
 // Obj-C Expressions.
 def ObjCStringLiteral : StmtNode<Expr>;
 def ObjCBoxedExpr : StmtNode<Expr>;

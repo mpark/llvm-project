@@ -5117,7 +5117,9 @@ enum EvalStmtResult {
   /// Hit a 'break' statement.
   ESR_Break,
   /// Still scanning for 'case' or 'default' statement.
-  ESR_CaseNotFound
+  ESR_CaseNotFound,
+  /// Hit a 'do_return' statement.
+  ESR_Doreturned
 };
 }
 
@@ -5514,6 +5516,22 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
               : Evaluate(Result.Value, Info, RetExpr)))
       return ESR_Failed;
     return Scope.destroy() ? ESR_Returned : ESR_Failed;
+  }
+
+  case Stmt::DoreturnStmtClass: {
+    const Expr *RetExpr = cast<DoreturnStmt>(S)->getOperand();
+    FullExpressionRAII Scope(Info);
+    if (RetExpr && RetExpr->isValueDependent()) {
+      EvaluateDependentExpr(RetExpr, Info);
+      // We know we returned, but we don't know what the value is.
+      return ESR_Failed;
+    }
+    if (RetExpr &&
+        !(Result.Slot
+              ? EvaluateInPlace(Result.Value, Info, *Result.Slot, RetExpr)
+              : Evaluate(Result.Value, Info, RetExpr)))
+      return ESR_Failed;
+    return Scope.destroy() ? ESR_Doreturned : ESR_Failed;
   }
 
   case Stmt::CompoundStmtClass: {
@@ -8526,6 +8544,37 @@ public:
         return this->Visit(Case.Handler);
     }
     return Error(E);
+  }
+
+  bool VisitDoExpr(const DoExpr *E) {
+    // We will have checked the full-expressions inside the statement expression
+    // when they were completed, and don't need to check them again now.
+    llvm::SaveAndRestore NotCheckingForUB(Info.CheckingForUndefinedBehavior,
+                                          false);
+
+    const CompoundStmt *CS = E->getBody();
+    if (CS->body_empty())
+      return true;
+
+    BlockScopeRAII Scope(Info);
+    for (Stmt* S : CS->body()) {
+      APValue ReturnValue;
+      StmtResult Result = { ReturnValue, nullptr };
+      EvalStmtResult ESR = EvaluateStmt(Result, Info, S);
+      if (ESR == ESR_Doreturned)
+        return DerivedSuccess(ReturnValue, E) && Scope.destroy();
+      if (ESR != ESR_Succeeded) {
+        // FIXME: If the statement-expression terminated due to 'return',
+        // 'break', or 'continue', it would be nice to propagate that to
+        // the outer statement evaluation rather than bailing out.
+        if (ESR != ESR_Failed)
+          Info.FFDiag(S->getBeginLoc(),
+                      diag::note_constexpr_stmt_expr_unsupported);
+        return false;
+      }
+    }
+
+    llvm_unreachable("Return from function from the loop above.");
   }
 
   /// Visit a value which is evaluated, but whose value is ignored.
@@ -17558,6 +17607,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   }
   case Expr::MatchTestExprClass:
   case Expr::MatchSelectExprClass:
+  case Expr::DoExprClass:
     assert(0 && "not implemented");
   }
 

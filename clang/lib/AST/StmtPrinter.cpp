@@ -2869,6 +2869,9 @@ void StmtPrinter::VisitHLSLOutArgExpr(HLSLOutArgExpr *Node) {
 void StmtPrinter::VisitMatchTestExpr(MatchTestExpr *Node) {}
 void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {}
 
+void StmtPrinter::VisitDoExpr(DoExpr *Node) {}
+void StmtPrinter::VisitDoreturnStmt(DoreturnStmt *Node) {}
+
 //===----------------------------------------------------------------------===//
 // Stmt method implementations
 //===----------------------------------------------------------------------===//

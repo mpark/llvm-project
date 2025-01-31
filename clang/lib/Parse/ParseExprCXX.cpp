@@ -2519,47 +2519,52 @@ void Parser::ParseCXXSimpleTypeSpecifier(DeclSpec &DS) {
 /// \verbatim
 /// TBD
 /// \endverbatim
-ExprResult Parser::ParseDoStmtExpression() {
+ExprResult Parser::ParseDoExpression() {
+  assert(Tok.is(tok::kw_do) && "Not a do expression!");
   auto DoLoc = ConsumeToken();
   ExprResult Result(true);
 
-  // FIXME: do we need this?
-  // checkCompoundToken(OpenLoc, tok::l_paren, CompoundToken::StmtExprBegin);
-
   if (!getCurScope()->getFnParent() && !getCurScope()->getBlockParent()) {
     // Differently from statement expressions, if this is done at file
-    Result = ExprError(Diag(DoLoc, diag::err_doexpr_file_scope));
-  } else {
-    // Find the nearest non-record decl context. Variables declared in a
-    // statement expression behave as if they were declared in the enclosing
-    // function, block, or other code construct.
-    DeclContext *CodeDC = Actions.CurContext;
-    while (CodeDC->isRecord() || isa<EnumDecl>(CodeDC)) {
-      CodeDC = CodeDC->getParent();
-      assert(CodeDC && !CodeDC->isFileContext() &&
-             "statement expr not in code context");
-    }
-    Sema::ContextRAII SavedContext(Actions, CodeDC, /*NewThisContext=*/false);
-
-    assert(0 && "not implemented");
-    // Actions.ActOnStartStmtExpr();
-
-    StmtResult Stmt(ParseCompoundStatement(StmtExprKind::Do));
-    // TODO: do we need this? probably not.
-    // ExprType = CompoundStmt;
-
-    // If the substmt parsed correctly, build the AST node.
-    if (!Stmt.isInvalid()) {
-      assert(0 && "not implemented");
-      // Result = Actions.ActOnStmtExpr(getCurScope(), OpenLoc, Stmt.get(),
-      //                                Tok.getLocation());
-    } else {
-      assert(0 && "not implemented");
-      // Actions.ActOnStmtExprError();
-    }
+    return ExprError(Diag(DoLoc, diag::err_doexpr_file_scope));
   }
 
-  return Result;
+  QualType Ty;
+  TypeSourceInfo *TSI = nullptr;
+  if (Tok.is(tok::arrow)) {
+    SourceRange Range;
+    TypeResult TrailingReturnType =
+        ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
+    if (TrailingReturnType.isInvalid())
+      return ExprError();
+    Ty = Actions.GetTypeFromParser(TrailingReturnType.get(), &TSI);
+  } else {
+    Ty = Actions.Context.getAutoDeductType();
+    TSI = Actions.Context.CreateTypeSourceInfo(Ty);
+  }
+  TypeLoc OrigResultType = TSI->getTypeLoc();
+
+  // Find the nearest non-record decl context. Variables declared in a
+  // statement expression behave as if they were declared in the enclosing
+  // function, block, or other code construct.
+  DeclContext *CodeDC = Actions.CurContext;
+  while (CodeDC->isRecord() || isa<EnumDecl>(CodeDC)) {
+    CodeDC = CodeDC->getParent();
+    assert(CodeDC && !CodeDC->isFileContext() &&
+           "statement expr not in code context");
+  }
+  Sema::ContextRAII SavedContext(Actions, CodeDC, /*NewThisContext=*/false);
+
+  Actions.ActOnStartDoExpr(DoLoc, &OrigResultType, Ty);
+
+  StmtResult Stmt(ParseCompoundStatement());
+
+  // If the substmt parsed correctly, build the AST node.
+  if (Stmt.isInvalid()) {
+    Actions.ActOnDoExprError();
+    return ExprError();
+  }
+  return Actions.ActOnDoExpr(DoLoc, Ty, Stmt.get());
 }
 
 /// ParseCXXTypeSpecifierSeq - Parse a C++ type-specifier-seq (C++

@@ -2507,6 +2507,14 @@ void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
   VisitStmt(S);
 }
 
+void StmtProfiler::VisitDoExpr(const DoExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitDoreturnStmt(const DoreturnStmt *S) {
+  VisitStmt(S);
+}
+
 namespace {
 class OpenACCClauseProfiler
     : public OpenACCClauseVisitor<OpenACCClauseProfiler> {

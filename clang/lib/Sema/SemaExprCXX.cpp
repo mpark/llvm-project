@@ -9604,3 +9604,25 @@ ExprResult Sema::ActOnRequiresExpr(
     return ExprError();
   return RE;
 }
+
+void Sema::ActOnStartDoExpr(SourceLocation DoLoc, const TypeLoc *OrigResultType,
+                            QualType &Ty) {
+  ActOnStartStmtExpr();
+  getCurFunction()->DoExprStack.emplace_back(OrigResultType, Ty);
+}
+
+ExprResult Sema::ActOnDoExpr(SourceLocation DoLoc, QualType Ty, Stmt *Body) {
+  if (hasAnyUnrecoverableErrorsInThisFunction())
+    DiscardCleanupsInEvaluationContext();
+  assert(!Cleanup.exprNeedsCleanups() &&
+         "cleanups within StmtExpr not correctly bound!");
+  PopExpressionEvaluationContext();
+
+  getCurFunction()->DoExprStack.pop_back();
+  return new (Context) DoExpr(DoLoc, Ty, Body);
+}
+
+void Sema::ActOnDoExprError() {
+  ActOnStmtExprError();
+  getCurFunction()->DoExprStack.pop_back();
+}

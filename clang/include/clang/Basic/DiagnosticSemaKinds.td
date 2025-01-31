@@ -10409,6 +10409,7 @@ def warn_break_binds_to_switch : Warning<
 def err_default_not_in_switch : Error<
   "'default' statement not in switch statement">;
 def err_case_not_in_switch : Error<"'case' statement not in switch statement">;
+def err_do_return_not_in_do_expr : Error<"'do_return' statement not in do expression">;
 def warn_bool_switch_condition : Warning<
   "switch condition has boolean value">, InGroup<SwitchBool>;
 def warn_case_value_overflow : Warning<

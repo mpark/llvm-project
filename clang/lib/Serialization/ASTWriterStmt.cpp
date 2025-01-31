@@ -2337,6 +2337,20 @@ void ASTStmtWriter::VisitMatchSelectExpr(MatchSelectExpr *E) {
 }
 
 //===----------------------------------------------------------------------===//
+// Do Expression
+//===----------------------------------------------------------------------===//
+
+void ASTStmtWriter::VisitDoExpr(DoExpr *E) {
+  VisitExpr(E);
+  Code = serialization::EXPR_DO;
+}
+
+void ASTStmtWriter::VisitDoreturnStmt(DoreturnStmt *S) {
+  VisitStmt(S);
+  Code = serialization::STMT_DORETURN;
+}
+
+//===----------------------------------------------------------------------===//
 // CUDA Expressions and Statements.
 //===----------------------------------------------------------------------===//
 

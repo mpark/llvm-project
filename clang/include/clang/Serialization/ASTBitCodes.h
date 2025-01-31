@@ -1913,6 +1913,9 @@ enum StmtCode {
   EXPR_MATCH_TEST,                        // MatchTestExpr
   EXPR_MATCH_SELECT,                      // MatchSelectExpr
 
+  EXPR_DO,                                // DoExpr
+  STMT_DORETURN,                          // DoreturnStmt
+
   // CUDA
   EXPR_CUDA_KERNEL_CALL, // CUDAKernelCallExpr
 

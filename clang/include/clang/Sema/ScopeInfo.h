@@ -245,6 +245,11 @@ public:
   /// The set of GNU address of label extension "&&label".
   llvm::SmallVector<AddrLabelExpr *, 4> AddrLabels;
 
+  /// DoExprStack - This is the current set of active do expressions in the
+  /// block.
+  using DoExprInfo = std::pair<const TypeLoc *, QualType &>;
+  SmallVector<DoExprInfo, 8> DoExprStack;
+
 public:
   /// Represents a simple identification of a weak object.
   ///

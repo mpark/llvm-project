@@ -355,9 +355,9 @@ Retry:
     Res = ParseReturnStatement();
     SemiError = "co_return";
     break;
-  case tok::kw_do_yield: // D2806R0: do_yield statement
-    Res = ParseDoYieldStatement();
-    SemiError = "do_yield";
+  case tok::kw_do_return:             // P2806R3: do_return statement
+    Res = ParseReturnStatement();
+    SemiError = "do_return";
     break;
 
   case tok::kw_asm: {
@@ -2487,60 +2487,27 @@ StmtResult Parser::ParseBreakStatement() {
   return Actions.ActOnBreakStmt(BreakLoc, getCurScope());
 }
 
-///       jump-statement:
-///         'do_yield' expression[opt] ';'
-///         'do_yield' braced-init-list ';'
-StmtResult Parser::ParseDoYieldStatement() {
-  assert(Tok.is(tok::kw_do_yield) && "Not a do_yield stmt!");
-  SourceLocation YieldLoc = ConsumeToken(); // eat the 'return'.
-
-  ExprResult R;
-  if (Tok.isNot(tok::semi)) {
-
-    // TODO: code completion
-    // PreferredType.enterReturn(Actions, Tok.getLocation());
-    // if (Tok.is(tok::code_completion) && !IsCoreturn) {
-    //   cutOffParsing();
-    //   Actions.CodeCompleteExpression(getCurScope(),
-    //                                  PreferredType.get(Tok.getLocation()));
-    //   return StmtError();
-    // }
-
-    if (Tok.is(tok::l_brace) && getLangOpts().CPlusPlus) {
-      R = ParseInitializer();
-      if (R.isUsable())
-        Diag(R.get()->getBeginLoc(),
-             getLangOpts().CPlusPlus11
-                 ? diag::warn_cxx98_compat_generalized_initializer_lists
-                 : diag::ext_generalized_initializer_lists)
-            << R.get()->getSourceRange();
-    } else
-      R = ParseExpression();
-    if (R.isInvalid()) {
-      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
-      return StmtError();
-    }
-  }
-  return Actions.ActOnDoYieldStmt(YieldLoc, R.get(), getCurScope());
-}
-
 /// ParseReturnStatement
 ///       jump-statement:
 ///         'return' expression[opt] ';'
 ///         'return' braced-init-list ';'
 ///         'co_return' expression[opt] ';'
 ///         'co_return' braced-init-list ';'
+///         'do_return' expression[opt] ';'
+///         'do_return' braced-init-list ';'
 StmtResult Parser::ParseReturnStatement() {
-  assert((Tok.is(tok::kw_return) || Tok.is(tok::kw_co_return)) &&
+  assert((Tok.is(tok::kw_return) || Tok.is(tok::kw_co_return) ||
+          Tok.is(tok::kw_do_return)) &&
          "Not a return stmt!");
   bool IsCoreturn = Tok.is(tok::kw_co_return);
+  bool IsDoreturn = Tok.is(tok::kw_do_return);
   SourceLocation ReturnLoc = ConsumeToken();  // eat the 'return'.
 
   ExprResult R;
   if (Tok.isNot(tok::semi)) {
     if (!IsCoreturn)
       PreferredType.enterReturn(Actions, Tok.getLocation());
-    // FIXME: Code completion for co_return.
+    // FIXME: Code completion for co_return and do_return.
     if (Tok.is(tok::code_completion) && !IsCoreturn) {
       cutOffParsing();
       Actions.CodeCompletion().CodeCompleteExpression(
@@ -2565,6 +2532,8 @@ StmtResult Parser::ParseReturnStatement() {
   }
   if (IsCoreturn)
     return Actions.ActOnCoreturnStmt(getCurScope(), ReturnLoc, R.get());
+  if (IsDoreturn)
+    return Actions.ActOnDoreturnStmt(ReturnLoc, R.get(), getCurScope());
   return Actions.ActOnReturnStmt(ReturnLoc, R.get(), getCurScope());
 }
 

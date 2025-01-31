@@ -524,6 +524,51 @@ public:
   }
 };
 
+/// DoreturnStmt - This represents a do_return, optionally of an expression:
+///   do_return;
+///   do_return 4;
+class DoreturnStmt final : public Stmt {
+  SourceLocation DoreturnLoc;
+  /// The do_return expression.
+  Stmt *Operand;
+
+public:
+  /// Build a do_return statement.
+  explicit DoreturnStmt(SourceLocation DL, Expr *E);
+
+  /// Build an empty do_return statement.
+  explicit DoreturnStmt(EmptyShell Empty);
+
+  Expr *getOperand() { return reinterpret_cast<Expr *>(Operand); }
+  const Expr *getOperand() const { return reinterpret_cast<Expr *>(Operand); }
+  void setOperand(Expr *E) { Operand = reinterpret_cast<Stmt *>(E); }
+
+  SourceLocation getDoreturnLoc() const { return DoreturnLoc; }
+  void setDoreturnLoc(SourceLocation L) { DoreturnLoc = L; }
+
+  SourceLocation getBeginLoc() const { return getDoreturnLoc(); }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return Operand ? Operand->getEndLoc() : getDoreturnLoc();
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == DoreturnStmtClass;
+  }
+
+  // Iterators
+  child_range children() {
+    if (Operand)
+      return child_range(&Operand, &Operand + 1);
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    if (Operand)
+      return const_child_range(&Operand, &Operand + 1);
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+};
+
 }  // end namespace clang
 
 #endif

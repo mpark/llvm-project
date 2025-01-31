@@ -1149,7 +1149,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
 
     // primary-expression
   case tok::kw_do:
-    Res = ParseDoStmtExpression();
+    Res = ParseDoExpression();
     // TODO: perhaps try detecting a 'while' here for more friendly
     // diagnostics.
     break;

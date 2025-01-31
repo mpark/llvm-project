@@ -8521,6 +8521,11 @@ public:
                                ArrayRef<concepts::Requirement *> Requirements,
                                SourceLocation ClosingBraceLoc);
 
+  void ActOnStartDoExpr(SourceLocation DoLoc, const TypeLoc *OrigResultType,
+                        QualType &Ty);
+  ExprResult ActOnDoExpr(SourceLocation DoLoc, QualType Ty, Stmt *Body);
+  void ActOnDoExprError();
+
 private:
   ExprResult BuiltinOperatorNewDeleteOverloaded(ExprResult TheCallResult,
                                                 bool IsDelete);
@@ -10934,9 +10939,6 @@ public:
                                      NamedReturnInfo &NRInfo,
                                      bool SupressSimplerImplicitMoves);
 
-  StmtResult ActOnDoYieldStmt(SourceLocation YieldLoc, Expr *YieldValExp,
-                              Scope *CurScope);
-
   /// ActOnCXXCatchBlock - Takes an exception declaration and a handler block
   /// and creates a proper catch handler from them.
   StmtResult ActOnCXXCatchBlock(SourceLocation CatchLoc, Decl *ExDecl,
@@ -10978,6 +10980,9 @@ public:
   RecordDecl *CreateCapturedStmtRecordDecl(CapturedDecl *&CD,
                                            SourceLocation Loc,
                                            unsigned NumParams);
+
+  StmtResult ActOnDoreturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
+                               Scope *CurScope);
 
 private:
   /// Check whether the given statement can have musttail applied to it,

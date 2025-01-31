@@ -126,3 +126,9 @@ CoroutineBodyStmt::CoroutineBodyStmt(CoroutineBodyStmt::CtorArgs const &Args)
   std::copy(Args.ParamMoves.begin(), Args.ParamMoves.end(),
             const_cast<Stmt **>(getParamMoves().data()));
 }
+
+// DoreturnStmt
+DoreturnStmt::DoreturnStmt(SourceLocation DL, Expr *E)
+    : Stmt(DoreturnStmtClass), DoreturnLoc(DL), Operand(E) {}
+
+DoreturnStmt::DoreturnStmt(EmptyShell Empty) : Stmt(DoreturnStmtClass, Empty) {}
