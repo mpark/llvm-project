@@ -241,6 +241,11 @@ public:
   void VisitPackIndexingExpr(PackIndexingExpr *E) {
     Visit(E->getSelectedExpr());
   }
+  void VisitMatchSelectExpr(MatchSelectExpr *IE) {
+    RValue Res = CGF.EmitMatchSelectExpr(*IE);
+    // TODO: handle dtors
+    EmitFinalDestCopy(IE->getType(), Res);
+  }
 };
 }  // end anonymous namespace.
 
