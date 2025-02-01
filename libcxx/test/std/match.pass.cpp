@@ -200,19 +200,19 @@ void test_alternative_pattern_const() {
   check(alternative_pattern_const(DerivedB{'a'}) == 97);
 }
 
-// auto alternative_pattern_non_const(DerivedA derived) {
-//   Base &base = derived;
-//   return base match {
-//     DerivedA: [let x] => x * 2;
-//     DerivedB: [let c] => (int)c;
-//     _ => 0;
-//   };
-// }
+auto alternative_pattern_non_const(DerivedA derived) {
+  Base &base = derived;
+  return base match {
+    DerivedA: [let x] => x * 2;
+    DerivedB: [let c] => (int)c;
+    _ => 0;
+  };
+}
 
-// void test_alternative_pattern_non_const() {
-//   check(alternative_pattern_non_const(DerivedA{101}) == 202);
-//   check(alternative_pattern_non_const(DerivedA{202}) == 404);
-// }
+void test_alternative_pattern_non_const() {
+  check(alternative_pattern_non_const(DerivedA{101}) == 202);
+  check(alternative_pattern_non_const(DerivedA{202}) == 404);
+}
 
 auto bitfields(int x) {
   struct S { int i : 6; } s{x};
@@ -458,7 +458,7 @@ int main() {
   test_fizzbuzz();
   test_trailing_return_type();
   test_alternative_pattern_const();
-  // test_alternative_pattern_non_const();
+  test_alternative_pattern_non_const();
   test_bitfields();
   // test_tuple_like_decomposition_pattern();
   // test_match_test_with_guard();
