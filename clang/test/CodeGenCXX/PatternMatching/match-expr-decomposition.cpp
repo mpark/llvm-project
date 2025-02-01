@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++2b -fpattern-matching -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 auto decomposition_pattern(const int (&xs)[2]) {
@@ -43,3 +43,51 @@ auto decomposition_pattern(const int (&xs)[2]) {
 // CHECK:       match.select.end:
 // CHECK:         %[[VAL_23:.*]] = load i32, ptr %[[VAL_1]], align 4
 // CHECK:         ret i32 %[[VAL_23]]
+
+// Just check this builds.
+struct Pair {
+  template <int I>
+  constexpr auto&& get(this auto&& self) {
+    if constexpr (I == 0) return decltype(self)(self).x;
+    else if constexpr (I == 1) return decltype(self)(self).y;
+    else static_assert(false);
+  }
+
+  int x;
+  int y;
+};
+
+namespace std {
+  template <typename T>
+  struct tuple_size;
+
+  template <typename T>
+  requires requires { tuple_size<T>::value; }
+  struct tuple_size<const T> {
+    static constexpr int value = std::tuple_size<T>::value;
+  };
+
+  template <>
+  struct tuple_size<Pair> {
+    static constexpr int value = 2;
+  };
+
+  template <int I, typename T>
+  struct tuple_element;
+
+  template <int I, class T>
+  struct tuple_element<I, const T> {
+    using type = typename std::tuple_element<I, T>::type const;
+  };
+
+  template <int I>
+  struct tuple_element<I, Pair> {
+    using type = int;
+  };
+}
+
+int tuple_like_decomposition_pattern(const Pair &tup) {
+  return tup match {
+    [0, let y] => y * 2;
+  };
+}
