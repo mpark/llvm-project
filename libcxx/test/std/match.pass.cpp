@@ -286,33 +286,33 @@ void test_tuple_like_decomposition_pattern() {
   check(tuple_like_decomposition_pattern({2, 3}) == 6);
 }
 
-// bool match_test_with_guard(const int (&xs)[2]) {
-//   return xs match let [x, y] if (x == y);
-// }
+bool match_test_with_guard(const int (&xs)[2]) {
+  return xs match let [x, y] if (x == y);
+}
 
-// void test_match_test_with_guard() {
-//   check(match_test_with_guard({0, 0}));
-//   check(!match_test_with_guard({0, 1}));
-//   check(match_test_with_guard({1, 1}));
-//   check(!match_test_with_guard({2, 3}));
-// }
+void test_match_test_with_guard() {
+  check(match_test_with_guard({0, 0}));
+  check(!match_test_with_guard({0, 1}));
+  check(match_test_with_guard({1, 1}));
+  check(!match_test_with_guard({2, 3}));
+}
 
-// auto match_pattern_guards(const Pair& p) {
-//   return p match {
-//     let [x, y] if (x < 0 && y < 0) => 0;
-//     let [x, y] if (x < 0) => y;
-//     let [x, y] if (y < 0) => x;
-//     let [x, y] => x + y;
-//   };
-// }
+auto match_pattern_guards(const Pair& p) {
+  return p match {
+    let [x, y] if (x < 0 && y < 0) => 0;
+    let [x, y] if (x < 0) => y;
+    let [x, y] if (y < 0) => x;
+    let [x, y] => x + y;
+  };
+}
 
-// void test_match_pattern_guards() {
-//   check(match_pattern_guards({-1, -2}) == 0);
-//   check(match_pattern_guards({0, 0}) == 0);
-//   check(match_pattern_guards({-1, 2}) == 2);
-//   check(match_pattern_guards({3, 0}) == 3);
-//   check(match_pattern_guards({4, 7}) == 11);
-// }
+void test_match_pattern_guards() {
+  check(match_pattern_guards({-1, -2}) == 0);
+  check(match_pattern_guards({0, 0}) == 0);
+  check(match_pattern_guards({-1, 2}) == 2);
+  check(match_pattern_guards({3, 0}) == 3);
+  check(match_pattern_guards({4, 7}) == 11);
+}
 
 // int match_in_if_condition(const int *p) {
 //   if (p match ? let v) {
@@ -461,8 +461,8 @@ int main() {
   test_alternative_pattern_non_const();
   test_bitfields();
   test_tuple_like_decomposition_pattern();
-  // test_match_test_with_guard();
-  // test_match_pattern_guards();
+  test_match_test_with_guard();
+  test_match_pattern_guards();
   // test_match_in_if_condition();
   // test_match_in_if_condition_lifetime_extended();
   // test_match_in_if_condition_not_lifetime_extended();
