@@ -2442,7 +2442,6 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
-    // QualType LHSType = Subject->getType();
     assert(PatternExpr->getCond() && "expected available cond-expr");
     return RValue::get(EmitScalarExpr(PatternExpr->getCond()));
   }
@@ -2486,6 +2485,41 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   llvm_unreachable("Unknown match-pattern");
 }
 
+bool hasMatchGuard(const MatchGuard &MG) { return (MG.first || MG.second); }
+
+RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
+                                       llvm::Value *PatBoolRes) {
+  const VarDecl *VD = MG.first;
+  const Expr *Cond = MG.second;
+
+  RawAddress GuardResultAddr = CreateTempAlloca(
+      Builder.getInt1Ty(), getPointerAlign(), "match.guard.result");
+
+  auto *GuardCheckBB = createBasicBlock("match.guard.check");
+  auto *GuardFailBB = createBasicBlock("match.guard.next");
+  auto *GuardPassBB = createBasicBlock("match.guard.pass");
+  auto *GuardEndBB = createBasicBlock("match.guard.end");
+
+  Builder.CreateCondBr(PatBoolRes, GuardCheckBB, GuardFailBB);
+
+  EmitBlock(GuardCheckBB);
+  assert(Cond && "condition expression required");
+  if (VD)
+    EmitVarDecl(*VD);
+  EmitBranchOnBoolExpr(Cond, GuardPassBB, GuardFailBB, getProfileCount(Cond));
+
+  EmitBlock(GuardFailBB);
+  Builder.CreateStore(Builder.getFalse(), GuardResultAddr);
+  EmitBranch(GuardEndBB);
+
+  EmitBlock(GuardPassBB);
+  Builder.CreateStore(Builder.getTrue(), GuardResultAddr);
+  EmitBranch(GuardEndBB);
+
+  EmitBlock(GuardEndBB);
+  return RValue::get(Builder.CreateLoad(GuardResultAddr));
+}
+
 RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   // FIXME: all constant folding already implemented during Sema?
   assert(!S.getType()->isVoidType() && "is this possible?");
@@ -2495,17 +2529,15 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
                      "MatchTestExpr::HoldingVar");
   }
 
-  auto Guard = S.getGuard();
-  if (Guard.first || Guard.second) {
-    llvm_unreachable(
-        "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
-  }
-
   const Expr *Subject = S.getSubject();
   assert(Subject);
 
-  RValue matchResult = EmitMatchPattern(S.getPattern(), Subject);
-  return matchResult;
+  RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
+
+  if (hasMatchGuard(S.getGuard()))
+    MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+
+  return MatchResult;
 }
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
@@ -2523,14 +2555,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     if (!SelectEndBB)
       SelectEndBB = createBasicBlock("match.select.end");
 
-    // TODO: guard support
-    MatchGuard G = MatchC.Guard;
-    if (G.first || G.second) {
-      llvm_unreachable(
-          "Pattern Matching: codegen not implemented for MatchTestExpr::Guard");
-    }
-
     RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+    if (hasMatchGuard(MatchC.Guard))
+      MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
+
     llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
     llvm::BasicBlock *NextPatternBB =
         (CasePatternIdx == (Cases.size() - 1))
