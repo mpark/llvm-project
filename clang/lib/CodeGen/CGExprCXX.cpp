@@ -2634,6 +2634,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   llvm::BasicBlock *SelectEndBB = nullptr;
 
   unsigned CasePatternIdx = 0;
+  bool isAggregate = false;
   for (MatchCase MatchC : Cases) {
     if (!SelectEndBB)
       SelectEndBB = createBasicBlock("match.select.end");
@@ -2682,8 +2683,12 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
         llvm_unreachable("MatchSelectExpr for TEK_Complex not yet implemented");
         break;
       case TEK_Aggregate:
-        llvm_unreachable(
-            "MatchSelectExpr for TEK_Aggregate not yet implemented");
+        isAggregate = true;
+        EmitAggExpr(
+            E, AggValueSlot::forAddr(
+                   MatchResAddr, Qualifiers(), AggValueSlot::IsDestructed,
+                   AggValueSlot::DoesNotNeedGCBarriers,
+                   AggValueSlot::IsNotAliased, getOverlapForReturnValue()));
         break;
       }
       EmitBranch(SelectEndBB);
@@ -2695,5 +2700,6 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   }
 
   assert(SelectEndBB && "expected at least one pattern");
-  return RValue::get(Builder.CreateLoad(MatchResAddr));
+  return isAggregate ? RValue::getAggregate(MatchResAddr)
+                     : RValue::get(Builder.CreateLoad(MatchResAddr));
 }

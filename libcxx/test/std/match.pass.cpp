@@ -96,40 +96,40 @@ void test_decomposition_pattern() {
   check(decomposition_pattern({3, 4}) == 12);
 }
 
-// enum Color { Red, Blue };
+enum Color { Red, Blue };
 
-// struct S {
-//   Color color;
-//   int xs[2];
-// };
+struct S {
+  Color color;
+  int xs[2];
+};
 
-// struct Result {
-//   Color color;
-//   int i;
-//   bool operator==(const Result&) const noexcept = default;
-// };
+struct Result {
+  Color color;
+  int i;
+  bool operator==(const Result&) const noexcept = default;
+};
 
-// auto nested_decomposition_pattern(const S& s) {
-//   return s match -> Result {
-//     [let c, [0, 0]] => {c, -1};
-//     [let c, [let x, 0]] => {c, x * 2};
-//     [let c, [0, let y]] => {c, y * 4};
-//     let [c, [x, y]] => {c, x * y};
-//   };
-// }
+auto nested_decomposition_pattern(const S& s) {
+  return s match -> Result {
+    [let c, [0, 0]] => {c, -1};
+    [let c, [let x, 0]] => {c, x * 2};
+    [let c, [0, let y]] => {c, y * 4};
+    let [c, [x, y]] => {c, x * y};
+  };
+}
 
-// void test_nested_decomposition_pattern() {
-//   check(nested_decomposition_pattern({Red, {0, 0}}) == Result{Red, -1});
-//   check(nested_decomposition_pattern({Red, {0, 0}}) == Result{Red, -1});
-//   check(nested_decomposition_pattern({Red, {0, 0}}) != Result{Red, 0});
-//   check(nested_decomposition_pattern({Red, {1, 0}}) == Result{Red, 2});
-//   check(nested_decomposition_pattern({Red, {1, 0}}) != Result{Red, 3});
-//   check(nested_decomposition_pattern({Red, {2, 0}}) == Result{Red, 4});
-//   check(nested_decomposition_pattern({Blue, {0, 1}}) == Result{Blue, 4});
-//   check(nested_decomposition_pattern({Blue, {0, 2}}) == Result{Blue, 8});
-//   check(nested_decomposition_pattern({Blue, {2, 3}}) == Result{Blue, 6});
-//   check(nested_decomposition_pattern({Blue, {3, 4}}) == Result{Blue, 12});
-// }
+void test_nested_decomposition_pattern() {
+  check(nested_decomposition_pattern({Red, {0, 0}}) == Result{Red, -1});
+  check(nested_decomposition_pattern({Red, {0, 0}}) == Result{Red, -1});
+  check(nested_decomposition_pattern({Red, {0, 0}}) != Result{Red, 0});
+  check(nested_decomposition_pattern({Red, {1, 0}}) == Result{Red, 2});
+  check(nested_decomposition_pattern({Red, {1, 0}}) != Result{Red, 3});
+  check(nested_decomposition_pattern({Red, {2, 0}}) == Result{Red, 4});
+  check(nested_decomposition_pattern({Blue, {0, 1}}) == Result{Blue, 4});
+  check(nested_decomposition_pattern({Blue, {0, 2}}) == Result{Blue, 8});
+  check(nested_decomposition_pattern({Blue, {2, 3}}) == Result{Blue, 6});
+  check(nested_decomposition_pattern({Blue, {3, 4}}) == Result{Blue, 12});
+}
 
 // enum State { FizzBuzz, Fizz, Buzz, N };
 // constexpr int Size = 15;
@@ -454,7 +454,7 @@ int main() {
   test_match_test_expr();
   test_char_pattern();
   test_decomposition_pattern();
-  // test_nested_decomposition_pattern();
+  test_nested_decomposition_pattern();
   // test_fizzbuzz();
   test_trailing_return_type();
   test_alternative_pattern_const();
