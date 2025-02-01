@@ -131,35 +131,35 @@ void test_nested_decomposition_pattern() {
   check(nested_decomposition_pattern({Blue, {3, 4}}) == Result{Blue, 12});
 }
 
-// enum State { FizzBuzz, Fizz, Buzz, N };
-// constexpr int Size = 15;
+enum State { FizzBuzz, Fizz, Buzz, N };
+constexpr int Size = 15;
 
-// bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
-//   bool result = true;
-//   for (int i = 1; i <= Size; ++i) {
-//     State s = states[i - 1];
-//     int n = elems[i - 1];
-//     result &= (int[2]){i % 3, i % 5} match {
-//       [0, 0] => s == FizzBuzz && n == 0;
-//       [0, let y] => s == Fizz && n == y;
-//       [let x, 0] => s == Buzz && n == x;
-//       let [x, y] => s == N && n == x + y;
-//     };
-//   }
-//   return result;
-// }
+bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
+  bool result = true;
+  for (int i = 1; i <= Size; ++i) {
+    State s = states[i - 1];
+    int n = elems[i - 1];
+    result &= (int[2]){i % 3, i % 5} match {
+      [0, 0] => s == FizzBuzz && n == 0;
+      [0, let y] => s == Fizz && n == y;
+      [let x, 0] => s == Buzz && n == x;
+      let [x, y] => s == N && n == x + y;
+    };
+  }
+  return result;
+}
 
-// void test_fizzbuzz() {
-//   check(fizzbuzz(
-//     {N, N, Fizz, N, Buzz, Fizz, N, N, Fizz, Buzz, N, Fizz, N, N, FizzBuzz},
-//     {2, 4, 3,    5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0       }
-//   ));
+void test_fizzbuzz() {
+  check(fizzbuzz(
+    {N, N, Fizz, N, Buzz, Fizz, N, N, Fizz, Buzz, N, Fizz, N, N, FizzBuzz},
+    {2, 4, 3,    5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0       }
+  ));
 
-//   check(!fizzbuzz(
-//     {N, N, Fizz, N, Buzz, Fizz, N, N, Fizz, Buzz, N, Fizz, N, N, Fizz},
-//     {2, 4, 3,    5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0   }
-//   ));
-// }
+  check(!fizzbuzz(
+    {N, N, Fizz, N, Buzz, Fizz, N, N, Fizz, Buzz, N, Fizz, N, N, Fizz},
+    {2, 4, 3,    5, 2,    1,    3, 5, 4,    1,    3, 2,    4, 6, 0   }
+  ));
+}
 
 auto trailing_return_type(int x) {
   return x match -> int {
@@ -455,7 +455,7 @@ int main() {
   test_char_pattern();
   test_decomposition_pattern();
   test_nested_decomposition_pattern();
-  // test_fizzbuzz();
+  test_fizzbuzz();
   test_trailing_return_type();
   test_alternative_pattern_const();
   // test_alternative_pattern_non_const();
