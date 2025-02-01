@@ -2503,7 +2503,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     assert(D && "expected binding declaration");
     const VarDecl *Var = D->getHoldingVar();
 
-    if (Var)
+    // SelectPattern might have already emitted it, be conservative.
+    if (Var && !LocalDeclMap.count(Var))
       EmitVarDecl(*Var);
     else {
       // Var Decl was already emitted elsewhere.
