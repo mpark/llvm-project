@@ -228,63 +228,63 @@ void test_bitfields() {
   check(bitfields(4) == 4);
 }
 
-// struct Pair {
-//   template <int I>
-//   constexpr auto&& get(this auto&& self) {
-//     if constexpr (I == 0) return decltype(self)(self).x;
-//     else if constexpr (I == 1) return decltype(self)(self).y;
-//     else static_assert(false);
-//   }
+struct Pair {
+  template <int I>
+  constexpr auto&& get(this auto&& self) {
+    if constexpr (I == 0) return decltype(self)(self).x;
+    else if constexpr (I == 1) return decltype(self)(self).y;
+    else static_assert(false);
+  }
 
-//   int x;
-//   int y;
-// };
+  int x;
+  int y;
+};
 
-// namespace std {
-//   template <typename T>
-//   struct tuple_size;
+namespace std {
+  template <typename T>
+  struct tuple_size;
 
-//   template <typename T>
-//   requires requires { tuple_size<T>::value; }
-//   struct tuple_size<const T> {
-//     static constexpr int value = std::tuple_size<T>::value;
-//   };
+  template <typename T>
+  requires requires { tuple_size<T>::value; }
+  struct tuple_size<const T> {
+    static constexpr int value = std::tuple_size<T>::value;
+  };
 
-//   template <>
-//   struct tuple_size<Pair> {
-//     static constexpr int value = 2;
-//   };
+  template <>
+  struct tuple_size<Pair> {
+    static constexpr int value = 2;
+  };
 
-//   template <int I, typename T>
-//   struct tuple_element;
+  template <int I, typename T>
+  struct tuple_element;
 
-//   template <int I, class T>
-//   struct tuple_element<I, const T> {
-//     using type = typename std::tuple_element<I, T>::type const;
-//   };
+  template <int I, class T>
+  struct tuple_element<I, const T> {
+    using type = typename std::tuple_element<I, T>::type const;
+  };
 
-//   template <int I>
-//   struct tuple_element<I, Pair> {
-//     using type = int;
-//   };
-// }
+  template <int I>
+  struct tuple_element<I, Pair> {
+    using type = int;
+  };
+}
 
-// int tuple_like_decomposition_pattern(const Pair &tup) {
-//   return tup match {
-//     [0, 0] => -1;
-//     [0, let y] => y * 2;
-//     [let x, 0] => x * 4;
-//     let [x, y] => x * y;
-//     _ => 0;
-//   };
-// }
+int tuple_like_decomposition_pattern(const Pair &tup) {
+  return tup match {
+    [0, 0] => -1;
+    [0, let y] => y * 2;
+    [let x, 0] => x * 4;
+    let [x, y] => x * y;
+    _ => 0;
+  };
+}
 
-// void test_tuple_like_decomposition_pattern() {
-//   check(tuple_like_decomposition_pattern({0, 0}) == -1);
-//   check(tuple_like_decomposition_pattern({0, 2}) == 4);
-//   check(tuple_like_decomposition_pattern({2, 0}) == 8);
-//   check(tuple_like_decomposition_pattern({2, 3}) == 6);
-// }
+void test_tuple_like_decomposition_pattern() {
+  check(tuple_like_decomposition_pattern({0, 0}) == -1);
+  check(tuple_like_decomposition_pattern({0, 2}) == 4);
+  check(tuple_like_decomposition_pattern({2, 0}) == 8);
+  check(tuple_like_decomposition_pattern({2, 3}) == 6);
+}
 
 // bool match_test_with_guard(const int (&xs)[2]) {
 //   return xs match let [x, y] if (x == y);
@@ -460,7 +460,7 @@ int main() {
   test_alternative_pattern_const();
   test_alternative_pattern_non_const();
   test_bitfields();
-  // test_tuple_like_decomposition_pattern();
+  test_tuple_like_decomposition_pattern();
   // test_match_test_with_guard();
   // test_match_pattern_guards();
   // test_match_in_if_condition();
