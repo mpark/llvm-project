@@ -5458,8 +5458,9 @@ class DoExpr final : public Expr {
   Stmt *Body;
 
 public:
-  explicit DoExpr(SourceLocation DoLoc, QualType Ty, Stmt *Body)
-      : Expr(DoExprClass, Ty, VK_PRValue, OK_Ordinary), DoLoc(DoLoc), Body(Body) {}
+  explicit DoExpr(SourceLocation DoLoc, QualType Ty, ExprValueKind VK,
+                  Stmt *Body)
+      : Expr(DoExprClass, Ty, VK, OK_Ordinary), DoLoc(DoLoc), Body(Body) {}
 
   explicit DoExpr(EmptyShell Empty) : Expr(DoExprClass, Empty) {}
 

@@ -24,3 +24,11 @@ constexpr int f3(int x) {
 
 static_assert(f3(1) == 1);
 static_assert(f3(-1) == 1);
+
+constexpr bool f4() {
+  int x = 0;
+  int &y = do -> int & { do_return x; };
+  return &x == &y;
+}
+
+static_assert(f4());

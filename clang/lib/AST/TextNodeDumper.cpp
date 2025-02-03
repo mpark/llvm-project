@@ -3010,3 +3010,7 @@ void TextNodeDumper::Visit(const MatchPattern *Node) {
   dumpPointer(Node);
   dumpSourceRange(Node->getSourceRange());
 }
+
+void TextNodeDumper::VisitDoExpr(const DoExpr *Node) {}
+
+void clang::TextNodeDumper::VisitDoreturnStmt(const DoreturnStmt *Node) {}

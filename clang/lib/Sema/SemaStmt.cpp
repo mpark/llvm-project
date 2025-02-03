@@ -4198,7 +4198,19 @@ StmtResult Sema::ActOnDoreturnStmt(SourceLocation DoreturnLoc,
     Ty = Deduced;
   }
 
-  Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
+  // TODO(mpark): The `SimplerImplicitMoveMode::ForceOff` enables code like this to be well-formed.
+  //
+  //   int x = 0;
+  //   int& y = do -> int& { do_return x; };
+  //
+  // But it also fails to diagnose code such as
+  //
+  //   int& y = do -> int& {
+  //     int x = 0;
+  //     do_return x;
+  //   };
+  Sema::NamedReturnInfo NRInfo =
+      getNamedReturnInfo(E, SimplerImplicitMoveMode::ForceOff);
   auto Entity = InitializedEntity::InitializeStmtExprResult(DoreturnLoc, Ty);
   ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
   if (ER.isInvalid()) {

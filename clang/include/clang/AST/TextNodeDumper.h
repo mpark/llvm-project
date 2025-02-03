@@ -427,6 +427,9 @@ public:
   void VisitMatchTestExpr(const MatchTestExpr *Node);
   void VisitMatchSelectExpr(const MatchSelectExpr *Node);
   void Visit(const MatchPattern *Node);
+
+  void VisitDoExpr(const DoExpr *Node);
+  void VisitDoreturnStmt(const DoreturnStmt *Node);
 };
 
 } // namespace clang

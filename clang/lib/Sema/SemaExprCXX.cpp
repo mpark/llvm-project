@@ -9619,7 +9619,9 @@ ExprResult Sema::ActOnDoExpr(SourceLocation DoLoc, QualType Ty, Stmt *Body) {
   PopExpressionEvaluationContext();
 
   getCurFunction()->DoExprStack.pop_back();
-  return new (Context) DoExpr(DoLoc, Ty, Body);
+  ExprValueKind VK = Expr::getValueKindForType(Ty);
+  Ty = Ty.getNonLValueExprType(Context);
+  return new (Context) DoExpr(DoLoc, Ty, VK, Body);
 }
 
 void Sema::ActOnDoExprError() {
