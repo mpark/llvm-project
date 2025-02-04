@@ -314,43 +314,43 @@ void test_match_pattern_guards() {
   check(match_pattern_guards({4, 7}) == 11);
 }
 
-// int match_in_if_condition(const int *p) {
-//   if (p match ? let v) {
-//     return v;
-//   }
-//   return -1;
-// }
+int match_in_if_condition(const int *p) {
+  if (p match ? let v) {
+    return v;
+  }
+  return -1;
+}
 
-// void test_match_in_if_condition() {
-//   check(match_in_if_condition(nullptr) == -1);
-//   int x = 0;
-//   check(match_in_if_condition(&x) == 0);
-//   int y = 1;
-//   check(match_in_if_condition(&y) == 1);
-// }
+void test_match_in_if_condition() {
+  check(match_in_if_condition(nullptr) == -1);
+  int x = 0;
+  check(match_in_if_condition(&x) == 0);
+  int y = 1;
+  check(match_in_if_condition(&y) == 1);
+}
 
-// struct Lifetime {
-//   Lifetime(bool *flag, int n) : flag(flag), n(n) { *flag = true; }
-//   ~Lifetime() { *flag = false; }
-//   bool *flag;
-//   int n;
-// };
+struct Lifetime {
+  Lifetime(bool *flag, int n) : flag(flag), n(n) { *flag = true; }
+  ~Lifetime() { *flag = false; }
+  bool *flag;
+  int n;
+};
 
-// bool match_in_if_condition_lifetime_extended(int n) {
-//   bool flag = false;
-//   if (Lifetime(&flag, n) match [? let b, 101]) {
-//     return b;
-//   } else if (n == 202) {
-//     return flag;
-//   }
-//   return flag;
-// }
+bool match_in_if_condition_lifetime_extended(int n) {
+  bool flag = false;
+  if (Lifetime(&flag, n) match [? let b, 101]) {
+    return b;
+  } else if (n == 202) {
+    return flag;
+  }
+  return flag;
+}
 
-// void test_match_in_if_condition_lifetime_extended() {
-//   check(match_in_if_condition_lifetime_extended(101));
-//   check(match_in_if_condition_lifetime_extended(202));
-//   check(!match_in_if_condition_lifetime_extended(303));
-// }
+void test_match_in_if_condition_lifetime_extended() {
+  check(match_in_if_condition_lifetime_extended(101));
+  check(match_in_if_condition_lifetime_extended(202));
+  check(!match_in_if_condition_lifetime_extended(303));
+}
 
 // bool match_in_if_condition_not_lifetime_extended(int n) {
 //   bool flag = false;
@@ -368,20 +368,20 @@ void test_match_pattern_guards() {
 //   check(!match_in_if_condition_not_lifetime_extended(303));
 // }
 
-// int match_in_while_condition() {
-//   int i = 0;
-//   auto next = [&]() -> int* {
-//     return i < 4 ? &i : nullptr;
-//   };
-//   while (next() match ? let v) {
-//     ++v;
-//   }
-//   return i;
-// }
+int match_in_while_condition() {
+  int i = 0;
+  auto next = [&]() -> int* {
+    return i < 4 ? &i : nullptr;
+  };
+  while (next() match ? let v) {
+    ++v;
+  }
+  return i;
+}
 
-// void test_match_in_while_condition() {
-//   check(match_in_while_condition() == 4);
-// }
+void test_match_in_while_condition() {
+  check(match_in_while_condition() == 4);
+}
 
 // struct Variant {
 //   Variant(int x) : i(0), x(x) {}
@@ -463,9 +463,9 @@ int main() {
   test_tuple_like_decomposition_pattern();
   test_match_test_with_guard();
   test_match_pattern_guards();
-  // test_match_in_if_condition();
-  // test_match_in_if_condition_lifetime_extended();
+  test_match_in_if_condition();
+  test_match_in_if_condition_lifetime_extended();
   // test_match_in_if_condition_not_lifetime_extended();
-  // test_match_in_while_condition();
+  test_match_in_while_condition();
   // test_variant_like_alternative_pattern();
 }
