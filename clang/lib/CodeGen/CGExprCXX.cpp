@@ -2524,10 +2524,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   // FIXME: all constant folding already implemented during Sema?
   assert(!S.getType()->isVoidType() && "is this possible?");
 
-  if (S.getHoldingVar()) {
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "MatchTestExpr::HoldingVar");
-  }
+  if (S.getHoldingVar())
+    EmitVarDecl(*S.getHoldingVar());
 
   const Expr *Subject = S.getSubject();
   assert(Subject);
