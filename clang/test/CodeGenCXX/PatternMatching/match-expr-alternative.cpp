@@ -64,3 +64,66 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:       match.select.end:
 // CHECK:         %[[VAL_30:.*]] = load i32, ptr %[[VAL_1]], align 4
 // CHECK:         ret i32 %[[VAL_30]]
+
+struct Variant {
+  Variant(int x) : i(0), x(x) {}
+  Variant(double y) : i(1), y(y) {}
+  Variant(float z) : i(2), z(z) {}
+
+  constexpr int index() const { return i; }
+
+  template <int I>
+  constexpr const auto& get() const {
+    if constexpr (I == 0) return x;
+    else if constexpr (I == 1) return y;
+    else if constexpr (I == 2) return z;
+    else static_assert(false);
+  }
+
+  int i;
+
+  int x;
+  double y;
+  float z;
+};
+
+namespace std {
+  template <typename T>
+  struct variant_size;
+
+  template <typename T>
+  struct variant_size<const T> {
+    static constexpr int value = std::variant_size<T>::value;
+  };
+
+  template <>
+  struct variant_size<Variant> {
+    static constexpr int value = 3;
+  };
+
+  template <int I, typename T>
+  struct variant_alternative;
+
+  template <int I, class T>
+  struct variant_alternative<I, const T> {
+    using type = typename std::variant_alternative<I, T>::type const;
+  };
+
+  template <> struct variant_alternative<0, Variant> { using type = int; };
+  template <> struct variant_alternative<1, Variant> { using type = double; };
+  template <> struct variant_alternative<2, Variant> { using type = float; };
+}
+
+int variant_like_alternative_pattern(const Variant &var) {
+  return var match {
+    int: 0 => 0;
+  };
+}
+
+// Make sure to emit std::variant_alternative<...>& __temp = get<index-of-int>(var)
+// right after type check passes.
+
+// CHECK-LABEL: _Z32variant_like_alternative_patternRK7Variant
+// CHECK: match.alt.type.check.pass:
+// CHECK-NEXT: load ptr, ptr %{{.*}}, align 8
+// CHECK-NEXT: call {{.*}} ptr @_ZNK7Variant3getILi0EEERKDav
