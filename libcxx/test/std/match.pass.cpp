@@ -383,72 +383,72 @@ void test_match_in_while_condition() {
   check(match_in_while_condition() == 4);
 }
 
-// struct Variant {
-//   Variant(int x) : i(0), x(x) {}
-//   Variant(double y) : i(1), y(y) {}
-//   Variant(float z) : i(2), z(z) {}
+struct Variant {
+  Variant(int x) : i(0), x(x) {}
+  Variant(double y) : i(1), y(y) {}
+  Variant(float z) : i(2), z(z) {}
 
-//   constexpr int index() const { return i; }
+  constexpr int index() const { return i; }
 
-//   template <int I>
-//   constexpr const auto& get() const {
-//     if constexpr (I == 0) return x;
-//     else if constexpr (I == 1) return y;
-//     else if constexpr (I == 2) return z;
-//     else static_assert(false);
-//   }
+  template <int I>
+  constexpr const auto& get() const {
+    if constexpr (I == 0) return x;
+    else if constexpr (I == 1) return y;
+    else if constexpr (I == 2) return z;
+    else static_assert(false);
+  }
 
-//   int i;
+  int i;
 
-//   int x;
-//   double y;
-//   float z;
-// };
+  int x;
+  double y;
+  float z;
+};
 
-// namespace std {
-//   template <typename T>
-//   struct variant_size;
+namespace std {
+  template <typename T>
+  struct variant_size;
 
-//   template <typename T>
-//   struct variant_size<const T> {
-//     static constexpr int value = std::variant_size<T>::value;
-//   };
+  template <typename T>
+  struct variant_size<const T> {
+    static constexpr int value = std::variant_size<T>::value;
+  };
 
-//   template <>
-//   struct variant_size<Variant> {
-//     static constexpr int value = 3;
-//   };
+  template <>
+  struct variant_size<Variant> {
+    static constexpr int value = 3;
+  };
 
-//   template <int I, typename T>
-//   struct variant_alternative;
+  template <int I, typename T>
+  struct variant_alternative;
 
-//   template <int I, class T>
-//   struct variant_alternative<I, const T> {
-//     using type = typename std::variant_alternative<I, T>::type const;
-//   };
+  template <int I, class T>
+  struct variant_alternative<I, const T> {
+    using type = typename std::variant_alternative<I, T>::type const;
+  };
 
-//   template <> struct variant_alternative<0, Variant> { using type = int; };
-//   template <> struct variant_alternative<1, Variant> { using type = double; };
-//   template <> struct variant_alternative<2, Variant> { using type = float; };
-// }
+  template <> struct variant_alternative<0, Variant> { using type = int; };
+  template <> struct variant_alternative<1, Variant> { using type = double; };
+  template <> struct variant_alternative<2, Variant> { using type = float; };
+}
 
-// int variant_like_alternative_pattern(const Variant &var) {
-//   return var match {
-//     int: 0 => 0;
-//     int: 1 => 1;
-//     double: let y => (int)y + 4;
-//     _ => -1;
-//   };
-// }
+int variant_like_alternative_pattern(const Variant &var) {
+  return var match {
+    int: 0 => 0;
+    int: 1 => 1;
+    double: let y => (int)y + 4;
+    _ => -1;
+  };
+}
 
-// void test_variant_like_alternative_pattern() {
-//   check(variant_like_alternative_pattern(0) == 0);
-//   check(variant_like_alternative_pattern(1) == 1);
-//   check(variant_like_alternative_pattern(2) == -1);
-//   check(variant_like_alternative_pattern(3.0) == 7);
-//   check(variant_like_alternative_pattern(4.0) == 8);
-//   check(variant_like_alternative_pattern(0.f) == -1);
-// }
+void test_variant_like_alternative_pattern() {
+  check(variant_like_alternative_pattern(0) == 0);
+  check(variant_like_alternative_pattern(1) == 1);
+  check(variant_like_alternative_pattern(2) == -1);
+  check(variant_like_alternative_pattern(3.0) == 7);
+  check(variant_like_alternative_pattern(4.0) == 8);
+  check(variant_like_alternative_pattern(0.f) == -1);
+}
 
 int main() {
   test_match_test_expr();
@@ -467,5 +467,5 @@ int main() {
   test_match_in_if_condition_lifetime_extended();
   // test_match_in_if_condition_not_lifetime_extended();
   test_match_in_while_condition();
-  // test_variant_like_alternative_pattern();
+  test_variant_like_alternative_pattern();
 }

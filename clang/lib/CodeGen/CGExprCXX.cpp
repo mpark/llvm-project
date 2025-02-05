@@ -2464,7 +2464,8 @@ RValue
 CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
   assert(AltPattern->getHoldingVar() && "expected holding var");
   EmitVarDecl(*AltPattern->getHoldingVar());
-  EmitVarDecl(*AltPattern->getCondVar());
+  if (AltPattern->getCondVar())
+    EmitVarDecl(*AltPattern->getCondVar());
 
   RawAddress AltResultAddr = CreateTempAlloca(
       Builder.getInt1Ty(), getPointerAlign(), "match.alt.result");
@@ -2480,6 +2481,8 @@ CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
                        getProfileCount(AltPattern->getCond()));
 
   EmitBlock(AltTypeCheckPassBB);
+  if (AltPattern->getBindingVar())
+    EmitVarDecl(*AltPattern->getBindingVar());
   RValue MatchResult = EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
   Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
   EmitBranch(AltEndBB);
