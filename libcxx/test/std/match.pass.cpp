@@ -330,7 +330,7 @@ void test_match_in_if_condition() {
 }
 
 struct Lifetime {
-  Lifetime(bool *flag, int n) : flag(flag), n(n) { *flag = true; }
+  Lifetime(bool* _flag, int n) : flag(_flag), n(n) { *flag = true; }
   ~Lifetime() { *flag = false; }
   bool *flag;
   int n;
@@ -352,21 +352,21 @@ void test_match_in_if_condition_lifetime_extended() {
   check(!match_in_if_condition_lifetime_extended(303));
 }
 
-// bool match_in_if_condition_not_lifetime_extended(int n) {
-//   bool flag = false;
-//   if ((Lifetime(&flag, n) match [? let b, 101])) {
-//     return flag;
-//   } else if (n == 202) {
-//     return flag;
-//   }
-//   return flag;
-// }
+bool match_in_if_condition_not_lifetime_extended(int n) {
+  bool flag = false;
+  if ((Lifetime(&flag, n) match [? let b, 101])) {
+    return flag;
+  } else if (n == 202) {
+    return flag;
+  }
+  return flag;
+}
 
-// void test_match_in_if_condition_not_lifetime_extended() {
-//   check(!match_in_if_condition_not_lifetime_extended(101));
-//   check(!match_in_if_condition_not_lifetime_extended(202));
-//   check(!match_in_if_condition_not_lifetime_extended(303));
-// }
+void test_match_in_if_condition_not_lifetime_extended() {
+  check(!match_in_if_condition_not_lifetime_extended(101));
+  check(!match_in_if_condition_not_lifetime_extended(202));
+  check(!match_in_if_condition_not_lifetime_extended(303));
+}
 
 int match_in_while_condition() {
   int i = 0;
@@ -465,7 +465,7 @@ int main() {
   test_match_pattern_guards();
   test_match_in_if_condition();
   test_match_in_if_condition_lifetime_extended();
-  // test_match_in_if_condition_not_lifetime_extended();
+  test_match_in_if_condition_not_lifetime_extended();
   test_match_in_while_condition();
   test_variant_like_alternative_pattern();
 }
