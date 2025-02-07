@@ -2527,18 +2527,31 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   // FIXME: all constant folding already implemented during Sema?
   assert(!S.getType()->isVoidType() && "is this possible?");
 
-  if (S.getHoldingVar())
-    EmitVarDecl(*S.getHoldingVar());
+  // Presence of holding var means the subject and the bindings have the
+  // lifetime of a hypothetical condition variable and do not need to
+  // cleanup temporaries created by the suject.
+  bool needsCleanup = !S.getHoldingVar();
+  auto emitMatchTest = [&]() {
+    if (S.getHoldingVar())
+      EmitVarDecl(*S.getHoldingVar());
 
-  const Expr *Subject = S.getSubject();
-  assert(Subject);
+    const Expr *Subject = S.getSubject();
+    assert(Subject);
 
-  RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
+    RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
 
-  if (hasMatchGuard(S.getGuard()))
-    MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+    if (hasMatchGuard(S.getGuard()))
+      MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
 
-  return MatchResult;
+    return MatchResult;
+  };
+
+  if (needsCleanup) {
+    RunCleanupsScope MatchScope(*this);
+    return emitMatchTest();
+  }
+
+  return emitMatchTest();
 }
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
