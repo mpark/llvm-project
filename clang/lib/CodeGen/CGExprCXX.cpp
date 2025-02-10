@@ -2587,9 +2587,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     const Expr *E = dyn_cast<Expr>(MatchC.Handler);
     if (!E) {
       EmitStmt(MatchC.Handler);
+      // Move on to next match pattern
+      EmitBlock(NextPatternBB);
       CasePatternIdx++;
-      // TODO: break, continue, return, co_return, etc.
-      llvm_unreachable("MatchSelectExpr for stmt actions not yet implemented");
+      continue;
     }
 
     // No result to store, but evaluate the expression for side effects.
