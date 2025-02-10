@@ -450,6 +450,25 @@ void test_variant_like_alternative_pattern() {
   check(variant_like_alternative_pattern(0.f) == -1);
 }
 
+int match_stmt_action(int limit) {
+  int r = 0;
+  for (int i = limit; i >= 0; i--) {
+    r += i match {
+      let x if (x < 5) => 1;
+      5 => continue;
+      6 => break;
+      7 => return 99;
+    };
+  }
+  return r;
+}
+
+void test_match_stmt_action() {
+  check(match_stmt_action(5) == 5);
+  check(match_stmt_action(6) == 0);
+  check(match_stmt_action(7) == 99);
+}
+
 int main() {
   test_match_test_expr();
   test_char_pattern();
@@ -468,4 +487,5 @@ int main() {
   test_match_in_if_condition_not_lifetime_extended();
   test_match_in_while_condition();
   test_variant_like_alternative_pattern();
+  test_match_stmt_action();
 }
