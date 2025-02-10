@@ -14449,4 +14449,8 @@ def err_cuda_device_kernel_launch_not_supported
 def err_cuda_device_kernel_launch_require_rdc
     : Error<"kernel launch from __device__ or __global__ function requires "
             "relocatable device code (i.e. requires -fgpu-rdc)">;
+
+// Pattern Matching
+def err_no_matching_alternative : Error<"no matching alternative">;
+
 } // end of sema component.
