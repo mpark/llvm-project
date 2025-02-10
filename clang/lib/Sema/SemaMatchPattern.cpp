@@ -258,6 +258,7 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
     }
   }
   if (I == NumAlternatives) {
+    S.Diag(Loc, diag::err_no_matching_alternative) << P->getSourceRange();
     return true;
   }
 

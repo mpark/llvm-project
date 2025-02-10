@@ -12882,4 +12882,8 @@ def err_acc_update_as_body
 // AMDGCN builtins diagnostics
 def err_amdgcn_global_load_lds_size_invalid_value : Error<"invalid size value">;
 def note_amdgcn_global_load_lds_size_valid_value : Note<"size must be %select{1, 2, or 4|1, 2, 4, 12 or 16}0">;
+
+// Pattern Matching
+def err_no_matching_alternative : Error<"no matching alternative">;
+
 } // end of sema component.
