@@ -479,9 +479,8 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
 }
 
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
-  if (Subject->isTypeDependent()) {
-    return false;
-  }
+  if (Subject && Subject->isTypeDependent())
+    return CheckCompleteMatchPattern(nullptr, Pattern);
   // TODO(mpark): Skip if Pattern is type-dependent as well.
   SourceLocation Loc = Pattern->getBeginLoc();
   Scope *S = getCurScope();
@@ -489,6 +488,9 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   case MatchPattern::WildcardPatternClass:
     break;
   case MatchPattern::ExpressionPatternClass: {
+    // Subject is dependent.
+    if (!Subject)
+      return false;
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
     ExprResult Cond =
         ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject, P->getExpr());
@@ -500,8 +502,9 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::BindingPatternClass: {
     BindingPattern *P = static_cast<BindingPattern *>(Pattern);
-    QualType Type = Subject->getType();
-    if (!Subject->refersToBitField()) {
+    // If the type of the subject is dependent, then so is the binding.
+    QualType Type = Subject ? Subject->getType() : Context.DependentTy;
+    if (Subject && !Subject->refersToBitField()) {
       QualType Deduced = Context.getAutoRRefDeductType();
       VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
       if (HoldingVar->isInvalidDecl()) {
@@ -522,6 +525,8 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
+    if (!Subject)
+      return CheckCompleteMatchPattern(nullptr, P->getSubPattern());
     QualType Type = Context.getAutoRRefDeductType();
     VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, Subject);
     if (CondVar->isInvalidDecl()) {
@@ -544,6 +549,8 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
+    if (!Subject)
+      return CheckCompleteMatchPattern(nullptr, P->getSubPattern());
     QualType Deduced = Context.getAutoRRefDeductType();
     VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
     if (HoldingVar->isInvalidDecl()) {
@@ -596,11 +603,18 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     }
     return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
   }
-  case MatchPattern::DecompositionPatternClass:
+  case MatchPattern::DecompositionPatternClass: {
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
+    if (!Subject) {
+      for (MatchPattern *C : P->children()) {
+        if (CheckCompleteMatchPattern(nullptr, C))
+          return true;
+      }
+      return false;
+    }
     QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TInfo = Context.getTrivialTypeSourceInfo(Type, Loc);
-    SmallVector<BindingDecl*, 8> Bindings;
+    SmallVector<BindingDecl *, 8> Bindings;
     Bindings.reserve(P->getNumPatterns());
     for (MatchPattern *C : P->children()) {
       BindingDecl *BD = nullptr;
@@ -632,6 +646,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       ++I;
     }
     break;
+  }
   }
   return false;
 }

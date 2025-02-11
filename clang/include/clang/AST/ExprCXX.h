@@ -5422,11 +5422,14 @@ public:
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases);
 
-
-  bool isConstexpr() const { return IsConstexpr; }
-
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
+
+  SourceLocation getMatchLoc() const LLVM_READONLY {
+    return MatchLoc;
+  }
+
+  bool isConstexpr() const { return IsConstexpr; }
 
   ArrayRef<MatchCase> getCases() const {
     return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
@@ -5439,6 +5442,8 @@ public:
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY { return Braces.getEnd(); }
+
+  SourceRange getBraces() const { return Braces; }
 
   child_range children() {
     return child_range(child_iterator(), child_iterator());

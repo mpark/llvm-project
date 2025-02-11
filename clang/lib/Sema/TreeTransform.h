@@ -4233,8 +4233,14 @@ public:
         return Pattern;
       return getSema().ActOnExpressionPattern(E.get());
     }
-    case MatchPattern::BindingPatternClass:
-      llvm_unreachable("not implemented");
+    case MatchPattern::BindingPatternClass: {
+      BindingPattern *P = static_cast<BindingPattern *>(Pattern);
+      BindingDecl* BD = cast<BindingDecl>(
+          getDerived().TransformDefinition(P->getBeginLoc(), P->getBinding()));
+      if (!Rebuild && BD == P->getBinding())
+        return Pattern;
+      return new (getSema().Context) BindingPattern(P->getLetLoc(), BD);
+    }
     case MatchPattern::ParenPatternClass: {
       ParenPattern *P = static_cast<ParenPattern *>(Pattern);
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
@@ -17529,8 +17535,46 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
 
 template <typename Derived>
 ExprResult
-TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *S) {
-  return ExprError();
+TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
+  ExprResult LHS = getDerived().TransformExpr(E->getSubject());
+  if (LHS.isInvalid())
+    return ExprError();
+
+  SmallVector<MatchCase, 32> Cases;
+  for (const MatchCase &Case : E->getCases()) {
+    ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
+        Case.Pattern, LHS.get() != E->getSubject());
+    if (Pattern.isInvalid() ||
+        getSema().CheckCompleteMatchPattern(LHS.get(), Pattern.get()))
+      return ExprError();
+
+    // Transform the condition
+    Sema::ConditionResult Guard = getDerived().TransformCondition(
+        Case.IfLoc, Case.Guard.first, Case.Guard.second,
+        E->isConstexpr() ? Sema::ConditionKind::ConstexprIf
+                         : Sema::ConditionKind::Boolean);
+    if (Guard.isInvalid())
+      return ExprError();
+
+    StmtResult Handler = getDerived().TransformStmt(Case.Handler, SDK_NotDiscarded);
+    if (Handler.isInvalid())
+      return ExprError();
+
+    Cases.push_back({Pattern.get(), Case.IfLoc, Guard.get(), Handler.get()});
+  }
+
+  if (auto Cs = E->getCases();
+      std::equal(Cs.begin(), Cs.end(), Cases.begin(), Cases.end(),
+                 [](const MatchCase &LHS, const MatchCase &RHS) {
+                   return LHS.Pattern == RHS.Pattern &&
+                          LHS.Guard == RHS.Guard && LHS.Handler == RHS.Handler;
+                 })) {
+    return E;
+  }
+
+  return getSema().ActOnMatchSelectExpr(LHS.get(), E->getMatchLoc(),
+                                        E->isConstexpr(), E->getType(), Cases,
+                                        E->getBraces());
 }
 
 template <typename Derived>
