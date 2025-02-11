@@ -105,6 +105,19 @@ static_assert(test('a') == 1);
 static_assert(test('b') == 2);
 static_assert(test('c') == 99);
 
+template <auto v>
+constexpr auto test_dependent(auto c) {
+  return c match {
+    'a' => 1;
+    v => 2;
+    let x => int(x);
+  };
+}
+
+static_assert(test_dependent<'b'>('a') == 1);
+static_assert(test_dependent<'b'>('b') == 2);
+static_assert(test_dependent<'b'>('c') == 99);
+
 constexpr auto test_decomposition_pattern(const int (&xs)[2]) {
   return xs match {
     [0, 0] => -1;
@@ -319,6 +332,21 @@ static_assert(test_tuple_like_decomposition_pattern({0, 0}) == -1);
 static_assert(test_tuple_like_decomposition_pattern({0, 2}) == 4);
 static_assert(test_tuple_like_decomposition_pattern({2, 0}) == 8);
 static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
+
+constexpr int test_tuple_like_decomposition_pattern_dependent(const auto &tup) {
+  return tup match {
+    [0, 0] => -1;
+    [0, let y] => y * 2;
+    [let x, 0] => x * 4;
+    let [x, y] => x * y;
+    _ => 0;
+  };
+}
+
+static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{0, 0}) == -1);
+static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{0, 2}) == 4);
+static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 0}) == 8);
+static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 3}) == 6);
 
 constexpr bool test_match_test_with_guard(const int (&xs)[2]) {
   return xs match let [x, y] if (x == y);
