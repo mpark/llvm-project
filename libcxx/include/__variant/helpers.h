@@ -32,12 +32,21 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 #if _LIBCPP_STD_VER >= 17
 
 template <class _Tp>
+#if _LIBCPP_STD_VER >= 26
+requires requires { variant_size<_Tp>::value; }
+#endif
 struct _LIBCPP_TEMPLATE_VIS variant_size<const _Tp> : variant_size<_Tp> {};
 
 template <class _Tp>
+#if _LIBCPP_STD_VER >= 26
+requires requires { variant_size<_Tp>::value; }
+#endif
 struct _LIBCPP_TEMPLATE_VIS variant_size<volatile _Tp> : variant_size<_Tp> {};
 
 template <class _Tp>
+#if _LIBCPP_STD_VER >= 26
+requires requires { variant_size<_Tp>::value; }
+#endif
 struct _LIBCPP_TEMPLATE_VIS variant_size<const volatile _Tp> : variant_size<_Tp> {};
 
 template <size_t _Ip, class _Tp>
