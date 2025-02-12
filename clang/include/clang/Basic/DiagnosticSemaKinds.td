@@ -14451,6 +14451,14 @@ def err_cuda_device_kernel_launch_require_rdc
             "relocatable device code (i.e. requires -fgpu-rdc)">;
 
 // Pattern Matching
-def err_no_matching_alternative : Error<"no matching alternative">;
+def err_no_viable_alternative : Error<
+  "no viable alternative; target type %0 does not match any "
+  "'std::variant_alternative<I, %1>::type' for I in [0, 'std::variant_size<%1>::value')">;
+def err_alternative_pattern_std_variant_alternative_not_specialized : Error<
+ "invalid variant-like protocol; 'std::variant_alternative<%0>::type' "
+ "does not name a type">;
+def err_alternative_pattern_std_variant_size_not_constant : Error<
+  "invalid variant-like protocol; 'std::variant_size<%0>::value' "
+  "is not a valid integral constant expression">;
 
 } // end of sema component.

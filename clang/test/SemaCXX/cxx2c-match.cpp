@@ -40,7 +40,7 @@ namespace std {
   };
 
   template <int I, typename T>
-  struct variant_alternative;
+  struct variant_alternative; // expected-note {{template is declared here}}
 
   template <int I, class T>
   struct variant_alternative<I, const T> {
@@ -55,7 +55,62 @@ namespace std {
 constexpr int test_variant_like_alternative_pattern(const Variant &var) {
   return var match {
     int: _ => 0;
-    short: _ => 1; // expected-error {{no matching alternative}}
+    short: _ => 1; // expected-error {{no viable alternative; target type 'short' does not match any 'std::variant_alternative<I, Variant>::type' for I in [0, 'std::variant_size<Variant>::value')}}
+    _ => -1;
+  };
+}
+
+struct S1 {};
+
+template <>
+struct std::variant_size<S1> { void value(); };
+
+int test_bad_variant_like_protocol_variant_size_value() {
+  return S1{} match {
+    int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_size<S1>::value' is not a valid integral constant expression}}
+    _ => -1;
+  };
+}
+
+struct S2 {};
+
+template <>
+struct std::variant_size<S2> { static constexpr int value = 1; };
+
+int test_bad_variant_like_protocol_missing_index() {
+  return S2{} match {
+    int: _ => 0; // expected-error {{use of undeclared identifier 'index'}}
+    _ => -1;
+  };
+}
+
+struct S3 {
+  int index() const { return 0; }
+};
+
+template <>
+struct std::variant_size<S3> { static constexpr int value = 1; };
+
+int test_bad_variant_like_protocol_missing_variant_alternative() {
+  return S3{} match {
+    int: _ => 0; // expected-error {{implicit instantiation of undefined template 'std::variant_alternative<0, S3>'}}
+    _ => -1;
+  };
+}
+
+struct S4 {
+  int index() const { return 0; }
+};
+
+template <>
+struct std::variant_size<S4> { static constexpr int value = 1; };
+
+template <>
+struct std::variant_alternative<0, S4> {};
+
+int test_bad_variant_like_protocol_variant_alternative_missing_type() {
+  return S4{} match {
+    int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_alternative<0UL, S4>::type' does not name a type}}
     _ => -1;
   };
 }
