@@ -16228,6 +16228,47 @@ Sema::BuildForRangeBeginEndCall(SourceLocation Loc,
   return FRS_Success;
 }
 
+// Copied from SemaDeclCXX.cpp
+static TemplateArgumentLoc
+getTrivialTypeTemplateArgument(Sema &S, SourceLocation Loc, QualType T) {
+  return S.getTrivialTemplateArgumentLoc(TemplateArgument(T), QualType(), Loc);
+}
+
+ExprResult Sema::BuildTryCastCall(SourceLocation Loc,
+                                  const DeclarationNameInfo &NameInfo,
+                                  OverloadCandidateSet *CandidateSet,
+                                  QualType TargetType, Expr *E) {
+  Scope *S = nullptr;
+
+  CandidateSet->clear(OverloadCandidateSet::CSK_Normal);
+
+  TemplateArgumentListInfo Args(Loc, Loc);
+  Args.addArgument(getTrivialTypeTemplateArgument(*this, Loc, TargetType));
+
+  UnresolvedLookupExpr *Fn = UnresolvedLookupExpr::Create(
+      Context, nullptr, NestedNameSpecifierLoc(), SourceLocation(), NameInfo,
+      /*RequiresADL=*/true, &Args, UnresolvedSetIterator(),
+      UnresolvedSetIterator(),
+      /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
+
+  ExprResult TryCastExpr;
+  bool CandidateSetError =
+      buildOverloadedCallSet(S, Fn, Fn, E, Loc, CandidateSet, &TryCastExpr);
+  if (CandidateSet->empty() || CandidateSetError) {
+    return ExprEmpty();
+  }
+  OverloadCandidateSet::iterator Best;
+  OverloadingResult OverloadResult =
+      CandidateSet->BestViableFunction(*this, Fn->getBeginLoc(), Best);
+
+  if (OverloadResult == OR_No_Viable_Function) {
+    return ExprEmpty();
+  }
+  return FinishOverloadedCallExpr(*this, S, Fn, Fn, Loc, E, Loc, nullptr,
+                                  CandidateSet, &Best, OverloadResult,
+                                  /*AllowTypoCorrection=*/false);
+}
+
 ExprResult Sema::FixOverloadedFunctionReference(Expr *E, DeclAccessPair Found,
                                                 FunctionDecl *Fn) {
   if (ParenExpr *PE = dyn_cast<ParenExpr>(E)) {

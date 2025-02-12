@@ -238,10 +238,10 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
     }
   }
 
-  ExprResult IndexExpr = DRE;
+  ExprResult IndexExpr;
   if (UseMemberIndex) {
     IndexExpr = S.BuildMemberReferenceExpr(
-        IndexExpr.get(), Type, Loc, false, CXXScopeSpec(), SourceLocation(),
+        DRE, Type, Loc, false, CXXScopeSpec(), SourceLocation(),
         nullptr, MemberIndex, nullptr, nullptr);
     if (IndexExpr.isInvalid())
       return true;
@@ -250,14 +250,14 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   } else {
     //   Otherwise, the initializer is index(e), where index is looked up
     //   in the associated namespaces.
-    Expr *Get = UnresolvedLookupExpr::Create(
+    Expr *Index = UnresolvedLookupExpr::Create(
         S.Context, nullptr, NestedNameSpecifierLoc(), SourceLocation(),
         IndexNameInfo, /*RequiresADL=*/true, nullptr, UnresolvedSetIterator(),
         UnresolvedSetIterator(),
         /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
 
-    Expr *Arg = IndexExpr.get();
-    IndexExpr = S.BuildCallExpr(nullptr, Get, Loc, Arg, Loc);
+    Expr *Arg = DRE;
+    IndexExpr = S.BuildCallExpr(nullptr, Index, Loc, Arg, Loc);
   }
   if (IndexExpr.isInvalid())
     return true;
@@ -577,9 +577,8 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern());
     QualType Deduced = Context.getAutoRRefDeductType();
     VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
-    if (HoldingVar->isInvalidDecl()) {
+    if (HoldingVar->isInvalidDecl())
       return true;
-    }
     P->setHoldingVar(HoldingVar);
     SourceLocation Loc = P->getBeginLoc();
     QualType Type = HoldingVar->getType();
@@ -595,27 +594,38 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       break;
     }
 
+    DeclRefExpr *DRE = BuildDeclRefExpr(HoldingVar, Type, VK_LValue,
+                                        HoldingVar->getLocation());
+
+    DeclarationNameInfo TryCastNameInfo(PP.getIdentifierInfo("try_cast"),
+                                        P->getBeginLoc());
+    OverloadCandidateSet CandidateSet(Loc, OverloadCandidateSet::CSK_Normal);
+
     QualType TargetType = P->getTypeSourceInfo()->getType();
-    TargetType = Context.getPointerType(
-        Type.isConstQualified() ? TargetType.withConst() : TargetType);
-    ExprResult AddrOf = ActOnUnaryOp(S, Loc, tok::TokenKind::amp, Subject);
-    if (AddrOf.isInvalid()) {
-      return true;
+    QualType VarType = Context.getAutoRRefDeductType();
+    ExprResult CastExpr =
+        BuildTryCastCall(Loc, TryCastNameInfo, &CandidateSet, TargetType, DRE);
+
+    if (CastExpr.isUnset()) {
+        ExprResult AddrOf = ActOnUnaryOp(S, Loc, tok::TokenKind::amp, Subject);
+        if (AddrOf.isInvalid())
+          return true;
+        VarType = Context.getPointerType(
+            Type.isConstQualified() ? TargetType.withConst() : TargetType);
+        TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(VarType, Loc);
+        CastExpr = BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI,
+                                            AddrOf.get(), {}, {});
     }
-    TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(TargetType, Loc);
-    ExprResult Cast =
-        BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, AddrOf.get(), {}, {});
-    if (Cast.isInvalid()) {
+
+    if (CastExpr.isInvalid())
       return true;
-    }
-    VarDecl *CondVar = BuildVarDecl(*this, Loc, TargetType, Cast.get());
-    if (CondVar->isInvalidDecl()) {
+
+    VarDecl *CondVar = BuildVarDecl(*this, Loc, VarType, CastExpr.get());
+    if (CondVar->isInvalidDecl())
       return true;
-    }
     P->setCondVar(CondVar);
-    DeclRefExpr *DRE =
-        BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
-                         VK_LValue, CondVar->getLocation());
+    DRE = BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
+                           VK_LValue, CondVar->getLocation());
     ExprResult Cond = CheckBooleanCondition(Loc, DRE);
     if (Cond.isInvalid()) {
       return true;

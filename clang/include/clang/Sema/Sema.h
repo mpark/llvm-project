@@ -10502,6 +10502,11 @@ public:
                                            OverloadCandidateSet *CandidateSet,
                                            Expr *Range, ExprResult *CallExpr);
 
+  ExprResult BuildTryCastCall(SourceLocation Loc,
+                              const DeclarationNameInfo &NameInfo,
+                              OverloadCandidateSet *CandidateSet,
+                              QualType TargetType, Expr *E);
+
   /// BuildOverloadedCallExpr - Given the call expression that calls Fn
   /// (which eventually refers to the declaration Func) and the call
   /// arguments Args/NumArgs, attempt to resolve the function call down
