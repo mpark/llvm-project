@@ -4260,8 +4260,19 @@ public:
         return Pattern;
       return getSema().ActOnOptionalPattern(P->getBeginLoc(), Sub.get());
     }
-    case MatchPattern::AlternativePatternClass:
-      llvm_unreachable("not implemented");
+    case MatchPattern::AlternativePatternClass: {
+      AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
+      TypeSourceInfo *TSI = getDerived().TransformType(P->getTypeSourceInfo());
+      if (!TSI)
+        return true;
+      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
+      if (Sub.isInvalid())
+        return true;
+      if (Sub.get() == P->getSubPattern())
+        return Pattern;
+      return new (getSema().Context) AlternativePattern(
+          P->getTypeRange(), TSI, P->getColonLoc(), Sub.get());
+    }
     case MatchPattern::DecompositionPatternClass: {
       DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
       SmallVector<MatchPattern *, 4> Patterns;
