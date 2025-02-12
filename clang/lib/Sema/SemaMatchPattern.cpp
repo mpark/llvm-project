@@ -163,7 +163,7 @@ static IsVariantLike isVariantLike(Sema &S, SourceLocation Loc, QualType T,
         : R(R), Args(Args) {}
     Sema::SemaDiagnosticBuilder diagnoseNotICE(Sema &S,
                                                SourceLocation Loc) override {
-      return S.Diag(Loc, diag::err_decomp_decl_std_tuple_size_not_constant)
+      return S.Diag(Loc, diag::err_alternative_pattern_std_variant_size_not_constant)
              << printTemplateArgs(S.Context.getPrintingPolicy(), Args,
                                   /*Params*/ nullptr);
     }
@@ -195,13 +195,13 @@ static QualType getVariantLikeAlternativeType(Sema &S, SourceLocation Loc,
   LookupResult R(S, TypeDN, Loc, Sema::LookupOrdinaryName);
   if (lookupStdTypeTraitMember(
           S, R, Loc, "variant_alternative", Args,
-          diag::err_decomp_decl_std_tuple_element_not_specialized))
+          diag::err_alternative_pattern_std_variant_alternative_not_specialized))
     return QualType();
 
   auto *TD = R.getAsSingle<TypeDecl>();
   if (!TD) {
     R.suppressDiagnostics();
-    S.Diag(Loc, diag::err_decomp_decl_std_tuple_element_not_specialized)
+    S.Diag(Loc, diag::err_alternative_pattern_std_variant_alternative_not_specialized)
         << printTemplateArgs(S.Context.getPrintingPolicy(), Args,
                              /*Params*/ nullptr);
     if (!R.empty())
@@ -220,25 +220,45 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   DeclRefExpr *DRE = S.BuildDeclRefExpr(HoldingVar, Type, VK_LValue,
                                         HoldingVar->getLocation());
 
-  if (S.RequireCompleteType(Loc, Type, diag::err_for_range_incomplete_type))
-    return true;
-
   DeclarationNameInfo IndexNameInfo(S.PP.getIdentifierInfo("index"), Loc);
-  LookupResult IndexMemberLookup(S, IndexNameInfo, Sema::LookupMemberName);
-  OverloadCandidateSet CandidateSet(Loc, OverloadCandidateSet::CSK_Normal);
-
-  if (CXXRecordDecl *D = Type->getAsCXXRecordDecl()) {
-    S.LookupQualifiedName(IndexMemberLookup, D);
-    if (IndexMemberLookup.isAmbiguous())
+  LookupResult MemberIndex(S, IndexNameInfo, Sema::LookupMemberName);
+  bool UseMemberIndex = false;
+  if (S.isCompleteType(HoldingVar->getLocation(), Type)) {
+    if (auto *RD = Type->getAsCXXRecordDecl())
+      S.LookupQualifiedName(MemberIndex, RD);
+    if (MemberIndex.isAmbiguous())
       return true;
+    for (NamedDecl *D : MemberIndex) {
+      if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D->getUnderlyingDecl())) {
+        if (FD->param_empty()) {
+          UseMemberIndex = true;
+          break;
+        }
+      }
+    }
   }
 
-  ExprResult IndexExpr;
-  Sema::ForRangeStatus Status =
-      S.BuildForRangeBeginEndCall(Loc, Loc, IndexNameInfo, IndexMemberLookup,
-                                  &CandidateSet, DRE, &IndexExpr);
-  if (Status != Sema::FRS_Success)
-    return true;
+  ExprResult IndexExpr = DRE;
+  if (UseMemberIndex) {
+    IndexExpr = S.BuildMemberReferenceExpr(
+        IndexExpr.get(), Type, Loc, false, CXXScopeSpec(), SourceLocation(),
+        nullptr, MemberIndex, nullptr, nullptr);
+    if (IndexExpr.isInvalid())
+      return true;
+
+    IndexExpr = S.BuildCallExpr(nullptr, IndexExpr.get(), Loc, {}, Loc);
+  } else {
+    //   Otherwise, the initializer is index(e), where index is looked up
+    //   in the associated namespaces.
+    Expr *Get = UnresolvedLookupExpr::Create(
+        S.Context, nullptr, NestedNameSpecifierLoc(), SourceLocation(),
+        IndexNameInfo, /*RequiresADL=*/true, nullptr, UnresolvedSetIterator(),
+        UnresolvedSetIterator(),
+        /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
+
+    Expr *Arg = IndexExpr.get();
+    IndexExpr = S.BuildCallExpr(nullptr, Get, Loc, Arg, Loc);
+  }
   if (IndexExpr.isInvalid())
     return true;
 
@@ -247,8 +267,11 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   llvm::SmallVector<QualType, 8> Alternatives;
   Alternatives.reserve(NumAlternatives);
   for (unsigned I = 0; I < NumAlternatives; ++I) {
-    Alternatives.push_back(
-        getVariantLikeAlternativeType(S, Loc, I, Type.getUnqualifiedType()));
+    QualType Alternative =
+        getVariantLikeAlternativeType(S, Loc, I, Type.getUnqualifiedType());
+    if (Alternative.isNull())
+      return true;
+    Alternatives.push_back(Alternative);
   }
   QualType TargetType = P->getTypeSourceInfo()->getType();
   unsigned I = 0;
@@ -258,7 +281,8 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
     }
   }
   if (I == NumAlternatives) {
-    S.Diag(Loc, diag::err_no_matching_alternative) << P->getSourceRange();
+    S.Diag(Loc, diag::err_no_viable_alternative)
+        << TargetType << Type.getUnqualifiedType().getAsString();
     return true;
   }
 
