@@ -461,6 +461,7 @@ namespace std {
   struct variant_size;
 
   template <typename T>
+  requires requires { variant_size<T>::value; }
   struct variant_size<const T> {
     static constexpr int value = std::variant_size<T>::value;
   };
@@ -498,3 +499,35 @@ static_assert(test_variant_like_alternative_pattern(2) == -1);
 static_assert(test_variant_like_alternative_pattern(3.0) == 7);
 static_assert(test_variant_like_alternative_pattern(4.0) == 8);
 static_assert(test_variant_like_alternative_pattern(0.f) == -1);
+
+namespace N1 {
+  struct S {
+    int index;
+    int i;
+    double d;
+  };
+
+  template <typename T>
+  constexpr const T* try_cast(const S& s) {
+    if constexpr (__is_same(T, int)) {
+      return s.index == 0 ? &s.i : nullptr;
+    } else if constexpr (__is_same(T, double)) {
+      return s.index == 1 ? &s.d : nullptr;
+    } else {
+      return nullptr;
+    }
+  }
+}
+
+constexpr int test_try_cast_alternative_pattern(const N1::S& s) {
+  return s match -> int {
+    int: let x => x;
+    double: let d => d;
+    short: let s => s;
+    _ => -1;
+  };
+}
+
+static_assert(test_try_cast_alternative_pattern(N1::S{0, 1, 2.2}) == 1);
+static_assert(test_try_cast_alternative_pattern(N1::S{1, 1, 2.2}) == 2);
+static_assert(test_try_cast_alternative_pattern(N1::S{2, 1, 2.2}) == -1);
