@@ -500,6 +500,23 @@ static_assert(test_variant_like_alternative_pattern(3.0) == 7);
 static_assert(test_variant_like_alternative_pattern(4.0) == 8);
 static_assert(test_variant_like_alternative_pattern(0.f) == -1);
 
+template <typename T, typename U>
+constexpr int test_variant_like_alternative_pattern_dependent(const auto &var) {
+  return var match {
+    T: 0 => 0;
+    T: 1 => 1;
+    U: let y => (int)y + 4;
+    _ => -1;
+  };
+}
+
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(0)) == 0);
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(1)) == 1);
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(2)) == -1);
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(3.0)) == 7);
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(4.0)) == 8);
+static_assert(test_variant_like_alternative_pattern_dependent<int, double>(Variant(0.f)) == -1);
+
 namespace N1 {
   struct S {
     int index;

@@ -237,6 +237,8 @@ public:
       : MatchPattern(AlternativePatternClass), TypeRange(TypeRange),
         TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {}
 
+  SourceRange getTypeRange() const { return TypeRange; }
+  SourceLocation getColonLoc() const { return ColonLoc; }
   SourceLocation getBeginLoc() const { return TypeRange.getBegin(); }
   SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
 
