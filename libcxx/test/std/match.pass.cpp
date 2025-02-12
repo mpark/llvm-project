@@ -11,6 +11,9 @@
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
 #include <cassert>
+#include <tuple>
+#include <variant>
+#include <any>
 
 void check(bool b) { assert(b); }
 
@@ -241,31 +244,24 @@ struct Pair {
 };
 
 namespace std {
-  template <typename T>
-  struct tuple_size;
-
-  template <typename T>
-  requires requires { tuple_size<T>::value; }
-  struct tuple_size<const T> {
-    static constexpr int value = std::tuple_size<T>::value;
-  };
-
   template <>
   struct tuple_size<Pair> {
     static constexpr int value = 2;
   };
 
-  template <int I, typename T>
-  struct tuple_element;
-
-  template <int I, class T>
-  struct tuple_element<I, const T> {
-    using type = typename std::tuple_element<I, T>::type const;
-  };
-
   template <int I>
   struct tuple_element<I, Pair> {
     using type = int;
+  };
+}
+
+int tuple_decomposition_pattern(const std::tuple<int, int> &tup) {
+  return tup match {
+    [0, 0] => -1;
+    [0, let y] => y * 2;
+    [let x, 0] => x * 4;
+    let [x, y] => x * y;
+    _ => 0;
   };
 }
 
@@ -280,6 +276,10 @@ int tuple_like_decomposition_pattern(const Pair &tup) {
 }
 
 void test_tuple_like_decomposition_pattern() {
+  check(tuple_decomposition_pattern({0, 0}) == -1);
+  check(tuple_decomposition_pattern({0, 2}) == 4);
+  check(tuple_decomposition_pattern({2, 0}) == 8);
+  check(tuple_decomposition_pattern({2, 3}) == 6);
   check(tuple_like_decomposition_pattern({0, 0}) == -1);
   check(tuple_like_decomposition_pattern({0, 2}) == 4);
   check(tuple_like_decomposition_pattern({2, 0}) == 8);
@@ -406,30 +406,23 @@ struct Variant {
 };
 
 namespace std {
-  template <typename T>
-  struct variant_size;
-
-  template <typename T>
-  struct variant_size<const T> {
-    static constexpr int value = std::variant_size<T>::value;
-  };
-
   template <>
   struct variant_size<Variant> {
     static constexpr int value = 3;
   };
 
-  template <int I, typename T>
-  struct variant_alternative;
-
-  template <int I, class T>
-  struct variant_alternative<I, const T> {
-    using type = typename std::variant_alternative<I, T>::type const;
-  };
-
   template <> struct variant_alternative<0, Variant> { using type = int; };
   template <> struct variant_alternative<1, Variant> { using type = double; };
   template <> struct variant_alternative<2, Variant> { using type = float; };
+}
+
+int variant_alternative_pattern(const std::variant<int, double, float> &var) {
+  return var match {
+    int: 0 => 0;
+    int: 1 => 1;
+    double: let y => (int)y + 4;
+    _ => -1;
+  };
 }
 
 int variant_like_alternative_pattern(const Variant &var) {
@@ -442,6 +435,12 @@ int variant_like_alternative_pattern(const Variant &var) {
 }
 
 void test_variant_like_alternative_pattern() {
+  check(variant_alternative_pattern(0) == 0);
+  check(variant_alternative_pattern(1) == 1);
+  check(variant_alternative_pattern(2) == -1);
+  check(variant_alternative_pattern(3.0) == 7);
+  check(variant_alternative_pattern(4.0) == 8);
+  check(variant_alternative_pattern(0.f) == -1);
   check(variant_like_alternative_pattern(0) == 0);
   check(variant_like_alternative_pattern(1) == 1);
   check(variant_like_alternative_pattern(2) == -1);
@@ -469,6 +468,24 @@ void test_match_stmt_action() {
   check(match_stmt_action(7) == 99);
 }
 
+int try_cast_alternative_pattern(const std::any& a) {
+  return a match {
+    int: 0 => 0;
+    int: 1 => 1;
+    double: let y => (int)y + 4;
+    _ => -1;
+  };
+}
+
+void test_try_cast_alternative_pattern() {
+  check(try_cast_alternative_pattern(0) == 0);
+  check(try_cast_alternative_pattern(1) == 1);
+  check(try_cast_alternative_pattern(2) == -1);
+  check(try_cast_alternative_pattern(3.0) == 7);
+  check(try_cast_alternative_pattern(4.0) == 8);
+  check(try_cast_alternative_pattern(0.f) == -1);
+}
+
 int main() {
   test_match_test_expr();
   test_char_pattern();
@@ -488,4 +505,5 @@ int main() {
   test_match_in_while_condition();
   test_variant_like_alternative_pattern();
   test_match_stmt_action();
+  test_try_cast_alternative_pattern();
 }
