@@ -15,6 +15,7 @@
 
 #include "clang/AST/ASTConcept.h"
 #include "clang/AST/Type.h"
+#include "clang/AST/DependenceFlags.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -52,6 +53,7 @@ protected:
 
 private:
   MatchPatternClass Class;
+  ExprDependence Dependent;
 
 public:
   // Only allow allocation of Stmts using the allocator in ASTContext
@@ -73,10 +75,23 @@ public:
 protected:
   explicit MatchPattern(MatchPatternClass MPC) : Class(MPC) {}
 
+  void setDependence(ExprDependence D) { Dependent = D; }
 public:
   MatchPatternClass getMatchPatternClass() const { return Class; }
 
   const char *getMatchPatternClassName() const;
+
+  ExprDependence computeDependence() {
+    ExprDependence Dependent = ExprDependence::None;
+    for (const MatchPattern* C : children()) {
+      Dependent |= C->getDependence();
+    }
+    return Dependent;
+  }
+
+  ExprDependence getDependence() const {
+    return Dependent;
+  }
 
   SourceRange getSourceRange() const LLVM_READONLY {
     return {getBeginLoc(), getEndLoc()};
@@ -97,7 +112,9 @@ class WildcardPattern final : public MatchPattern {
 
 public:
   explicit WildcardPattern(SourceLocation WildcardLoc)
-      : MatchPattern(WildcardPatternClass), WildcardLoc(WildcardLoc) {}
+      : MatchPattern(WildcardPatternClass), WildcardLoc(WildcardLoc) {
+    setDependence(ExprDependence::None);
+  }
 
   SourceLocation getBeginLoc() const { return WildcardLoc; }
   SourceLocation getEndLoc() const { return WildcardLoc; }
@@ -144,7 +161,9 @@ class BindingPattern final : public MatchPattern {
 
 public:
   explicit BindingPattern(SourceLocation LetLoc, BindingDecl *Binding)
-      : MatchPattern(BindingPatternClass), LetLoc(LetLoc), Binding(Binding) {}
+      : MatchPattern(BindingPatternClass), LetLoc(LetLoc), Binding(Binding) {
+    setDependence(ExprDependence::None);
+  }
 
   SourceLocation getLetLoc() const { return LetLoc; }
   SourceLocation getBeginLoc() const { return getLetLoc(); }
@@ -168,7 +187,9 @@ class ParenPattern final : public MatchPattern {
 
 public:
   explicit ParenPattern(SourceRange Parens, MatchPattern *Pattern)
-      : MatchPattern(ParenPatternClass), Parens(Parens), Pattern(Pattern) {}
+      : MatchPattern(ParenPatternClass), Parens(Parens), Pattern(Pattern) {
+    setDependence(computeDependence());
+  }
 
   SourceLocation getBeginLoc() const { return Parens.getBegin(); }
   SourceLocation getEndLoc() const { return Parens.getEnd(); }
@@ -195,7 +216,9 @@ class OptionalPattern final : public MatchPattern {
 public:
   explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
       : MatchPattern(OptionalPatternClass), QuestionLoc(QuestionLoc),
-        Pattern(Pattern) {}
+        Pattern(Pattern) {
+    setDependence(computeDependence());
+  }
 
   SourceLocation getBeginLoc() const { return QuestionLoc; }
   SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
@@ -240,12 +263,19 @@ public:
   explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
       : MatchPattern(AlternativePatternClass), DiscriminatorRange(ConceptRange),
-        CR(CR), ColonLoc(ColonLoc), Pattern(Pattern) {}
+        CR(CR), ColonLoc(ColonLoc), Pattern(Pattern) {
+    // FIXME(mpark): Account for ConceptReference.
+    setDependence(computeDependence());
+  }
 
   explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
       : MatchPattern(AlternativePatternClass), DiscriminatorRange(TypeRange),
-        TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {}
+        TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {
+     setDependence(
+        toExprDependenceForImpliedType(TInfo->getType()->getDependence()) |
+        computeDependence());
+  }
 
   SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
   SourceLocation getColonLoc() const { return ColonLoc; }
