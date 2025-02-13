@@ -1,4 +1,25 @@
-// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value %s -verify
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -fcxx-exceptions %s -verify
+
+void test_throw_does_not_contribute_to_type_deduction() {
+  static_assert(__is_same(decltype(0 match {
+    0 => 0;
+    1 => 1;
+    _ => throw;
+  }), int));
+}
+
+void test_throw_action() {
+  static_assert(0 match {
+    0 => 0;
+    1 => 1;
+    _ => throw;
+  } == 0);
+  static_assert(1 match {
+    0 => 0;
+    1 => 1;
+    _ => throw;
+  } == 1);
+}
 
 struct Variant {
   constexpr Variant(int x) : i(0), x(x) {}
