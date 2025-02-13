@@ -487,7 +487,7 @@ void test_try_cast_alternative_pattern() {
 }
 
 void test_void_returning_match() {
-  // 0 match { _ => []() {}(); };
+  0 match { _ => []() {}(); };
 }
 
 int main() {
