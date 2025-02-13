@@ -11094,7 +11094,10 @@ public:
   ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
                                                  MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
-  ActOnAlternativePattern(SourceRange TypeRange, ParsedType Ty,
+  ActOnAlternativePattern(SourceRange DiscriminatorRange, ConceptReference *CR,
+                          SourceLocation ColonLoc, MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnAlternativePattern(SourceRange DiscriminatorRange, TypeSourceInfo *TSI,
                           SourceLocation ColonLoc, MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
