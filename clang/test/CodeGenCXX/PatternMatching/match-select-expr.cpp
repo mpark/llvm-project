@@ -48,3 +48,12 @@ auto char_pattern(char c) {
 // CHECK:   %5 = load i32, ptr %[[SELECT_RES]], align 4
 // CHECK:   ret i32 %5
 // CHECK: }
+
+void test_void_returning_match() {
+  0 match { _ => []() {}(); };
+}
+
+// CHECK-LABEL: _Z25test_void_returning_matchv
+// CHECK: match.select.action:
+// CHECK-NEXT:   call void @"_ZZ25test_void_returning_matchvENK3$_0clEv"
+// CHECK-NEXT:   br label %match.select.end
