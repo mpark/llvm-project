@@ -458,6 +458,14 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
     }
     RetTy = Deduced;
   }
+  if (RetTy->isVoidType()) {
+    ExprResult Result = E;
+    Result = IgnoredValueConversions(Result.get());
+    if (Result.isInvalid())
+      return StmtError();
+    E = Result.get();
+    E = ImpCastExprToType(E, Context.VoidTy, CK_ToVoid).get();
+  }
   Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
   auto Entity = InitializedEntity::InitializeStmtExprResult(Loc, RetTy);
   ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
