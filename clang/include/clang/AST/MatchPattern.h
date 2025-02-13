@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_AST_PATTERN_H
 #define LLVM_CLANG_AST_PATTERN_H
 
+#include "clang/AST/ASTConcept.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -222,8 +223,12 @@ public:
 };
 
 class AlternativePattern final : public MatchPattern {
-  SourceRange TypeRange;
-  TypeSourceInfo* TInfo;
+  SourceRange DiscriminatorRange;
+
+  // Discriminator is either a type or a type-constraint.
+  TypeSourceInfo* TInfo = nullptr;
+  ConceptReference* CR = nullptr;
+
   SourceLocation ColonLoc;
   MatchPattern *Pattern;
   VarDecl *HoldingVar = nullptr;
@@ -232,15 +237,24 @@ class AlternativePattern final : public MatchPattern {
   VarDecl *BindingVar = nullptr;
 
 public:
+  explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
+                              SourceLocation ColonLoc, MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass), DiscriminatorRange(ConceptRange),
+        CR(CR), ColonLoc(ColonLoc), Pattern(Pattern) {}
+
   explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), TypeRange(TypeRange),
+      : MatchPattern(AlternativePatternClass), DiscriminatorRange(TypeRange),
         TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {}
 
-  SourceRange getTypeRange() const { return TypeRange; }
+  SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
   SourceLocation getColonLoc() const { return ColonLoc; }
-  SourceLocation getBeginLoc() const { return TypeRange.getBegin(); }
+  SourceLocation getBeginLoc() const { return DiscriminatorRange.getBegin(); }
   SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
+
+  ConceptReference *getConceptReference() const {
+    return CR;
+  }
 
   TypeSourceInfo *getTypeSourceInfo() const {
     return TInfo;
