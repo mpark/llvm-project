@@ -451,6 +451,11 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   }
   Expr *E = ER.get();
   SourceLocation Loc = E->getBeginLoc();
+  if (isa<CXXThrowExpr>(E->IgnoreParenImpCasts())) {
+    if (ER.isInvalid())
+      return StmtError();
+    return ER.get();
+  }
   if (const AutoType *AT = RetTy->getContainedAutoType()) {
     QualType Deduced;
     if (DeduceAutoTypeFromExpr(OrigResultType, Loc, E, Deduced, AT)) {
@@ -469,15 +474,13 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
   auto Entity = InitializedEntity::InitializeStmtExprResult(Loc, RetTy);
   ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
-  if (ER.isInvalid()) {
+  if (ER.isInvalid())
     return StmtError();
-  }
   E = ER.get();
   CheckReturnValExpr(E, RetTy, Loc);
   ER = ActOnFinishFullExpr(E, Loc, /*DiscardedValue=*/false);
-  if (ER.isInvalid()) {
+  if (ER.isInvalid())
     return StmtError();
-  }
   return ER.get();
 }
 
