@@ -5340,8 +5340,7 @@ public:
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
         HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
         Pattern(Pattern), IfLoc(IfLoc), Guard(Guard) {
-    // Match test expressions are value-dependent if the subject is value-dependent.
-    setDependence(Subject->getDependence() & ~ExprDependence::Type);
+    setDependence(computeDependence(this));
   }
 
   explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
@@ -5402,12 +5401,14 @@ class MatchSelectExpr final
   Expr *Subject;
   SourceLocation MatchLoc;
   bool IsConstexpr;
+  TypeLoc OrigResultType;
   unsigned NumCases;
   SourceRange Braces;
 
   explicit MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
-                           bool IsConstexpr, QualType Ty,
-                           ArrayRef<MatchCase> Cases, SourceRange Braces);
+                           bool IsConstexpr, TypeLoc OrigResultType,
+                           QualType Ty, ArrayRef<MatchCase> Cases,
+                           SourceRange Braces);
 
   explicit MatchSelectExpr(unsigned NumCases, EmptyShell Empty)
       : Expr(MatchSelectExprClass, Empty), NumCases(NumCases) {}
@@ -5417,8 +5418,8 @@ public:
 
   static MatchSelectExpr *Create(const ASTContext &Ctx, Expr *Subject,
                                  SourceLocation MatchLoc, bool IsConstexpr,
-                                 QualType Ty, ArrayRef<MatchCase> Cases,
-                                 SourceRange Braces);
+                                 TypeLoc OrigResultType, QualType Ty,
+                                 ArrayRef<MatchCase> Cases, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases);
 
@@ -5428,6 +5429,8 @@ public:
   SourceLocation getMatchLoc() const LLVM_READONLY {
     return MatchLoc;
   }
+
+  TypeLoc getOrigResultType() const { return OrigResultType; }
 
   bool isConstexpr() const { return IsConstexpr; }
 

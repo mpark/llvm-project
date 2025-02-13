@@ -108,6 +108,8 @@ class ObjCIsaExpr;
 class ObjCIndirectCopyRestoreExpr;
 class ObjCMessageExpr;
 class OpenACCAsteriskSizeExpr;
+class MatchTestExpr;
+class MatchSelectExpr;
 
 // The following functions are called from constructors of `Expr`, so they
 // should not access anything beyond basic
@@ -206,6 +208,9 @@ ExprDependence computeDependence(ObjCIsaExpr *E);
 ExprDependence computeDependence(ObjCIndirectCopyRestoreExpr *E);
 ExprDependence computeDependence(ObjCMessageExpr *E);
 ExprDependence computeDependence(OpenACCAsteriskSizeExpr *E);
+
+ExprDependence computeDependence(MatchTestExpr *E);
+ExprDependence computeDependence(MatchSelectExpr *E);
 
 } // namespace clang
 #endif

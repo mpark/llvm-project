@@ -4353,8 +4353,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces)) {
       return ExprError();
     }
-    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr, RetTy,
-                                        Cases, Braces);
+    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
+                                        OrigResultType, RetTy, Cases, Braces);
   } else {
     VarDecl *HoldingVar = nullptr;
     if (InjectedDecls && LHS.isUsable()) {

@@ -17557,6 +17557,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   if (LHS.isInvalid())
     return ExprError();
 
+  QualType RetTy = E->getType();
   SmallVector<MatchCase, 32> Cases;
   for (const MatchCase &Case : E->getCases()) {
     ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
@@ -17577,6 +17578,12 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Handler.isInvalid())
       return ExprError();
 
+    Stmt* HS = Handler.get();
+    if (Expr *HE = dyn_cast<Expr>(HS)) {
+      Handler =
+          getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy, HE);
+    }
+
     Cases.push_back({Pattern.get(), Case.IfLoc, Guard.get(), Handler.get()});
   }
 
@@ -17590,8 +17597,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   }
 
   return getSema().ActOnMatchSelectExpr(LHS.get(), E->getMatchLoc(),
-                                        E->isConstexpr(), E->getType(), Cases,
-                                        E->getBraces());
+                                        E->isConstexpr(), E->getOrigResultType(), RetTy,
+                                        Cases, E->getBraces());
 }
 
 template <typename Derived>

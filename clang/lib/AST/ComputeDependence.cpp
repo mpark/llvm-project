@@ -966,3 +966,15 @@ ExprDependence clang::computeDependence(OpenACCAsteriskSizeExpr *E) {
   // way.
   return ExprDependence::None;
 }
+
+ExprDependence clang::computeDependence(MatchTestExpr *E) {
+  // Match test expressions are value-dependent either the subject or
+  // the pattern is value-dependent.
+  return turnTypeToValueDependence(E->getSubject()->getDependence() |
+                                   E->getPattern()->getDependence());
+}
+
+ExprDependence clang::computeDependence(MatchSelectExpr *E) {
+  // FIXME(mpark): Account for the patterns and handlers and such.
+  return E->getSubject()->getDependence();
+}

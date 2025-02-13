@@ -490,11 +490,11 @@ ExprResult Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
-                                      bool IsConstexpr, QualType RetTy,
-                                      ArrayRef<MatchCase> Cases,
+                                      bool IsConstexpr, TypeLoc OrigResultType,
+                                      QualType RetTy, ArrayRef<MatchCase> Cases,
                                       SourceRange Braces) {
-  return MatchSelectExpr::Create(Context, Subject, MatchLoc, IsConstexpr, RetTy,
-                                 Cases, Braces);
+  return MatchSelectExpr::Create(Context, Subject, MatchLoc, IsConstexpr,
+                                 OrigResultType, RetTy, Cases, Braces);
 }
 
 ActionResult<MatchPattern *>
