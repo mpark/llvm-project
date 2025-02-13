@@ -4262,16 +4262,22 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-      TypeSourceInfo *TSI = getDerived().TransformType(P->getTypeSourceInfo());
-      if (!TSI)
-        return true;
-      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
-      if (Sub.isInvalid())
-        return true;
-      if (Sub.get() == P->getSubPattern())
-        return Pattern;
-      return new (getSema().Context) AlternativePattern(
-          P->getTypeRange(), TSI, P->getColonLoc(), Sub.get());
+      if (ConceptReference* CR = P->getConceptReference()) {
+        llvm_unreachable("not implemented");
+      }
+      if (TypeSourceInfo* TSI = P->getTypeSourceInfo()) {
+        TSI = getDerived().TransformType(P->getTypeSourceInfo());
+        if (!TSI)
+          return true;
+        auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
+        if (Sub.isInvalid())
+          return true;
+        if (Sub.get() == P->getSubPattern())
+          return Pattern;
+        return new (getSema().Context) AlternativePattern(
+            P->getDiscriminatorRange(), TSI, P->getColonLoc(), Sub.get());
+      }
+      llvm_unreachable("unknown alternative pattern");
     }
     case MatchPattern::DecompositionPatternClass: {
       DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);

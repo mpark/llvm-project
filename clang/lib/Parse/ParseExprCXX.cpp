@@ -4658,21 +4658,83 @@ Parser::ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr) {
 
 ActionResult<MatchPattern *>
 Parser::TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr) {
-  if (!isCXXTypeId(TypeIdInAlternativePattern)) {
-    return false;
-  }
-  SourceRange TypeRange;
-  TypeResult Ty = ParseTypeName(&TypeRange);
-
-  // Match the ':'.
-  assert(Tok.is(tok::colon) && "Not an alternative pattern");
-  SourceLocation ColonLoc = ConsumeToken();
-  ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
-  if (Ty.isInvalid() || Pattern.isInvalid()) {
+  if (TryAnnotateTypeConstraint())
     return true;
+
+  SourceRange DiscriminatorRange;
+  if (isTypeConstraintAnnotation()) {
+    CXXScopeSpec TypeConstraintSS;
+    ParseOptionalCXXScopeSpecifier(TypeConstraintSS, /*ObjectType=*/nullptr,
+                                   /*ObjectHasErrors=*/false,
+                                   /*EnteringContext*/ false);
+    // Consume the 'type-constraint'.
+    TemplateIdAnnotation *TypeConstraint =
+        static_cast<TemplateIdAnnotation *>(Tok.getAnnotationValue());
+    assert(TypeConstraint->Kind == TNK_Concept_template &&
+           "stray non-concept template-id annotation");
+    DiscriminatorRange = ConsumeAnnotationToken();
+    if (Actions.CheckTypeConstraint(TypeConstraint))
+      return true;
+
+    // Similar code in SemaType.cpp `ConvertDeclSpecToType`
+    ConceptDecl *TypeConstraintConcept =
+        cast<ConceptDecl>(TypeConstraint->Template.get().getAsTemplateDecl());
+
+    const ASTTemplateArgumentListInfo *ArgsAsWritten =
+        [&]() -> const ASTTemplateArgumentListInfo * {
+      if (TypeConstraint->LAngleLoc.isInvalid())
+        return nullptr;
+      TemplateArgumentListInfo TemplateArgs(TypeConstraint->LAngleLoc,
+                                            TypeConstraint->RAngleLoc);
+      ASTTemplateArgsPtr TemplateArgsPtr(TypeConstraint->getTemplateArgs(),
+                                         TypeConstraint->NumArgs);
+      Actions.translateTemplateArguments(TemplateArgsPtr, TemplateArgs);
+      return ASTTemplateArgumentListInfo::Create(Actions.getASTContext(),
+                                                 TemplateArgs);
+    }();
+    ConceptReference* CR = ConceptReference::Create(
+        Actions.getASTContext(),
+        TypeConstraintSS.isSet()
+            ? TypeConstraintSS.getWithLocInContext(Actions.getASTContext())
+            : NestedNameSpecifierLoc{},
+        TypeConstraint->TemplateKWLoc,
+        DeclarationNameInfo(TypeConstraint->Name,
+                            TypeConstraint->TemplateNameLoc),
+        nullptr, TypeConstraintConcept, ArgsAsWritten);
+
+    // Match the ':'.
+    assert(Tok.is(tok::colon) && "Not an alternative pattern");
+    SourceLocation ColonLoc = ConsumeToken();
+    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
+    if (!CR || Pattern.isInvalid())
+      return true;
+    return Actions.ActOnAlternativePattern(DiscriminatorRange, CR, ColonLoc,
+                                           Pattern.get());
+
+    #if 0
+    QualType Type = Actions.getASTContext().getAutoType(
+        QualType(), AutoTypeKeyword::Auto,
+        /*IsDependent=*/false, /*IsPack=*/false, TypeConstraintConcept,
+        TypeConstraintArgs);
+
+    TSI = Actions.getASTContext().getTrivialTypeSourceInfo(
+        Type, TypeRange.getBegin());
+    #endif
   }
-  return Actions.ActOnAlternativePattern(TypeRange, Ty.get(), ColonLoc,
-                                         Pattern.get());
+  if (isCXXTypeId(TypeIdInAlternativePattern)) {
+    TypeSourceInfo* TSI = nullptr;
+    TypeResult Ty = ParseTypeName(&DiscriminatorRange);
+    Actions.GetTypeFromParser(Ty.get(), &TSI);
+    // Match the ':'.
+    assert(Tok.is(tok::colon) && "Not an alternative pattern");
+    SourceLocation ColonLoc = ConsumeToken();
+    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
+    if (!TSI || Pattern.isInvalid())
+      return true;
+    return Actions.ActOnAlternativePattern(DiscriminatorRange, TSI, ColonLoc,
+                                           Pattern.get());
+  }
+  return false;
 }
 
 ActionResult<MatchPattern *> Parser::ParseBindingPattern(SourceLocation LetLoc) {

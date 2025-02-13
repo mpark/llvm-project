@@ -273,17 +273,50 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
       return true;
     Alternatives.push_back(Alternative);
   }
-  QualType TargetType = P->getTypeSourceInfo()->getType();
   unsigned I = 0;
-  for (; I < NumAlternatives; ++I) {
-    if (S.Context.hasSameType(Alternatives[I], TargetType)) {
-      break;
+  if (ConceptReference* CR = P->getConceptReference()) {
+    CXXScopeSpec SS;
+    SS.Adopt(CR->getNestedNameSpecifierLoc());
+
+    for (; I < NumAlternatives; ++I) {
+      TemplateArgumentListInfo TemplateArgs;
+      TemplateArgs.addArgument(S.getTrivialTemplateArgumentLoc(
+          TemplateArgument(Alternatives[I]), /*NTTPType=*/QualType(), Loc));
+      if (const ASTTemplateArgumentListInfo *ArgsAsWritten =
+              CR->getTemplateArgsAsWritten()) {
+        TemplateArgs.setLAngleLoc(ArgsAsWritten->getLAngleLoc());
+        TemplateArgs.setRAngleLoc(ArgsAsWritten->getRAngleLoc());
+        for (const TemplateArgumentLoc &Arg : ArgsAsWritten->arguments()) {
+          TemplateArgs.addArgument(Arg);
+        }
+      }
+      ExprResult E = S.CheckConceptTemplateId(
+          SS, CR->getTemplateKWLoc(), CR->getConceptNameInfo(),
+          CR->getFoundDecl(), CR->getNamedConcept(), &TemplateArgs);
+      if (E.isInvalid())
+        return true;
+      ConceptSpecializationExpr* CSE = cast<ConceptSpecializationExpr>(E.get());
+      if (CSE->isSatisfied()) {
+        break;
+      }
     }
-  }
-  if (I == NumAlternatives) {
-    S.Diag(Loc, diag::err_no_viable_alternative)
-        << TargetType << Type.getUnqualifiedType().getAsString();
-    return true;
+    if (I == NumAlternatives) {
+      // S.Diag(Loc, diag::err_no_viable_alternative)
+      //     << *CR << Type.getUnqualifiedType().getAsString();
+      return true;
+    }
+  } else if (TypeSourceInfo* TSI = P->getTypeSourceInfo()) {
+    QualType TargetType = TSI->getType();
+    for (; I < NumAlternatives; ++I) {
+      if (S.Context.hasSameType(Alternatives[I], TargetType)) {
+        break;
+      }
+    }
+    if (I == NumAlternatives) {
+      S.Diag(Loc, diag::err_no_viable_alternative)
+          << TargetType << Type.getUnqualifiedType().getAsString();
+      return true;
+    }
   }
 
   ExprResult TargetIndex = S.ActOnIntegerConstant(Loc, I);
@@ -488,12 +521,19 @@ Sema::ActOnOptionalPattern(SourceLocation QuestionLoc,
 }
 
 ActionResult<MatchPattern *>
-Sema::ActOnAlternativePattern(SourceRange TypeRange, ParsedType Ty,
-                              SourceLocation ColonLoc,
+Sema::ActOnAlternativePattern(SourceRange DiscriminatorRange,
+                              ConceptReference *CR, SourceLocation ColonLoc,
                               MatchPattern *SubPattern) {
-  TypeSourceInfo *TSI = nullptr;
-  GetTypeFromParser(Ty, &TSI);
-  return new (Context) AlternativePattern(TypeRange, TSI, ColonLoc, SubPattern);
+  return new (Context)
+      AlternativePattern(DiscriminatorRange, CR, ColonLoc, SubPattern);
+}
+
+ActionResult<MatchPattern *>
+Sema::ActOnAlternativePattern(SourceRange DiscriminatorRange,
+                              TypeSourceInfo *TSI, SourceLocation ColonLoc,
+                              MatchPattern *SubPattern) {
+  return new (Context)
+      AlternativePattern(DiscriminatorRange, TSI, ColonLoc, SubPattern);
 }
 
 ActionResult<MatchPattern *>
