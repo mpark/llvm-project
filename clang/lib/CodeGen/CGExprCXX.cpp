@@ -2559,8 +2559,11 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   // just like switch does. Is this already handled in Sema?
   llvm::ArrayRef<MatchCase> Cases = S.getCases();
 
-  assert(!S.getType()->isVoidType() && "is this possible?");
-  Address MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+  bool IgnoreResult = S.getType()->isVoidType();
+  Address MatchResAddr = Address::invalid();
+  if (!IgnoreResult)
+    MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+
   llvm::BasicBlock *SelectEndBB = nullptr;
 
   unsigned CasePatternIdx = 0;
@@ -2593,15 +2596,16 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       continue;
     }
 
-    // No result to store, but evaluate the expression for side effects.
     if (E->getType()->isVoidType()) {
-      llvm_unreachable("is this possible?");
+      // No result to store, but evaluate the expression for side effects.
+      EmitAnyExpr(E);
     } else if (E->getType()->isReferenceType()) {
       // If the expr is a reference, take the address of the expression
       // rather than the value.
       llvm_unreachable(
           "MatchSelectExpr for isReferenceType not yet implemented");
     } else {
+      assert(MatchResAddr.isValid() && "expected valid address");
       switch (getEvaluationKind(E->getType())) {
       case TEK_Scalar:
         Builder.CreateStore(EmitScalarExpr(E), MatchResAddr);
@@ -2618,15 +2622,19 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
                    AggValueSlot::IsNotAliased, getOverlapForReturnValue()));
         break;
       }
-      EmitBranch(SelectEndBB);
-
-      // If match failed, try next one.
-      EmitBlock(NextPatternBB);
-      CasePatternIdx++;
     }
+    EmitBranch(SelectEndBB);
+
+    // If match failed, try next one.
+    EmitBlock(NextPatternBB);
+    CasePatternIdx++;
   }
 
   assert(SelectEndBB && "expected at least one pattern");
+
+  if (IgnoreResult)
+    return RValue::getIgnored();
+
   return isAggregate ? RValue::getAggregate(MatchResAddr)
                      : RValue::get(Builder.CreateLoad(MatchResAddr));
 }
