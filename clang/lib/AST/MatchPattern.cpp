@@ -104,7 +104,9 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
 }
 
 ExpressionPattern::ExpressionPattern(Expr *E)
-    : MatchPattern(ExpressionPatternClass), E(E) {}
+    : MatchPattern(ExpressionPatternClass), E(E) {
+  setDependence(E->getDependence());
+}
 
 SourceLocation ExpressionPattern::getBeginLoc() const {
   return E->getBeginLoc();
@@ -124,6 +126,7 @@ DecompositionPattern::DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
     : MatchPattern(DecompositionPatternClass), NumPatterns(Patterns.size()),
       Squares(Squares), BindingOnly(BindingOnly) {
   std::uninitialized_copy(Patterns.begin(), Patterns.end(), getPatterns());
+  setDependence(computeDependence());
 }
 
 DecompositionPattern *
