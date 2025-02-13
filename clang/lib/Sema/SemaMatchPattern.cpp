@@ -223,7 +223,7 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   DeclarationNameInfo IndexNameInfo(S.PP.getIdentifierInfo("index"), Loc);
   LookupResult MemberIndex(S, IndexNameInfo, Sema::LookupMemberName);
   bool UseMemberIndex = false;
-  if (S.isCompleteType(HoldingVar->getLocation(), Type)) {
+  if (S.isCompleteType(Loc, Type)) {
     if (auto *RD = Type->getAsCXXRecordDecl())
       S.LookupQualifiedName(MemberIndex, RD);
     if (MemberIndex.isAmbiguous())
