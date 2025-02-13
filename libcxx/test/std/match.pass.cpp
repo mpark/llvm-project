@@ -486,6 +486,10 @@ void test_try_cast_alternative_pattern() {
   check(try_cast_alternative_pattern(0.f) == -1);
 }
 
+void test_void_returning_match() {
+  // 0 match { _ => []() {}(); };
+}
+
 int main() {
   test_match_test_expr();
   test_char_pattern();
@@ -506,4 +510,5 @@ int main() {
   test_variant_like_alternative_pattern();
   test_match_stmt_action();
   test_try_cast_alternative_pattern();
+  test_void_returning_match();
 }
