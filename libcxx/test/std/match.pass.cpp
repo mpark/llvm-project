@@ -490,6 +490,24 @@ void test_void_returning_match() {
   0 match { _ => []() {}(); };
 }
 
+int throw_action(int x) {
+  return x match {
+    0 => 0;
+    1 => 1;
+    _ => throw 101;
+  };
+}
+
+void test_throw_action() {
+  check(throw_action(0) == 0);
+  check(throw_action(1) == 1);
+  try {
+    throw_action(2);
+  } catch (int x) {
+    check(x == 101);
+  }
+}
+
 int main() {
   test_match_test_expr();
   test_char_pattern();
@@ -511,4 +529,5 @@ int main() {
   test_match_stmt_action();
   test_try_cast_alternative_pattern();
   test_void_returning_match();
+  test_throw_action();
 }
