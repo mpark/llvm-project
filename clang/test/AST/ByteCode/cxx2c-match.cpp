@@ -548,3 +548,25 @@ constexpr int test_try_cast_alternative_pattern(const N1::S& s) {
 static_assert(test_try_cast_alternative_pattern(N1::S{0, 1, 2.2}) == 1);
 static_assert(test_try_cast_alternative_pattern(N1::S{1, 1, 2.2}) == 2);
 static_assert(test_try_cast_alternative_pattern(N1::S{2, 1, 2.2}) == -1);
+
+template <typename T>
+concept integral = __is_integral(T);
+
+template <typename T, typename U>
+concept same = __is_same(T, U);
+
+constexpr int test_variant_like_alternative_pattern_with_type_constraint(const Variant &var) {
+  return var match {
+    integral: 0 => 0;
+    same<int>: 1 => 1;
+    double: let y => (int)y + 4;
+    _ => -1;
+  };
+}
+
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(0) == 0);
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(1) == 1);
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(2) == -1);
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(3.0) == 7);
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(4.0) == 8);
+static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) == -1);
