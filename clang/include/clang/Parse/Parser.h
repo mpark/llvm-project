@@ -4514,11 +4514,13 @@ private:
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
+               bool Decomp = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *> ParseWildcardPattern();
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr,
+                         bool Decomp,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *> ParseParenPattern();
   ActionResult<MatchPattern *>
