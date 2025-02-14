@@ -570,3 +570,16 @@ static_assert(test_variant_like_alternative_pattern_with_type_constraint(2) == -
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(3.0) == 7);
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(4.0) == 8);
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) == -1);
+
+template <int... Is, int N>
+constexpr int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
+  return p match {
+    [0, Is...] => 0;
+    [Is..., 0] => 1;
+    _ => -1;
+  };
+}
+
+static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({0, 1, 1}) == 0);
+static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({1, 1, 0}) == 1);
+static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({0, 0, 0}) == -1);

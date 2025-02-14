@@ -3976,10 +3976,12 @@ private:
 
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
+               bool Decomp = false,
                TypeCastState State = NotTypeCast);
   ActionResult<MatchPattern *> ParseWildcardPattern();
   ActionResult<MatchPattern *>
-  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, TypeCastState State);
+  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                         TypeCastState State);
   ActionResult<MatchPattern *> ParseParenPattern();
   ActionResult<MatchPattern *>
   ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);

@@ -131,9 +131,12 @@ public:
 class ExpressionPattern final : public MatchPattern {
   Expr *E;
   Expr *Cond = nullptr;
+  bool IsPackExpansion;
 
 public:
-  explicit ExpressionPattern(Expr *E);
+  explicit ExpressionPattern(Expr *E, bool IsPackExpansion);
+
+  bool isPackExpansion() const { return IsPackExpansion; };
 
   SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;

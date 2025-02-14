@@ -4285,10 +4285,29 @@ public:
       Patterns.reserve(P->getNumPatterns());
       auto Children = P->children();
       for (MatchPattern* C : Children) {
-        auto Sub = TransformPattern(C, Rebuild);
-        if (Sub.isInvalid())
-          return true;
-        Patterns.push_back(Sub.get());
+        if (ExpressionPattern *EP = static_cast<ExpressionPattern *>(C);
+            C->getMatchPatternClass() == MatchPattern::ExpressionPatternClass &&
+            EP->isPackExpansion()) {
+          Expr *E = EP->getExpr();
+          bool ArgumentChanged = false;
+          SmallVector<Expr *, 8> Args;
+          if (getDerived().TransformExprs(&E, 1, /*IsCall=*/false, Args,
+                                          &ArgumentChanged)) {
+            return true;
+          }
+          for (Expr *Arg : Args) {
+            ActionResult<MatchPattern *> NewEP =
+                getSema().ActOnExpressionPattern(Arg);
+            if (NewEP.isInvalid())
+              return true;
+            Patterns.push_back(NewEP.get());
+          }
+        } else {
+          auto Sub = TransformPattern(C, Rebuild);
+          if (Sub.isInvalid())
+            return true;
+          Patterns.push_back(Sub.get());
+        }
       }
       if (std::equal(Children.begin(), Children.end(), Patterns.begin(),
                      Patterns.end())) {
