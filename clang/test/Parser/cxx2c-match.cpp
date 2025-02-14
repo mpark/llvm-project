@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -fcxx-exceptions -Wno-unused-variable -Wno-unused-value -verify %s
 
 void test_match_is_not_keyword() {
   int match;
