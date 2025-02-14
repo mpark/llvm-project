@@ -503,7 +503,10 @@ ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
   if (P.isInvalid())
     return ExprError();
 
-  QualType FnType = Context.getFunctionNoProtoType(Context.VoidTy);
+  QualType FnType = Context.getFunctionType(
+      Context.VoidTy, {},
+      FunctionProtoType::ExtProtoInfo().withExceptionSpec(
+          FunctionProtoType::ExceptionSpecInfo(EST_BasicNoexcept)));
   NamespaceDecl *Std = getOrCreateStdNamespace();
   FunctionDecl *StdTerminate = FunctionDecl::Create(
       Context, Std, Loc, SourceLocation(),
@@ -511,7 +514,6 @@ ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
       Context.getTrivialTypeSourceInfo(FnType), SC_Extern,
       /*UsesFPIntrin=*/false, /*isInlineSpecified=*/false,
       /*hasWrittenPrototype=*/false);
-  Std->addDecl(StdTerminate);
 
   ExprResult E =
       BuildDeclRefExpr(StdTerminate, StdTerminate->getType(), VK_LValue, Loc);
