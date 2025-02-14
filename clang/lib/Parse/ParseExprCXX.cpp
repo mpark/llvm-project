@@ -4156,6 +4156,7 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
 
 ActionResult<MatchPattern *>
 Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
+                     bool Decomp,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
   switch (Tok.getKind()) {
   case tok::l_paren:
@@ -4182,7 +4183,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
         return Pattern;
       }
     }
-    return ParseExpressionPattern(LHSOfMatchTestExpr, CorrectionBehavior);
+    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
+                                  CorrectionBehavior);
   }
   }
 }
@@ -4194,6 +4196,7 @@ ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
 ActionResult<MatchPattern *>
 Parser::ParseExpressionPattern(
     ExprResult *LHSOfMatchTestExpr,
+    bool,
     TypoCorrectionTypeBehavior CorrectionBehavior) {
   ExprResult Expr = [&] {
     if (!LHSOfMatchTestExpr) {
@@ -4210,10 +4213,15 @@ Parser::ParseExpressionPattern(
            "be tighter than match");
     return Expr;
   }();
-  if (Expr.isInvalid()) {
+  if (Expr.isInvalid())
     return true;
+  bool IsPackExpansion = Tok.is(tok::ellipsis);
+  if (IsPackExpansion) {
+    Expr = Actions.ActOnPackExpansion(Expr.get(), ConsumeToken());
+    if (Expr.isInvalid())
+      return true;
   }
-  return Actions.ActOnExpressionPattern(Expr.get());
+  return Actions.ActOnExpressionPattern(Expr.get(), IsPackExpansion);
 }
 
 ActionResult<MatchPattern *> Parser::ParseParenPattern() {
@@ -4261,7 +4269,8 @@ ActionResult<MatchPattern *> Parser::ParseParenPattern() {
   }
 
   InMessageExpressionRAIIObject InMessage(*this, false);
-  Result = ParsePattern(nullptr, TypoCorrectionTypeBehavior::AllowBoth);
+  Result = ParsePattern(nullptr, /*Decomp=*/false,
+                        TypoCorrectionTypeBehavior::AllowBoth);
   if (Result.isInvalid()) {
     SkipUntil(tok::r_paren, StopAtSemi);
     return true;
@@ -4421,7 +4430,8 @@ Parser::ParseDecompositionPattern(SourceLocation *LetLoc) {
   SmallVector<MatchPattern *, 4> Patterns;
   do {
     ActionResult<MatchPattern *> Pattern =
-        LetLoc ? ParseBindingPattern(*LetLoc) : ParsePattern();
+        LetLoc ? ParseBindingPattern(*LetLoc)
+               : ParsePattern(nullptr, /*Decomp=*/true);
     if (Pattern.isInvalid()) {
       T.skipToEnd();
       return true;
