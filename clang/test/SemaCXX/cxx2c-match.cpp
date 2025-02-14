@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -fcxx-exceptions %s -verify
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -fcxx-exceptions -Wno-unused-variable -Wno-unused-value %s -verify
 
 void test_throw_does_not_contribute_to_type_deduction() {
   static_assert(__is_same(decltype(0 match {
