@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value %s
+// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching -fcxx-exceptions -Wno-unused-variable -Wno-unused-value %s
 
 void test_decltypes() {
   constexpr int x = 0;
