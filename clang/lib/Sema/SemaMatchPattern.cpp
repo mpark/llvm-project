@@ -541,8 +541,9 @@ Sema::ActOnWildcardPattern(SourceLocation WildcardLoc) {
   return new (Context) WildcardPattern(WildcardLoc);
 }
 
-ActionResult<MatchPattern *> Sema::ActOnExpressionPattern(Expr *E) {
-  return new (Context) ExpressionPattern(E);
+ActionResult<MatchPattern *>
+Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
+  return new (Context) ExpressionPattern(E, IsPackExpansion);
 }
 
 ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation LetLoc,
