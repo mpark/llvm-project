@@ -494,8 +494,40 @@ ExprResult Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
 
 ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                                       bool IsConstexpr, TypeLoc OrigResultType,
-                                      QualType RetTy, ArrayRef<MatchCase> Cases,
+                                      QualType RetTy,
+                                      SmallVectorImpl<MatchCase> &Cases,
                                       SourceRange Braces) {
+  // Inject a fake '_ => throw (std::terminate(), 0);'
+  SourceLocation Loc = Braces.getEnd();
+  ActionResult<MatchPattern *> P = ActOnWildcardPattern(Loc);
+  if (P.isInvalid())
+    return ExprError();
+
+  QualType FnType = Context.getFunctionNoProtoType(Context.VoidTy);
+  NamespaceDecl *Std = getOrCreateStdNamespace();
+  FunctionDecl *StdTerminate = FunctionDecl::Create(
+      Context, Std, Loc, SourceLocation(),
+      PP.getIdentifierInfo("terminate"), FnType,
+      Context.getTrivialTypeSourceInfo(FnType), SC_Extern,
+      /*UsesFPIntrin=*/false, /*isInlineSpecified=*/false,
+      /*hasWrittenPrototype=*/false);
+  Std->addDecl(StdTerminate);
+
+  ExprResult E =
+      BuildDeclRefExpr(StdTerminate, StdTerminate->getType(), VK_LValue, Loc);
+  if (E.isInvalid())
+    return ExprError();
+  E = BuildCallExpr(/*Scope=*/nullptr, E.get(), Loc, {}, Loc);
+  if (E.isInvalid())
+    return ExprError();
+  ExprResult Dummy = ActOnIntegerConstant(Braces.getEnd(), 0);
+  if (Dummy.isInvalid())
+    return ExprError();
+
+  E = BuildBinOp(/*Scope=*/nullptr, Loc, BinaryOperatorKind::BO_Comma, E.get(),
+                 Dummy.get());
+  E = ActOnCXXThrow(getCurScope(), Braces.getEnd(), E.get());
+  Cases.push_back({P.get(), Braces.getEnd(), {}, E.get()});
   return MatchSelectExpr::Create(Context, Subject, MatchLoc, IsConstexpr,
                                  OrigResultType, RetTy, Cases, Braces);
 }

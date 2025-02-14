@@ -10673,7 +10673,8 @@ public:
                                 SourceLocation IfLoc, MatchGuard Guard);
   ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                                   bool IsConstexpr, TypeLoc OrigResultType,
-                                  QualType RetTy, ArrayRef<MatchCase> Cases,
+                                  QualType RetTy,
+                                  SmallVectorImpl<MatchCase> &Cases,
                                   SourceRange Braces);
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
