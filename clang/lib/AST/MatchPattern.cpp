@@ -103,8 +103,9 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
   llvm_unreachable("unknown match pattern kind");
 }
 
-ExpressionPattern::ExpressionPattern(Expr *E)
-    : MatchPattern(ExpressionPatternClass), E(E) {
+ExpressionPattern::ExpressionPattern(Expr *E, bool IsPackExpansion)
+    : MatchPattern(ExpressionPatternClass), E(E),
+      IsPackExpansion(IsPackExpansion) {
   setDependence(E->getDependence());
 }
 
