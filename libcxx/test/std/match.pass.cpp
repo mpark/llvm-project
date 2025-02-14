@@ -508,6 +508,21 @@ void test_throw_action() {
   }
 }
 
+template <int... Is, int N>
+int pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
+  return p match {
+    [0, Is...] => 0;
+    [Is..., 0] => 1;
+    _ => -1;
+  };
+}
+
+void test_pack_expansion_in_decomposition_pattern() {
+  check(pack_expansion_in_decomposition_pattern<1, 1>({0, 1, 1}) == 0);
+  check(pack_expansion_in_decomposition_pattern<1, 1>({1, 1, 0}) == 1);
+  check(pack_expansion_in_decomposition_pattern<1, 1>({0, 0, 0}) == -1);
+}
+
 int main() {
   test_match_test_expr();
   test_char_pattern();
@@ -530,4 +545,5 @@ int main() {
   test_try_cast_alternative_pattern();
   test_void_returning_match();
   test_throw_action();
+  test_pack_expansion_in_decomposition_pattern();
 }

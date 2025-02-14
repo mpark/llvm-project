@@ -424,3 +424,12 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     b;
   }
 }
+
+template <int... Is, int N>
+int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
+  return p match {
+    [0, Is...] => 0;
+    [Is..., 0] => 1;
+    _ => -1;
+  };
+}
