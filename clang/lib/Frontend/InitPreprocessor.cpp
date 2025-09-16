@@ -855,7 +855,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
                                        const FrontendOptions &FEOpts,
                                        const PreprocessorOptions &PPOpts,
                                        const CodeGenOptions &CGOpts,
-                                       MacroBuilder &Builder) {
+                                       MacroBuilder &Builder,
+                                       IdentifierTable& Identifiers,
+                                       Preprocessor::OptsPredefinesTable& OptsPredefines) {
   // Compiler version introspection macros.
   Builder.defineMacro("__llvm__");  // LLVM Backend
   Builder.defineMacro("__clang__"); // Clang Frontend
@@ -1402,12 +1404,26 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   Builder.defineMacro("__FLT_RADIX__", "2");
   Builder.defineMacro("__DECIMAL_DIG__", "__LDBL_DECIMAL_DIG__");
 
-  if (LangOpts.getStackProtector() == LangOptions::SSPOn)
+  switch (LangOpts.getStackProtector()) {
+  case LangOptions::SSPOff:
+    break;
+  case LangOptions::SSPOn:
     Builder.defineMacro("__SSP__");
-  else if (LangOpts.getStackProtector() == LangOptions::SSPStrong)
+    break;
+  case LangOptions::SSPStrong:
     Builder.defineMacro("__SSP_STRONG__", "2");
-  else if (LangOpts.getStackProtector() == LangOptions::SSPReq)
+    break;
+  case LangOptions::SSPReq:
     Builder.defineMacro("__SSP_ALL__", "3");
+    break;
+  }
+  Builder.append("#pragma clang track __SSP__");
+  Builder.append("#pragma clang track __SSP_STRONG__");
+  Builder.append("#pragma clang track __SSP_ALL__");
+  auto [Iter, _] = OptsPredefines.try_emplace("StackProtector");
+  Iter->second.push_back(&Identifiers.get("__SSP__"));
+  Iter->second.push_back(&Identifiers.get("__SSP_STRONG__"));
+  Iter->second.push_back(&Identifiers.get("__SSP_ALL__"));
 
   if (PPOpts.SetUpStaticAnalyzer)
     Builder.defineMacro("__clang_analyzer__");
@@ -1578,10 +1594,11 @@ void clang::InitializePreprocessor(Preprocessor &PP,
     if ((LangOpts.CUDA || LangOpts.isTargetDevice()) && PP.getAuxTargetInfo())
       InitializePredefinedMacros(*PP.getAuxTargetInfo(), LangOpts, FEOpts,
                                  PP.getPreprocessorOpts(), CodeGenOpts,
-                                 Builder);
+                                 Builder, PP.getIdentifierTable(), PP.OptsPredefines);
 
     InitializePredefinedMacros(PP.getTargetInfo(), LangOpts, FEOpts,
-                               PP.getPreprocessorOpts(), CodeGenOpts, Builder);
+                               PP.getPreprocessorOpts(), CodeGenOpts, Builder,
+                               PP.getIdentifierTable(), PP.OptsPredefines);
 
     // Install definitions to make Objective-C++ ARC work well with various
     // C++ Standard Library implementations.

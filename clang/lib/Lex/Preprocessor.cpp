@@ -816,10 +816,14 @@ bool Preprocessor::HandleIdentifier(Token &Identifier) {
       II.setIsPoisoned(CurrentIsPoisoned);
   }
 
-  // If this identifier was poisoned, and if it was not produced from a macro
-  // expansion, emit an error.
-  if (II.isPoisoned() && CurPPLexer) {
-    HandlePoisonedIdentifier(Identifier);
+  if (CurPPLexer) {
+    // If this identifier was poisoned, and if it was not produced from a macro
+    // expansion, emit an error.
+    if (II.isPoisoned())
+      HandlePoisonedIdentifier(Identifier);
+
+    if (II.isTracked())
+      II.setIsUsed();
   }
 
   // If this is a macro to be expanded, do it.

@@ -325,7 +325,20 @@ static bool checkLanguageOptions(const LangOptions &LangOpts,
   }
 
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Compatibility, Description)    \
-  if constexpr (CK::Compatibility != CK::Benign) {                             \
+  if constexpr (CK::Compatibility == CK::CompatibleIfUnused) {                 \
+    assert(!(static_cast<unsigned>(ExistingLangOpts.get##Name()) &             \
+             (1u << Bits)));                                                   \
+    if (static_cast<unsigned>(LangOpts.get##Name()) & (1u << Bits)) {          \
+      if (ExistingLangOpts.get##Name() !=                                      \
+          static_cast<LangOptions::Type>(                                      \
+              static_cast<unsigned>(LangOpts.get##Name()) & ~(1u << Bits))) {  \
+        if (Diags)                                                             \
+          Diags->Report(diag::err_ast_file_langopt_value_mismatch)             \
+              << Description << ModuleFilename;                                \
+        return true;                                                           \
+      }                                                                        \
+    }                                                                          \
+  } else if constexpr (CK::Compatibility != CK::Benign) {                      \
     if ((CK::Compatibility == CK::NotCompatible) ||                            \
         (CK::Compatibility == CK::Compatible &&                                \
          !AllowCompatibleDifferences)) {                                       \

@@ -1620,7 +1620,21 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, StringRef isysroot) {
 #define LANGOPT(Name, Bits, Default, Compatibility, Description)               \
   Record.push_back(LangOpts.Name);
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Compatibility, Description)    \
-  Record.push_back(static_cast<unsigned>(LangOpts.get##Name()));
+  Record.push_back(                                                            \
+      [&LangOpts](const Preprocessor::OptsPredefinesTable &OptsPredefines) {   \
+        auto Result = static_cast<unsigned>(LangOpts.get##Name());             \
+        if constexpr (LangOptions::CompatibilityKind::Compatibility ==         \
+                      LangOptions::CompatibilityKind::CompatibleIfUnused) {    \
+          if (auto Iter = OptsPredefines.find(#Name);                          \
+              Iter != OptsPredefines.end() &&                                  \
+              llvm::any_of(Iter->getValue(), [](const IdentifierInfo *II) {    \
+                return II->isUsed();                                           \
+              })) {                                                            \
+            Result |= 1u << Bits;                                              \
+          }                                                                    \
+        }                                                                      \
+        return Result;                                                         \
+      }(PP.OptsPredefines));
 #include "clang/Basic/LangOptions.def"
 #define SANITIZER(NAME, ID)                                                    \
   Record.push_back(LangOpts.Sanitize.has(SanitizerKind::ID));

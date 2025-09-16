@@ -87,6 +87,13 @@ public:
     /// interoperability (that is, the value can be different between an
     /// explicit module and the user of that module).
     Compatible,
+    /// Does not affect the construction of the AST if the option is unused.
+    /// This is generally the case for feature flags that only affect codegen,
+    /// but defines feature macros. e.g. -fstack-protector only affects
+    /// codegen, except that it defines __SSP__ as a feature macro.
+    /// If the __SSP__ macro was not used at all, the resulting AST is compatible
+    /// with other ASTs whether the other ASTs were built with the flag or not.
+    CompatibleIfUnused,
     /// Does not affect the construction of the AST in any way (that is, the
     /// value can be different between an implicit module and the user of that
     /// module).
@@ -420,12 +427,13 @@ public:
 #include "clang/Basic/LangOptions.def"
 
 protected:
+  using CK = CompatibilityKind;
   // Define language options of enumeration type. These are private, and will
   // have accessors (below).
 #define LANGOPT(Name, Bits, Default, Compatibility, Description)
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Compatibility, Description)    \
   LLVM_PREFERRED_TYPE(Type)                                                    \
-  unsigned Name : Bits;
+  unsigned Name : Bits + (CK::Compatibility == CK::CompatibleIfUnused ? 1 : 0);
 #include "clang/Basic/LangOptions.def"
 };
 
@@ -587,7 +595,10 @@ public:
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Compatibility, Description)    \
   Type get##Name() const { return static_cast<Type>(Name); }                   \
   void set##Name(Type Value) {                                                 \
-    assert(static_cast<unsigned>(Value) < (1u << Bits));                       \
+    assert(((CompatibilityKind::Compatibility ==                               \
+             CompatibilityKind::CompatibleIfUnused)                            \
+                ? (static_cast<unsigned>(Value) & ~(1u << Bits))              \
+                : static_cast<unsigned>(Value)) < (1u << Bits));               \
     Name = static_cast<unsigned>(Value);                                       \
   }
 #include "clang/Basic/LangOptions.def"

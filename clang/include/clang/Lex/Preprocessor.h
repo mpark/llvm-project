@@ -1113,6 +1113,15 @@ private:
   /// command line etc.
   std::string Predefines;
 
+public:
+
+  using OptsPredefinesTable =
+      llvm::StringMap<llvm::SmallVector<const IdentifierInfo *>>;
+
+  OptsPredefinesTable OptsPredefines;
+
+private:
+
   /// The file ID for the preprocessor predefines.
   FileID PredefinesFileID;
 
@@ -2287,7 +2296,7 @@ public:
   IdentifierInfo *LookUpIdentifierInfo(Token &Identifier) const;
 
 private:
-  llvm::DenseMap<IdentifierInfo*,unsigned> PoisonReasons;
+  llvm::DenseMap<IdentifierInfo *, unsigned> PoisonReasons;
 
 public:
   /// Specifies the reason for poisoning an identifier.
@@ -2298,14 +2307,6 @@ public:
 
   /// Display reason for poisoned identifier.
   void HandlePoisonedIdentifier(Token & Identifier);
-
-  void MaybeHandlePoisonedIdentifier(Token & Identifier) {
-    if(IdentifierInfo * II = Identifier.getIdentifierInfo()) {
-      if(II->isPoisoned()) {
-        HandlePoisonedIdentifier(Identifier);
-      }
-    }
-  }
 
   /// Check whether the next pp-token is one of the specificed token kind. this
   /// method should have no observable side-effect on the lexed tokens.
@@ -2941,6 +2942,7 @@ public:
   void HandlePragmaOnce(Token &OnceTok);
   void HandlePragmaMark(Token &MarkTok);
   void HandlePragmaPoison();
+  void HandlePragmaTrack();
   void HandlePragmaSystemHeader(Token &SysHeaderTok);
   void HandlePragmaDependency(Token &DependencyTok);
   void HandlePragmaPushMacro(Token &Tok);

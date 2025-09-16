@@ -143,6 +143,14 @@ class alignas(IdentifierInfoAlignment) IdentifierInfo {
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsPoisoned : 1;
 
+  // True if this identifier is tracked.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned IsTracked : 1;
+
+  // True if this identifier was used.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned IsUsed : 1;
+
   // True if the identifier is a C++ operator keyword.
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsCPPOperatorKeyword : 1;
@@ -199,7 +207,7 @@ class alignas(IdentifierInfoAlignment) IdentifierInfo {
   LLVM_PREFERRED_TYPE(bool)
   unsigned IsKeywordInCpp : 1;
 
-  // 21 bits left in a 64-bit word.
+  // 19 bits left in a 64-bit word.
 
   // Managed by the language front-end.
   void *FETokenInfo = nullptr;
@@ -211,12 +219,13 @@ class alignas(IdentifierInfoAlignment) IdentifierInfo {
         InterestingIdentifierID(llvm::to_underlying(
             InterestingIdentifier::NotInterestingIdentifier)),
         HasMacro(false), HadMacro(false), IsExtension(false),
-        IsFutureCompatKeyword(false), IsPoisoned(false),
-        IsCPPOperatorKeyword(false), NeedsHandleIdentifier(false),
-        IsFromAST(false), ChangedAfterLoad(false), FEChangedAfterLoad(false),
-        RevertedTokenID(false), OutOfDate(false), IsModulesImport(false),
-        IsMangledOpenMPVariantName(false), IsDeprecatedMacro(false),
-        IsRestrictExpansion(false), IsFinal(false), IsKeywordInCpp(false) {}
+        IsFutureCompatKeyword(false), IsPoisoned(false), IsTracked(false),
+        IsUsed(false), IsCPPOperatorKeyword(false),
+        NeedsHandleIdentifier(false), IsFromAST(false), ChangedAfterLoad(false),
+        FEChangedAfterLoad(false), RevertedTokenID(false), OutOfDate(false),
+        IsModulesImport(false), IsMangledOpenMPVariantName(false),
+        IsDeprecatedMacro(false), IsRestrictExpansion(false), IsFinal(false),
+        IsKeywordInCpp(false) {}
 
 public:
   IdentifierInfo(const IdentifierInfo &) = delete;
@@ -441,6 +450,21 @@ public:
   /// Return true if this token has been poisoned.
   bool isPoisoned() const { return IsPoisoned; }
 
+  /// setIsTracked - Mark this identifier as being tracked.
+  void setIsTracked() {
+    IsTracked = true;
+    NeedsHandleIdentifier = true;
+  }
+
+  /// Return true if this token is being tracked.
+  bool isTracked() const { return IsTracked; }
+
+  /// setIsUsed - Mark that this identifier is used.
+  void setIsUsed() { IsUsed = true; }
+
+  /// Return true if this token is used.
+  bool isUsed() const { return IsUsed; }
+
   /// isCPlusPlusOperatorKeyword/setIsCPlusPlusOperatorKeyword controls whether
   /// this identifier is a C++ alternate representation of an operator.
   void setIsCPlusPlusOperatorKeyword(bool Val = true) {
@@ -575,9 +599,10 @@ private:
   /// This method is very tied to the definition of HandleIdentifier.  Any
   /// change to it should be reflected here.
   void RecomputeNeedsHandleIdentifier() {
-    NeedsHandleIdentifier = isPoisoned() || hasMacroDefinition() ||
-                            isExtensionToken() || isFutureCompatKeyword() ||
-                            isOutOfDate() || isModulesImport();
+    NeedsHandleIdentifier = isPoisoned() || isTracked() ||
+                            hasMacroDefinition() || isExtensionToken() ||
+                            isFutureCompatKeyword() || isOutOfDate() ||
+                            isModulesImport();
   }
 };
 

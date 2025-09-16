@@ -475,6 +475,38 @@ void Preprocessor::HandlePragmaPoison() {
   }
 }
 
+/// HandlePragmaTrack - Handle \#pragma clang track.
+void Preprocessor::HandlePragmaTrack() {
+  Token Tok;
+
+  while (true) {
+    // Read the next token to poison.  While doing this, pretend that we are
+    // skipping while reading the identifier to poison.
+    // This avoids errors on code like:
+    //   #pragma clang track X
+    //   #pragma clang track X
+    if (CurPPLexer) CurPPLexer->LexingRawMode = true;
+    LexUnexpandedToken(Tok);
+    if (CurPPLexer) CurPPLexer->LexingRawMode = false;
+
+    // If we reached the end of line, we're done.
+    if (Tok.is(tok::eod)) return;
+
+    // Can only track identifiers.
+    if (Tok.isNot(tok::raw_identifier)) {
+      Diag(Tok, diag::err_pp_invalid_poison); // TODO(mpark): Fix error message.
+      return;
+    }
+
+    // Look up the identifier info for the token.  We disabled identifier lookup
+    // by saying we're skipping contents, so we need to do this manually.
+    IdentifierInfo *II = LookUpIdentifierInfo(Tok);
+
+    II->setIsTracked();
+  }
+}
+
+
 /// HandlePragmaSystemHeader - Implement \#pragma GCC system_header.  We know
 /// that the whole directive has been parsed.
 void Preprocessor::HandlePragmaSystemHeader(Token &SysHeaderTok) {
@@ -1026,6 +1058,16 @@ struct PragmaPoisonHandler : public PragmaHandler {
   void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
                     Token &PoisonTok) override {
     PP.HandlePragmaPoison();
+  }
+};
+
+/// PragmaTrackHandler - "\#pragma track x" track the usage of x.
+struct PragmaTrackHandler : public PragmaHandler {
+  PragmaTrackHandler() : PragmaHandler("track") {}
+
+  void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
+                    Token &TrackTok) override {
+    PP.HandlePragmaTrack();
   }
 };
 
@@ -2167,6 +2209,7 @@ void Preprocessor::RegisterBuiltinPragmas() {
                                                    "GCC"));
   // #pragma clang ...
   AddPragmaHandler("clang", new PragmaPoisonHandler());
+  AddPragmaHandler("clang", new PragmaTrackHandler());
   AddPragmaHandler("clang", new PragmaSystemHeaderHandler());
   AddPragmaHandler("clang", new PragmaDebugHandler());
   AddPragmaHandler("clang", new PragmaDependencyHandler());

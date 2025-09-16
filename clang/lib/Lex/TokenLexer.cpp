@@ -705,11 +705,16 @@ bool TokenLexer::Lex(Token &Tok) {
     IdentifierInfo *II = Tok.getIdentifierInfo();
     Tok.setKind(II->getTokenID());
 
-    // If this identifier was poisoned and from a paste, emit an error.  This
-    // won't be handled by Preprocessor::HandleIdentifier because this is coming
-    // from a macro expansion.
-    if (II->isPoisoned() && TokenIsFromPaste) {
-      PP.HandlePoisonedIdentifier(Tok);
+    // If this identifier from a paste, it won't be handled by
+    // Preprocessor::HandleIdentifier because this is coming from
+    // a macro expansion.
+    if (TokenIsFromPaste) {
+      // If it was poisoned, emit an error.
+      if (II->isPoisoned())
+        PP.HandlePoisonedIdentifier(Tok);
+
+      if (II->isTracked())
+        II->setIsUsed();
     }
 
     if (!DisableMacroExpansion && II->isHandleIdentifierCase())
