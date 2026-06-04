@@ -368,6 +368,17 @@ class TypeSourceInfo;
       return Import(const_cast<Decl *>(FromD));
     }
 
+    /// Import the given splice specifier from the "from" context into the "to"
+    /// context.
+    ///
+    /// \returns The equivalent splice specifier in the "to" context, or the
+    /// import error.
+    llvm::Expected<SpliceSpecifier *> Import(SpliceSpecifier *FromSS);
+    llvm::Expected<const SpliceSpecifier *>
+    Import(const SpliceSpecifier *FromD) {
+      return Import(const_cast<SpliceSpecifier *>(FromD));
+    }
+
     llvm::Expected<InheritedConstructor>
     Import(const InheritedConstructor &From);
 

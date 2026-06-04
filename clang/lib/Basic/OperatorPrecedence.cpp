@@ -54,10 +54,11 @@ prec::Level getBinOpPrecedence(tok::TokenKind Kind, bool GreaterThanIsOperator,
   case tok::pipepipe:             return prec::LogicalOr;
   case tok::ampamp:               return prec::LogicalAnd;
   case tok::pipe:                 return prec::InclusiveOr;
-  // this is for the case when ^^ appears where a binary operator is needed,
-  // and the first ^ is the actual binary operator,
-  // and the second is for a block.
+
+  // Accidental parsing of a bitwise-or followed by a block.
+  // Will be replaced with two carets during parsing.
   case tok::caretcaret:
+
   case tok::caret:                return prec::ExclusiveOr;
   case tok::amp:                  return prec::And;
   case tok::exclaimequal:

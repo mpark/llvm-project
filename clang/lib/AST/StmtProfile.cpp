@@ -2267,32 +2267,6 @@ StmtProfiler::VisitLambdaExpr(const LambdaExpr *S) {
   ID.AddInteger(Hasher.CalculateHash());
 }
 
-void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  // TODO(Reflection): Add support for Null, TypeSourceInfo,
-  // TemplateReference and DeclRefExpr
-  VisitExpr(E);
-  ID.AddInteger(static_cast<int>(E->getKind()));
-  switch (E->getKind()) {
-  case ReflectionKind::Null:
-    assert(false && "null reflection can't be constructed from parsing a "
-                    "reflection operand");
-    return;
-  case ReflectionKind::Type: {
-    QualType QT = E->getTypeSourceInfo()->getType();
-    if (isTypeAliasAsReflectionName(QT)) {
-      if (const auto *TDT = QT->getAs<TypedefType>()) {
-        ID.AddBoolean(true);
-        VisitDecl(TDT->getDecl()->getCanonicalDecl());
-        return;
-      }
-    }
-    ID.AddBoolean(false);
-    VisitType(QT);
-    return;
-  }
-  }
-  assert(false && "unknown or unimplemented reflection entities");
-}
 
 void
 StmtProfiler::VisitCXXScalarValueInitExpr(const CXXScalarValueInitExpr *S) {
@@ -2537,6 +2511,41 @@ void StmtProfiler::VisitCoyieldExpr(const CoyieldExpr *S) {
 }
 
 void StmtProfiler::VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
+  VisitExpr(E);
+
+  if (E->hasDependentSubExpr()) {
+    VisitExpr(E->getDependentSubExpr());
+  } else {
+    E->getReflection().Profile(ID);
+  }
+}
+
+void StmtProfiler::VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXDependentMemberSpliceExpr(
+                                        const CXXDependentMemberSpliceExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitStackLocationExpr(const StackLocationExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitExtractLValueExpr(const ExtractLValueExpr *E) {
+  VisitDecl(E->getValueDecl());
+}
+
+void StmtProfiler::VisitExplDependentCallExpr(const ExplDependentCallExpr *E) {
   VisitExpr(E);
 }
 
