@@ -1,5 +1,7 @@
 //===- NestedNameSpecifier.cpp - C++ nested name specifiers ---------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -16,7 +18,9 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DependenceFlags.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyPrinter.h"
+#include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
@@ -60,6 +64,9 @@ bool NestedNameSpecifier::isFullyQualified() const {
     return getAsNamespaceAndPrefix().Prefix.isFullyQualified();
   case NestedNameSpecifier::Kind::Type:
     return getAsType()->getPrefix().isFullyQualified();
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
+    return false;
   }
   llvm_unreachable("Invalid NNS Kind!");
 }
@@ -68,8 +75,24 @@ NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
   switch (getKind()) {
   case Kind::Null:
   case Kind::Global:
-  case Kind::Namespace:
     return NestedNameSpecifierDependence::None;
+  case Kind::Namespace: {
+    // A namespace nested-name-specifier is dependent if it names a dependent
+    // namespace (P2996 splice), a namespace alias whose target is dependent,
+    // or has a dependent prefix.
+    auto [Namespace, Prefix] = getAsNamespaceAndPrefix();
+    NestedNameSpecifierDependence Dep = NestedNameSpecifierDependence::None;
+    if (isa<DependentNamespaceDecl>(Namespace))
+      Dep |= NestedNameSpecifierDependence::DependentInstantiation |
+             NestedNameSpecifierDependence::Dependent;
+    else if (const auto *AD = dyn_cast<NamespaceAliasDecl>(Namespace);
+             AD && AD->isDependent())
+      Dep |= NestedNameSpecifierDependence::DependentInstantiation |
+             NestedNameSpecifierDependence::Dependent;
+    if (Prefix)
+      Dep |= Prefix.getDependence();
+    return Dep;
+  }
   case Kind::MicrosoftSuper: {
     CXXRecordDecl *RD = getAsMicrosoftSuper();
     return RD->isDependentContext()
@@ -79,6 +102,10 @@ NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
   }
   case Kind::Type:
     return toNestedNameSpecifierDependence(getAsType()->getDependence());
+  case Kind::Splice:
+  case Kind::SpliceWithTemplate:
+    return toNestedNameSpecifierDependence(
+        getAsSplice()->getOperand()->getDependence());
   }
   llvm_unreachable("Invalid NNS Kind!");
 }
@@ -112,6 +139,12 @@ void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
     QualType(getAsType(), 0).print(OS, InnerPolicy);
     break;
   }
+  case Kind::SpliceWithTemplate:
+    OS << "template ";
+    [[fallthrough]];
+  case Kind::Splice:
+    OS << "[: splice :]";
+    break;
   case Kind::Null:
     return;
   }
@@ -143,6 +176,15 @@ SourceLocation NestedNameSpecifierLoc::getBeginLoc() const {
   while (NestedNameSpecifierLoc Prefix = First.getAsNamespaceAndPrefix().Prefix)
     First = Prefix;
   return First.getLocalSourceRange().getBegin();
+}
+
+const SpliceSpecifier *
+NestedNameSpecifierLoc::getSplice() const {
+  if (Qualifier.getKind() != NestedNameSpecifier::Kind::Splice &&
+      Qualifier.getKind() != NestedNameSpecifier::Kind::SpliceWithTemplate)
+    return nullptr;
+
+  return Qualifier.getAsSplice();
 }
 
 static void Append(char *Start, char *End, char *&Buffer, unsigned &BufferSize,
@@ -327,11 +369,31 @@ void NestedNameSpecifierLocBuilder::PushTrivial(ASTContext &Context,
                 BufferCapacity);
     break;
   }
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
+    // Store the 'template' keyword location before the trailing '::'.
+    SaveSourceLocation(R.getBegin(), Buffer, BufferSize, BufferCapacity);
+    break;
+  case NestedNameSpecifier::Kind::Splice:
   case NestedNameSpecifier::Kind::Global:
   case NestedNameSpecifier::Kind::MicrosoftSuper:
     break;
   }
   SaveSourceLocation(R.getEnd(), Buffer, BufferSize, BufferCapacity);
+}
+
+void NestedNameSpecifierLocBuilder::MakeSpliceScopeSpecifier(
+    ASTContext &Context, SourceLocation TemplateKWLoc,
+    const SpliceSpecifier *Splice, SourceLocation ColonColonLoc) {
+  assert(!Representation && "Already have a nested-name-specifier!?");
+  bool TemplateKW = TemplateKWLoc.isValid();
+  Representation = NestedNameSpecifier(Splice, TemplateKW);
+
+  // Push source-location info into the buffer. Layout must match
+  // NestedNameSpecifierLoc::getLocalSourceRange: for SpliceWithTemplate the
+  // 'template' keyword location comes first, then the trailing '::'.
+  if (TemplateKW)
+    SaveSourceLocation(TemplateKWLoc, Buffer, BufferSize, BufferCapacity);
+  SaveSourceLocation(ColonColonLoc, Buffer, BufferSize, BufferCapacity);
 }
 
 void NestedNameSpecifierLocBuilder::Adopt(NestedNameSpecifierLoc Other) {

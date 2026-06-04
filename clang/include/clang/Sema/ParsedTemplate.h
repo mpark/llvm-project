@@ -36,7 +36,7 @@ namespace clang {
       /// A non-type template parameter, stored as an expression.
       NonType,
       /// A template template argument, stored as a template name.
-      Template
+      Template,
     };
 
     /// Build an empty template argument.
@@ -107,7 +107,7 @@ namespace clang {
     /// Retrieve the location of the ellipsis that makes a template
     /// template argument into a pack expansion.
     SourceLocation getEllipsisLoc() const {
-      assert(Kind == Template &&
+      assert((Kind == Template) &&
              "Only template template arguments can have an ellipsis");
       return EllipsisLoc;
     }

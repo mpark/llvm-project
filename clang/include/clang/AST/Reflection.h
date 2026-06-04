@@ -1,64 +1,134 @@
-//===--- Reflection.h - Kind of reflection operands ---*- C++ -*-===//
+//===--- Reflection.h - Classes for representing reflection -----*- C++ -*-===//
+//
+// Copyright 2024 Bloomberg Finance L.P.
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// This file declares the kinds of reflection operands.
-//
+///
+/// \file
+/// \brief Defines facilities for representing reflected entities.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CLANG_AST_REFLECTION_H
 #define LLVM_CLANG_AST_REFLECTION_H
 
 #include "clang/AST/TypeBase.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/FoldingSet.h"
+#include <optional>
+#include <string>
 
 namespace clang {
 
-// TODO(Reflection): Add support for Template, Namespace and DeclRefExpr.
-enum class ReflectionKind { Null, Type };
+class APValue;
+class ASTContext;
+class CXXBaseSpecifier;
+class NamespaceDecl;
+class ValueDecl;
 
-inline llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
-                                     ReflectionKind Kind) {
-  switch (Kind) {
-  case ReflectionKind::Type:
-    OS << "type";
-    break;
-  case ReflectionKind::Null:
-    OS << "null";
-    break;
-  }
+struct TagDataMemberSpec;
 
-  return OS;
-}
+/// \brief The kind of construct reflected.
+enum class ReflectionKind {
+  /// \brief A null reflection.
+  ///
+  /// Corresponds to no object.
+  Null = 0,
 
-/// [expr.reflect] p5, if a reflect-expression R matches the form
-/// ^^reflection-name it is interpreted as such; the identifier is looked up
-/// and the representation of R is determined as follows:
-/// - if lookup finds a type alias A, R represents the type the underlying
-///   entity of A if A was introduced by the declaration of a template
-///   parameter; otherwise, R represents A.
+  /// \brief A reflection of a type.
+  ///
+  /// Corresponds to a QualType.
+  Type,
 
-/// [expr.reflect] p6, Given reflect-expression R of the form ^^type-id,
-/// if type-id is neither a placeholder type nor
-/// in the form of nested-name-specifier_opt template_opt simple-template-id
-/// then R represents the type denoted by the type-id
+  /// \brief A reflection of an object (i.e., the non-function result of an
+  /// lvalue).
+  ///
+  /// Corresponds to an APValue (plus a QualType).
+  Object,
 
-// In particular, this means that e.g. '^^const Alias' is reflection of
-// a type, not an alias. For example:
-//
-// using foo = const int;
-// ^^int       // Type
-// ^^const int // Type
-// ^^foo       // Alias
-// ^^const foo // Type
-inline bool isTypeAliasAsReflectionName(QualType QT) {
-  return QT.getLocalQualifiers() == Qualifiers{};
-}
+  /// \brief A reflection of a value (i.e., the result of a prvalue).
+  ///
+  /// Corresponds to an APValue (plus a QualType).
+  Value,
 
+  /// \brief A reflection of a language construct that has a declaration in
+  /// the Clang AST.
+  ///
+  /// Corresponds to a ValueDecl, which could be any of:
+  /// - a variable (i.e., VarDecl),
+  /// - a structured binding (i.e., BindingDecl),
+  /// - a function (i.e., FunctionDecl),
+  /// - an enumerator (i.e., EnumConstantDecl),
+  /// - a non-static data member or unnamed bit-field (i.e., FieldDecl),
+  Declaration,
+
+  /// \brief A reflection of a template (e.g., class template, variable
+  /// template, function template, alias template, concept).
+  ///
+  /// Corresponds to a TemplateName.
+  Template,
+
+  /// \brief A reflection of a namespace.
+  ///
+  /// Corresponds to a Decl, which could be any of:
+  /// - the global namespace (i.e., TranslationUnitDecl),
+  /// - a non-global namespace (i.e., NamespaceDecl),
+  /// - a namespace alias (i.e., NamespaceAliasDecl)
+  ///
+  /// Somewhat annoyingly, these classes have no nearer common ancestor than
+  /// the Decl class.
+  Namespace,
+
+  /// \brief A reflection of an entity proxy.
+  ///
+  /// Corresponds to a UsingShadowDecl.
+  EntityProxy,
+
+  /// \brief A reflection of a function parameter.
+  ///
+  /// Corresponds to a ParmVarDecl.
+  Parameter,
+
+  /// \brief A reflection of a base class specifier.
+  ///
+  /// Corresponds to a CXXBaseSpecifier.
+  BaseSpecifier,
+
+  /// \brief A reflection of a description of a hypothetical data member
+  /// (static or nonstatic) that might belong to a class or union.
+  ///
+  /// Corresponds to a TagDataMemberSpec.
+  ///
+  /// This is specifically used for the 'std::meta::data_member_spec' and
+  /// 'std::meta::define_class' metafunctions. If the surface area of
+  /// 'define_class' grows (i.e., supports additional types of "descriptions",
+  /// e.g., for member functions), it would be nice to find a more generic way
+  /// to do this. One idea is to allow a reflection of a type erased struct,
+  /// but the current design seems tolerable for now.
+  DataMemberSpec,
+
+  /// \brief A reflection of an annotation (P2996 ext).
+  Annotation,
+};
+
+
+/// \brief Representation of a hypothetical data member, which could be used to
+/// complete an incomplete class definition using the 'std::meta::define_class'
+/// standard library function.
+struct TagDataMemberSpec {
+  QualType Ty;
+
+  std::optional<std::string> Name;
+  std::optional<size_t> Alignment;
+  std::optional<size_t> BitWidth;
+  bool NoUniqueAddress;
+
+  bool operator==(TagDataMemberSpec const& Rhs) const;
+  bool operator!=(TagDataMemberSpec const& Rhs) const;
+};
 } // namespace clang
 
 #endif

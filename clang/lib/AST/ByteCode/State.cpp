@@ -199,6 +199,7 @@ bool State::hasPriorDiagnostic() {
       [[fallthrough]];
     case EvaluationMode::ConstantExpression:
     case EvaluationMode::ConstantExpressionUnevaluated:
+    case EvaluationMode::ConstantExpressionPlainlyConstantEvaluated:
       setActiveDiagnostic(false);
       return true;
     }
@@ -214,6 +215,7 @@ bool State::keepEvaluatingAfterFailure() const {
   switch (EvalMode) {
   case EvaluationMode::ConstantExpression:
   case EvaluationMode::ConstantExpressionUnevaluated:
+  case EvaluationMode::ConstantExpressionPlainlyConstantEvaluated:
   case EvaluationMode::ConstantFold:
   case EvaluationMode::IgnoreSideEffects:
     return checkingPotentialConstantExpression() ||
@@ -229,6 +231,7 @@ bool State::keepEvaluatingAfterSideEffect() const {
 
   case EvaluationMode::ConstantExpression:
   case EvaluationMode::ConstantExpressionUnevaluated:
+  case EvaluationMode::ConstantExpressionPlainlyConstantEvaluated:
   case EvaluationMode::ConstantFold:
     // By default, assume any side effect might be valid in some other
     // evaluation of this expression from a different context.
@@ -246,6 +249,7 @@ bool State::keepEvaluatingAfterUndefinedBehavior() const {
 
   case EvaluationMode::ConstantExpression:
   case EvaluationMode::ConstantExpressionUnevaluated:
+  case EvaluationMode::ConstantExpressionPlainlyConstantEvaluated:
     return checkingForUndefinedBehavior();
   }
   llvm_unreachable("Missed EvalMode case");

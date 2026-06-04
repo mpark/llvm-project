@@ -321,8 +321,8 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
       FpPragmaStack(FPOptionsOverride()), CurInitSeg(), VisContext(nullptr),
       PragmaAttributeCurrentTargetDecl(nullptr),
       StdCoroutineTraitsCache(nullptr), IdResolver(pp),
-      OriginalLexicalContext(nullptr), StdInitializerList(nullptr),
-      StdTypeIdentity(nullptr),
+      OriginalLexicalContext(nullptr), StdMetaNamespace(nullptr),
+      StdInitializerList(nullptr), StdTypeIdentity(nullptr),
       FullyCheckedComparisonCategories(
           static_cast<unsigned>(ComparisonCategoryType::Last) + 1),
       StdSourceLocationImplDecl(nullptr), CXXTypeInfoDecl(nullptr),
@@ -2231,6 +2231,9 @@ Sema::SemaDiagnosticBuilder::SemaDiagnosticBuilder(Kind K, SourceLocation Loc,
                                                    Sema &S)
     : S(S), Loc(Loc), DiagID(DiagID), Fn(Fn),
       ShowCallStack(K == K_ImmediateWithCallStack || K == K_Deferred) {
+  if (S.suppressDiagnostics())
+    K = K_Nop;
+
   switch (K) {
   case K_Nop:
     break;
@@ -2656,6 +2659,7 @@ operator()(sema::FunctionScopeInfo *Scope) const {
 }
 
 void Sema::PushCompoundScope(bool IsStmtExpr) {
+  assert(getCurFunction());
   getCurFunction()->CompoundScopes.push_back(
       CompoundScopeInfo(IsStmtExpr, getCurFPFeatures()));
 }
@@ -2751,8 +2755,6 @@ LambdaScopeInfo *Sema::getCurLambda(bool IgnoreNonLambdaCapturingScope) {
   auto *CurLSI = dyn_cast<LambdaScopeInfo>(*I);
   if (CurLSI && CurLSI->Lambda && CurLSI->CallOperator &&
       !CurLSI->Lambda->Encloses(CurContext) && CurLSI->AfterParameterList) {
-    // We have switched contexts due to template instantiation.
-    assert(!CodeSynthesisContexts.empty());
     return nullptr;
   }
 

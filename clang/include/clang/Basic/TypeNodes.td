@@ -98,6 +98,7 @@ def AutoType : TypeNode<DeducedType>;
 def DeducedTemplateSpecializationType : TypeNode<DeducedType>;
 def DependentNameType : TypeNode<Type>, AlwaysDependent;
 def PackExpansionType : TypeNode<Type>, AlwaysDependent;
+def ReflectionSpliceType : TypeNode<Type>, NeverCanonicalUnlessDependent;
 def PackIndexingType  : TypeNode<Type>, NeverCanonicalUnlessDependent;
 def ObjCTypeParamType : TypeNode<Type>, NeverCanonical;
 def ObjCObjectType : TypeNode<Type>;

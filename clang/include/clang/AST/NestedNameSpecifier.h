@@ -1,5 +1,7 @@
 //===- NestedNameSpecifier.h - C++ nested name specifiers -------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -34,6 +36,10 @@ auto NestedNameSpecifier::getKind() const -> Kind {
   switch (auto [K, Ptr] = getStored(); K) {
   case StoredKind::Type:
     return Kind::Type;
+  case StoredKind::Splice:
+    return Kind::Splice;
+  case StoredKind::SpliceWithTemplate:
+    return Kind::SpliceWithTemplate;
   case StoredKind::NamespaceWithGlobal:
   case StoredKind::NamespaceWithNamespace:
     return Kind::Namespace;
@@ -67,6 +73,8 @@ auto NestedNameSpecifier::MakeNamespacePtrKind(
   case Kind::Global:
     return {StoredKind::NamespaceWithGlobal, Namespace};
   case Kind::Namespace:
+  case Kind::Splice:
+  case Kind::SpliceWithTemplate:
     return {StoredKind::NamespaceWithNamespace,
             MakeNamespaceAndPrefixStorage(Ctx, Namespace, Prefix)};
   case Kind::MicrosoftSuper:
@@ -91,6 +99,15 @@ NestedNameSpecifier::NestedNameSpecifier(CXXRecordDecl *RD)
   assert(getKind() == Kind::MicrosoftSuper);
 }
 
+NestedNameSpecifier::NestedNameSpecifier(const SpliceSpecifier *Splice,
+                                         bool TemplateKeyword)
+    : NestedNameSpecifier({TemplateKeyword ? StoredKind::SpliceWithTemplate
+                                           : StoredKind::Splice,
+                           Splice}) {
+  assert(getKind() ==
+         (TemplateKeyword ? Kind::SpliceWithTemplate : Kind::Splice));
+}
+
 CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
   switch (getKind()) {
   case Kind::MicrosoftSuper:
@@ -100,6 +117,8 @@ CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
   case Kind::Global:
   case Kind::Namespace:
   case Kind::Null:
+  case Kind::Splice:
+  case Kind::SpliceWithTemplate:
     return nullptr;
   }
   llvm_unreachable("Invalid NNS Kind!");
@@ -110,6 +129,10 @@ NestedNameSpecifier NestedNameSpecifier::getCanonical() const {
   case NestedNameSpecifier::Kind::Null:
   case NestedNameSpecifier::Kind::Global:
   case NestedNameSpecifier::Kind::MicrosoftSuper:
+  // A splice scope specifier is always dependent; treat it as its own
+  // canonical form (it is resolved to a concrete qualifier on instantiation).
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
     // These are canonical and unique.
     return *this;
   case NestedNameSpecifier::Kind::Namespace: {
@@ -160,6 +183,16 @@ NestedNameSpecifierLoc::getLocalDataLength(NestedNameSpecifier Qualifier) {
     // The "void*" that points at the TypeLoc data.
     // Note: the 'template' keyword is part of the TypeLoc.
     Length += sizeof(void *);
+    break;
+
+  case NestedNameSpecifier::Kind::Splice:
+    // The splice's own range comes from the SpliceSpecifier; only the trailing
+    // '::' location is stored locally.
+    break;
+
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
+    // The location of the 'template' keyword, in addition to the trailing '::'.
+    Length += sizeof(SourceLocation::UIntTy);
     break;
 
   case NestedNameSpecifier::Kind::Null:
@@ -217,6 +250,14 @@ SourceRange NestedNameSpecifierLoc::getLocalSourceRange() const {
     TypeLoc TL(Qualifier.getAsType(), TypeData);
     return SourceRange(TL.getBeginLoc(), LoadSourceLocation(sizeof(void *)));
   }
+  case NestedNameSpecifier::Kind::Splice:
+    // Layout: [trailing '::'].
+    return SourceRange(Qualifier.getAsSplice()->getBeginLoc(),
+                       LoadSourceLocation(/*Offset=*/0));
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
+    // Layout: ['template' keyword][trailing '::'].
+    return SourceRange(LoadSourceLocation(/*Offset=*/0),
+                       LoadSourceLocation(sizeof(SourceLocation::UIntTy)));
   }
 
   llvm_unreachable("Invalid NNS Kind!");

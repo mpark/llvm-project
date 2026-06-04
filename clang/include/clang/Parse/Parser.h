@@ -1,5 +1,7 @@
 //===--- Parser.h - C Language Parser ---------------------------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -150,7 +152,7 @@ enum class TentativeCXXTypeIdContext {
   AsTemplateArgument,
   InTrailingReturnType,
   AsGenericSelectionArgument,
-  AsReflectionOperand
+  AsReflectionOperand,
 };
 
 /// The kind of attribute specifier we have found.
@@ -483,7 +485,9 @@ public:
            (Tok.is(tok::identifier) || Tok.is(tok::coloncolon) ||
             (Tok.is(tok::annot_template_id) &&
              NextToken().is(tok::coloncolon)) ||
-            Tok.is(tok::kw_decltype) || Tok.is(tok::kw___super));
+            Tok.is(tok::kw_decltype) || Tok.is(tok::kw___super) ||
+            Tok.isOneOf(tok::l_splice, tok::annot_splice, tok::kw_template));
+
   }
   bool TryAnnotateOptionalCXXScopeToken(bool EnteringContext = false) {
     return MightBeCXXScopeToken() && TryAnnotateCXXScopeToken(EnteringContext);
@@ -640,7 +644,8 @@ private:
   /// Used by code completion for ranking.
   PreferredTypeBuilder PreferredType;
 
-  unsigned short ParenCount = 0, BracketCount = 0, BraceCount = 0;
+  unsigned short ParenCount = 0, BracketCount = 0, BraceCount = 0,
+                 SpliceCount = 0;
   unsigned short MisplacedModuleBeginCount = 0;
 
   /// Actions - These are the callbacks we invoke as we parse various constructs
@@ -699,6 +704,11 @@ private:
   }
   /// isTokenBrace - Return true if the cur token is '{' or '}'.
   bool isTokenBrace() const { return Tok.isOneOf(tok::l_brace, tok::r_brace); }
+  /// isTokenSplice - Return true if the cur token is "[:" or ":]".
+  bool isTokenSplice() const {
+    return Tok.isOneOf(tok::l_splice, tok::r_splice);
+  }
+
   /// isTokenStringLiteral - True if this token is a string-literal.
   bool isTokenStringLiteral() const {
     return tok::isStringLiteral(Tok.getKind());
@@ -760,6 +770,22 @@ private:
     PP.Lex(Tok);
     return PrevTokLocation;
   }
+
+  /// ConsumeSplice - This consume methods keeps the splice count up-to-date.
+  SourceLocation ConsumeSplice() {
+    assert(isTokenSplice() && "wrong consume method");
+    if (Tok.getKind() == tok::l_splice)
+      ++SpliceCount;
+    else if (SpliceCount) {
+      AngleBrackets.clear(*this);
+      --SpliceCount;     // Don't let unbalanced :]'s drive the count negative.
+    }
+
+    PrevTokLocation = Tok.getLocation();
+    PP.Lex(Tok);
+    return PrevTokLocation;
+  }
+
 
   /// ConsumeBrace - This consume method keeps the brace count up-to-date.
   ///
@@ -857,6 +883,16 @@ private:
   /// token.
   static void setExprAnnotation(Token &Tok, ExprResult ER) {
     Tok.setAnnotationValue(ER.getAsOpaquePointer());
+  }
+
+  /// Read an already-translated splice specifier out of an annotation token.
+  static SpliceResult getSpliceAnnotation(const Token &Tok) {
+    return SpliceResult::getFromOpaquePointer(Tok.getAnnotationValue());
+  }
+
+  /// Set the splice specifier corresponding to the given annotation token.
+  static void setSpliceAnnotation(Token &Tok, SpliceResult SR) {
+    Tok.setAnnotationValue(SR.getAsOpaquePointer());
   }
 
   /// Attempt to classify the name at the current token position. This may
@@ -1212,10 +1248,13 @@ private:
   ///@{
 
 private:
-  friend struct LateParsedAttribute;
-  friend struct LateParsedTypeAttribute;
+  /// Flag whether we are inside a using-declaration.
+  bool InUsingDeclaration;
 
   struct ParsingClass;
+
+  friend struct LateParsedAttribute;
+  friend struct LateParsedTypeAttribute;
 
   /// Inner node of the LateParsedDeclaration tree that parses
   /// all its members recursively.
@@ -1611,6 +1650,7 @@ private:
     DSC_condition,          // condition declaration context
     DSC_association, // A _Generic selection expression's type association
     DSC_new,         // C++ new expression
+    DSC_reflect_operator,  // C++2c reflect operator (P2996)
   };
 
   /// Is this a context in which we are parsing just a type-specifier (or
@@ -1624,6 +1664,7 @@ private:
     case DeclSpecContext::DSC_top_level:
     case DeclSpecContext::DSC_objc_method_result:
     case DeclSpecContext::DSC_condition:
+    case DeclSpecContext::DSC_reflect_operator:
       return false;
 
     case DeclSpecContext::DSC_template_type_arg:
@@ -1682,6 +1723,7 @@ private:
     case DeclSpecContext::DSC_conv_operator:
     case DeclSpecContext::DSC_template_arg:
     case DeclSpecContext::DSC_new:
+    case DeclSpecContext::DSC_reflect_operator:
       return AllowDefiningTypeSpec::No;
     }
     llvm_unreachable("Missing DeclSpecContext case");
@@ -1706,6 +1748,7 @@ private:
     case DeclSpecContext::DSC_conv_operator:
     case DeclSpecContext::DSC_template_arg:
     case DeclSpecContext::DSC_new:
+    case DeclSpecContext::DSC_reflect_operator:
 
       return false;
     }
@@ -1726,6 +1769,7 @@ private:
     case DeclSpecContext::DSC_association:
     case DeclSpecContext::DSC_conv_operator:
     case DeclSpecContext::DSC_new:
+    case DeclSpecContext::DSC_reflect_operator:
       return true;
 
     case DeclSpecContext::DSC_objc_method_result:
@@ -1757,6 +1801,7 @@ private:
     case DeclSpecContext::DSC_condition:
     case DeclSpecContext::DSC_template_arg:
     case DeclSpecContext::DSC_association:
+    case DeclSpecContext::DSC_reflect_operator:
       return ImplicitTypenameContext::No;
     }
     llvm_unreachable("Missing DeclSpecContext case");
@@ -3385,6 +3430,7 @@ private:
   /// \endverbatim
   ///
   Decl *ParseStaticAssertDeclaration(SourceLocation &DeclEnd);
+  Decl *ParseConstevalBlockDeclaration(SourceLocation &DeclEnd);
 
   /// ParseNamespaceAlias - Parse the part after the '=' in a namespace
   /// alias definition.
@@ -4761,9 +4807,14 @@ private:
   ParseLambdaIntroducer(LambdaIntroducer &Intro,
                         LambdaIntroducerTentativeParse *Tentative = nullptr);
 
-  /// ParseLambdaExpressionAfterIntroducer - Parse the rest of a lambda
-  /// expression.
-  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro);
+  // Explicit 'ConstevalLoc' is allowed to facilitate C++2C consteval-blocks.
+  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro,
+                                                  SourceLocation ConstevalLoc,
+                                                  TypeResult ReturnTy = {});
+  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro) {
+    SourceLocation ConstevalLoc;
+    return ParseLambdaExpressionAfterIntroducer(Intro, ConstevalLoc);
+  }
 
   /// Whether the current token can begin a lambda specifier sequence.
   bool isLambdaSpecifier();
@@ -8080,16 +8131,17 @@ private:
       Expr *TemplateName;
       SourceLocation LessLoc;
       AngleBracketTracker::Priority Priority;
-      unsigned short ParenCount, BracketCount, BraceCount;
+      unsigned short ParenCount, BracketCount, BraceCount, SpliceCount;
 
       bool isActive(Parser &P) const {
         return P.ParenCount == ParenCount && P.BracketCount == BracketCount &&
-               P.BraceCount == BraceCount;
+               P.BraceCount == BraceCount && P.SpliceCount == SpliceCount;
       }
 
       bool isActiveOrNested(Parser &P) const {
         return isActive(P) || P.ParenCount > ParenCount ||
-               P.BracketCount > BracketCount || P.BraceCount > BraceCount;
+               P.BracketCount > BracketCount || P.BraceCount > BraceCount ||
+               P.SpliceCount > SpliceCount;
       }
     };
 
@@ -8110,7 +8162,7 @@ private:
         }
       } else {
         Locs.push_back({TemplateName, LessLoc, Prio, P.ParenCount,
-                        P.BracketCount, P.BraceCount});
+                        P.BracketCount, P.BraceCount, P.SpliceCount});
       }
     }
 
@@ -8545,6 +8597,22 @@ private:
   /// Implementations are in ParseTentative.cpp
   ///@{
 
+  //===--------------------------------------------------------------------===//
+  // C++2c: Reflection [P2996]
+  ExprResult ParseCXXReflectExpression(SourceLocation OpLoc);
+  ExprResult ParseCXXMetafunctionExpression();
+
+  bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
+
+  ExprResult ParseCXXSpliceAsExpr(SourceLocation TemplateKWLoc,
+                                  bool AllowMemberReference);
+  TypeResult ParseCXXSpliceAsType(SourceLocation TypenameKWLoc,
+                                  bool AllowDependent, bool Complain);
+  DeclResult ParseCXXSpliceAsNamespace();
+
+  void ParseAnnotationSpecifier(ParsedAttributes &Attrs,
+                                SourceLocation *endLoc = nullptr);
+
 private:
   /// TentativeParsingAction - An object that is used as a kind of "tentative
   /// parsing transaction". It gets instantiated to mark the token position and
@@ -8564,7 +8632,8 @@ private:
     PreferredTypeBuilder PrevPreferredType;
     Token PrevTok;
     size_t PrevTentativelyDeclaredIdentifierCount;
-    unsigned short PrevParenCount, PrevBracketCount, PrevBraceCount;
+    unsigned short PrevParenCount, PrevBracketCount, PrevBraceCount,
+                   PrevSpliceCount;
     bool isActive;
 
   public:
@@ -8576,6 +8645,7 @@ private:
       PrevParenCount = P.ParenCount;
       PrevBracketCount = P.BracketCount;
       PrevBraceCount = P.BraceCount;
+      PrevSpliceCount = P.SpliceCount;
       P.PP.EnableBacktrackAtThisPos(Unannotated);
       isActive = true;
     }
@@ -8595,6 +8665,7 @@ private:
           PrevTentativelyDeclaredIdentifierCount);
       P.ParenCount = PrevParenCount;
       P.BracketCount = PrevBracketCount;
+      P.SpliceCount = PrevSpliceCount;
       P.BraceCount = PrevBraceCount;
       isActive = false;
     }
