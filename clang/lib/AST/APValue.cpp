@@ -1,5 +1,7 @@
 //===--- APValue.cpp - Union class for APFloat/APSInt/Complex -------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -13,10 +15,12 @@
 #include "clang/AST/APValue.h"
 #include "Linkage.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/LocInfoType.h"
 #include "clang/AST/Type.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -298,11 +302,12 @@ APValue::UnionData::~UnionData () {
 }
 
 APValue::APValue(const APValue &RHS)
-    : Kind(None), AllowConstexprUnknown(RHS.AllowConstexprUnknown) {
-  switch (RHS.getKind()) {
+    : Kind(None), AllowConstexprUnknown(RHS.AllowConstexprUnknown),
+      UnderlyingTy(), ReflectionDepth() {
+  switch (RHS.Kind) {
   case None:
   case Indeterminate:
-    Kind = RHS.getKind();
+    Kind = RHS.Kind;
     break;
   case Int:
     MakeInt(RHS.getInt());
@@ -372,12 +377,20 @@ APValue::APValue(const APValue &RHS)
     MakeAddrLabelDiff();
     setAddrLabelDiff(RHS.getAddrLabelDiffLHS(), RHS.getAddrLabelDiffRHS());
     break;
+  case Reflection:
+    MakeReflection();
+    setReflection(((const ReflectionData *)(const char *)&RHS.Data)->Kind,
+                  RHS.getOpaqueReflectionData());
+    break;
   }
+  ReflectionDepth = RHS.ReflectionDepth;
+  UnderlyingTy = RHS.UnderlyingTy;
 }
 
 APValue::APValue(APValue &&RHS)
     : Kind(RHS.Kind), AllowConstexprUnknown(RHS.AllowConstexprUnknown),
-      Data(RHS.Data) {
+      Data(RHS.Data), UnderlyingTy(RHS.UnderlyingTy),
+      ReflectionDepth(RHS.ReflectionDepth) {
   RHS.Kind = None;
 }
 
@@ -395,6 +408,8 @@ APValue &APValue::operator=(APValue &&RHS) {
     Kind = RHS.Kind;
     Data = RHS.Data;
     AllowConstexprUnknown = RHS.AllowConstexprUnknown;
+    UnderlyingTy = RHS.UnderlyingTy;
+    ReflectionDepth = RHS.ReflectionDepth;
     RHS.Kind = None;
   }
   return *this;
@@ -427,12 +442,14 @@ void APValue::DestroyDataAndMakeUninit() {
     ((MemberPointerData *)(char *)&Data)->~MemberPointerData();
   else if (Kind == AddrLabelDiff)
     ((AddrLabelDiffData *)(char *)&Data)->~AddrLabelDiffData();
+  else if (Kind == Reflection)
+    ((ReflectionData *)(char *)&Data)->~ReflectionData();
   Kind = None;
   AllowConstexprUnknown = false;
 }
 
 bool APValue::needsCleanup() const {
-  switch (getKind()) {
+  switch (Kind) {
   case None:
   case Indeterminate:
   case AddrLabelDiff:
@@ -441,6 +458,7 @@ bool APValue::needsCleanup() const {
   case Union:
   case Array:
   case Vector:
+  case Reflection:
   case Matrix:
     return true;
   case Int:
@@ -476,12 +494,94 @@ void APValue::swap(APValue &RHS) {
   bool tmp = AllowConstexprUnknown;
   AllowConstexprUnknown = RHS.AllowConstexprUnknown;
   RHS.AllowConstexprUnknown = tmp;
+
+  std::swap(UnderlyingTy, RHS.UnderlyingTy);
+  std::swap(ReflectionDepth, RHS.ReflectionDepth);
 }
 
 /// Profile the value of an APInt, excluding its bit-width.
 static void profileIntValue(llvm::FoldingSetNodeID &ID, const llvm::APInt &V) {
   for (unsigned I = 0, N = V.getBitWidth(); I < N; I += 32)
     ID.AddInteger((uint32_t)V.extractBitsAsZExtValue(std::min(32u, N - I), I));
+}
+
+static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
+  while (V.getReflectionDepth() > 0)
+    V = V.Lower();
+
+  ID.AddInteger(static_cast<int>(V.getReflectionKind()));
+
+  switch (V.getReflectionKind()) {
+  case ReflectionKind::Null:
+    return;
+  case ReflectionKind::Type: {
+    QualType QT = V.getReflectedType();
+    QT.getQualifiers().Profile(ID);
+
+    if (auto *TST = dyn_cast<TemplateSpecializationType>(QT)) {
+      // Note: This sugar only kept for alias template specializations.
+      ID.AddInteger(Type::TemplateSpecialization);
+      QT.getCanonicalType().Profile(ID);
+    } else {
+      ID.AddInteger(0);
+      if (auto *TDT = dyn_cast<TypedefType>(QT)) {
+        ID.AddBoolean(true);
+        ID.AddPointer(TDT->getDecl());
+      } else {
+        ID.AddBoolean(false);
+        QT.getCanonicalType().Profile(ID);
+      }
+    }
+    return;
+  }
+  case ReflectionKind::Declaration:
+    if (auto *PVD = dyn_cast<ParmVarDecl>(V.getReflectedDecl())) {
+      if (auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext()))
+        PVD = FD->getFirstDecl()->getParamDecl(PVD->getFunctionScopeIndex());
+      ID.AddPointer(PVD);
+    } else {
+      ID.AddPointer(V.getReflectedDecl());
+    }
+    return;
+  case ReflectionKind::Template: {
+    TemplateDecl *TDecl = V.getReflectedTemplate().getAsTemplateDecl();
+    if (auto *RTD = dyn_cast<RedeclarableTemplateDecl>(TDecl))
+      TDecl = RTD->getCanonicalDecl();
+    ID.AddPointer(TDecl);
+    return;
+  }
+  case ReflectionKind::Parameter: {
+    ParmVarDecl *PVD = dyn_cast<ParmVarDecl>(V.getReflectedParameter());
+    if (auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext()))
+      PVD = FD->getFirstDecl()->getParamDecl(PVD->getFunctionScopeIndex());
+    ID.AddPointer(PVD);
+    return;
+  }
+  case ReflectionKind::Namespace:
+  case ReflectionKind::EntityProxy:
+  case ReflectionKind::BaseSpecifier:
+  case ReflectionKind::Annotation:
+    ID.AddPointer(V.getOpaqueReflectionData());
+    return;
+  case ReflectionKind::DataMemberSpec: {
+    TagDataMemberSpec *TDMS = V.getReflectedDataMemberSpec();
+    TDMS->Ty.Profile(ID);
+    ID.AddBoolean(TDMS->Name.has_value());
+    if (TDMS->Name)
+      ID.AddString(TDMS->Name.value());
+    ID.AddBoolean(TDMS->Alignment.has_value());
+    if (TDMS->Alignment)
+      ID.AddInteger(TDMS->Alignment.value());
+    ID.AddBoolean(TDMS->BitWidth.has_value());
+    if (TDMS->BitWidth)
+      ID.AddInteger(TDMS->BitWidth.value());
+    return;
+  }
+  case ReflectionKind::Object:
+  case ReflectionKind::Value:
+    llvm_unreachable("lowered value should never represent a value or object");
+  }
+  llvm_unreachable("unknown reflection kind");
 }
 
 void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
@@ -491,6 +591,11 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
   // numbers of members could profile the same.)
 
   ID.AddInteger(Kind);
+
+  // Profile the reflection depth and underlying type (if any).
+  ID.AddInteger(ReflectionDepth);
+  if (isReflectedValue())
+    UnderlyingTy.getCanonicalType().getUnqualifiedType().Profile(ID);
 
   switch (Kind) {
   case None:
@@ -630,9 +735,245 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
     for (const CXXRecordDecl *D : getMemberPointerPath())
       ID.AddPointer(D);
     return;
+  case Reflection:
+    profileReflection(ID, *this);
+    return;
   }
 
   llvm_unreachable("Unknown APValue kind!");
+}
+
+QualType APValue::getTypeOfReflectedResult(const ASTContext &C) const {
+  assert((isReflectedValue() || isReflectedObject()) &&
+         "not a reflection of a value or object");
+  if (getReflectionDepth() == 1)
+    return UnderlyingTy;
+  return C.MetaInfoTy;
+}
+
+ReflectionKind APValue::getReflectionKind() const {
+  assert(isReflection() && "not a reflection value");
+
+  switch (getReflectionDepth()) {
+    // In case '0', this is a reflection of something other than a value or an
+    // object. Its kind is stored in the Data of the APValue.
+    case 0: {
+      ReflectionKind RK = ((const ReflectionData *)(const char *)&Data)->Kind;
+      assert((RK != ReflectionKind::Value && RK != ReflectionKind::Object) &&
+             "Value and Object should never be stored as Kind");
+
+      return RK;
+    }
+
+    // In case '1', this is either a reflection of a value or of an object.
+    // A few cases need to be considered to determine which.
+    case 1:
+      // If no type was provided, then the type must be inferrable from the
+      // LValue. IT must be an object.
+      if (UnderlyingTy.isNull()) {
+        return ReflectionKind::Object;
+
+        // Any APValue which is not an LValue is assumed to be a value.
+      } else if (Kind == LValue) {
+        // Handle the odd nullptr_t corner case, which is a value.
+        if (getLValueBase().isNull())
+          return ReflectionKind::Value;
+
+        // The only other LValue-kind APValues that we consider values are those
+        // that are pointers and blocks. For all others, consider it an object.
+        else if (!UnderlyingTy->isPointerType() &&
+                 !UnderlyingTy->isBlockPointerType())
+          return ReflectionKind::Object;
+
+        // We were give a pointer type, and we'll need to do some work to
+        // disambiguate between a value and an object.
+        //
+        // - A pointer value will be an LValue whose "thing it is pointing to"
+        //   has a different type than itself (e.g., int * vs int).
+        // - An object that happens to have pointer type will be an LValue whose
+        //   (normalized) type is the same as its 'UnderlyingTy'.
+        const Type *LVTy = nullptr;
+
+        // If we have an LValuePath, use the type of the back-most path element.
+        if (hasLValuePath() && getLValuePath().size() > 0) {
+          const LValuePathEntry &E = getLValuePath().back();
+          if (const auto *D = E.getAsBaseOrMember().getPointer()) {
+            if (auto *FD = dyn_cast<FieldDecl>(D))
+              LVTy = FD->getType()->getCanonicalTypeUnqualified().getTypePtr();
+            else if (auto *TD = dyn_cast<CXXRecordDecl>(D))
+              LVTy = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
+          }
+        }
+
+        // Otherwise, infer from the LValueBase.
+        if (!LVTy) {
+          if (auto *B = getLValueBase().dyn_cast<const ValueDecl *>()) {
+            LVTy = B->getType()->getCanonicalTypeUnqualified().getTypePtr();
+          } else if (auto *B = getLValueBase().dyn_cast<const Expr *>()) {
+            // If the base expression isn't an lvalue, it must be an object.
+            if (!B->isLValue())
+              return ReflectionKind::Value;
+
+            LVTy = B->getType()->getCanonicalTypeUnqualified().getTypePtr();
+          }
+        }
+        assert(LVTy);
+
+        // Equivalent types means it's an object; otherwise, assume a value.
+        if (LVTy == UnderlyingTy->getCanonicalTypeUnqualified().getTypePtr()) {
+          return ReflectionKind::Object;
+        }
+      }
+      return ReflectionKind::Value;
+    default:
+      // Any APValue whose reflection depth is higher than 1 is a reflection of
+      // a value; the type is 'std::meta::info'.
+      return ReflectionKind::Value;
+  }
+}
+
+static QualType ComputeLValueType(const APValue &V) {
+  assert(V.isLValue());
+  if (V.getLValueBase().isNull())
+    return QualType {};
+
+  SplitQualType SQT = V.getLValueBase().getType().split();
+
+  for (auto p = V.getLValuePath().begin();
+       p != V.getLValuePath().end(); ++p) {
+    const Decl *D = V.getLValuePath().back().getAsBaseOrMember().getPointer();
+    if (D) {  // base or member case
+      if (auto *VD = dyn_cast<FieldDecl>(D)) {
+        QualType QT = VD->getType();
+        SQT.Ty = QT.getTypePtr();
+
+        if (QT.isConstQualified()) SQT.Quals.addConst();
+        if (QT.isVolatileQualified()) SQT.Quals.addVolatile();
+
+        continue;
+      } else if (auto *TD = dyn_cast<CXXRecordDecl>(D)) {
+        SQT.Ty = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
+        continue;
+      }
+
+      llvm_unreachable("unknown lvalue path kind");
+    } else { // array case
+      QualType QT = cast<ArrayType>(SQT.Ty)->getElementType();
+      SQT.Ty = QT.getTypePtr();
+      if (QT.isConstQualified()) SQT.Quals.addConst();
+      if (QT.isVolatileQualified()) SQT.Quals.addVolatile();
+    }
+  }
+  return QualType(SQT.Ty, SQT.Quals.getAsOpaqueValue());
+}
+
+APValue APValue::Lift(QualType ResultType) const {
+  assert(ReflectionDepth <
+         std::numeric_limits<decltype(ReflectionDepth)>::max());
+
+  // TODO: Special case for lvalues referring to functions?
+  //       Should be "promoted" to a reflection of the function declaration.
+
+  APValue Result(*this);
+  ++Result.ReflectionDepth;
+
+  if (Result.ReflectionDepth == 1) {
+    Result.UnderlyingTy = ResultType;
+
+    if (Result.isReflectedObject())
+      Result.UnderlyingTy = ComputeLValueType(*this);
+    else
+      assert(Result.isReflectedValue() && "not a value or an object?");
+  }
+  return Result;
+}
+
+APValue APValue::Lower() const {
+  assert(getReflectionDepth() > 0 && "not a reflection");
+
+  APValue Result(*this);
+  --Result.ReflectionDepth;
+  return Result;
+}
+
+const void *APValue::getOpaqueReflectionData() const {
+  assert(isReflection() && "not a reflection value");
+  return ((const ReflectionData *)(const void *)&Data)->Data;
+}
+
+QualType APValue::getReflectedType() const {
+  assert(getReflectionKind() == ReflectionKind::Type &&
+         "not a reflection of a type");
+  return QualType::getFromOpaquePtr(getOpaqueReflectionData());
+}
+
+APValue APValue::getReflectedObject() const {
+  assert(getReflectionKind() == ReflectionKind::Object &&
+         "not a reflection of an object");
+  assert(getReflectionKind() == ReflectionKind::Object);
+  return Lower();
+}
+
+APValue APValue::getReflectedValue() const {
+  assert(getReflectionKind() == ReflectionKind::Value &&
+         "not a reflection of a value");
+  return Lower();
+}
+
+ValueDecl *APValue::getReflectedDecl() const {
+  assert(getReflectionKind() == ReflectionKind::Declaration &&
+         "not a reflection of a declaration");
+  return reinterpret_cast<ValueDecl *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+const TemplateName APValue::getReflectedTemplate() const {
+  assert(getReflectionKind() == ReflectionKind::Template &&
+         "not a reflection of a template");
+  return TemplateName::getFromVoidPointer(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+Decl *APValue::getReflectedNamespace() const {
+  assert(getReflectionKind() == ReflectionKind::Namespace &&
+         "not a reflection of a namespace");
+  return reinterpret_cast<Decl *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+UsingShadowDecl *APValue::getReflectedEntityProxy() const {
+  assert(getReflectionKind() == ReflectionKind::EntityProxy &&
+         "not a reflection of an entity proxy");
+  return reinterpret_cast<UsingShadowDecl *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+ParmVarDecl *APValue::getReflectedParameter() const {
+  assert(getReflectionKind() == ReflectionKind::Parameter &&
+         "not a reflection of a parameter");
+  return reinterpret_cast<ParmVarDecl *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+CXXBaseSpecifier *APValue::getReflectedBaseSpecifier() const {
+  assert(getReflectionKind() == ReflectionKind::BaseSpecifier &&
+         "not a reflection of a base specifier");
+  return reinterpret_cast<CXXBaseSpecifier *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+TagDataMemberSpec *APValue::getReflectedDataMemberSpec() const {
+  assert(getReflectionKind() == ReflectionKind::DataMemberSpec &&
+         "not a reflection of a description of a data member");
+  return reinterpret_cast<TagDataMemberSpec *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+CXX26AnnotationAttr *APValue::getReflectedAnnotation() const {
+  assert(getReflectionKind() == ReflectionKind::Annotation &&
+         "not a reflection of an annotation");
+  return reinterpret_cast<CXX26AnnotationAttr *>(
+          const_cast<void *>(getOpaqueReflectionData()));
 }
 
 static double GetApproxValue(const llvm::APFloat &F) {
@@ -984,6 +1325,48 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     Out << " - ";
     Out << "&&" << getAddrLabelDiffRHS()->getLabel()->getName();
     return;
+  case APValue::Reflection:
+    std::string Repr("unknown-reflection");
+    switch (getReflectionKind()) {
+    case ReflectionKind::Null:
+      Repr = "null";
+      break;
+    case ReflectionKind::Type:
+      Repr = "type";
+      break;
+    case ReflectionKind::Object:
+      Repr = "object";
+      break;
+    case ReflectionKind::Value:
+      Repr = "value";
+      break;
+    case ReflectionKind::Declaration:
+      Repr = "declaration";
+      break;
+    case ReflectionKind::Template:
+      Repr = "template";
+      break;
+    case ReflectionKind::Namespace:
+      Repr = "namespace";
+      break;
+    case ReflectionKind::EntityProxy:
+      Repr = "entity-proxy";
+      break;
+    case ReflectionKind::Parameter:
+      Repr = "parameter";
+      break;
+    case ReflectionKind::BaseSpecifier:
+      Repr = "base-specifier";
+      break;
+    case ReflectionKind::DataMemberSpec:
+      Repr = "data-member-spec";
+      break;
+    case ReflectionKind::Annotation:
+      Repr = "annotation";
+      break;
+    }
+    Out << "^^(" << Repr << ")";
+    return;
   }
   llvm_unreachable("Unknown APValue kind!");
 }
@@ -1016,43 +1399,43 @@ bool APValue::toIntegralConstant(APSInt &Result, QualType SrcTy,
 }
 
 const APValue::LValueBase APValue::getLValueBase() const {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((const LV *)(const void *)&Data)->Base;
 }
 
 bool APValue::isLValueOnePastTheEnd() const {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((const LV *)(const void *)&Data)->IsOnePastTheEnd;
 }
 
 CharUnits &APValue::getLValueOffset() {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((LV *)(void *)&Data)->Offset;
 }
 
 bool APValue::hasLValuePath() const {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((const LV *)(const char *)&Data)->hasPath();
 }
 
 ArrayRef<APValue::LValuePathEntry> APValue::getLValuePath() const {
-  assert(isLValue() && hasLValuePath() && "Invalid accessor");
+  assert(Kind == LValue && hasLValuePath() && "Invalid accessor");
   const LV &LVal = *((const LV *)(const char *)&Data);
   return {LVal.getPath(), LVal.PathLength};
 }
 
 unsigned APValue::getLValueCallIndex() const {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((const LV *)(const char *)&Data)->Base.getCallIndex();
 }
 
 unsigned APValue::getLValueVersion() const {
-  assert(isLValue() && "Invalid accessor");
+  assert(Kind == LValue && "Invalid accessor");
   return ((const LV *)(const char *)&Data)->Base.getVersion();
 }
 
 bool APValue::isNullPointer() const {
-  assert(isLValue() && "Invalid usage");
+  assert(Kind == LValue && "Invalid usage");
   return ((const LV *)(const char *)&Data)->IsNullPtr;
 }
 
@@ -1099,21 +1482,21 @@ void APValue::setUnion(const FieldDecl *Field, const APValue &Value) {
 }
 
 const ValueDecl *APValue::getMemberPointerDecl() const {
-  assert(isMemberPointer() && "Invalid accessor");
+  assert(Kind == MemberPointer && "Invalid accessor");
   const MemberPointerData &MPD =
       *((const MemberPointerData *)(const char *)&Data);
   return MPD.MemberAndIsDerivedMember.getPointer();
 }
 
 bool APValue::isMemberPointerToDerivedMember() const {
-  assert(isMemberPointer() && "Invalid accessor");
+  assert(Kind == MemberPointer && "Invalid accessor");
   const MemberPointerData &MPD =
       *((const MemberPointerData *)(const char *)&Data);
   return MPD.MemberAndIsDerivedMember.getInt();
 }
 
 ArrayRef<const CXXRecordDecl*> APValue::getMemberPointerPath() const {
-  assert(isMemberPointer() && "Invalid accessor");
+  assert(Kind == MemberPointer && "Invalid accessor");
   const MemberPointerData &MPD =
       *((const MemberPointerData *)(const char *)&Data);
   return {MPD.getPath(), MPD.PathLength};
@@ -1174,6 +1557,7 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
   case APValue::ComplexInt:
   case APValue::ComplexFloat:
   case APValue::Vector:
+  case APValue::Reflection:
   case APValue::Matrix:
     break;
 
@@ -1251,4 +1635,78 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
   }
 
   return LV;
+}
+
+static QualType unwrapReflectedType(QualType QT) {
+  bool IsConst = QT.isConstQualified();
+  bool IsVolatile = QT.isVolatileQualified();
+  bool UnwrapAliases = (IsConst || IsVolatile);
+
+  void *AsPtr;
+  do {
+    AsPtr = QT.getAsOpaquePtr();
+
+    if (const auto *LIT = dyn_cast<LocInfoType>(QT))
+      QT = LIT->getType();
+    if (const auto *STTPT = dyn_cast<SubstTemplateTypeParmType>(QT);
+        STTPT && !STTPT->isDependentType())
+      QT = STTPT->getReplacementType();
+    if (const auto *RST = dyn_cast<ReflectionSpliceType>(QT);
+        RST && !RST->isDependentType())
+      QT = RST->getUnderlyingType();
+    if (const auto *TST = dyn_cast<TemplateSpecializationType>(QT);
+        TST && !TST->isTypeAlias()) {
+      QT = TST->desugar();
+    }
+    if (const auto *DTST = dyn_cast<DeducedTemplateSpecializationType>(QT))
+      QT = DTST->getDeducedType();
+    if (const auto *DTT = dyn_cast<DecltypeType>(QT)) {
+      QT = DTT->desugar();
+      UnwrapAliases = true;
+    }
+    if (const auto *UT = dyn_cast<UsingType>(QT);
+        UT && UnwrapAliases)
+      QT = UT->desugar();
+    if (const auto *TDT = dyn_cast<TypedefType>(QT);
+        TDT && UnwrapAliases)
+      QT = TDT->desugar();
+  } while (QT.getAsOpaquePtr() != AsPtr);
+
+  if (IsConst)
+    QT = QT.withConst();
+  if (IsVolatile)
+    QT = QT.withVolatile();
+
+  return QT;
+}
+
+void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
+  ReflectionData &SelfData = *((ReflectionData *)(char *)&Data);
+  switch (RK) {
+  case ReflectionKind::Null:
+    SelfData.Kind = RK;
+    return;
+  case ReflectionKind::Type: {
+    QualType QT = unwrapReflectedType(QualType::getFromOpaquePtr(Ptr));
+
+    SelfData.Kind = RK;
+    SelfData.Data = QT.getAsOpaquePtr();
+    return;
+  }
+  case ReflectionKind::Declaration:
+  case ReflectionKind::Template:
+  case ReflectionKind::Namespace:
+  case ReflectionKind::EntityProxy:
+  case ReflectionKind::Parameter:
+  case ReflectionKind::BaseSpecifier:
+  case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::Annotation:
+    SelfData.Kind = RK;
+    SelfData.Data = Ptr;
+    return;
+  case ReflectionKind::Object:
+  case ReflectionKind::Value:
+    return;
+  }
+  assert(RK == ReflectionKind::Null && "unknown reflection kind");
 }

@@ -1,5 +1,7 @@
 //===- DeclBase.cpp - Declaration AST Node Implementation -----------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -27,6 +29,7 @@
 #include "clang/AST/DependentDiagnostic.h"
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
@@ -419,6 +422,7 @@ void Decl::setDeclContextsImpl(DeclContext *SemaDC, DeclContext *LexicalDC,
     auto *MDC = new (Ctx) Decl::MultipleDC();
     MDC->SemanticDC = SemaDC;
     MDC->LexicalDC = LexicalDC;
+    MDC->PrevMultDCSemaDecl = nullptr;
     DeclCtx = MDC;
   }
 }
@@ -963,6 +967,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
 
     case Namespace:
     case NamespaceAlias:
+    case DependentNamespace:
       return IDNS_Namespace;
 
     case FunctionTemplate:
@@ -991,6 +996,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case FileScopeAsm:
     case TopLevelStmt:
     case StaticAssert:
+    case ConstevalBlock:
     case ObjCPropertyImpl:
     case PragmaComment:
     case PragmaDetectMismatch:
@@ -1266,6 +1272,11 @@ bool Decl::isFunctionPointerType() const {
     return false;
 
   return Ty.getCanonicalType()->isFunctionPointerType();
+}
+
+Decl *Decl::getPrevMultDCDeclInSemaContext() {
+  assert(!isInSemaDC());
+  return getMultipleDC()->PrevMultDCSemaDecl;
 }
 
 DeclContext *Decl::getNonTransparentDeclContext() {
@@ -1808,6 +1819,14 @@ void DeclContext::addHiddenDecl(Decl *D) {
     LastDecl = D;
   } else {
     FirstDecl = LastDecl = D;
+  }
+
+  if (auto *NS = dyn_cast<NamespaceDecl>(D->getDeclContext());
+      NS && !D->isInSemaDC()) {
+    NS = NS->getCanonicalDecl();
+
+    D->getMultipleDC()->PrevMultDCSemaDecl = NS->getLastMultDCSemaDecl();
+    NS->setLastMultDCSemaDecl(D);
   }
 
   // Notify a C++ record declaration that we've added a member, so it can

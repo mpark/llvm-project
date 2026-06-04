@@ -1,5 +1,7 @@
 //==--- DiagnosticSemaKinds.td - libsema diagnostics ----------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -3280,6 +3282,89 @@ def err_type_constraint_missing_arguments : Error<
 def err_placeholder_constraints_not_satisfied : Error<
   "deduced type %0 does not satisfy %1">;
 
+// Reflection (P2996)
+def err_expr_consteval_only_type : Error<
+  "expressions of consteval-only type are only allowed in constant-evaluated "
+  "contexts">;
+def err_decl_consteval_only_type : Error<
+  "variable %0 of consteval-only type must either be constexpr or in a "
+  "constant-evaluated context">;
+
+def err_reflect_general_expression : Error<
+  "reflection operand must be a named entity">;
+def err_reflect_overload_set : Error<
+  "cannot take the reflection of an overload set">;
+def err_reflect_nttp : Error<
+  "cannot take the reflection of a non-type template parameter">;
+def err_reflect_using_declarator : Error<
+  "cannot take the reflection of a using-declarator">;
+def err_reflect_init_capture : Error<
+  "cannot take the reflection of a local entity declared by init-capture">;
+def err_reflect_local_requires_param : Error<
+  "cannot take the reflection of a local parameter of a requires-expression">;
+def err_reflect_intervening_lambda : Error<
+  "cannot take the reflection of a local entity for which there is an "
+  "intervening lambda expression">;
+
+def err_splice_operand_not_reflection : Error<
+  "splice operand must be a reflection">;
+def err_splice_operand_not_constexpr : Error<
+  "splice operand must be a constant expression">;
+def err_unexpected_reflection_kind_in_splice : Error<
+  "reflection not usable in a "
+  "%select{splice type|splice expression|namespace splice|template splice}0">;
+def err_unexpected_reflection_kind : Error<
+  "expected a reflection of %select{a|an|a|a}0 "
+  "%select{type|expression|namespace|template}0">;
+def err_unexpected_reflection_template_kind : Error<
+  "expected a reflection of a template of %select{a|an}0 "
+  "%select{type|expression}0">;
+def err_unexpected_splice_specialization : Error<
+  "cannot specialize a splice of a namespace">;
+def err_splice_global_scope_as_namespace : Error<
+  "splice of global scope can only appear in a nested-name-specifier">;
+def err_member_access_splice_not_class_member : Error<
+  "use of splice as qualified member access requires the reflection to be a "
+  "member of a class">;
+def err_splice_unnamed_bit_field : Error<
+  "cannot splice a reflection of an unnamed bit-field">;
+def err_unsupported_splice_kind : Error<
+  "splicing %0 %select{as template arguments is|is}1 %select{not|not yet}2 "
+  "%select{supported|implemented}2">;
+def err_using_dependent_namespace : Error<
+  "dependent namespaces cannot appear in a using directive">;
+def err_dependent_splice_implicit_member_reference : Error<
+  "cannot implicitly reference a class member through a splice">;
+def note_dependent_splice_explicit_this_may_fix : Note<
+  "an explicit 'this' pointer may fix the problem">;
+def err_splice_intervening_lambda : Error<
+  "cannot splice local entity %0 for which there is an intervening lambda "
+  "expression">;
+
+def err_metafunction_empty_args : Error<
+  "__metafunction requires arguments">;
+def err_metafunction_leading_arg_type : Error<
+  "leading argument of __metafunction must have integral type">;
+def err_metafunction_not_constexpr : Error<
+  "arguments of __metafunction must be constant expressions">;
+def err_unknown_metafunction : Error<
+  "leading argument to __metafunction does not identify a metafunction">;
+def err_metafunction_arity : Error<
+  "expected between %0 and %1 arguments (%2 given)">;
+
+def err_consteval_block_not_constexpr : Error<
+  "evaluating expression of a consteval block must be a constant expression">;
+
+def err_injected_decl_outside_cone : Error <
+  "cannot produce injected declaration of %0 from declaration of %1: scope "
+  "associated with the %select{class|function}2 %3 does not enclose both "
+  "declarations">;
+
+def err_compute_expansion_size_index : Error<
+  "could not compute %select{size|index}0 of expansion">;
+def err_expanded_identifier_label : Error<
+  "identifier labels are not allowed in expansion statements">;
+
 // C++11 char16_t/char32_t
 def warn_cxx98_compat_unicode_type : Warning<
   "'%0' type specifier is incompatible with C++98">,
@@ -3502,7 +3587,8 @@ def err_attribute_argument_n_type : Error<
   "constant|a string|an identifier|a constant expression|a builtin function}2">;
 def err_attribute_argument_type : Error<
   "%0 attribute requires %select{int or bool|an integer "
-  "constant|a string|an identifier}1">;
+  "constant|a string|an identifier|an expression usable as a template argument|"
+  "a value of structural type}1">;
 def err_attribute_argument_out_of_range : Error<
   "%0 attribute requires integer constant between %1 and %2 inclusive">;
 def err_init_priority_object_attr : Error<
@@ -7506,6 +7592,8 @@ def err_illegal_decl_mempointer_to_reference : Error<
   "'%0' declared as a member pointer to a reference of type %1">;
 def err_illegal_decl_mempointer_to_void : Error<
   "'%0' declared as a member pointer to void">;
+def err_illegal_decl_mempointer_into_anon_union : Error<
+  "'%0' declared as a member pointer into an anonymous union">;
 def err_illegal_decl_mempointer_in_nonclass
     : Error<"%0 does not point into a class">;
 def err_reference_to_void : Error<"cannot form a reference to 'void'">;
@@ -9091,6 +9179,9 @@ def warn_no_typeid_with_rtti_disabled: Warning<
 
 def err_cannot_form_pointer_to_member_of_reference_type : Error<
   "cannot form a pointer-to-member to member %0 of reference type %1">;
+def err_cannot_form_pointer_to_member_anon_union : Error<
+  "cannot form a pointer-to-member to member %0 of %1 that is not a member of "
+  "a named class">;
 def err_incomplete_object_call : Error<
   "incomplete type in call to object of type %0">;
 
@@ -10319,6 +10410,7 @@ def err_base_class_has_flexible_array_member : Error<
 def err_incomplete_base_class : Error<"base class has incomplete type">;
 def err_duplicate_base_class : Error<
   "base class %0 specified more than once as a direct base class">;
+def err_class_not_derived_from_base : Error<"class %0 not derived from %1">;
 def warn_inaccessible_base_class : Warning<
   "direct base %0 is inaccessible due to ambiguity:%1">,
   InGroup<DiagGroup<"inaccessible-base">>;

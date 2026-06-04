@@ -1,5 +1,7 @@
 //===- Lexer.cpp - C Language Family Lexer --------------------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -4170,9 +4172,39 @@ LexStart:
   case '?':
     Kind = tok::question;
     break;
-  case '[':
-    Kind = tok::l_square;
+  case '[': {
+    size_t SuccessiveColons = 0;
+
+    // There may be as many as 3 successive colons:
+    // - `[: ...` for an 'l_splice' token.
+    // - `[:: ...` for an 'l_square' token followed by a 'coloncolon' token.
+    // - `[: :: ...` for an 'l_splice' token followed by a 'coloncolon' token.
+    Char = getCharAndSize(CurPtr, SizeTmp);
+    SizeTmp2 = 0;
+    while (Char == ':' && SuccessiveColons <= 3) {
+      unsigned SizeTmp3;
+      Char = getCharAndSize(CurPtr + SizeTmp + SizeTmp2, SizeTmp3);
+      SizeTmp2 += SizeTmp3;
+
+      if (Char != '>')  // Check for ':>'-digraph.
+        ++SuccessiveColons;
+    }
+
+    // Every `[:`-pattern except for `[::` indicates an `l_splice` token.
+    if (SuccessiveColons > 0 && SuccessiveColons != 2) {
+      if (LangOpts.Reflection) {
+        Kind = tok::l_splice;
+        CurPtr += SizeTmp;
+      } else {
+        if (!isLexingRawMode() && !LangOpts.OpenMP && !LangOpts.OpenACC)
+          Diag(CurPtr, diag::warn_reflection_disabled) << "[:";
+        Kind = tok::l_square;
+      }
+    } else {
+      Kind = tok::l_square;
+    }
     break;
+  }
   case ']':
     Kind = tok::r_square;
     break;
@@ -4495,6 +4527,15 @@ LexStart:
     } else if (Char == ':') {
       Kind = tok::coloncolon;
       CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
+    } else if (Char == ']') {
+      if (LangOpts.Reflection) {
+        Kind = tok::r_splice;
+        CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
+      } else {
+        if (!isLexingRawMode() && !LangOpts.OpenMP && !LangOpts.OpenACC)
+          Diag(BufferPtr, diag::warn_reflection_disabled) << ":]";
+        Kind = tok::colon;
+      }
     } else {
       Kind = tok::colon;
     }
@@ -4839,4 +4880,70 @@ bool Lexer::LexDependencyDirectiveTokenWhileSkipping(Token &Result) {
 
   convertDependencyDirectiveToken(DDTok, Result);
   return false;
+}
+
+bool Lexer::validateIdentifier(const std::string &In) {
+  static const llvm::sys::UnicodeCharRange DigitRanges[] = {
+    {0x0030, 0x0039}
+  };
+  static llvm::sys::UnicodeCharRange NondigitRanges[] = {
+    {0x0041, 0x005A}, {0x005F, 0x005F}, {0x0061, 0x007A}
+  };
+  static const llvm::sys::UnicodeCharSet DigitChars(DigitRanges);
+  static const llvm::sys::UnicodeCharSet NondigitChars(NondigitRanges);
+  static const llvm::sys::UnicodeCharSet XIDStartChars(XIDStartRanges);
+  static const llvm::sys::UnicodeCharSet XIDContinueChars(XIDContinueRanges);
+
+  if (In.size() == 0)
+    return false;
+
+  const auto *Cursor = &In[0];
+  const auto *End = Cursor + In.size();
+
+  // Validate leading character.
+  if (*Cursor == '\\') {
+    const char *SlashLoc = Cursor++;
+    std::optional<uint32_t> UCN = tryReadUCN(Cursor, SlashLoc, nullptr);
+    if (!UCN || !XIDStartChars.contains(UCN.value()))
+      return false;
+  } else {
+    llvm::UTF32 CodePoint;
+
+    if (llvm::conversionOK != llvm::convertUTF8Sequence(
+            reinterpret_cast<const llvm::UTF8 **>(&Cursor),
+            reinterpret_cast<const llvm::UTF8 *>(End), &CodePoint,
+            llvm::ConversionFlags::strictConversion))
+      return false;
+
+    if (!NondigitChars.contains(CodePoint) &&
+        !XIDStartChars.contains(CodePoint))
+        return false;
+  }
+
+  // Validate remaining characters.
+  while (Cursor < End) {
+    if (*Cursor == '\\') {
+      const char *SlashLoc = Cursor++;
+      std::optional<uint32_t> UCN = tryReadUCN(Cursor, SlashLoc, nullptr);
+      if (!UCN || !(XIDStartChars.contains(UCN.value()) ||
+                    XIDContinueChars.contains(UCN.value())))
+        return false;
+    } else {
+      llvm::UTF32 CodePoint;
+
+      if (llvm::conversionOK != llvm::convertUTF8Sequence(
+              reinterpret_cast<const llvm::UTF8 **>(&Cursor),
+              reinterpret_cast<const llvm::UTF8 *>(End), &CodePoint,
+              llvm::ConversionFlags::strictConversion))
+          return false;
+
+      if (!DigitChars.contains(CodePoint) &&
+          !NondigitChars.contains(CodePoint) &&
+          !XIDStartChars.contains(CodePoint) &&
+          !XIDContinueChars.contains(CodePoint))
+        return false;
+    }
+  }
+  assert(Cursor == End);
+  return true;
 }

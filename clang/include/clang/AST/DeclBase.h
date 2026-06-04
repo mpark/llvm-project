@@ -262,6 +262,8 @@ private:
   struct MultipleDC {
     DeclContext *SemanticDC;
     DeclContext *LexicalDC;
+
+    Decl *PrevMultDCSemaDecl;
   };
 
   /// DeclCtx - Holds either a DeclContext* or a MultipleDC*.
@@ -452,6 +454,11 @@ public:
 
   Decl *getNextDeclInContext() { return NextInContextAndBits.getPointer(); }
   const Decl *getNextDeclInContext() const {return NextInContextAndBits.getPointer();}
+
+  Decl *getPrevMultDCDeclInSemaContext();
+  const Decl *getPrevMultDCDeclInSemaContext() const {
+    return const_cast<Decl*>(this)->getPrevMultDCDeclInSemaContext();
+  }
 
   DeclContext *getDeclContext() {
     if (isInSemaDC())
@@ -1478,7 +1485,7 @@ class DeclContext {
   friend class ASTWriter;
 
 protected:
-  enum { NumOdrHashBits = 25 };
+  enum { NumOdrHashBits = 24 };
 
   // We use uint64_t in the bit-fields below since some bit-fields
   // cross the unsigned boundary and this breaks the packing.
@@ -1713,6 +1720,10 @@ protected:
     /// Indicates whether this struct has had its field layout randomized.
     LLVM_PREFERRED_TYPE(bool)
     uint64_t IsRandomized : 1;
+
+    /// Indicates whether this struct is a consteval-only type.
+    LLVM_PREFERRED_TYPE(bool)
+    uint64_t IsConstevalOnly : 1;
 
     /// True if a valid hash is stored in ODRHash. This should shave off some
     /// extra storage and prevent CXXRecordDecl to store unused bits.

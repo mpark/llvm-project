@@ -1,5 +1,7 @@
 //===--- Sema.h - Semantic Analysis & AST Building --------------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -194,6 +196,7 @@ class TemplateSpecCandidateSet;
 class Token;
 class TypeConstraint;
 class TypoCorrectionConsumer;
+class TypeLocBuilder;
 class UnresolvedSetImpl;
 class UnresolvedSetIterator;
 class VisibleDeclConsumer;
@@ -926,6 +929,10 @@ public:
   LLVM_DECLARE_VIRTUAL_ANCHOR_FUNCTION();
 
   const LangOptions &getLangOpts() const { return LangOpts; }
+  bool languageAccessControl() {
+    return getLangOpts().AccessControl && !EllideAccessControl;
+  }
+
   OpenCLOptions &getOpenCLOptions() { return OpenCLFeatures; }
   FPOptions &getCurFPFeatures() { return CurFPFeatures; }
 
@@ -5327,6 +5334,10 @@ public:
   /// implicitly define the namespace.
   NamespaceDecl *getOrCreateStdNamespace();
 
+  NamespaceDecl *lookupStdMetaNamespace();
+
+  RecordDecl *lookupStdSourceLocationImpl(SourceLocation Loc);
+
   CXXRecordDecl *getStdBadAlloc() const;
   EnumDecl *getStdAlignValT() const;
 
@@ -5388,10 +5399,20 @@ public:
   /// defined in [dcl.init.list]p2.
   bool isInitListConstructor(const FunctionDecl *Ctor);
 
+  /// Resolve SS and Id as a namespace name. Returns nullptr if the pair does
+  /// not denote a namespace.
+  Decl *ActOnNamespaceName(Scope *CurScope, CXXScopeSpec &SS,
+                           IdentifierInfo *Id, SourceLocation IdLoc);
+
   Decl *ActOnUsingDirective(Scope *CurScope, SourceLocation UsingLoc,
                             SourceLocation NamespcLoc, CXXScopeSpec &SS,
                             SourceLocation IdentLoc,
                             IdentifierInfo *NamespcName,
+                            const ParsedAttributesView &AttrList);
+  Decl *ActOnUsingDirective(Scope *CurScope, SourceLocation UsingLoc,
+                            SourceLocation NamespaceLoc, CXXScopeSpec &SS,
+                            SourceLocation IdentLoc, NamedDecl *Named,
+                            NamespaceDecl *NS,
                             const ParsedAttributesView &AttrList);
 
   void PushUsingDirective(Scope *S, UsingDirectiveDecl *UDir);
@@ -5400,6 +5421,13 @@ public:
                                SourceLocation AliasLoc, IdentifierInfo *Alias,
                                CXXScopeSpec &SS, SourceLocation IdentLoc,
                                IdentifierInfo *Ident);
+  Decl *ActOnNamespaceAliasDef(Scope *CurScope,
+                               SourceLocation NamespaceLoc,
+                               SourceLocation AliasLoc,
+                               IdentifierInfo *Alias,
+                               CXXScopeSpec &SS,
+                               SourceLocation IdentLoc,
+                               NamespaceBaseDecl *ND);
 
   /// Remove decls we can't actually see from a lookup being used to declare
   /// shadow using decls.
@@ -5513,6 +5541,11 @@ public:
                                   SourceLocation EnumLoc, SourceRange TyLoc,
                                   const IdentifierInfo &II, ParsedType Ty,
                                   const CXXScopeSpec &SS);
+  Decl *ActOnUsingEnumDeclaration(Scope *CurScope, AccessSpecifier AS,
+                                  SourceLocation UsingLoc,
+                                  SourceLocation EnumLoc,
+                                  SourceLocation IdentLoc, QualType EnumTy,
+                                  TypeSourceInfo *TSI);
   Decl *ActOnAliasDeclaration(Scope *CurScope, AccessSpecifier AS,
                               MultiTemplateParamsArg TemplateParams,
                               SourceLocation UsingLoc, UnqualifiedId &Name,
@@ -6555,6 +6588,9 @@ public:
   /// The C++ "std" namespace, where the standard library resides.
   LazyDeclPtr StdNamespace;
 
+  /// The C++ "std::experimental::meta" namespace.
+  NamespaceDecl *StdMetaNamespace;
+
   /// The C++ "std::initializer_list" template, which is defined in
   /// \<initializer_list>.
   ClassTemplateDecl *StdInitializerList;
@@ -6783,7 +6819,11 @@ public:
     /// we would like to provide diagnostics (e.g., passing non-POD arguments
     /// through varargs) but do not want to mark declarations as "referenced"
     /// until the default argument is used.
-    PotentiallyEvaluatedIfUsed
+    PotentiallyEvaluatedIfUsed,
+
+    /// The current expression and its subexpressions occur within an
+    /// unevaluated reflection operand (C++26 P2996).
+    ReflectionContext,
   };
 
   /// Store a set of either DeclRefExprs or MemberExprs that contain a reference
@@ -6847,6 +6887,10 @@ public:
     /// Set of DeclRefExprs referencing a consteval function when used in a
     /// context not already known to be immediately invoked.
     llvm::SmallPtrSet<DeclRefExpr *, 4> ReferenceToConsteval;
+
+    /// Set of expressions having consteval-only type when used in a context
+    /// not already known to be immediately invoked.
+    llvm::SmallPtrSet<Expr *, 4> ConstevalOnly;
 
     /// P2718R0 - Lifetime extension in range-based for loops.
     /// MaterializeTemporaryExprs in for-range-init expressions which need to
@@ -6923,7 +6967,8 @@ public:
     bool isUnevaluated() const {
       return Context == ExpressionEvaluationContext::Unevaluated ||
              Context == ExpressionEvaluationContext::UnevaluatedAbstract ||
-             Context == ExpressionEvaluationContext::UnevaluatedList;
+             Context == ExpressionEvaluationContext::UnevaluatedList ||
+             Context == ExpressionEvaluationContext::ReflectionContext;
     }
 
     bool isPotentiallyEvaluated() const {
@@ -6959,6 +7004,10 @@ public:
                    ExpressionEvaluationContext::ImmediateFunctionContext ||
                isPotentiallyEvaluated()) &&
               InDiscardedStatement);
+    }
+
+    bool isReflectionContext() const {
+      return Context == ExpressionEvaluationContext::ReflectionContext;
     }
   };
 
@@ -8210,6 +8259,12 @@ public:
     return currentEvaluationContext().isUnevaluated();
   }
 
+  /// Determines whether we are currently in a context assembling a reflect
+  /// expression. This is akin to unevaluated, but has some special rules.
+  bool isReflectionContext() const {
+    return currentEvaluationContext().isReflectionContext();
+  }
+
   bool isImmediateFunctionContext() const {
     return currentEvaluationContext().isImmediateFunctionContext();
   }
@@ -8861,11 +8916,10 @@ public:
                          Scope *BodyScope);
   void ActOnFinishRequiresExpr();
   concepts::Requirement *ActOnSimpleRequirement(Expr *E);
-  concepts::Requirement *ActOnTypeRequirement(SourceLocation TypenameKWLoc,
-                                              CXXScopeSpec &SS,
-                                              SourceLocation NameLoc,
-                                              const IdentifierInfo *TypeName,
-                                              TemplateIdAnnotation *TemplateId);
+  concepts::Requirement *ActOnTypeRequirement(
+      SourceLocation TypenameKWLoc, CXXScopeSpec &SS, SourceLocation NameLoc,
+      const IdentifierInfo *TypeName, TemplateIdAnnotation *TemplateId,
+      SpliceSpecifier *Splice);
   concepts::Requirement *ActOnCompoundRequirement(Expr *E,
                                                   SourceLocation NoexceptLoc);
   concepts::Requirement *ActOnCompoundRequirement(
@@ -9403,6 +9457,8 @@ public:
     /// Look up a friend of a local class. This lookup does not look
     /// outside the innermost non-class scope. See C++11 [class.friend]p11.
     LookupLocalFriendName,
+    /// Look up any operand of the reflection operator.
+    LookupReflectOperandName,
     /// Look up the name of an Objective-C protocol.
     LookupObjCProtocolName,
     /// Look up implicit 'self' parameter of an objective-c method.
@@ -9412,7 +9468,7 @@ public:
     /// Look up the name of an OpenMP user-defined mapper.
     LookupOMPMapperName,
     /// Look up any declaration with any name.
-    LookupAnyName
+    LookupAnyName,
   };
 
   /// The possible outcomes of name lookup for a literal operator.
@@ -13318,6 +13374,9 @@ public:
       /// We are performing partial ordering for template template parameters.
       PartialOrderingTTP,
 
+      /// We are instantiating an expansion statement.
+      ExpansionStmtInstantiation,
+
       /// We are performing name lookup for a function template or variable
       /// template named 'sycl_kernel_launch'.
       SYCLKernelLaunchLookup,
@@ -13325,9 +13384,6 @@ public:
       /// We are performing overload resolution for a call to a function
       /// template or variable template named 'sycl_kernel_launch'.
       SYCLKernelLaunchOverloadResolution,
-
-      /// We are instantiating an expansion statement.
-      ExpansionStmtInstantiation,
     } Kind;
 
     /// Whether we're substituting into constraints.
@@ -13892,6 +13948,10 @@ public:
   /// act like a CXXIdExpression rather than an attempt to call.
   ExprResult SubstCXXIdExpr(Expr *E,
                             const MultiLevelTemplateArgumentList &TemplateArgs);
+
+  SpliceResult
+  SubstSpliceSpecifier(SpliceSpecifier *SS,
+                       const MultiLevelTemplateArgumentList &TemplateArgs);
 
   // Must be used instead of SubstExpr at 'constraint checking' time.
   ExprResult
@@ -15742,12 +15802,6 @@ public:
 
   ///@}
 
-  //
-  //
-  // -------------------------------------------------------------------------
-  //
-  //
-
   /// \name Function Effects
   /// Implementations are in SemaFunctionEffects.cpp
   ///@{
@@ -15841,6 +15895,182 @@ public:
   void addDeclWithEffects(const Decl *D, const FunctionEffectsRef &FX);
 
   void performFunctionEffectAnalysis(TranslationUnitDecl *TU);
+
+  ///@}
+
+  /// \name P2996 Reflection Constructs
+  /// Implementations are in SemaReflect.cpp
+  ///@{
+
+public:
+  class SuppressDiagnosticsRAII {
+    Sema &S;
+    bool PreviousValue;
+
+  public:
+    SuppressDiagnosticsRAII(Sema &S, bool NewValue = true)
+        : S(S), PreviousValue(S.SuppressDiagnostics) {
+      S.SuppressDiagnostics = NewValue;
+    }
+
+    ~SuppressDiagnosticsRAII() { S.SuppressDiagnostics = PreviousValue; }
+  };
+  bool suppressDiagnostics() const { return SuppressDiagnostics; }
+
+  /// Records a consteval-only expression after leaving an expression
+  /// evaluation context.
+  class ConstevalOnlyRecorder {
+    Sema &S;
+    Expr *TheExpr;
+
+  public:
+    ConstevalOnlyRecorder(Sema &S);
+    ~ConstevalOnlyRecorder();
+
+    ExprResult RecordAndReturn(ExprResult Res);
+  };
+
+  ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc,
+                                 SourceLocation TemplateKWLoc,
+                                 CXXScopeSpec &SS, UnqualifiedId &Id);
+  ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, TypeResult T);
+  ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, SourceLocation ArgLoc,
+                                 Decl *D);
+  ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc,
+                                 ParsedTemplateArgument Template);
+  ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, CXXSpliceExpr *E);
+
+  ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
+                                  SourceLocation LParenLoc,
+                                  SmallVectorImpl<Expr *> &Args,
+                                  SourceLocation RParenLoc);
+
+  SpliceResult ActOnSpliceSpecifier(SourceLocation LSpliceLoc, Expr *Operand,
+                                    SourceLocation RSpliceLoc);
+  SpliceResult ActOnSpliceSpecifier(SourceLocation LSpliceLoc, Expr *Operand,
+                                    SourceLocation RSpliceLoc,
+                                    SourceLocation LAngleLoc,
+                                    ASTTemplateArgsPtr TemplateArgs,
+                                    SourceLocation RAngleLoc);
+
+  ExprResult ActOnCXXSpliceExpression(SourceLocation TemplateKWLoc,
+                                      SpliceSpecifier *Splice,
+                                      bool AllowMemberReference);
+  TypeResult ActOnCXXSpliceTypeSpecifier(SourceLocation TypenameKWLoc,
+                                         SpliceSpecifier *Splice,
+                                         bool Complain);
+  DeclResult ActOnCXXSpliceExpectingNamespace(SpliceSpecifier *Splice);
+  bool ActOnCXXSpliceScopeSpecifier(CXXScopeSpec &SS,
+                                    SourceLocation TemplateKWLoc,
+                                    SpliceSpecifier *Splice,
+                                    SourceLocation ColonColonLoc);
+
+  ExprResult ActOnMemberAccessExpr(Scope *S, Expr *Base,
+                                   SourceLocation OpLoc,
+                                   tok::TokenKind OpKind, CXXSpliceExpr *RHS);
+
+  Decl *ActOnConstevalBlockDeclaration(SourceLocation ConstevalLoc,
+                                       Expr *EvaluatingExpr);
+
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 SourceLocation OperandLoc, QualType T);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 SourceLocation OperandLoc, Decl *D);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 SourceLocation OperandLoc,
+                                 TemplateName Template);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc, Expr *E);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 UnresolvedLookupExpr *E);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 SubstNonTypeTemplateParmExpr *E);
+  ExprResult BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                 CXXSpliceExpr *E);
+
+  ExprResult BuildCXXMetafunctionExpr(SourceLocation KwLoc,
+                                      SourceLocation LParenLoc,
+                                      SourceLocation RParenLoc,
+                                      unsigned MetaFnID,
+                                      const CXXMetafunctionExpr::ImplFn &Impl,
+                                      SmallVectorImpl<Expr *> &Args);
+  ExprResult BuildExplDependentCallExpr(Expr *SubExpr,
+                                        unsigned TemplateDepth);
+
+  SpliceResult BuildSpliceSpecifier(
+      SourceLocation LSpliceLoc, Expr *Operand, SourceLocation RSpliceLoc,
+      const ASTTemplateArgumentListInfo *TemplateArgs);
+
+  QualType BuildReflectionSpliceType(SourceLocation TypenameKWLoc,
+                                     SpliceSpecifier *Splice, bool Complain);
+  QualType BuildReflectionSpliceTypeLoc(TypeLocBuilder &TLB,
+                                        SourceLocation TypenameKWLoc,
+                                        SpliceSpecifier *Splice,
+                                        bool Complain);
+  ExprResult BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
+                                       SpliceSpecifier *Splice,
+                                       bool AllowMemberReference);
+  DeclResult BuildReflectionSpliceNamespace(SpliceSpecifier *Splice);
+
+  ExprResult BuildMemberReferenceExpr(Scope *S, Expr *Base,
+                                      SourceLocation OpLoc,
+                                      tok::TokenKind OpKind,
+                                      CXXSpliceExpr *RHS);
+  ExprResult BuildDependentMemberSpliceExpr(Expr *Base, SourceLocation OpLoc,
+                                            bool IsArrow,
+                                            CXXSpliceExpr *RHS);
+
+  Decl *BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
+                                       Expr *EvaluatingExpr);
+
+  DeclContext *TryFindDeclContextOf(SpliceSpecifier *Splice);
+
+  const CXXMetafunctionExpr::ImplFn &getMetafunctionCb(unsigned FnID);
+
+  static IndirectFieldDecl *findInjectedIndirectField(CXXRecordDecl *Outer,
+                                                      FieldDecl *FD) {
+    if (!Outer || !FD)
+      return nullptr;
+
+    DeclarationName N = FD->getDeclName();
+    if (!N)
+      return nullptr;
+
+    for (NamedDecl *ND : Outer->lookup(N)) {
+      auto *IFD = dyn_cast<IndirectFieldDecl>(ND);
+      if (!IFD)
+        continue;
+      auto Chain = IFD->chain();
+      if (!Chain.empty() && Chain.back() == FD)
+        return IFD;
+    }
+    return nullptr;
+  }
+
+private:
+  llvm::SmallDenseMap<unsigned, std::unique_ptr<CXXMetafunctionExpr::ImplFn>>
+      MetafunctionImplCbs;
+
+  bool EllideAccessControl = false;
+  bool SuppressDiagnostics = false;
+
+  class AccessControlScopeGuard final {
+  public:
+    AccessControlScopeGuard(const AccessControlScopeGuard &) = delete;
+    AccessControlScopeGuard(AccessControlScopeGuard &&) = delete;
+    AccessControlScopeGuard &operator=(const AccessControlScopeGuard &) = delete;
+    AccessControlScopeGuard &operator=(AccessControlScopeGuard &&) = delete;
+
+    explicit AccessControlScopeGuard(Sema &S, bool NewValue)
+        : S(S), PreviousValue(S.EllideAccessControl) {
+      S.EllideAccessControl = NewValue;
+    }
+
+    ~AccessControlScopeGuard() { S.EllideAccessControl = PreviousValue; }
+
+  private:
+    Sema &S;
+    bool PreviousValue;
+  };
 
   ///@}
 

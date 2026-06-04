@@ -1,5 +1,7 @@
 //===--- ParseTentative.cpp - Ambiguity Resolution Parsing ----------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -32,6 +34,11 @@ bool Parser::isCXXDeclarationStatement(
   case tok::kw_static_assert:
   case tok::kw__Static_assert:
     return true;
+  case tok::kw_consteval:
+    // consteval-block-declaration
+    if (getLangOpts().Reflection)
+      return NextToken().is(tok::l_brace);
+    return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false);
   case tok::coloncolon:
   case tok::identifier: {
     if (DisambiguatingWithExpression) {
@@ -534,7 +541,6 @@ Parser::isCXXConditionDeclarationOrInitStatement(bool CanBeInitStatement,
 }
 
 bool Parser::isCXXTypeId(TentativeCXXTypeIdContext Context, bool &isAmbiguous) {
-
   isAmbiguous = false;
 
   // C++ 8.2p2:
@@ -934,6 +940,10 @@ Parser::TPResult Parser::TryParseDeclarator(bool mayBeAbstract,
       ConsumeToken();
   } else if (Tok.is(tok::l_paren)) {
     ConsumeParen();
+
+    if (Tok.is(tok::l_splice) && TryAnnotateTypeOrScopeToken())
+      return TPResult::Error;
+
     if (mayBeAbstract &&
         (Tok.is(tok::r_paren) || // 'int()' is a function.
                                  // 'int(...)' is a function.
@@ -1031,7 +1041,6 @@ public:
   }
 };
 }
-
 Parser::TPResult
 Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
                                   Parser::TPResult BracedCastResult,
@@ -1066,7 +1075,8 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
              GetLookAheadToken(Lookahead + 1).isOneOf(tok::amp, tok::ampamp)));
   };
   switch (Tok.getKind()) {
-  case tok::identifier: {
+  case tok::identifier:
+  case tok::annot_splice: {
     if (GetLookAheadToken(1).is(tok::ellipsis) &&
         GetLookAheadToken(2).is(tok::l_square)) {
 
@@ -1091,13 +1101,14 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
     // If this identifier was reverted from a token ID, and the next token
     // is a '(', we assume it to be a use of a type trait, so this
     // can never be a type name.
-    if (Next.is(tok::l_paren) &&
+    if (Next.is(tok::l_paren) && Tok.is(tok::identifier) &&
         Tok.getIdentifierInfo()->hasRevertedTokenIDToIdentifier() &&
         isRevertibleTypeTrait(Tok.getIdentifierInfo())) {
       return TPResult::False;
     }
 
-    if (Next.isNoneOf(tok::coloncolon, tok::less, tok::colon)) {
+    if (Tok.is(tok::identifier) &&
+        Next.isNoneOf(tok::coloncolon, tok::less, tok::colon)) {
       // Determine whether this is a valid expression. If not, we will hit
       // a parse error one way or another. In that case, tell the caller that
       // this is ambiguous. Typo-correct to type and expression keywords and
@@ -1140,7 +1151,8 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
       // If annotation failed, assume it's a non-type.
       // FIXME: If this happens due to an undeclared identifier, treat it as
       // ambiguous.
-      if (Tok.is(tok::identifier))
+      if (Tok.is(tok::identifier) || Tok.is(tok::annot_splice) ||
+          Tok.is(tok::annot_splice_specialization))
         return TPResult::False;
     }
 
@@ -1174,6 +1186,7 @@ Parser::isCXXDeclarationSpecifier(ImplicitTypenameContext AllowImplicitTypename,
   }
   case tok::kw___super:
   case tok::kw_decltype:
+  case tok::l_splice:
     // Annotate typenames and C++ scope specifiers.  If we get one, just
     // recurse to handle whatever we get.
     if (TryAnnotateTypeOrScopeToken(AllowImplicitTypename))

@@ -7659,6 +7659,10 @@ void TypeLocReader::VisitDecltypeTypeLoc(DecltypeTypeLoc TL) {
   TL.setRParenLoc(readSourceLocation());
 }
 
+void TypeLocReader::VisitReflectionSpliceTypeLoc(ReflectionSpliceTypeLoc TL) {
+  // nothing to do
+}
+
 void TypeLocReader::VisitPackIndexingTypeLoc(PackIndexingTypeLoc TL) {
   TL.setEllipsisLoc(readSourceLocation());
 }
@@ -7680,6 +7684,20 @@ ConceptReference *ASTRecordReader::readConceptReference() {
       getContext(), NNS, TemplateKWLoc, ConceptNameLoc, FoundDecl, NamedConcept,
       (readBool() ? readASTTemplateArgumentListInfo() : nullptr));
   return CR;
+}
+
+SpliceSpecifier *ASTRecordReader::readSpliceSpecifierRef() {
+  auto LSpliceLoc = readSourceLocation();
+  auto *Operand = readExpr();
+  auto RSpliceLoc = readSourceLocation();
+
+  const ASTTemplateArgumentListInfo *TArgs = nullptr;
+  if (readBool())
+    TArgs = readASTTemplateArgumentListInfo();
+
+  auto *Splice = SpliceSpecifier::Create(getContext(), LSpliceLoc, Operand,
+                                         RSpliceLoc, TArgs);
+  return Splice;
 }
 
 void TypeLocReader::VisitAutoTypeLoc(AutoTypeLoc TL) {
@@ -8082,6 +8100,9 @@ QualType ASTReader::GetType(TypeID ID) {
       break;
     case PREDEF_TYPE_CHAR32_ID:
       T = Context.Char32Ty;
+      break;
+    case PREDEF_TYPE_META_INFO_ID:
+      T = Context.MetaInfoTy;
       break;
     case PREDEF_TYPE_OBJC_ID:
       T = Context.ObjCBuiltinIdTy;
@@ -10307,14 +10328,13 @@ void ASTRecordReader::readUnresolvedSet(LazyASTUnresolvedSet &Set) {
 CXXBaseSpecifier
 ASTRecordReader::readCXXBaseSpecifier() {
   bool isVirtual = readBool();
-  bool isBaseOfClass = readBool();
   AccessSpecifier AS = static_cast<AccessSpecifier>(readInt());
   bool inheritConstructors = readBool();
   TypeSourceInfo *TInfo = readTypeSourceInfo();
+  CXXRecordDecl *Derived = readDeclAs<CXXRecordDecl>();
   SourceRange Range = readSourceRange();
   SourceLocation EllipsisLoc = readSourceLocation();
-  CXXBaseSpecifier Result(Range, isVirtual, isBaseOfClass, AS, TInfo,
-                          EllipsisLoc);
+  CXXBaseSpecifier Result(Range, isVirtual, AS, TInfo, Derived, EllipsisLoc);
   Result.setInheritConstructors(inheritConstructors);
   return Result;
 }
@@ -10418,6 +10438,20 @@ ASTRecordReader::readNestedNameSpecifierLoc() {
       CXXRecordDecl *RD = readDeclAs<CXXRecordDecl>();
       SourceRange Range = readSourceRange();
       Builder.MakeMicrosoftSuper(Context, RD, Range.getBegin(), Range.getEnd());
+      break;
+    }
+
+    case NestedNameSpecifier::Kind::Splice:
+    case NestedNameSpecifier::Kind::SpliceWithTemplate: {
+      SpliceSpecifier *Splice = readSpliceSpecifierRef();
+      bool HasTemplateKWLoc = readBool();
+      SourceRange Range = readSourceRange();
+
+      SourceLocation TemplateKWLoc =
+          HasTemplateKWLoc ? Range.getBegin() : SourceLocation();
+
+      Builder.MakeSpliceScopeSpecifier(Context, TemplateKWLoc, Splice,
+                                       Range.getEnd());
       break;
     }
 

@@ -1,5 +1,7 @@
 //===--- CGExprConstant.cpp - Emit LLVM Code from Constant Expressions ----===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -2781,7 +2783,9 @@ llvm::Constant *
 CodeGenModule::getMemberPointerConstant(const UnaryOperator *uo) {
   // Member pointer constants always have a very particular form.
   const MemberPointerType *type = cast<MemberPointerType>(uo->getType());
-  const ValueDecl *decl = cast<DeclRefExpr>(uo->getSubExpr())->getDecl();
+
+  const Expr *SubExpr = uo->getSubExpr()->IgnoreSplices();
+  const ValueDecl *decl = cast<DeclRefExpr>(SubExpr)->getDecl();
 
   // A member function pointer.
   if (const CXXMethodDecl *method = dyn_cast<CXXMethodDecl>(decl))

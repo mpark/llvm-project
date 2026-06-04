@@ -596,8 +596,8 @@ static CXXRecordDecl *createHostLayoutStruct(Sema &S,
       if (BaseDecl) {
         TypeSourceInfo *TSI =
             AST.getTrivialTypeSourceInfo(AST.getCanonicalTagType(BaseDecl));
-        Base = CXXBaseSpecifier(SourceRange(), false, StructDecl->isClass(),
-                                AS_none, TSI, SourceLocation());
+        Base = CXXBaseSpecifier(SourceRange(), false, AS_none, TSI, StructDecl,
+                                SourceLocation());
       }
     }
     if (BaseDecl) {

@@ -1,5 +1,7 @@
 //===--- SemaExprMember.cpp - Semantic Analysis for Expressions -----------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -83,7 +85,11 @@ enum IMAKind {
 
   /// All possible referrents are instance members of an unrelated
   /// class.
-  IMA_Error_Unrelated
+  IMA_Error_Unrelated,
+
+  /// The reference is in the context of a reflection operand, which is allowed
+  /// because the context is unevaluated.
+  IMA_Reflection_Operand,
 };
 
 /// The given lookup names class member(s) and is not being used for
@@ -100,6 +106,9 @@ static IMAKind ClassifyImplicitMemberAccess(Sema &SemaRef,
 
   bool couldInstantiateToStatic = false;
   bool isStaticOrExplicitContext = SemaRef.CXXThisTypeOverride.isNull();
+
+  if (SemaRef.isReflectionContext())
+    return IMA_Reflection_Operand;
 
   if (auto *MD = dyn_cast<CXXMethodDecl>(DC)) {
     if (MD->isImplicitObjectMemberFunction()) {
@@ -166,6 +175,7 @@ static IMAKind ClassifyImplicitMemberAccess(Sema &SemaRef,
     AbstractInstanceResult = IMA_Abstract;
     break;
 
+  case Sema::ExpressionEvaluationContext::ReflectionContext:
   case Sema::ExpressionEvaluationContext::DiscardedStatement:
   case Sema::ExpressionEvaluationContext::ConstantEvaluated:
   case Sema::ExpressionEvaluationContext::ImmediateFunctionContext:
@@ -318,6 +328,7 @@ ExprResult Sema::BuildPossibleImplicitMemberExpr(
     Diag(R.getNameLoc(), diag::warn_cxx98_compat_non_static_member_use)
       << R.getLookupNameInfo().getName();
     [[fallthrough]];
+  case IMA_Reflection_Operand:
   case IMA_Static:
   case IMA_Abstract:
   case IMA_Mixed_StaticOrExplicitContext:
@@ -868,6 +879,15 @@ static bool IsInFnTryBlockHandler(const Scope *S) {
   return false;
 }
 
+static bool isRecordType(QualType T) {
+  return T->isRecordType();
+}
+static bool isPointerToRecordType(QualType T) {
+  if (const PointerType *PT = T->getAs<PointerType>())
+    return PT->getPointeeType()->isRecordType();
+  return false;
+}
+
 ExprResult
 Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
                                SourceLocation OpLoc, bool IsArrow,
@@ -1166,6 +1186,116 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
   return ExprError();
 }
 
+ExprResult
+Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
+                               tok::TokenKind OpKind, CXXSpliceExpr *RHS) {
+  bool IsRHSDependent = (RHS->isValueDependent() || RHS->isTypeDependent());
+  bool IsArrow = (OpKind == tok::arrow);
+  if (Base) {
+    const PointerType *PT = Base->getType()->getAs<PointerType>();
+    bool IsPtr = (PT != nullptr);
+    bool IsRecord = isRecordType(PT ? PT->getPointeeType() : Base->getType());
+    if (IsRecord && IsArrow != IsPtr) {
+      std::string Suggestion = IsPtr ? "." : "->";
+      Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
+        << Base->getType() << int(IsArrow) << Base->getSourceRange()
+        << FixItHint::CreateReplacement(OpLoc, Suggestion);
+      return ExprError();
+    } else if (!IsRecord && !IsRHSDependent) {
+        Diag(OpLoc, diag::err_typecheck_member_reference_struct_union)
+          << Base->getType() << Base->getSourceRange()
+          << RHS->getSourceRange();
+      return ExprError();
+    }
+  }
+
+  if (IsRHSDependent) {
+    return BuildDependentMemberSpliceExpr(Base, OpLoc, IsArrow, RHS);
+  }
+
+  CXXScopeSpec SS;
+  NamedDecl *ND = nullptr;
+  TemplateArgumentListInfo TemplateArgs(RHS->getBeginLoc(), RHS->getEndLoc());
+  if (auto *DRE = dyn_cast<DeclRefExpr>(RHS->getModel())) {
+    ValueDecl *D = DRE->getDecl();
+    if (isa<FieldDecl>(D) || isa<IndirectFieldDecl>(D) || isa<CXXMethodDecl>(D)
+     || (isa<VarDecl>(D) && DRE->getQualifierLoc())) {
+      ND = D;
+      // NOTE(P2996): Uncomment the following line for static dispatch.
+      // SS.Adopt(DRE->getQualifierLoc());
+    }
+  } else if (auto *ULE = dyn_cast<UnresolvedLookupExpr>(RHS->getModel())) {
+    assert(ULE->getNumDecls() == 1);
+
+    ND = (*ULE->decls_begin());
+    ULE->copyTemplateArgumentsInto(TemplateArgs);
+    SS.Adopt(ULE->getQualifierLoc());
+  }
+
+  if (!ND || (SS.isSet() && SS.isInvalid())) {
+    Diag(RHS->getExprLoc(), diag::err_member_access_splice_not_class_member);
+    return ExprError();
+  }
+
+  DeclarationNameInfo NameInfo(cast<NamedDecl>(ND)->getDeclName(),
+                               ND->getLocation());
+  {
+    CXXRecordDecl *DerivedRecord = [](QualType QT) {
+      if (QualType PT = QT->getPointeeType(); !PT.isNull())
+        QT = PT;
+      return QT->getAsCXXRecordDecl()->getCanonicalDecl();
+    }(Base->getType());
+    CXXRecordDecl *BaseRecord = [](NamedDecl *ND) {
+      DeclContext *DC = ND->getDeclContext();
+      while (!isa<CXXRecordDecl>(DC)) {
+        DC = DC->getParent();
+        assert(DC);
+      }
+      return cast<CXXRecordDecl>(DC)->getCanonicalDecl();
+    }(ND);
+    if (BaseRecord != DerivedRecord &&
+        !IsDerivedFrom(Base->getExprLoc(), DerivedRecord, BaseRecord)) {
+      Diag(Base->getExprLoc(), diag::err_class_not_derived_from_base)
+          << DerivedRecord << BaseRecord << SourceRange(Base->getBeginLoc(),
+                                                        RHS->getEndLoc());
+      return ExprError();
+    }
+  }
+
+  LookupResult LR(*this, NameInfo, LookupMemberName);
+  if (LR.empty())
+    LR.addDecl(ND);
+  LR.resolveKind();
+
+  // Obnoxious translating of TemplateArgumentList to TemplateArgumentListInfo..
+  if (auto *FD = dyn_cast<FunctionDecl>(ND);
+      FD && TemplateArgs.size() == 0) {
+    if (const TemplateArgumentList *TAs = FD->getTemplateSpecializationArgs())
+      for (const TemplateArgument &TA : TAs->asArray()) {
+        TemplateArgumentLoc TAL =
+            getTrivialTemplateArgumentLoc(TA, QualType(), OpLoc);
+        TemplateArgs.addArgument(TAL);
+      }
+  }
+
+  ExprResult Res = BuildMemberReferenceExpr(
+      Base, Base->getType(), OpLoc, IsArrow, SS, RHS->getTemplateKWLoc(),
+      nullptr, LR, TemplateArgs.size() > 0 ? &TemplateArgs : 0, S, false,
+      nullptr);
+
+  if (!Res.isInvalid() && isa<MemberExpr>(Res.get()))
+    CheckMemberAccessOfNoDeref(cast<MemberExpr>(Res.get()));
+
+  return Res;
+}
+
+ExprResult
+Sema::BuildDependentMemberSpliceExpr(Expr *Base, SourceLocation OpLoc,
+                                     bool IsArrow, CXXSpliceExpr *RHS) {
+  return CXXDependentMemberSpliceExpr::Create(Context, Base, OpLoc, IsArrow,
+                                              RHS);
+}
+
 /// Given that normal member access failed on the given expression,
 /// and given that the expression's type involves builtin-id or
 /// builtin-Class, decide whether substituting in the redefinition
@@ -1196,15 +1326,6 @@ static bool ShouldTryAgainWithRedefinitionType(Sema &S, ExprResult &base) {
 
   base = S.ImpCastExprToType(base.get(), redef, CK_BitCast);
   return true;
-}
-
-static bool isRecordType(QualType T) {
-  return T->isRecordType();
-}
-static bool isPointerToRecordType(QualType T) {
-  if (const PointerType *PT = T->getAs<PointerType>())
-    return PT->getPointeeType()->isRecordType();
-  return false;
 }
 
 ExprResult
@@ -1767,6 +1888,15 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
   return Res;
 }
 
+/// Variant of ActOnMemberAccessExpr used when the right-hand expression is an
+/// expression splice (C++26, P2996) rather than an unqualified-id.
+ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
+                                       SourceLocation OpLoc,
+                                       tok::TokenKind OpKind,
+                                       CXXSpliceExpr *RHS) {
+  return BuildMemberReferenceExpr(S, Base, OpLoc, OpKind, RHS);
+}
+
 void Sema::CheckMemberAccessOfNoDeref(const MemberExpr *E) {
   if (isUnevaluatedContext())
     return;
@@ -1903,6 +2033,20 @@ Sema::BuildImplicitMemberExpr(const CXXScopeSpec &SS,
   assert(!R.empty() && !R.isAmbiguous());
 
   SourceLocation loc = R.getNameLoc();
+
+  if (NestedNameSpecifier NNS = SS.getScopeRep()) {
+    while (NNS.getKind() == NestedNameSpecifier::Kind::Namespace)
+      NNS = NNS.getAsNamespaceAndPrefix().Prefix;
+
+    if (NNS.getAsSplice()) {
+      Diag(SS.getBeginLoc(),
+           diag::err_dependent_splice_implicit_member_reference)
+          << SourceRange(SS.getBeginLoc(), R.getNameLoc());
+      Diag(SS.getBeginLoc(),
+           diag::note_dependent_splice_explicit_this_may_fix);
+      return ExprError();
+    }
+  }
 
   // If this is known to be an instance access, go ahead and build an
   // implicit 'this' expression now.

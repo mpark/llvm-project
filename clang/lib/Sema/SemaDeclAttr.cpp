@@ -2363,6 +2363,65 @@ static void handleAttrWithMessage(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) AttrTy(S.Context, AL, Str));
 }
 
+/// Handle an annotation (C++2c).
+static void handleCXX2CAnnotation(Sema &S, Decl *D, const ParsedAttr &AL) {
+  Expr *CE = AL.getArgAsExpr(0);
+  if (CE->isLValue()) {
+    if (CE->getType()->isRecordType()) {
+      InitializedEntity Entity =
+          InitializedEntity::InitializeTemporary(
+              CE->getType().getUnqualifiedType());
+      InitializationKind Kind =
+          InitializationKind::CreateCopy(CE->getExprLoc(), SourceLocation());
+      InitializationSequence Seq(S, Entity, Kind, CE);
+
+      ExprResult CopyResult = Seq.Perform(S, Entity, Kind, CE);
+      if (CopyResult.isInvalid())
+        return;
+
+      CE = CopyResult.get();
+    } else {
+      ExprResult RVExprResult = S.DefaultLvalueConversion(AL.getArgAsExpr(0));
+      assert(!RVExprResult.isInvalid() && RVExprResult.get());
+
+      CE = RVExprResult.get();
+    }
+  }
+
+  Expr::EvalResult Result;
+
+  SmallVector<PartialDiagnosticAt, 4> Notes;
+  Result.Diag = &Notes;
+
+  if (!CE->isValueDependent()) {
+    ConstantExprKind CEKind = (CE->getType()->isClassType() ?
+                               ConstantExprKind::ClassTemplateArgument :
+                               ConstantExprKind::NonClassTemplateArgument);
+
+    if (!CE->EvaluateAsConstantExpr(Result, S.Context, CEKind)) {
+      S.Diag(CE->getBeginLoc(), diag::err_attribute_argument_type)
+          << "C++26 annotation" << 4 << CE->getSourceRange();
+      for (auto P : Notes)
+        S.Diag(P.first, P.second);
+
+      return;
+    } else if (!CE->getType()->isStructuralType()) {
+      S.Diag(CE->getBeginLoc(), diag::err_attribute_argument_type)
+          << "C++26 annotation" << 5 << CE->getSourceRange();
+      return;
+    }
+  }
+  auto *Annot = CXX26AnnotationAttr::Create(S.Context, CE, AL);
+  Annot->setValue(Result.Val);
+  Annot->setEqLoc(AL.getLoc());
+  D->addAttr(Annot);
+}
+
+static void handleInstantiationDependentAttr(Sema &S, Decl *D,
+                                             const ParsedAttr &AL) {
+  D->addAttr(::new (S.Context) InstantiationDependentAttr(S.Context, AL));
+}
+
 static bool checkAvailabilityAttr(Sema &S, SourceRange Range,
                                   const IdentifierInfo *Platform,
                                   VersionTuple Introduced,
@@ -8481,6 +8540,14 @@ ProcessDeclAttribute(Sema &S, Decl *D, const ParsedAttr &AL,
     handleVTablePointerAuthentication(S, D, AL);
     break;
 
+  case ParsedAttr::AnnotationAttribute:
+    handleCXX2CAnnotation(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_InstantiationDependent:
+    handleInstantiationDependentAttr(S, D, AL);
+    break;
+
   case ParsedAttr::AT_ModularFormat:
     handleModularFormat(S, D, AL);
     break;
@@ -8963,7 +9030,6 @@ static void handleDelayedForbiddenType(Sema &S, DelayedDiagnostic &DD,
       << DD.getForbiddenTypeOperand() << DD.getForbiddenTypeArgument();
   DD.Triggered = true;
 }
-
 
 void Sema::PopParsingDeclaration(ParsingDeclState state, Decl *decl) {
   assert(DelayedDiagnostics.getCurrentPool());

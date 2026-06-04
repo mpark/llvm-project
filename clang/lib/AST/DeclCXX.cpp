@@ -3360,11 +3360,11 @@ NamespaceDecl *UsingDirectiveDecl::getNominatedNamespace() {
   return cast_or_null<NamespaceDecl>(NominatedNamespace);
 }
 
-NamespaceDecl::NamespaceDecl(ASTContext &C, DeclContext *DC, bool Inline,
+NamespaceDecl::NamespaceDecl(Kind K, ASTContext &C, DeclContext *DC, bool Inline,
                              SourceLocation StartLoc, SourceLocation IdLoc,
                              IdentifierInfo *Id, NamespaceDecl *PrevDecl,
                              bool Nested)
-    : NamespaceBaseDecl(Namespace, DC, IdLoc, Id), DeclContext(Namespace),
+    : NamespaceBaseDecl(K, DC, IdLoc, Id), DeclContext(Namespace),
       redeclarable_base(C), LocStart(StartLoc) {
   setInline(Inline);
   setNested(Nested);
@@ -3376,13 +3376,15 @@ NamespaceDecl *NamespaceDecl::Create(ASTContext &C, DeclContext *DC,
                                      SourceLocation IdLoc, IdentifierInfo *Id,
                                      NamespaceDecl *PrevDecl, bool Nested) {
   return new (C, DC)
-      NamespaceDecl(C, DC, Inline, StartLoc, IdLoc, Id, PrevDecl, Nested);
+      NamespaceDecl(Namespace, C, DC, Inline, StartLoc, IdLoc, Id, PrevDecl,
+                    Nested);
 }
 
 NamespaceDecl *NamespaceDecl::CreateDeserialized(ASTContext &C,
                                                  GlobalDeclID ID) {
-  return new (C, ID) NamespaceDecl(C, nullptr, false, SourceLocation(),
-                                   SourceLocation(), nullptr, nullptr, false);
+  return new (C, ID) NamespaceDecl(Namespace, C, nullptr, false,
+                                   SourceLocation(), SourceLocation(), nullptr,
+                                   nullptr, false);
 }
 
 NamespaceDecl *NamespaceDecl::getNextRedeclarationImpl() {
@@ -3429,6 +3431,29 @@ NamespaceAliasDecl *NamespaceAliasDecl::CreateDeserialized(ASTContext &C,
                                         SourceLocation(), nullptr,
                                         NestedNameSpecifierLoc(),
                                         SourceLocation(), nullptr);
+}
+
+void DependentNamespaceDecl::anchor() {}
+
+DependentNamespaceDecl::DependentNamespaceDecl(
+      ASTContext &C, DeclContext *DC, SpliceSpecifier *Splice)
+    : NamespaceDecl(DependentNamespace, C, DC, false, Splice->getBeginLoc(),
+                    Splice->getBeginLoc(), nullptr, nullptr, false),
+      Splice(Splice) {}
+
+DependentNamespaceDecl *DependentNamespaceDecl::Create(
+      ASTContext &C, DeclContext *DC, SpliceSpecifier *Splice) {
+  return new (C, DC) DependentNamespaceDecl(C, DC, Splice);
+}
+
+DependentNamespaceDecl *
+DependentNamespaceDecl::CreateDeserialized(ASTContext &C,
+                                           GlobalDeclID ID) {
+  return new (C, ID) DependentNamespaceDecl(C, nullptr, nullptr);
+}
+
+SourceRange DependentNamespaceDecl::getSourceRange() const {
+  return SourceRange(Splice->getBeginLoc(), Splice->getEndLoc());
 }
 
 void LifetimeExtendedTemporaryDecl::anchor() {}
@@ -3690,6 +3715,19 @@ StaticAssertDecl *StaticAssertDecl::CreateDeserialized(ASTContext &C,
                                                        GlobalDeclID ID) {
   return new (C, ID) StaticAssertDecl(nullptr, SourceLocation(), nullptr,
                                       nullptr, SourceLocation(), false);
+}
+
+void ConstevalBlockDecl::anchor() {}
+
+ConstevalBlockDecl *ConstevalBlockDecl::Create(ASTContext &C, DeclContext *DC,
+                                               SourceLocation ConstevalLoc,
+                                               Expr *EvaluatingExpr) {
+  return new (C, DC) ConstevalBlockDecl(DC, ConstevalLoc, EvaluatingExpr);
+}
+
+ConstevalBlockDecl *ConstevalBlockDecl::CreateDeserialized(ASTContext &C,
+                                                           GlobalDeclID ID) {
+  return new (C, ID) ConstevalBlockDecl(nullptr, SourceLocation(), nullptr);
 }
 
 VarDecl *ValueDecl::getPotentiallyDecomposedVarDecl() {

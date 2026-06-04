@@ -1,5 +1,7 @@
 //===- ASTRecordWriter.h - Helper classes for writing AST -------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -181,6 +183,10 @@ public:
     Record->push_back(Value);
   }
 
+  void writeChar(char Value) {
+    Record->push_back(Value);
+  }
+
   void writeUInt32(uint32_t Value) {
     Record->push_back(Value);
   }
@@ -232,6 +238,10 @@ public:
   /// Emit a set of C++ base specifiers.
   void AddCXXBaseSpecifiers(ArrayRef<CXXBaseSpecifier> Bases);
 
+  void writeCXXBaseSpecifierRef(const CXXBaseSpecifier *S) {
+    AddCXXBaseSpecifier(*S);
+  }
+
   /// Emit a reference to a type.
   void AddTypeRef(QualType T) {
     return Writer->AddTypeRef(getASTContext(), T, *Record);
@@ -259,12 +269,23 @@ public:
   // Emits a concept reference.
   void AddConceptReference(const ConceptReference *CR);
 
+  // Emits a splice specifier.
+  void AddSpliceSpecifier(const SpliceSpecifier *SS);
+  void writeSpliceSpecifierRef(const SpliceSpecifier *SS) {
+    AddSpliceSpecifier(SS);
+  }
+
   /// Emit a reference to a declaration.
   void AddDeclRef(const Decl *D) {
     return Writer->AddDeclRef(D, *Record);
   }
   void writeDeclRef(const Decl *D) {
     AddDeclRef(D);
+  }
+
+  /// Emit a TagDataMemberSpec.
+  void writeTagDataMemberSpecRef(const TagDataMemberSpec *Spec) {
+    // TODO(P2996): Implement this.
   }
 
   /// Emit a declaration name.

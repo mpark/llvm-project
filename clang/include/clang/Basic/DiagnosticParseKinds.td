@@ -1686,6 +1686,24 @@ def err_import_in_wrong_fragment : Error<
 def err_export_empty : Error<"export declaration cannot be empty">;
 }
 
+let CategoryName = "Reflection Issue" in {
+
+def err_cannot_reflect_operand : Error<
+  "cannot reflect the provided operand">;
+def err_expansion_statements_disabled : Error<
+  "'template for' statements are not enabled; use '-fexpansion-statements'">;
+def err_annotation_with_using : Error<
+  "annotations are not permitted following an attribute-using-prefix">;
+def err_annotation_used_on : Error<
+  "annotations are not permitted on %select{defining-type-id}0">;
+def err_mixed_attributes_and_annotations : Error<
+  "attribute specifier cannot contain both attributes and annotations">;
+def warn_meant_parenthesize_reflection : Warning<
+  "'%0' binds to reflection operand">, InGroup<ReflexingParse>;
+def err_splice_template_argument : Error<
+  "unparenthesized splice expression cannot be used as a template argument">;
+}
+
 let CategoryName = "Generics Issue" in {
 
 def err_objc_expected_type_parameter : Error<
@@ -1716,11 +1734,6 @@ def err_concept_legacy_bool_keyword : Error<
   "ISO C++ does not permit the 'bool' keyword after 'concept'">;
 def err_placeholder_expected_auto_or_decltype_auto : Error<
   "expected 'auto' or 'decltype(auto)' after concept name">;
-}
-
-let CategoryName = "Reflection Diagnostics" in {
-def err_cannot_reflect_operand : Error<
-  "unknown or unimplemented reflectable entity">;
 }
 
 def warn_max_tokens : Warning<

@@ -1,5 +1,7 @@
 //===- CompilerInvocation.cpp ---------------------------------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -588,6 +590,14 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
     LangOpts.NewAlignOverride = 0;
   }
 
+  if (!LangOpts.Reflection) {
+    if (LangOpts.ParameterReflection) {
+      Diags.Report(diag::err_fe_parameter_reflection_without_reflection);
+    } else if (LangOpts.EntityProxyReflection) {
+      Diags.Report(diag::err_fe_entity_proxy_reflection_without_reflection);
+    }
+  }
+
   // The -f[no-]raw-string-literals option is only valid in C and in C++
   // standards before C++11.
   if (LangOpts.CPlusPlus11) {
@@ -601,7 +611,12 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
     LangOpts.RawStringLiterals = true;
   }
 
-  if (Args.hasArg(OPT_freflection) && !LangOpts.CPlusPlus26) {
+  // Don't enforce the C++26 requirement when the input is a precompiled module:
+  // its language standard comes from the module itself (and is validated when
+  // the module was built), not from the current command line, so LangOpts here
+  // does not reflect the module's standard.
+  if (Args.hasArg(OPT_freflection) && !LangOpts.CPlusPlus26 &&
+      IK.getFormat() != InputKind::Precompiled) {
     Diags.Report(diag::err_drv_reflection_requires_cxx26)
         << Args.getLastArg(options::OPT_freflection)->getAsString(Args);
   }

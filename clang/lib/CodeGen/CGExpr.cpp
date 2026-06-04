@@ -1896,6 +1896,8 @@ LValue CodeGenFunction::EmitLValueHelper(const Expr *E,
     return EmitCoawaitLValue(cast<CoawaitExpr>(E));
   case Expr::CoyieldExprClass:
     return EmitCoyieldLValue(cast<CoyieldExpr>(E));
+  case Expr::CXXSpliceExprClass:
+    return EmitLValue(cast<CXXSpliceExpr>(E)->getModel());
   case Expr::PackIndexingExprClass:
     return EmitLValue(cast<PackIndexingExpr>(E)->getSelectedExpr());
   case Expr::HLSLOutArgExprClass:

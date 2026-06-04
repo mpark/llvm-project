@@ -158,6 +158,10 @@ module std_core {
       header "__type_traits/is_constant_evaluated.h"
       export std_core.type_traits.integral_constant
     }
+    module is_consteval_only {
+      header "__type_traits/is_consteval_only.h"
+      export std_core.type_traits.integral_constant
+    }
     module is_constructible {
       header "__type_traits/is_constructible.h"
       export std_core.type_traits.integral_constant
@@ -1768,6 +1772,14 @@ module std {
     export *
   }
 
+  module meta {
+    header "meta"
+    export *
+    export std.concepts.constructible
+    export std.concepts.same_as
+    export std.tuple
+  }
+
   module mutex {
     module lock_guard     { header "__mutex/lock_guard.h" }
     module mutex          { header "__mutex/mutex.h" }
@@ -2355,6 +2367,7 @@ module std {
   module experimental {
     module iterator           { header "experimental/iterator" }
     module memory             { header "experimental/memory" }
+    module meta               { header "experimental/meta" }
     module propagate_const    { header "experimental/propagate_const" }
     module type_traits        { header "experimental/type_traits" }
     module utility            { header "experimental/utility" }

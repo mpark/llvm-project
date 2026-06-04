@@ -1,5 +1,7 @@
 //===--- ParseExpr.cpp - Expression Parsing -------------------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -333,23 +335,20 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     Token OpToken = Tok;
     ConsumeToken();
 
-    // The reflection operator is not valid here (i.e., in the place of the
-    // operator token in a binary expression), so if reflection and blocks are
-    // enabled, we split caretcaret into two carets: the first being the binary
-    // operator and the second being the introducer for the block.
     if (OpToken.is(tok::caretcaret)) {
-      assert(getLangOpts().Reflection);
+      assert(getLangOpts().Reflection &&
+             "should not have '^^'-token without reflection");
       if (getLangOpts().Blocks) {
         OpToken.setKind(tok::caret);
-        Token Caret;
+        Token T;
         {
-          Caret.startToken();
-          Caret.setKind(tok::caret);
-          Caret.setLocation(OpToken.getLocation().getLocWithOffset(1));
-          Caret.setLength(1);
+          T.startToken();
+          T.setKind(tok::caret);
+          T.setLocation(Tok.getLocation());
+          T.setLength(1);
         }
         UnconsumeToken(OpToken);
-        PP.EnterToken(Caret, /*IsReinject=*/true);
+        PP.EnterToken(T, /*IsReinject=*/true);
         return ParseRHSOfBinaryExpression(LHS, MinPrec);
       }
     }
@@ -655,6 +654,7 @@ bool Parser::isRevertibleTypeTrait(const IdentifierInfo *II,
 
     REVERTIBLE_TYPE_TRAIT(__is_abstract);
     REVERTIBLE_TYPE_TRAIT(__is_aggregate);
+    REVERTIBLE_TYPE_TRAIT(__is_consteval_only);
     REVERTIBLE_TYPE_TRAIT(__is_arithmetic);
     REVERTIBLE_TYPE_TRAIT(__is_array);
     REVERTIBLE_TYPE_TRAIT(__is_assignable);
@@ -1237,7 +1237,7 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;
     AllowSuffix = false;
-    Res = ParseCXXReflectExpression();
+    Res = ParseUnaryExprOrTypeTraitExpression();
     break;
   }
   case tok::ampamp: {      // unary-expression: '&&' identifier
@@ -1394,15 +1394,62 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     break;
   }
 
-  case tok::annot_cxxscope: { // [C++] id-expression: qualified-id
-    // If TryAnnotateTypeOrScopeToken annotates the token, tail recurse.
-    // (We can end up in this situation after tentative parsing.)
-    if (TryAnnotateTypeOrScopeToken())
+  case tok::kw_template: {
+    SourceLocation TemplateKWLoc = ConsumeToken();
+
+    if (!Tok.is(tok::l_splice) ||
+        ParseSpliceSpecifier(/*TryParseSpecialization=*/true)) {
+      NotCastExpr = true;
       return ExprError();
-    if (!Tok.is(tok::annot_cxxscope))
+    }
+    SpliceResult SR = getSpliceAnnotation(Tok);
+    if (SR.isInvalid())
+      return ExprError();
+    SpliceSpecifier *Splice = SR.get();
+
+    if (Splice->isSpecialization() && NextToken().is(tok::coloncolon)) {
+      ConsumeAnnotationToken();
+
+      CXXScopeSpec SS;
+      if (Actions.ActOnCXXSpliceScopeSpecifier(SS, TemplateKWLoc, Splice,
+                                               Tok.getLocation()))
+        return ExprError();
+      ConsumeToken();
+      AnnotateScopeToken(SS, /*IsNewAnnotation=*/true);
+
       return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
                                  CorrectionBehavior, isVectorLiteral,
                                  NotPrimaryExpression);
+    }
+
+    Res = ParseCXXSpliceAsExpr(TemplateKWLoc,
+                               /*AllowMemberReference=*/isAddressOfOperand);
+    break;
+  }
+
+  case tok::annot_splice: {
+    // An 'annot_splice' was parsed by 'TryAnnotateTypeOrScopeToken', but it
+    // could not be spliced as a type; it must be an expression.
+    Res = ParseCXXSpliceAsExpr(SourceLocation(),
+                               /*AllowMemberReference=*/isAddressOfOperand);
+    break;
+  }
+
+  case tok::l_splice:
+    if (ParseSpliceSpecifier())
+      return ExprError();
+    [[fallthrough]];
+  case tok::annot_cxxscope: { // [C++] id-expression: qualified-id
+    // If TryAnnotateTypeOrScopeToken annotates the token, tail recurse.
+    // (We can end up in this situation after tentative parsing.)
+    if (TryAnnotateTypeOrScopeToken()) {
+      return ExprError();
+    }
+    if (!Tok.is(tok::annot_cxxscope)) {
+      return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
+                                 CorrectionBehavior, isVectorLiteral,
+                                 NotPrimaryExpression);
+    }
 
     Token Next = NextToken();
     if (Next.is(tok::annot_template_id)) {
@@ -1547,6 +1594,9 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
       *NotPrimaryExpression = true;
     Res = ParseExpressionTrait();
     break;
+
+  case tok::kw___metafunction:
+    return ParseCXXMetafunctionExpression();
 
   case tok::at: {
     if (NotPrimaryExpression)
@@ -1947,6 +1997,12 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       ParsedType ObjectType;
       bool MayBePseudoDestructor = false;
       Expr* OrigLHS = !LHS.isInvalid() ? LHS.get() : nullptr;
+      SourceLocation TemplateKWLoc;
+
+      if (Tok.is(tok::kw_template) && NextToken().is(tok::l_splice)) {
+        TemplateKWLoc = ConsumeToken();
+        ParseSpliceSpecifier(/*TryParseSpecialization=*/true);
+      }
 
       PreferredType.enterMemAccess(Actions, Tok.getLocation(), OrigLHS);
 
@@ -2023,8 +2079,8 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       // names a real destructor.
       // Allow explicit constructor calls in Microsoft mode.
       // FIXME: Add support for explicit call of template constructor.
-      SourceLocation TemplateKWLoc;
       UnqualifiedId Name;
+
       if (getLangOpts().ObjC && OpKind == tok::period &&
           Tok.is(tok::kw_class)) {
         // Objective-C++:
@@ -2037,6 +2093,23 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         IdentifierInfo *Id = Tok.getIdentifierInfo();
         SourceLocation Loc = ConsumeToken();
         Name.setIdentifier(Id, Loc);
+      } else if (Tok.is(tok::annot_splice)) {
+        ExprResult Res = ParseCXXSpliceAsExpr(TemplateKWLoc,
+                                              /*AllowMemberReference=*/true);
+        if (!Res.isInvalid()) {
+          LHS = Actions.ActOnMemberAccessExpr(getCurScope(), LHS.get(), OpLoc,
+                                              OpKind,
+                                              cast<CXXSpliceExpr>(Res.get()));
+          if (LHS.isInvalid())
+            // Preserve the LHS if the RHS is an invalid member.
+            LHS = Actions.CreateRecoveryExpr(OrigLHS->getBeginLoc(),
+                                             Name.getEndLoc(), {OrigLHS});
+          else if (Tok.is(tok::less))
+            checkPotentialAngleBracket(LHS);
+        } else {
+          LHS = ExprError();
+        }
+        break;
       } else if (ParseUnqualifiedId(
                      SS, ObjectType, LHS.get() && LHS.get()->containsErrors(),
                      /*EnteringContext=*/false,
@@ -2220,10 +2293,11 @@ ExprResult Parser::ParseSYCLUniqueStableNameExpression() {
 }
 
 ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
-  assert(Tok.isOneOf(tok::kw_sizeof, tok::kw___datasizeof, tok::kw___alignof,
+  assert((Tok.isOneOf(tok::kw_sizeof, tok::kw___datasizeof, tok::kw___alignof,
                      tok::kw_alignof, tok::kw__Alignof, tok::kw_vec_step,
                      tok::kw___builtin_omp_required_simd_align,
-                     tok::kw___builtin_vectorelements, tok::kw__Countof) &&
+                     tok::kw___builtin_vectorelements, tok::kw__Countof) ||
+         (getLangOpts().Reflection && Tok.is(tok::caretcaret))) &&
          "Not a sizeof/alignof/vec_step expression!");
   Token OpTok = Tok;
   ConsumeToken();
@@ -2282,6 +2356,9 @@ ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
     Diag(OpTok, diag::warn_c23_compat_keyword) << OpTok.getName();
   else if (getLangOpts().C2y && OpTok.is(tok::kw__Countof))
     Diag(OpTok, diag::warn_c2y_compat_keyword) << OpTok.getName();
+
+  if (OpTok.is(tok::caretcaret))
+    return ParseCXXReflectExpression(OpTok.getLocation());
 
   EnterExpressionEvaluationContext Unevaluated(
       Actions, Sema::ExpressionEvaluationContext::Unevaluated,

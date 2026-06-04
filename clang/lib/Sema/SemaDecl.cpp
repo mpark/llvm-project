@@ -1,5 +1,7 @@
 //===--- SemaDecl.cpp - Semantic Analysis for Declarations ----------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -3043,6 +3045,9 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
     NewAttr = S.HLSL().mergeShaderAttr(D, *SA, SA->getType());
   else if (isa<SuppressAttr>(Attr))
     // Do nothing. Each redeclaration should be suppressed separately.
+    NewAttr = nullptr;
+  else if (isa<CXX26AnnotationAttr>(Attr))
+    // Do nothing. Annotation introspection walks all redeclarations.
     NewAttr = nullptr;
   else if (const auto *RD = dyn_cast<OpenACCRoutineDeclAttr>(Attr))
     NewAttr = S.OpenACC().mergeRoutineDeclAttr(*RD);
@@ -15064,6 +15069,16 @@ void Sema::addLifetimeBoundToImplicitThis(CXXMethodDecl *MD) {
 
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
+
+  if (var->getType()->isConstevalOnly() && !var->isConstexpr() &&
+      !isCheckingDefaultArgumentOrInitializer() &&
+      !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
+      !isImmediateFunctionContext() && !isAlwaysConstantEvaluatedContext()) {
+    if (!ExprEvalContexts.back().InImmediateEscalatingFunctionContext)
+      Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
+    else if (FunctionScopeInfo *FI = getCurFunction())
+      FI->FoundImmediateEscalatingConstruct = true;
+  }
 
   CUDA().MaybeAddConstantAttr(var);
 

@@ -2255,10 +2255,6 @@ StmtProfiler::VisitLambdaExpr(const LambdaExpr *S) {
   ID.AddInteger(Hasher.CalculateHash());
 }
 
-void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  // TODO(Reflection): Implement this.
-  assert(false && "not implemented yet");
-}
 
 void
 StmtProfiler::VisitCXXScalarValueInitExpr(const CXXScalarValueInitExpr *S) {
@@ -2503,6 +2499,41 @@ void StmtProfiler::VisitCoyieldExpr(const CoyieldExpr *S) {
 }
 
 void StmtProfiler::VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
+  VisitExpr(E);
+
+  if (E->hasDependentSubExpr()) {
+    VisitExpr(E->getDependentSubExpr());
+  } else {
+    E->getReflection().Profile(ID);
+  }
+}
+
+void StmtProfiler::VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitCXXDependentMemberSpliceExpr(
+                                        const CXXDependentMemberSpliceExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitStackLocationExpr(const StackLocationExpr *E) {
+  VisitExpr(E);
+}
+
+void StmtProfiler::VisitExtractLValueExpr(const ExtractLValueExpr *E) {
+  VisitDecl(E->getValueDecl());
+}
+
+void StmtProfiler::VisitExplDependentCallExpr(const ExplDependentCallExpr *E) {
   VisitExpr(E);
 }
 

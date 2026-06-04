@@ -120,6 +120,7 @@ class CXXRecordDecl;
 class DeclContext;
 class EnumDecl;
 class Expr;
+class SpliceSpecifier;
 class ExtQualsTypeCommonBase;
 class FunctionDecl;
 class FunctionEffectsRef;
@@ -1916,6 +1917,12 @@ private:
     LLVM_PREFERRED_TYPE(bool)
     mutable unsigned FromAST : 1;
 
+    /// P2996 reflection: whether this type is "consteval-only" (i.e., may only
+    /// appear during constant evaluation, e.g. std::meta::info). Propagated
+    /// through composed types.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned ConstevalOnly : 1;
+
     bool isCacheValid() const {
       return CacheValid;
     }
@@ -1930,7 +1937,7 @@ private:
       return CachedLocalOrUnnamed;
     }
   };
-  enum { NumTypeBits = 8 + llvm::BitWidth<TypeDependence> + 6 };
+  enum { NumTypeBits = 8 + llvm::BitWidth<TypeDependence> + 7 };
 
 protected:
   // These classes allow subclasses to somewhat cleanly pack bitfields
@@ -2410,7 +2417,8 @@ private:
 protected:
   friend class ASTContext;
 
-  Type(TypeClass tc, QualType canon, TypeDependence Dependence)
+  Type(TypeClass tc, QualType canon, TypeDependence Dependence,
+       bool ConstevalOnly = false)
       : ExtQualsTypeCommonBase(this,
                                canon.isNull() ? QualType(this_(), 0) : canon) {
     static_assert(sizeof(*this) <=
@@ -2424,6 +2432,7 @@ protected:
     TypeBits.CachedLocalOrUnnamed = false;
     TypeBits.CachedLinkage = llvm::to_underlying(Linkage::Invalid);
     TypeBits.FromAST = false;
+    TypeBits.ConstevalOnly = ConstevalOnly;
   }
 
   // silence VC++ warning C4355: 'this' : used in base member initializer list
@@ -2434,6 +2443,9 @@ protected:
   }
 
   void addDependence(TypeDependence D) { setDependence(getDependence() | D); }
+
+  /// P2996 reflection: set whether this type is consteval-only.
+  void setConstevalOnly(bool C = true) { TypeBits.ConstevalOnly = C; }
 
 public:
   friend class ASTReader;
@@ -2653,6 +2665,8 @@ public:
   bool isRealType() const;         // C99 6.2.5p17 (real floating + integer)
   bool isArithmeticType() const;   // C99 6.2.5p18 (integer + floating)
   bool isVoidType() const;         // C99 6.2.5p19
+  bool isReflectionType() const;   // C++2c reflection [P2996]
+  bool isConstevalOnly() const;    // C++2c reflection [P2996]
   bool isScalarType() const;       // C99 6.2.5p21 (arithmetic + pointers)
   bool isAggregateType() const;
   bool isFundamentalType() const;
@@ -2839,7 +2853,8 @@ public:
     STK_Floating,
     STK_IntegralComplex,
     STK_FloatingComplex,
-    STK_FixedPoint
+    STK_FixedPoint,
+    STK_Reflection,
   };
 
   /// Given that this is a scalar type, classify it.
@@ -3280,7 +3295,8 @@ private:
   BuiltinType(Kind K)
       : Type(Builtin, QualType(),
              K == Dependent ? TypeDependence::DependentInstantiation
-                            : TypeDependence::None) {
+                            : TypeDependence::None,
+             /*ConstevalOnly=*/(K == MetaInfo)) {
     static_assert(Kind::LastKind <
                       (1 << BuiltinTypeBitfields::NumOfBuiltinTypeBits) &&
                   "Defined builtin type exceeds the allocated space for serial "
@@ -3411,7 +3427,8 @@ class PointerType : public Type, public llvm::FoldingSetNode {
   QualType PointeeType;
 
   PointerType(QualType Pointee, QualType CanonicalPtr)
-      : Type(Pointer, CanonicalPtr, Pointee->getDependence()),
+      : Type(Pointer, CanonicalPtr, Pointee->getDependence(),
+             Pointee->isConstevalOnly()),
         PointeeType(Pointee) {}
 
 public:
@@ -3690,7 +3707,8 @@ class ReferenceType : public Type, public llvm::FoldingSetNode {
 protected:
   ReferenceType(TypeClass tc, QualType Referencee, QualType CanonicalRef,
                 bool SpelledAsLValue)
-      : Type(tc, CanonicalRef, Referencee->getDependence()),
+      : Type(tc, CanonicalRef, Referencee->getDependence(),
+             Referencee->isConstevalOnly()),
         PointeeType(Referencee) {
     ReferenceTypeBits.SpelledAsLValue = SpelledAsLValue;
     ReferenceTypeBits.InnerRef = Referencee->isReferenceType();
@@ -4942,7 +4960,8 @@ public:
 protected:
   FunctionType(TypeClass tc, QualType res, QualType Canonical,
                TypeDependence Dependence, ExtInfo Info)
-      : Type(tc, Canonical, Dependence), ResultType(res) {
+      : Type(tc, Canonical, Dependence,
+             /*ConstevalOnly=*/res->isConstevalOnly()), ResultType(res) {
     FunctionTypeBits.ExtInfo = Info.Bits;
   }
 
@@ -6304,7 +6323,8 @@ class MacroQualifiedType : public Type {
 
   MacroQualifiedType(QualType UnderlyingTy, QualType CanonTy,
                      const IdentifierInfo *MacroII)
-      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence()),
+      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence(),
+             UnderlyingTy->isConstevalOnly()),
         UnderlyingTy(UnderlyingTy), MacroII(MacroII) {
     assert(isa<AttributedType>(UnderlyingTy) &&
            "Expected a macro qualified type to only wrap attributed types.");
@@ -7728,6 +7748,67 @@ public:
   }
 };
 
+/// Represents a type formed by evaluating a reflection splice (C++2c, P2996).
+///
+/// A reflection splice wraps a potentially dependent constant expression whose
+/// resulting APValue is a reflection; this is expected to hold a type in the
+/// context of a 'ReflectionSpliceType'.
+class ReflectionSpliceType : public Type {
+  SourceLocation TypenameKWLoc;
+  SpliceSpecifier *Splice;
+  QualType UnderlyingTy;
+
+  static TypeDependence computeDependence(QualType Canon,
+                                          SpliceSpecifier *Splice);
+
+protected:
+  friend class ASTContext;
+
+  ReflectionSpliceType(SourceLocation TypenameKWLoc, SpliceSpecifier *Splice,
+                       QualType Canon = QualType());
+
+public:
+  /// Returns the location of the 'typename' keyword (if any).
+  SourceLocation getTypenameKWLoc() const { return TypenameKWLoc; }
+
+  /// Returns the splice specifier.
+  SpliceSpecifier *getSplice() const { return Splice; }
+
+  /// Returns the underlying type (i.e., the one spliced).
+  QualType getUnderlyingType() const { return UnderlyingTy; }
+
+  /// Removes a single level of sugar.
+  QualType desugar() const;
+
+  /// Returns whether this type directly provides sugar.
+  bool isSugared() const;
+
+  static bool classof(const Type *T) {
+    return T->getTypeClass() == ReflectionSplice;
+  }
+};
+
+/// Represents a dependent type formed by evaluating a reflection splice
+/// (C++2c, P2996).
+///
+/// For these types, we won't actually know what the type is until the
+/// splice operand is evaluated, at which point this will become a
+/// ReflectionSpliceType.
+class DependentReflectionSpliceType : public ReflectionSpliceType,
+                                      public llvm::FoldingSetNode {
+  const ASTContext &Context;
+
+public:
+  DependentReflectionSpliceType(const ASTContext &Context,
+                                SourceLocation TypenameKWLoc,
+                                SpliceSpecifier *Splice);
+
+  void Profile(llvm::FoldingSetNodeID &ID) { ID.AddPointer(getSplice()); }
+
+  static void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+                      Expr *Operand);
+};
+
 /// This class wraps the list of protocol qualifiers. For types that can
 /// take ObjC protocol qualifers, they can subclass this class.
 template <class T>
@@ -9111,6 +9192,12 @@ inline bool Type::isVoidType() const {
   return isSpecificBuiltinType(BuiltinType::Void);
 }
 
+inline bool Type::isReflectionType() const {
+  if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
+    return BT->getKind() == BuiltinType::MetaInfo;
+  return false;
+}
+
 inline bool Type::isHalfType() const {
   // FIXME: Should we allow complex __fp16? Probably not.
   return isSpecificBuiltinType(BuiltinType::Half);
@@ -9216,7 +9303,7 @@ inline bool Type::isUnsignedFixedPointType() const {
 inline bool Type::isScalarType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
     return BT->getKind() > BuiltinType::Void &&
-           BT->getKind() <= BuiltinType::NullPtr;
+           BT->getKind() <= BuiltinType::MetaInfo;
   if (const EnumType *ET = dyn_cast<EnumType>(CanonicalType))
     // Enums are scalar types, but only if they are defined.  Incomplete enums
     // are not treated as scalar types.

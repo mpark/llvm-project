@@ -1,5 +1,7 @@
 //===--- ParseDeclCXX.cpp - C++ Declaration Parsing -------------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -29,6 +31,7 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
 
@@ -281,7 +284,24 @@ Decl *Parser::ParseNamespaceAlias(SourceLocation NamespaceLoc,
                                  /*LastII=*/nullptr,
                                  /*OnlyNamespace=*/true);
 
-  if (Tok.isNot(tok::identifier)) {
+  // Check for a splice expression without a leading nested-name-specififer.
+  if (Tok.is(tok::annot_splice) && SS.isEmpty()) {
+    SourceLocation NSLoc = Tok.getLocation();
+
+    DeclResult DR = ParseCXXSpliceAsNamespace();
+    if (DR.isInvalid())
+      return nullptr;
+
+    // Eat the ';'.
+    DeclEnd = Tok.getLocation();
+    if (ExpectAndConsume(tok::semi,
+                         diag::err_expected_semi_after_namespace_name))
+      SkipUntil(tok::semi);
+
+    return Actions.ActOnNamespaceAliasDef(getCurScope(), NamespaceLoc, AliasLoc,
+                                          Alias, SS, NSLoc,
+                                          cast<NamespaceBaseDecl>(DR.get()));
+  } else if (Tok.isNot(tok::identifier)) {
     Diag(Tok, diag::err_expected_namespace_name);
     // Skip to end of the definition and eat the ';'.
     SkipUntil(tok::semi);
@@ -504,8 +524,40 @@ Decl *Parser::ParseUsingDirective(DeclaratorContext Context,
   IdentifierInfo *NamespcName = nullptr;
   SourceLocation IdentLoc = SourceLocation();
 
-  // Parse namespace-name.
-  if (Tok.isNot(tok::identifier)) {
+  // Check for a splice expression without a leading nested-name-specififer.
+  if (Tok.is(tok::annot_splice) && SS.isEmpty()) {
+    SourceLocation NSLoc = Tok.getLocation();
+
+    DeclResult DR = ParseCXXSpliceAsNamespace();
+    if (DR.isInvalid())
+      return nullptr;
+
+    NamedDecl *Named = cast<NamedDecl>(DR.get());
+    NamespaceDecl *NS = nullptr;
+    if (auto *Alias = dyn_cast<NamespaceAliasDecl>(Named))
+      NS = Alias->getNamespace();
+    else
+      NS = cast<NamespaceDecl>(Named);
+
+    // Parse (optional) attributes (most likely GNU strong-using extension).
+    bool GNUAttr = false;
+    if (Tok.is(tok::kw___attribute)) {
+      GNUAttr = true;
+      ParseGNUAttributes(attrs);
+    }
+
+    // Eat ';'.
+    DeclEnd = Tok.getLocation();
+    if (ExpectAndConsume(
+            tok::semi,
+            GNUAttr ? diag::err_expected_semi_after_attribute_list
+                    : diag::err_expected_semi_after_namespace_name))
+      SkipUntil(tok::semi);
+
+    return Actions.ActOnUsingDirective(getCurScope(), UsingLoc, NamespcLoc,
+                                       SS, NSLoc, Named, NS, attrs);
+  } else if (Tok.isNot(tok::identifier)) {
+    // Parse namespace-name.
     Diag(Tok, diag::err_expected_namespace_name);
     // If there was invalid namespace name, skip to end of decl, and eat ';'.
     SkipUntil(tok::semi);
@@ -629,6 +681,10 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
       SkipUntil(tok::semi);
       return nullptr;
     }
+
+    SourceLocation TypenameKWLoc;
+    TryConsumeToken(tok::kw_typename, TypenameKWLoc);
+
     CXXScopeSpec SS;
     if (ParseOptionalCXXScopeSpecifier(SS, /*ParsedType=*/nullptr,
                                        /*ObectHasErrors=*/false,
@@ -645,6 +701,39 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
     if (Tok.is(tok::code_completion)) {
       cutOffParsing();
       Actions.CodeCompletion().CodeCompleteUsing(getCurScope());
+      return nullptr;
+    }
+
+    if (Tok.is(tok::annot_typename)) {
+      SourceLocation SpliceLoc = Tok.getLocation();
+      // Dependent type will be diagnosed by ActOnUsingEnumDeclaration.
+      TypeResult TR = getTypeAnnotation(Tok);
+      if (TR.isInvalid()) {
+        SkipUntil(tok::semi);
+        return nullptr;
+      }
+      ConsumeAnnotationToken();
+
+      TypeSourceInfo *TSI;
+      QualType EnumTy = Actions.GetTypeFromParser(TR.get(), &TSI);
+      if (EnumTy.isNull()) {
+        SkipUntil(tok::semi);
+        return nullptr;
+      }
+
+      Decl *UED = Actions.ActOnUsingEnumDeclaration(getCurScope(), AS, UsingLoc,
+                                                    UELoc, SpliceLoc, EnumTy,
+                                                    TSI);
+      if (!UED) {
+        SkipUntil(tok::semi);
+        return nullptr;
+      }
+
+      return Actions.ConvertDeclToDeclGroup(UED);
+    }
+
+    if (TypenameKWLoc.isValid()) {
+      SkipUntil(tok::semi);
       return nullptr;
     }
 
@@ -732,6 +821,10 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
         << FixItHint::CreateRemoval(Range);
     Attrs.takeAllPrependingFrom(MisplacedAttrs);
   }
+
+  // Flag to the parser we are parsing a using declaration, among others we
+  // wanto to disallow parsing annotations as valid here.
+  llvm::SaveAndRestore<bool> InInitStatementGuard(InUsingDeclaration, true);
 
   // Maybe this is an alias-declaration.
   if (Tok.is(tok::equal) || InInitStatement) {
@@ -1000,6 +1093,36 @@ Decl *Parser::ParseStaticAssertDeclaration(SourceLocation &DeclEnd) {
   return Actions.ActOnStaticAssertDeclaration(StaticAssertLoc, AssertExpr.get(),
                                               AssertMessage.get(),
                                               T.getCloseLocation());
+}
+
+Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
+  assert(Tok.is(tok::kw_consteval) && NextToken().is(tok::l_brace) &&
+         "Not a consteval block declaration");
+  SourceLocation ConstevalLoc = ConsumeToken();
+
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      Actions, Sema::ExpressionEvaluationContext::ImmediateFunctionContext);
+
+  LambdaIntroducer FakeIntroducer;
+  FakeIntroducer.Range.setBegin(ConstevalLoc);
+  FakeIntroducer.Range.setEnd(ConstevalLoc);
+
+  TypeResult ReturnTy = ParsedType::make(Actions.Context.VoidTy);
+  ExprResult Lambda = ParseLambdaExpressionAfterIntroducer(FakeIntroducer,
+                                                           ConstevalLoc,
+                                                           ReturnTy);
+  if (Lambda.isInvalid())
+    return nullptr;
+
+  SmallVector<Expr *, 0> EmptyArgs;
+  ExprResult Invocation = Actions.ActOnCallExpr(getCurScope(), Lambda.get(),
+                                                Lambda.get()->getBeginLoc(),
+                                                EmptyArgs,
+                                                Lambda.get()->getEndLoc());
+  if (Invocation.isInvalid())
+    return nullptr;
+
+  return Actions.ActOnConstevalBlockDeclaration(ConstevalLoc, Invocation.get());
 }
 
 SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {
@@ -1338,11 +1461,12 @@ bool Parser::MaybeParseTypeTransformTypeSpecifier(DeclSpec &DS) {
 
 TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
                                           SourceLocation &EndLocation) {
-  // Ignore attempts to use typename
-  if (Tok.is(tok::kw_typename)) {
+  // Disallow attempts to use typename except for splice-type-specifiers.
+  SourceLocation TypenameKWLoc;
+  if (TryConsumeToken(tok::kw_typename, TypenameKWLoc) &&
+      !Tok.is(tok::l_splice)) {
     Diag(Tok, diag::err_expected_class_name_not_template)
         << FixItHint::CreateRemoval(Tok.getLocation());
-    ConsumeToken();
   }
 
   // Parse optional nested-name-specifier
@@ -1397,6 +1521,10 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
 
     // Fall through to produce an error below.
   }
+
+  if (Tok.is(tok::annot_splice))
+    return ParseCXXSpliceAsType(TypenameKWLoc, /*AllowDependent=*/true,
+                                /*Complain=*/true);
 
   if (Tok.isNot(tok::identifier)) {
     Diag(Tok, diag::err_expected_class_name);
@@ -1663,6 +1791,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
 #include "clang/Basic/BuiltinTraits.inc"
           tok::kw___is_abstract,
           tok::kw___is_aggregate,
+          tok::kw___is_consteval_only,
           tok::kw___is_arithmetic,
           tok::kw___is_array,
           tok::kw___is_assignable,
@@ -2793,6 +2922,14 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
         DeclGroupRef(ParseStaticAssertDeclaration(DeclEnd)));
   }
 
+  if (TemplateInfo.Kind == ParsedTemplateKind::NonTemplate &&
+      getLangOpts().Reflection && Tok.is(tok::kw_consteval) &&
+      NextToken().is(tok::l_brace)) {
+    SourceLocation DeclEnd;
+    return DeclGroupPtrTy::make(
+        DeclGroupRef(ParseConstevalBlockDeclaration(DeclEnd)));
+  }
+
   if (Tok.is(tok::kw_template)) {
     assert(!TemplateInfo.TemplateParams &&
            "Nested template improperly parsed?");
@@ -3333,12 +3470,19 @@ ExprResult Parser::ParseCXXMemberInitializer(Decl *D, bool IsFunction,
 
   bool IsFieldInitialization = isa_and_present<FieldDecl>(D);
 
-  EnterExpressionEvaluationContext Context(
-      Actions,
-      IsFieldInitialization
-          ? Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed
-          : Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
-      D);
+  auto Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluated;
+  if (IsFieldInitialization)
+    Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed;
+  else if (auto *VD = dyn_cast_or_null<VarDecl>(D);
+           VD && getLangOpts().CPlusPlus23) {
+    if (VD->isConstexpr())
+      Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+    else if (auto *CIA = VD->getAttr<ConstInitAttr>();
+             CIA && CIA->isConstinit())
+      Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+  }
+
+  EnterExpressionEvaluationContext Context(Actions, Ctx, D);
 
   // CWG2760
   // Default member initializers used to initialize a base or member subobject
@@ -4661,6 +4805,9 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
   checkCompoundToken(OpenLoc, tok::l_square, CompoundToken::AttrBegin);
   ConsumeBracket();
 
+  bool AllowAnnotations = getLangOpts().AnnotationAttributes &&
+                         Tok.is(tok::equal);
+
   SourceLocation CommonScopeLoc;
   IdentifierInfo *CommonScopeName = nullptr;
   if (Tok.is(tok::kw_using)) {
@@ -4671,14 +4818,15 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
         CommonScopeLoc, SemaCodeCompletion::AttributeCompletion::Scope);
     if (!CommonScopeName) {
       Diag(Tok.getLocation(), diag::err_expected) << tok::identifier;
-      SkipUntil(tok::r_square, tok::colon, StopBeforeMatch);
+      SkipUntil(tok::r_square, tok::colon, tok::r_splice, StopBeforeMatch);
     }
-    if (!TryConsumeToken(tok::colon) && CommonScopeName)
+    if (!TryConsumeToken(tok::colon) && !Tok.is(tok::r_splice) &&
+        CommonScopeName)
       Diag(Tok.getLocation(), diag::err_expected) << tok::colon;
   }
 
   bool AttrParsed = false;
-  while (!Tok.isOneOf(tok::r_square, tok::semi, tok::eof)) {
+  while (!Tok.isOneOf(tok::r_square, tok::semi, tok::eof, tok::r_splice)) {
     if (AttrParsed) {
       // If we parsed an attribute, a comma is required before parsing any
       // additional attributes.
@@ -4695,6 +4843,29 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
 
     SourceLocation ScopeLoc, AttrLoc;
     IdentifierInfo *ScopeName = nullptr, *AttrName = nullptr;
+
+    if (AllowAnnotations) {
+      if (Tok.is(tok::equal)) {
+        // This is a C++2c annotation.
+        if (CommonScopeName) {
+          Diag(Tok.getLocation(), diag::err_annotation_with_using);
+          SkipUntil(tok::r_square, tok::colon, tok::r_splice, StopBeforeMatch);
+        } else if (InUsingDeclaration) {
+          Diag(Tok.getLocation(), diag::err_annotation_used_on) << 0;
+          SkipUntil(tok::r_square, tok::colon, tok::r_splice, StopBeforeMatch);
+        }
+         else {
+          ParseAnnotationSpecifier(Attrs, EndLoc);
+        }
+        continue;
+      } else {
+        Diag(Tok.getLocation(), diag::err_mixed_attributes_and_annotations);
+        SkipUntil(tok::r_square, tok::colon, tok::r_splice, StopBeforeMatch);
+      }
+    } else if (Tok.is(tok::equal)) {
+      Diag(Tok.getLocation(), diag::err_mixed_attributes_and_annotations);
+      SkipUntil(tok::r_square, tok::colon, tok::r_splice, StopBeforeMatch);
+    }
 
     AttrName = TryParseCXX11AttributeIdentifier(
         AttrLoc, SemaCodeCompletion::AttributeCompletion::Attribute,
@@ -4751,8 +4922,10 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
   }
 
   SourceLocation CloseLoc = Tok.getLocation();
-  bool IsTokenNotFound = ExpectAndConsume(tok::r_square);
-  if (IsTokenNotFound)
+  bool IsTokenNotFound = false;
+  if (Tok.is(tok::r_splice))
+    ConsumeToken();
+  else if ((IsTokenNotFound = ExpectAndConsume(tok::r_square)))
     SkipUntil(tok::r_square);
   else if (Tok.is(tok::r_square))
     checkCompoundToken(CloseLoc, tok::r_square, CompoundToken::AttrEnd);

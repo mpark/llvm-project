@@ -1,5 +1,7 @@
 //===--- Options.td - Options for clang -----------------------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -4118,11 +4120,38 @@ defm application_extension : BoolFOption<"application-extension",
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Restrict code to those available for App Extensions">,
   NegFlag<SetFalse>>;
+
 defm reflection : BoolFOption<"reflection",
   LangOpts<"Reflection">, DefaultFalse,
-  PosFlag<SetTrue, [], [CC1Option],
-          "Enable C++26 reflection">,
-  NegFlag<SetFalse>>, ShouldParseIf<cplusplus.KeyPath>;
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable proposed C++26 reflection as described by P2996">,
+  NegFlag<SetFalse>>;
+defm parameter_reflection : BoolFOption<"parameter-reflection",
+  LangOpts<"ParameterReflection">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable proposed parameter reflection as described by P3096">,
+  NegFlag<SetFalse>>;
+defm expansion_statements : BoolFOption<"expansion-statements",
+  LangOpts<"ExpansionStatements">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable proposed expansion statements as described by P1306">,
+  NegFlag<SetFalse>>;
+defm annotation_attributes : BoolFOption<"annotation-attributes",
+  LangOpts<"AnnotationAttributes">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable proposed annotation attributes as described by P3394">,
+  NegFlag<SetFalse>>;
+defm entity_proxy_reflection : BoolFOption<"entity-proxy-reflection",
+  LangOpts<"EntityProxyReflection">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable proposed reflection of entity proxies as described by P3XYZ">,
+  NegFlag<SetFalse>>;
+defm reflection_latest : BoolFOption<"reflection-latest",
+  LangOpts<"ReflectionLatest">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable all reflection features supported by Clang/P2996">,
+  NegFlag<SetFalse>>;
+
 defm sized_deallocation : BoolFOption<"sized-deallocation",
   LangOpts<"SizedDeallocation">, Default<cpp14.KeyPath>,
   PosFlag<SetTrue, [], [], "Enable C++14 sized global deallocation functions">,

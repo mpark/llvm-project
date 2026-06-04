@@ -2013,7 +2013,7 @@ namespace ConstexprConstructorRecovery {
 
 namespace Lifetime {
   void f() {
-    constexpr int &n = n; // expected-error {{constant expression}} cxx23-note {{reference to 'n' is not a constant expression}} cxx23-note {{address of non-static constexpr variable 'n' may differ}} expected-warning {{not yet bound to a value}}
+    constexpr int &n = n; // expected-error {{constant expression}} cxx23-note {{reference to 'n' is not a constant expression}} cxx23-note {{address of non-static constexpr variable 'n' may differ}} cxx11_20-warning {{not yet bound to a value}}
                           // cxx11_20-note@-1 {{use of reference outside its lifetime is not allowed in a constant expression}}
     constexpr int m = m; // expected-error {{constant expression}} \
                          // expected-note {{read of object outside its lifetime}} \

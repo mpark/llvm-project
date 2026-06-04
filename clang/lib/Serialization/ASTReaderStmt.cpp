@@ -112,7 +112,7 @@ namespace clang {
     static const unsigned NumObjCObjectLiteralFields = NumExprFields + 1;
 
     /// The number of bits required for the packing bits for the Expr class.
-    static const unsigned NumExprBits = 10;
+    static const unsigned NumExprBits = 11;
 
     /// Read and initialize a ExplicitTemplateArgumentList structure.
     void ReadTemplateKWAndArgsInfo(ASTTemplateKWAndArgsInfo &Args,
@@ -505,6 +505,66 @@ void ASTStmtReader::VisitCoyieldExpr(CoyieldExpr *E) {
   E->OpaqueValue = cast_or_null<OpaqueValueExpr>(Record.readSubStmt());
 }
 
+void ASTStmtReader::VisitCXXReflectExpr(CXXReflectExpr *E) {
+  VisitExpr(E);
+  E->setOperatorLoc(Record.readSourceLocation());
+
+  if (Record.readBool()) {
+    Expr *DepSubExpr = Record.readExpr();
+
+    E->setDependentSubExpr(DepSubExpr);
+    E->setOperandRange(DepSubExpr->getSourceRange());
+  } else {
+    E->setAPValue(Record.readAPValue());
+    E->setOperandRange(Record.readSourceRange());
+  }
+}
+
+void ASTStmtReader::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setMetaFnID(Record.readUInt32());
+  E->setImpl(Record.getMetafunctionCb(E->getMetaFnID()));
+  E->setResultType(Record.readQualType());
+
+  unsigned NumArgs = Record.readUInt32();
+  Expr **Args = new (Record.getContext()) Expr *[NumArgs];
+  for (unsigned k = 0; k < NumArgs; ++k)
+    Args[k] = Record.readExpr();
+  E->setArgs(Args, NumArgs);
+}
+
+void ASTStmtReader::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
+  VisitExpr(E);
+  E->setTemplateKWLoc(Record.readSourceLocation());
+  E->setSplice(Record.readSpliceSpecifierRef());
+  E->setModel(Record.readExpr());
+  E->setAllowMemberReference(Record.readBool());
+}
+
+void ASTStmtReader::VisitCXXDependentMemberSpliceExpr(
+                                              CXXDependentMemberSpliceExpr *E) {
+  VisitExpr(E);
+  E->setOpLoc(Record.readSourceLocation());
+  E->setIsArrow(Record.readBool());
+  E->setBase(Record.readExpr());
+  E->setRHS(cast<CXXSpliceExpr>(Record.readExpr()));
+}
+
+void ASTStmtReader::VisitStackLocationExpr(StackLocationExpr *E) {
+  llvm_unreachable("unimplemented");
+}
+
+void ASTStmtReader::VisitExtractLValueExpr(ExtractLValueExpr *E) {
+  llvm_unreachable("unimplemented");
+}
+
+void ASTStmtReader::VisitExplDependentCallExpr(ExplDependentCallExpr *E) {
+  llvm_unreachable("unimplemented");
+}
+
 void ASTStmtReader::VisitDependentCoawaitExpr(DependentCoawaitExpr *E) {
   VisitExpr(E);
   E->KeywordLoc = readSourceLocation();
@@ -538,10 +598,6 @@ void ASTStmtReader::VisitCapturedStmt(CapturedStmt *S) {
   }
 }
 
-void ASTStmtReader::VisitCXXReflectExpr(CXXReflectExpr *E) {
-  // TODO(Reflection): Implement this.
-  assert(false && "not implemented yet");
-}
 
 void ASTStmtReader::VisitSYCLKernelCallStmt(SYCLKernelCallStmt *S) {
   VisitStmt(S);
@@ -555,6 +611,7 @@ void ASTStmtReader::VisitExpr(Expr *E) {
   CurrentUnpackingBits.emplace(Record.readInt());
   E->setDependence(static_cast<ExprDependence>(
       CurrentUnpackingBits->getNextBits(/*Width=*/5)));
+  E->setIsImmediateEscalating(CurrentUnpackingBits->getNextBit());  // Width=1
   E->setValueKind(static_cast<ExprValueKind>(
       CurrentUnpackingBits->getNextBits(/*Width=*/2)));
   E->setObjectKind(static_cast<ExprObjectKind>(
@@ -640,7 +697,6 @@ void ASTStmtReader::VisitDeclRefExpr(DeclRefExpr *E) {
       CurrentUnpackingBits->getNextBit();
   E->DeclRefExprBits.NonOdrUseReason =
       CurrentUnpackingBits->getNextBits(/*Width=*/2);
-  E->DeclRefExprBits.IsImmediateEscalating = CurrentUnpackingBits->getNextBit();
   E->DeclRefExprBits.HasFoundDecl = CurrentUnpackingBits->getNextBit();
   E->DeclRefExprBits.HasQualifier = CurrentUnpackingBits->getNextBit();
   E->DeclRefExprBits.HasTemplateKWAndArgsInfo =
@@ -1844,7 +1900,6 @@ void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
   E->CXXConstructExprBits.StdInitListInitialization = Record.readInt();
   E->CXXConstructExprBits.ZeroInitialization = Record.readInt();
   E->CXXConstructExprBits.ConstructionKind = Record.readInt();
-  E->CXXConstructExprBits.IsImmediateEscalating = Record.readInt();
   E->CXXConstructExprBits.Loc = readSourceLocation();
   E->Constructor = readDeclAs<CXXConstructorDecl>();
   E->ParenOrBraceRange = readSourceRange();
@@ -3305,7 +3360,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case EXPR_DECL_REF: {
       BitsUnpacker DeclRefExprBits(Record[ASTStmtReader::NumExprFields]);
-      DeclRefExprBits.advance(5);
+      DeclRefExprBits.advance(4);
       bool HasFoundDecl = DeclRefExprBits.getNextBit();
       bool HasQualifier = DeclRefExprBits.getNextBit();
       bool HasTemplateKWAndArgsInfo = DeclRefExprBits.getNextBit();
@@ -4677,6 +4732,18 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     case EXPR_REFLECT: {
       S = CXXReflectExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_METAFUNCTION: {
+      S = CXXMetafunctionExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_SPLICE: {
+      S = CXXSpliceExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_DEPENDENT_MEMBER_SPLICE: {
+      S = CXXDependentMemberSpliceExpr::CreateEmpty(Context);
       break;
     }
     }

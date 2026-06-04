@@ -1,5 +1,7 @@
 //===- ASTImporter.cpp - Importing ASTs from other Contexts ---------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -79,6 +81,7 @@ namespace clang {
   using ExpectedStmt = llvm::Expected<Stmt *>;
   using ExpectedExpr = llvm::Expected<Expr *>;
   using ExpectedDecl = llvm::Expected<Decl *>;
+  using ExpectedSplice = llvm::Expected<SpliceSpecifier *>;
   using ExpectedSLoc = llvm::Expected<SourceLocation>;
   using ExpectedName = llvm::Expected<DeclarationName>;
 
@@ -1735,6 +1738,20 @@ ExpectedType ASTNodeImporter::VisitDecltypeType(const DecltypeType *T) {
 }
 
 ExpectedType
+ASTNodeImporter::VisitReflectionSpliceType(const ReflectionSpliceType *T) {
+  ExpectedSplice ToSpliceOrErr = import(T->getSplice());
+  if (!ToSpliceOrErr)
+    return ToSpliceOrErr.takeError();
+
+  ExpectedType ToUnderlyingTypeOrErr = import(T->getUnderlyingType());
+  if (!ToUnderlyingTypeOrErr)
+    return ToUnderlyingTypeOrErr.takeError();
+
+  return Importer.getToContext().getReflectionSpliceType(
+      T->getTypenameKWLoc(), *ToSpliceOrErr, *ToUnderlyingTypeOrErr);
+}
+
+ExpectedType
 ASTNodeImporter::VisitUnaryTransformType(const UnaryTransformType *T) {
   ExpectedType ToBaseTypeOrErr = import(T->getBaseType());
   if (!ToBaseTypeOrErr)
@@ -2641,9 +2658,9 @@ Error ASTNodeImporter::ImportDefinition(
           new (Importer.getToContext()) CXXBaseSpecifier(
               *RangeOrErr,
               Base1.isVirtual(),
-              Base1.isBaseOfClass(),
               Base1.getAccessSpecifierAsWritten(),
               *TSIOrErr,
+              Base1.getDerived(),
               EllipsisLoc));
     }
     if (!Bases.empty())
@@ -10044,6 +10061,11 @@ Expected<Decl *> ASTImporter::Import(Decl *FromD) {
   return ToDOrErr;
 }
 
+llvm::Expected<SpliceSpecifier *> ASTImporter::Import(SpliceSpecifier *FromSS) {
+  llvm_unreachable("unimplemented");
+}
+
+
 llvm::Expected<InheritedConstructor>
 ASTImporter::Import(const InheritedConstructor &From) {
   return ASTNodeImporter(*this).ImportInheritedConstructor(From);
@@ -10179,6 +10201,10 @@ Expected<NestedNameSpecifier> ASTImporter::Import(NestedNameSpecifier FromNNS) {
     } else {
       return TyOrErr.takeError();
     }
+
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
+    llvm_unreachable("unimplemented");
   }
   llvm_unreachable("Invalid nested name specifier kind");
 }
@@ -10563,8 +10589,9 @@ ASTImporter::Import(const CXXBaseSpecifier *BaseSpec) {
   if (!ToEllipsisLoc)
     return ToEllipsisLoc.takeError();
   CXXBaseSpecifier *Imported = new (ToContext) CXXBaseSpecifier(
-      *ToSourceRange, BaseSpec->isVirtual(), BaseSpec->isBaseOfClass(),
-      BaseSpec->getAccessSpecifierAsWritten(), *ToTSI, *ToEllipsisLoc);
+      *ToSourceRange, BaseSpec->isVirtual(),
+      BaseSpec->getAccessSpecifierAsWritten(), *ToTSI, BaseSpec->getDerived(),
+      *ToEllipsisLoc);
   ImportedCXXBaseSpecifiers[BaseSpec] = Imported;
   return Imported;
 }
@@ -10729,6 +10756,7 @@ ASTNodeImporter::ImportAPValue(const APValue &FromValue) {
   case APValue::FixedPoint:
   case APValue::ComplexInt:
   case APValue::ComplexFloat:
+  case APValue::Reflection:
     Result = FromValue;
     break;
   case APValue::Vector: {

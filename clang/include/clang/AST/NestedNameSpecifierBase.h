@@ -33,6 +33,7 @@ class IdentifierInfo;
 class LangOptions;
 class NamespaceBaseDecl;
 struct PrintingPolicy;
+class SpliceSpecifier;
 class Type;
 class TypeLoc;
 
@@ -54,10 +55,19 @@ class NestedNameSpecifier {
     Type,
     NamespaceOrSuper,
     NamespaceWithGlobal,
-    NamespaceWithNamespace
+    NamespaceWithNamespace,
+    // P2996 reflection: a splice scope specifier ('[: r :]::'), stored as a
+    // SpliceSpecifier*. 'SpliceWithTemplate' is the same but preceded by the
+    // 'template' keyword.
+    Splice,
+    SpliceWithTemplate,
   };
-  static constexpr uintptr_t FlagBits = 2, FlagMask = (1u << FlagBits) - 1u,
-                             FlagOffset = 1, PtrOffset = FlagBits + FlagOffset,
+  // NB(P2996): widened from 2 to 3 bits (and FlagOffset 1->0, reclaiming the
+  // formerly-reserved low bit) to make room for the Splice stored kinds while
+  // preserving 8-byte pointer alignment. This drops NumLowBitsAvailable to 0;
+  // the two former users (TemplateName) store their bit out-of-line instead.
+  static constexpr uintptr_t FlagBits = 3, FlagMask = (1u << FlagBits) - 1u,
+                             FlagOffset = 0, PtrOffset = FlagBits + FlagOffset,
                              PtrMask = (1u << PtrOffset) - 1u;
 
   uintptr_t StoredOrFlag;
@@ -124,6 +134,14 @@ public:
     /// Microsoft's '__super' specifier, stored as a CXXRecordDecl* of
     /// the class it appeared in.
     MicrosoftSuper,
+
+    /// P2996 reflection: a splice scope specifier '[: r :]::', stored as a
+    /// SpliceSpecifier*.
+    Splice,
+
+    /// P2996 reflection: a splice scope specifier preceded by the 'template'
+    /// keyword, stored as a SpliceSpecifier*.
+    SpliceWithTemplate,
   };
 
   inline Kind getKind() const;
@@ -141,6 +159,9 @@ public:
   /// __super specifier.
   explicit inline NestedNameSpecifier(CXXRecordDecl *RD);
 
+  /// Builds a nested name specifier for a P2996 splice scope specifier.
+  inline NestedNameSpecifier(const SpliceSpecifier *Splice, bool TemplateKeyword);
+
   explicit operator bool() const { return StoredOrFlag != 0; }
 
   void *getAsVoidPointer() const {
@@ -155,6 +176,17 @@ public:
     assert(Kind == StoredKind::Type);
     assert(Ptr != nullptr);
     return static_cast<const Type *>(Ptr);
+  }
+
+  /// Retrieve the splice specifier stored in this nested name specifier, or
+  /// null if this is not a splice scope specifier.
+  const SpliceSpecifier *getAsSplice() const {
+    if (!isStoredKind())
+      return nullptr;
+    auto [Kind, Ptr] = getStored();
+    if (Kind != StoredKind::Splice && Kind != StoredKind::SpliceWithTemplate)
+      return nullptr;
+    return static_cast<const SpliceSpecifier *>(Ptr);
   }
 
   inline NamespaceAndPrefix getAsNamespaceAndPrefix() const;
@@ -285,7 +317,9 @@ NamespaceAndPrefix NestedNameSpecifier::getAsNamespaceAndPrefix() const {
                 : std::nullopt};
   case StoredKind::NamespaceWithNamespace:
     return *static_cast<const NamespaceAndPrefixStorage *>(Ptr);
-  case StoredKind::Type:;
+  case StoredKind::Type:
+  case StoredKind::Splice:
+  case StoredKind::SpliceWithTemplate:;
   }
   llvm_unreachable("unexpected stored kind");
 }
@@ -342,6 +376,10 @@ public:
   /// Retrieve the nested-name-specifier to which this instance
   /// refers.
   NestedNameSpecifier getNestedNameSpecifier() const { return Qualifier; }
+
+  /// For a nested-name-specifier that refers to a P2996 splice specifier,
+  /// retrieve the splice specifier (or null otherwise).
+  const SpliceSpecifier *getSplice() const;
 
   /// Retrieve the opaque pointer that refers to source-location data.
   void *getOpaqueData() const { return Data; }
@@ -506,6 +544,13 @@ public:
   void MakeMicrosoftSuper(ASTContext &Context, CXXRecordDecl *RD,
                           SourceLocation SuperLoc,
                           SourceLocation ColonColonLoc);
+
+  /// Make a new nested-name-specifier for a P2996 splice scope specifier
+  /// '[: r :]::' (optionally preceded by the 'template' keyword).
+  void MakeSpliceScopeSpecifier(ASTContext &Context,
+                                SourceLocation TemplateKWLoc,
+                                const SpliceSpecifier *Splice,
+                                SourceLocation ColonColonLoc);
 
   /// Make a new nested-name-specifier from incomplete source-location
   /// information.

@@ -1,5 +1,7 @@
 //===--- SemaExprCXX.cpp - Semantic Analysis for Expressions --------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -531,6 +533,8 @@ bool Sema::checkLiteralOperatorId(const CXXScopeSpec &SS,
   case NestedNameSpecifier::Kind::Global:
   case NestedNameSpecifier::Kind::MicrosoftSuper:
   case NestedNameSpecifier::Kind::Namespace:
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
     return false;
   }
 
@@ -1934,7 +1938,7 @@ static bool CheckDeleteOperator(Sema &S, SourceLocation StartLoc,
   }
 
   // FIXME: DiagnoseUseOfDecl?
-  if (Operator->isDeleted()) {
+  if (Operator->isDeleted() && !S.isReflectionContext()) {
     if (Diagnose) {
       StringLiteral *Msg = Operator->getDeletedMessage();
       S.Diag(StartLoc, diag::err_deleted_function_use)
@@ -8006,9 +8010,10 @@ concepts::Requirement *Sema::ActOnSimpleRequirement(Expr *E) {
 
 concepts::Requirement *Sema::ActOnTypeRequirement(
     SourceLocation TypenameKWLoc, CXXScopeSpec &SS, SourceLocation NameLoc,
-    const IdentifierInfo *TypeName, TemplateIdAnnotation *TemplateId) {
-  assert(((!TypeName && TemplateId) || (TypeName && !TemplateId)) &&
-         "Exactly one of TypeName and TemplateId must be specified.");
+    const IdentifierInfo *TypeName, TemplateIdAnnotation *TemplateId,
+    SpliceSpecifier *Splice) {
+  assert(((bool(TypeName) + bool(TemplateId) + bool(Splice)) == 1) &&
+         "Exactly one of TypeName, TemplateId, and Splice must be specified.");
   TypeSourceInfo *TSI = nullptr;
   if (TypeName) {
     QualType T =
@@ -8017,7 +8022,7 @@ concepts::Requirement *Sema::ActOnTypeRequirement(
                           &TSI, /*DeducedTSTContext=*/false);
     if (T.isNull())
       return nullptr;
-  } else {
+  } else if (TemplateId) {
     ASTTemplateArgsPtr ArgsPtr(TemplateId->getTemplateArgs(),
                                TemplateId->NumArgs);
     TypeResult T = ActOnTypenameType(CurScope, TypenameKWLoc, SS,
@@ -8030,6 +8035,14 @@ concepts::Requirement *Sema::ActOnTypeRequirement(
       return nullptr;
     if (GetTypeFromParser(T.get(), &TSI).isNull())
       return nullptr;
+  } else if (Splice) {
+    TypeResult TR = ActOnCXXSpliceTypeSpecifier(TypenameKWLoc, Splice, true);
+    if (TR.isInvalid()) {
+      return nullptr;
+    }
+    if (GetTypeFromParser(TR.get(), &TSI).isNull()) {
+      return nullptr;
+    }
   }
   return BuildTypeRequirement(TSI);
 }
