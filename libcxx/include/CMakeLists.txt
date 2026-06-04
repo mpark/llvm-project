@@ -887,6 +887,7 @@ set(files
   __type_traits/is_compound.h
   __type_traits/is_const.h
   __type_traits/is_constant_evaluated.h
+  __type_traits/is_consteval_only.h
   __type_traits/is_constructible.h
   __type_traits/is_convertible.h
   __type_traits/is_core_convertible.h
@@ -1066,6 +1067,7 @@ set(files
   experimental/__simd/vec_ext.h
   experimental/iterator
   experimental/memory
+  experimental/meta
   experimental/propagate_const
   experimental/simd
   experimental/type_traits
@@ -1097,6 +1099,7 @@ set(files
   mdspan
   memory
   memory_resource
+  meta
   mutex
   new
   numbers

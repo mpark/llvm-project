@@ -42,6 +42,7 @@ class DeducedTemplateStorage;
 class PackIndexingTemplateStorage;
 struct PrintingPolicy;
 class QualifiedTemplateName;
+class SpliceSpecifier;
 class SubstTemplateTemplateParmPackStorage;
 class SubstTemplateTemplateParmStorage;
 class TemplateArgument;
@@ -434,7 +435,7 @@ public:
   /// error.
   void dump() const;
 
-  void Profile(llvm::FoldingSetNodeID &ID) {
+  void Profile(llvm::FoldingSetNodeID &ID) const {
     ID.AddPointer(Storage.getOpaqueValue());
   }
 
@@ -604,12 +605,17 @@ class QualifiedTemplateName : public llvm::FoldingSetNode {
 
   /// The nested name specifier that qualifies the template name.
   ///
-  /// The bit is used to indicate whether the "template" keyword was
-  /// present before the template name itself. Note that the
-  /// "template" keyword is always redundant in this case (otherwise,
-  /// the template name would be a dependent name and we would express
-  /// this name with DependentTemplateName).
-  llvm::PointerIntPair<NestedNameSpecifier, 1, bool> Qualifier;
+  /// NB(P2996): \c TemplateKeyword was formerly packed into the low bit of this
+  /// pointer via a PointerIntPair; it is stored out-of-line now that
+  /// NestedNameSpecifier no longer advertises a spare low bit (see
+  /// NestedNameSpecifierBase.h).
+  NestedNameSpecifier Qualifier;
+
+  /// Whether the "template" keyword was present before the template name
+  /// itself. Note that the "template" keyword is always redundant in this case
+  /// (otherwise, the template name would be a dependent name and we would
+  /// express this name with DependentTemplateName).
+  bool TemplateKeyword;
 
   /// The underlying template name, it is either
   ///  1) a Template -- a template declaration that this qualified name refers
@@ -620,18 +626,19 @@ class QualifiedTemplateName : public llvm::FoldingSetNode {
 
   QualifiedTemplateName(NestedNameSpecifier NNS, bool TemplateKeyword,
                         TemplateName Template)
-      : Qualifier(NNS, TemplateKeyword ? 1 : 0), UnderlyingTemplate(Template) {
+      : Qualifier(NNS), TemplateKeyword(TemplateKeyword),
+        UnderlyingTemplate(Template) {
     assert(UnderlyingTemplate.getKind() == TemplateName::Template ||
            UnderlyingTemplate.getKind() == TemplateName::UsingTemplate);
   }
 
 public:
   /// Return the nested name specifier that qualifies this name.
-  NestedNameSpecifier getQualifier() const { return Qualifier.getPointer(); }
+  NestedNameSpecifier getQualifier() const { return Qualifier; }
 
   /// Whether the template name was prefixed by the "template"
   /// keyword.
-  bool hasTemplateKeyword() const { return Qualifier.getInt(); }
+  bool hasTemplateKeyword() const { return TemplateKeyword; }
 
   /// Return the underlying template name.
   TemplateName getUnderlyingTemplate() const { return UnderlyingTemplate; }
@@ -689,9 +696,14 @@ class DependentTemplateStorage {
   /// The nested name specifier that qualifies the template
   /// name.
   ///
-  /// The bit stored in this qualifier describes whether the \c Name field
-  /// was preceeded by a template keyword.
-  llvm::PointerIntPair<NestedNameSpecifier, 1, bool> Qualifier;
+  /// NB(P2996): \c TemplateKeyword was formerly packed into the low bit of this
+  /// pointer via a PointerIntPair; stored out-of-line now that
+  /// NestedNameSpecifier no longer advertises a spare low bit (see
+  /// NestedNameSpecifierBase.h).
+  NestedNameSpecifier Qualifier;
+
+  /// Whether the \c Name field was preceeded by a template keyword.
+  bool TemplateKeyword;
 
   /// The dependent template name.
   IdentifierOrOverloadedOperator Name;
@@ -702,12 +714,12 @@ public:
                            bool HasTemplateKeyword);
 
   /// Return the nested name specifier that qualifies this name.
-  NestedNameSpecifier getQualifier() const { return Qualifier.getPointer(); }
+  NestedNameSpecifier getQualifier() const { return Qualifier; }
 
   IdentifierOrOverloadedOperator getName() const { return Name; }
 
   /// Was this template name was preceeded by the template keyword?
-  bool hasTemplateKeyword() const { return Qualifier.getInt(); }
+  bool hasTemplateKeyword() const { return TemplateKeyword; }
 
   TemplateNameDependence getDependence() const;
 

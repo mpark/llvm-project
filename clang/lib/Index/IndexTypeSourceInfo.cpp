@@ -254,6 +254,8 @@ void IndexingContext::indexNestedNameSpecifierLoc(
   case NestedNameSpecifier::Kind::Null:
   case NestedNameSpecifier::Kind::Global:
   case NestedNameSpecifier::Kind::MicrosoftSuper:
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
     break;
 
   case NestedNameSpecifier::Kind::Namespace: {

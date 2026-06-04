@@ -474,10 +474,6 @@ void ASTStmtWriter::VisitCoyieldExpr(CoyieldExpr *E) {
   Code = serialization::EXPR_COYIELD;
 }
 
-void ASTStmtWriter::VisitCXXReflectExpr(CXXReflectExpr *E) {
-  // TODO(Reflection): Implement this.
-  assert(false && "not implemented yet");
-}
 
 void ASTStmtWriter::VisitDependentCoawaitExpr(DependentCoawaitExpr *E) {
   VisitExpr(E);
@@ -485,6 +481,75 @@ void ASTStmtWriter::VisitDependentCoawaitExpr(DependentCoawaitExpr *E) {
   for (Stmt *S : E->children())
     Record.AddStmt(S);
   Code = serialization::EXPR_DEPENDENT_COAWAIT;
+}
+
+void ASTStmtWriter::VisitCXXReflectExpr(CXXReflectExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getOperatorLoc());
+
+  Record.writeBool(E->hasDependentSubExpr());
+  if (E->hasDependentSubExpr()) {
+    Record.AddStmt(E->getDependentSubExpr());
+  } else {
+    Record.AddAPValue(E->getReflection());
+    Record.AddSourceRange(E->getOperandRange());
+  }
+  Code = serialization::EXPR_REFLECT;
+}
+
+void ASTStmtWriter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getKwLoc());
+  Record.AddSourceLocation(E->getLParenLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  Record.writeUInt32(E->getMetaFnID());
+  Record.writeQualType(E->getResultType());
+
+  Record.writeUInt32(E->getNumArgs());
+  for (size_t k = 0; k < E->getNumArgs(); ++k) {
+    Record.AddStmt(E->getArg(k));
+  }
+
+  Code = serialization::EXPR_METAFUNCTION;
+}
+
+void ASTStmtWriter::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getTemplateKWLoc());
+  Record.AddSpliceSpecifier(E->getSplice());
+  Record.AddStmt(E->getModel());
+  Record.writeBool(E->allowMemberReference());
+
+  Code = serialization::EXPR_SPLICE;
+}
+
+void ASTStmtWriter::VisitCXXDependentMemberSpliceExpr(
+                                              CXXDependentMemberSpliceExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getOpLoc());
+  Record.writeBool(E->isArrow());
+  Record.AddStmt(E->getBase());
+  Record.AddStmt(E->getRHS());
+
+  Code = serialization::EXPR_DEPENDENT_MEMBER_SPLICE;
+}
+
+void ASTStmtWriter::VisitStackLocationExpr(StackLocationExpr *E) {
+  VisitExpr(E);
+  // TODO(P2996): Implement this.
+  Code = serialization::EXPR_STACK_LOCATION;
+}
+
+void ASTStmtWriter::VisitExtractLValueExpr(ExtractLValueExpr *E) {
+  VisitExpr(E);
+  // TODO(P2996): Implement this.
+  Code = serialization::EXPR_EXTRACT_LVALUE;
+}
+
+void ASTStmtWriter::VisitExplDependentCallExpr(ExplDependentCallExpr *E) {
+  VisitExpr(E);
+  // TODO(P2996): Implement this.
+  Code = serialization::EXPR_EXPL_DEPENDENT_CALL;
 }
 
 static void
@@ -649,6 +714,7 @@ void ASTStmtWriter::VisitExpr(Expr *E) {
 
   CurrentPackingBits.updateBits();
   CurrentPackingBits.addBits(E->getDependence(), /*BitsWidth=*/5);
+  CurrentPackingBits.addBits(E->isImmediateEscalating(), /*BitsWidth=*/1);
   CurrentPackingBits.addBits(E->getValueKind(), /*BitsWidth=*/2);
   CurrentPackingBits.addBits(E->getObjectKind(), /*BitsWidth=*/3);
 
@@ -729,7 +795,6 @@ void ASTStmtWriter::VisitDeclRefExpr(DeclRefExpr *E) {
   CurrentPackingBits.addBit(E->hadMultipleCandidates());
   CurrentPackingBits.addBit(E->refersToEnclosingVariableOrCapture());
   CurrentPackingBits.addBits(E->isNonOdrUse(), /*Width=*/2);
-  CurrentPackingBits.addBit(E->isImmediateEscalating());
   CurrentPackingBits.addBit(E->getDecl() != E->getFoundDecl());
   CurrentPackingBits.addBit(E->hasQualifier());
   CurrentPackingBits.addBit(E->hasTemplateKWAndArgsInfo());
@@ -1879,7 +1944,6 @@ void ASTStmtWriter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   Record.push_back(E->requiresZeroInitialization());
   Record.push_back(
       llvm::to_underlying(E->getConstructionKind())); // FIXME: stable encoding
-  Record.push_back(E->isImmediateEscalating());
   Record.AddSourceLocation(E->getLocation());
   Record.AddDeclRef(E->getConstructor());
   Record.AddSourceRange(E->getParenOrBraceRange());

@@ -23,6 +23,7 @@
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/Basic/DiagnosticInstallAPI.h"
 #include "clang/Basic/DiagnosticLex.h"
+#include "clang/Basic/DiagnosticMetafn.h"
 #include "clang/Basic/DiagnosticParse.h"
 #include "clang/Basic/DiagnosticRefactoring.h"
 #include "clang/Basic/DiagnosticSema.h"
