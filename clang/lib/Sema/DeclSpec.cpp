@@ -1,5 +1,7 @@
 //===--- DeclSpec.cpp - Declaration Specifier Semantic Analysis -----------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -88,6 +90,20 @@ void CXXScopeSpec::MakeMicrosoftSuper(ASTContext &Context, CXXRecordDecl *RD,
   Builder.MakeMicrosoftSuper(Context, RD, SuperLoc, ColonColonLoc);
 
   Range.setBegin(SuperLoc);
+  Range.setEnd(ColonColonLoc);
+
+  assert(Range == Builder.getSourceRange() &&
+  "NestedNameSpecifierLoc range computation incorrect");
+}
+
+void CXXScopeSpec::MakeSpliceScopeSpecifier(ASTContext &Context,
+                                            SourceLocation TemplateKWLoc,
+                                            SpliceSpecifier *Splice,
+                                            SourceLocation ColonColonLoc) {
+  Builder.MakeSpliceScopeSpecifier(Context, TemplateKWLoc, Splice,
+                                   ColonColonLoc);
+  Range.setBegin(TemplateKWLoc.isValid() ? TemplateKWLoc :
+                 Splice->getBeginLoc());
   Range.setEnd(ColonColonLoc);
 
   assert(Range == Builder.getSourceRange() &&
@@ -364,6 +380,11 @@ bool Declarator::isDeclarationOfFunction() const {
         return E->getType()->isFunctionType();
       return false;
 
+    case TST_type_splice:
+      // TODO(P2996): This is wrong; a splice of a function type (or a
+      // non-dependent splice-specialization-specifier declares a function.
+      return false;
+
 #define TRANSFORM_TYPE_TRAIT_DEF(_, Trait) case TST_##Trait:
 #include "clang/Basic/BuiltinTraits.inc"
     case TST_typename:
@@ -569,6 +590,7 @@ const char *DeclSpec::getSpecifierName(DeclSpec::TST T,
   case DeclSpec::TST_auto:        return "auto";
   case DeclSpec::TST_auto_type:   return "__auto_type";
   case DeclSpec::TST_decltype:    return "(decltype)";
+  case DeclSpec::TST_type_splice: return "[:reflection-of-type:]";
   case DeclSpec::TST_decltype_auto: return "decltype(auto)";
 #define TRANSFORM_TYPE_TRAIT_DEF(_, Trait)                                     \
   case DeclSpec::TST_##Trait:                                                  \
@@ -798,6 +820,27 @@ bool DeclSpec::SetTypeSpecType(TST T, SourceLocation Loc,
   ExprRep = Rep;
   TSTLoc = Loc;
   TSTNameLoc = Loc;
+  TypeSpecOwned = false;
+  return false;
+}
+
+bool DeclSpec::SetTypeSpecType(TST T, SourceLocation Loc,
+                               const char *&PrevSpec,
+                               unsigned &DiagID,
+                               SpliceSpecifier *Rep,
+                               const PrintingPolicy &Policy) {
+  assert(isSpliceRep(T) && "T does not store a splice");
+  assert(Rep && "no splice provided!");
+  if (TypeSpecType == TST_error)
+    return false;
+  if (TypeSpecType != TST_unspecified) {
+    PrevSpec = DeclSpec::getSpecifierName((TST) TypeSpecType, Policy);
+    DiagID = diag::err_invalid_decl_spec_combination;
+    return true;
+  }
+  TypeSpecType = T;
+  SpliceRep = Rep;
+  TSTLoc = Loc;
   TypeSpecOwned = false;
   return false;
 }

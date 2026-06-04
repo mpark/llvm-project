@@ -1,5 +1,7 @@
 //===------- SemaTemplateVariadic.cpp - C++ Variadic Templates ------------===/
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -139,6 +141,25 @@ class CollectUnexpandedParameterPacksVisitor
       if (E->getDecl()->isParameterPack())
         addUnexpanded(E->getDecl(), E->getLocation());
 
+      return true;
+    }
+
+    // Record occurrences of function and non-type template parameters packs in
+    // an expression.
+    bool VisitCXXReflectExpr(CXXReflectExpr *E) override {
+      if (E->hasDependentSubExpr())
+        return true;
+
+      if (E->getReflection().isReflectedDecl()) {
+        ValueDecl *VD = E->getReflection().getReflectedDecl();
+        if (VD->isParameterPack())
+          addUnexpanded(VD, E->getExprLoc());
+      } else if (E->getReflection().isReflectedTemplate()) {
+        TemplateName TName = E->getReflection().getReflectedTemplate();
+        if (TName.containsUnexpandedParameterPack()) {
+          addUnexpanded(TName.getAsTemplateDecl());
+        }
+      }
       return true;
     }
 
@@ -773,6 +794,7 @@ Sema::ActOnPackExpansion(const ParsedTemplateArgument &Arg,
 
     return Arg.getTemplatePackExpansion(EllipsisLoc);
   }
+
   llvm_unreachable("Unhandled template argument kind?");
 }
 
@@ -1158,6 +1180,7 @@ bool Sema::containsUnexpandedParameterPacks(Declarator &D) {
   case TST_typename:
   case TST_typeof_unqualType:
   case TST_typeofType:
+  case TST_type_splice:
 #define TRANSFORM_TYPE_TRAIT_DEF(_, Trait) case TST_##Trait:
 #include "clang/Basic/BuiltinTraits.inc"
   case TST_atomic: {
@@ -1341,6 +1364,9 @@ static bool isParameterPack(Expr *PackExpression) {
   if (auto *D = dyn_cast<DeclRefExpr>(PackExpression); D) {
     ValueDecl *VD = D->getDecl();
     return VD->isParameterPack();
+  } else if (auto *R = dyn_cast<CXXReflectExpr>(PackExpression)) {
+    if (!R->hasDependentSubExpr() && R->getReflection().isReflectedDecl())
+      return R->getReflection().getReflectedDecl()->isParameterPack();
   }
   return false;
 }

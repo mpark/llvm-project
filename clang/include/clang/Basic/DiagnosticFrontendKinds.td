@@ -110,6 +110,12 @@ def warn_toc_unsupported_type : Warning<"-mtocdata option is ignored "
 
 def err_fe_invalid_code_complete_file : Error<
     "cannot locate code-completion file %0">, DefaultFatal;
+def err_fe_parameter_reflection_without_reflection : Error<
+    "cannot specify '-fparameter-reflection' without '-freflection'">,
+    DefaultFatal;
+def err_fe_entity_proxy_reflection_without_reflection : Error<
+    "cannot specify '-fentity-proxy-reflection' without '-freflection'">,
+    DefaultFatal;
 def err_fe_dependency_file_requires_MT : Error<
     "-dependency-file requires at least one -MT or -MQ option">;
 def err_fe_invalid_plugin_name : Error<
@@ -367,6 +373,8 @@ def warn_alias_type_mismatch : Warning<
   InGroup<DiagGroup<"attribute-alias">>;
 
 def err_fe_text_encoding_config : Error<"failed to set fexec-charset to '%0'">;
+def err_runtime_consteval_only_type : Error<
+  "cannot emit a runtime definition of consteval-only type">;
 def warn_atomic_op_misaligned : Warning<
   "misaligned atomic operation may incur "
   "significant performance penalty"

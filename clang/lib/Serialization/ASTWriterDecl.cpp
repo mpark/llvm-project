@@ -144,6 +144,7 @@ namespace clang {
     void VisitFriendDecl(FriendDecl *D);
     void VisitFriendTemplateDecl(FriendTemplateDecl *D);
     void VisitStaticAssertDecl(StaticAssertDecl *D);
+    void VisitConstevalBlockDecl(ConstevalBlockDecl *D);
     void VisitExplicitInstantiationDecl(ExplicitInstantiationDecl *D);
     void VisitCXXExpansionStmtDecl(CXXExpansionStmtDecl *D);
     void VisitBlockDecl(BlockDecl *D);
@@ -2216,6 +2217,13 @@ void ASTDeclWriter::VisitStaticAssertDecl(StaticAssertDecl *D) {
   Code = serialization::DECL_STATIC_ASSERT;
 }
 
+void ASTDeclWriter::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
+  VisitDecl(D);
+  Record.AddSourceLocation(D->getLocation());
+  Record.AddStmt(D->getEvaluatingExpr());
+  Code = serialization::DECL_CONSTEVAL_BLOCK;
+}
+
 void ASTDeclWriter::VisitExplicitInstantiationDecl(
     ExplicitInstantiationDecl *D) {
   // Trailing-object flags must be the first thing written so the reader can
@@ -2880,13 +2888,13 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Stmt
   //  Expr
   //  PackingBits: DependenceKind, ValueKind. ObjectKind should be 0.
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 7));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 8));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // DeclRefExpr
   // Packing Bits: , HadMultipleCandidates, RefersToEnclosingVariableOrCapture,
   // IsImmediateEscalating, NonOdrUseReason.
   // GetDeclFound, HasQualifier and ExplicitTemplateArgs should be 0.
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 4));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // DeclRef
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Location
   DeclRefExprAbbrev = Stream.EmitAbbrev(std::move(Abv));
@@ -2897,7 +2905,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   //Stmt
   // Expr
   // DependenceKind, ValueKind, ObjectKind
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // Integer Literal
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Location
@@ -2911,7 +2919,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   //Stmt
   // Expr
   // DependenceKind, ValueKind, ObjectKind
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // Character Literal
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // getValue
@@ -2925,7 +2933,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Stmt
   // Expr
   // Packing Bits: DependenceKind, ValueKind, ObjectKind,
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // CastExpr
   Abv->Add(BitCodeAbbrevOp(0)); // PathSize
@@ -2941,7 +2949,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Expr
   // Packing Bits: DependenceKind. ValueKind and ObjectKind should
   // be 0 in this case.
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 6));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // BinaryOperator
   Abv->Add(
@@ -2956,7 +2964,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Expr
   // Packing Bits: DependenceKind. ValueKind and ObjectKind should
   // be 0 in this case.
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 6));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // BinaryOperator
   // Packing Bits: OpCode. The HasFPFeatures bit should be 0
@@ -2974,7 +2982,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Stmt
   // Expr
   // Packing Bits: DependenceKind, ValueKind, ObjectKind,
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // CallExpr
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // NumArgs
@@ -2988,7 +2996,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Stmt
   // Expr
   // Packing Bits: DependenceKind, ValueKind, ObjectKind,
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // CallExpr
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // NumArgs
@@ -3006,7 +3014,7 @@ void ASTWriter::WriteDeclAbbrevs() {
   // Stmt
   // Expr
   // Packing Bits: DependenceKind, ValueKind, ObjectKind,
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 10));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 11));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Type
   // CallExpr
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // NumArgs

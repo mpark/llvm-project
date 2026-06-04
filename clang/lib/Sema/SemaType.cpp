@@ -1,5 +1,7 @@
 //===--- SemaType.cpp - Semantic Analysis for Types -----------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -1297,6 +1299,20 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     }
     break;
   }
+
+  case DeclSpec::TST_type_splice: {
+    SpliceSpecifier *Splice = DS.getRepAsSpliceSpecifier();
+    assert(Splice && "Didn't get a splice for type-splice?");
+    // TypeQuals handled by caller.
+    Result = S.BuildReflectionSpliceType(DS.getTypeSpecTypeLoc(), Splice,
+                                         /*Complain=*/true);
+    if (Result.isNull()) {
+      Result = Context.IntTy;
+      declarator.setInvalidType(true);
+    }
+    break;
+  }
+
   case DeclSpec::TST_typename_pack_indexing: {
     Expr *E = DS.getPackIndexingExpr();
     assert(E && "Didn't get an expression for pack indexing");
@@ -2767,6 +2783,15 @@ QualType Sema::BuildMemberPointerType(QualType T, const CXXScopeSpec &SS,
     }
   }
 
+  if (Cls && Cls->isAnonymousStructOrUnion()) {
+    auto D = Diag(Loc, diag::err_illegal_decl_mempointer_into_anon_union);
+    if (const IdentifierInfo *II = Entity.getAsIdentifierInfo())
+      D << II;
+    else
+      D << "member pointer";
+    return QualType();
+  }
+
   // Verify that we're not building a pointer to pointer to function with
   // exception specification.
   if (CheckDistantExceptionSpec(T)) {
@@ -3356,6 +3381,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       Error = 9; // Block literal
       break;
     case DeclaratorContext::TemplateArg:
+    case DeclaratorContext::ReflectOperator:
       // Within a template argument list, a deduced template specialization
       // type will be reinterpreted as a template template argument.
       if (isa<DeducedTemplateSpecializationType>(Deduced) &&
@@ -3501,6 +3527,7 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
     case DeclaratorContext::TemplateArg:
     case DeclaratorContext::TemplateTypeArg:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       DiagID = diag::err_type_defined_in_type_specifier;
       break;
     case DeclaratorContext::Prototype:
@@ -4578,6 +4605,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     case DeclaratorContext::FunctionalCast:
     case DeclaratorContext::RequiresExpr:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       // Don't infer in these contexts.
       break;
     }
@@ -5599,6 +5627,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     if (IsQualifiedFunction &&
         // Check for non-static member function and not and
         // explicit-object-parameter-declaration
+        !S.isReflectionContext() &&
         (Kind != Member || D.isExplicitObjectMemberFunction() ||
          D.getDeclSpec().getStorageClassSpec() == DeclSpec::SCS_static ||
          (D.getContext() == clang::DeclaratorContext::Member &&
@@ -5748,6 +5777,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     case DeclaratorContext::TemplateArg:
     case DeclaratorContext::TemplateTypeArg:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       // FIXME: We may want to allow parameter packs in block-literal contexts
       // in the future.
       S.Diag(D.getEllipsisLoc(),
@@ -6047,7 +6077,8 @@ namespace {
     }
     void VisitTemplateSpecializationTypeLoc(TemplateSpecializationTypeLoc TL) {
       TypeSourceInfo *TInfo = nullptr;
-      Sema::GetTypeFromParser(DS.getRepAsType(), &TInfo);
+      if (DS.getTypeSpecType() != TST_type_splice)
+        Sema::GetTypeFromParser(DS.getRepAsType(), &TInfo);
 
       // If we got no declarator info from previous Sema routines,
       // just fill with the typespec loc.

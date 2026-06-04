@@ -405,6 +405,7 @@ public:
   void VisitFriendDecl(FriendDecl *D);
   void VisitFriendTemplateDecl(FriendTemplateDecl *D);
   void VisitStaticAssertDecl(StaticAssertDecl *D);
+  void VisitConstevalBlockDecl(ConstevalBlockDecl *D);
   void VisitExplicitInstantiationDecl(ExplicitInstantiationDecl *D);
   void VisitCXXExpansionStmtDecl(CXXExpansionStmtDecl *D);
   void VisitBlockDecl(BlockDecl *BD);
@@ -2829,6 +2830,12 @@ void ASTDeclReader::VisitStaticAssertDecl(StaticAssertDecl *D) {
   D->RParenLoc = readSourceLocation();
 }
 
+void ASTDeclReader::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
+  VisitDecl(D);
+  D->ConstevalLoc = readSourceLocation();
+  D->EvaluatingExpr = Record.readExpr();
+}
+
 void ASTDeclReader::VisitExplicitInstantiationDecl(
     ExplicitInstantiationDecl *D) {
   // Note: trailing flags were already read by ReadDeclRecord and passed to
@@ -4200,6 +4207,9 @@ Decl *ASTReader::ReadDeclRecord(GlobalDeclID ID) {
     break;
   case DECL_STATIC_ASSERT:
     D = StaticAssertDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_CONSTEVAL_BLOCK:
+    D = ConstevalBlockDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_EXPLICIT_INSTANTIATION:
     D = ExplicitInstantiationDecl::CreateDeserialized(Context, ID,
