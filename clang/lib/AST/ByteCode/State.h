@@ -62,6 +62,11 @@ enum class EvaluationMode {
   /// gets a chance to look at it.
   ConstantExpressionUnevaluated,
 
+  /// Evaluate as a plainly constant-evaluated expression. Allow production
+  /// of injected declarations. Stop if we find that the expression is not a
+  /// constant expression. (P2996 reflection)
+  ConstantExpressionPlainlyConstantEvaluated,
+
   /// Fold the expression to a constant. Stop if we hit a side-effect that
   /// we can't model.
   ConstantFold,

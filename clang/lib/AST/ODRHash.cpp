@@ -127,6 +127,8 @@ void ODRHash::AddNestedNameSpecifier(NestedNameSpecifier NNS) {
   case NestedNameSpecifier::Kind::Null:
   case NestedNameSpecifier::Kind::Global:
   case NestedNameSpecifier::Kind::MicrosoftSuper:
+  case NestedNameSpecifier::Kind::Splice:          // TODO(P2996): This is wrong.
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
     break;
   }
 }

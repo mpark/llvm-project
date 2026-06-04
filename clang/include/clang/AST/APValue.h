@@ -1,5 +1,7 @@
 //===--- APValue.h - Union class for APFloat/APSInt/Complex -----*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -32,13 +34,17 @@ template <typename T> class BasicReaderBase;
 
   class AddrLabelExpr;
   class ASTContext;
+  class CXX26AnnotationAttr;
   class CXXRecordDecl;
   class Decl;
   class DiagnosticBuilder;
   class Expr;
   class FieldDecl;
+  class NamespaceDecl;
+  class ParmVarDecl;
   struct PrintingPolicy;
   class Type;
+  class UsingShadowDecl;
   class ValueDecl;
   class QualType;
 
@@ -120,7 +126,8 @@ template<> struct PointerLikeTypeTraits<clang::DynamicAllocLValue> {
 namespace clang {
 /// APValue - This class implements a discriminated union of [uninitialized]
 /// [APSInt] [APFloat], [Complex APSInt] [Complex APFloat], [Expr + Offset],
-/// [Vector: N * APValue], [Array: N * APValue]
+/// [Vector: N * APValue], [Array: N * APValue],
+/// [ReflectionKind + Ptr]
 class LLVM_ATTRIBUTE_WARN_UNUSED APValue {
   typedef llvm::APFixedPoint APFixedPoint;
   typedef llvm::APSInt APSInt;
@@ -144,7 +151,7 @@ public:
     Union,
     MemberPointer,
     AddrLabelDiff,
-    Reflection
+    Reflection,
   };
 
   class alignas(uint64_t) LValueBase {
@@ -319,26 +326,31 @@ private:
     const AddrLabelExpr* RHSExpr;
   };
   struct ReflectionData {
-    // OperandKind will eventually have support for
-    // Null, TypeSourceInfo, TemplateReference, NamespaceReference, DeclRefExpr.
-    // Operand stores the opaque pointer of the reflection operand.
-    // Depending on the value of OperandKind, we can perform the
-    // corresponding cast to the associated type.
-    // If OperandKind is Null, then the ReflectionData represents
-    // a null reflection, and therefore Operand should be a nullptr.
-    ReflectionKind OperandKind;
-    const void *Operand;
+    ReflectionKind Kind;
+    const void *Data;
   };
   struct MemberPointerData;
 
   // We ensure elsewhere that Data is big enough for LV and MemberPointerData.
-  typedef llvm::AlignedCharArrayUnion<
-      void *, APSInt, APFloat, ComplexAPSInt, ComplexAPFloat, Vec, Mat, Arr,
-      StructData, UnionData, AddrLabelDiffData, ReflectionData>
+  typedef llvm::AlignedCharArrayUnion<void *, APSInt, APFloat, ComplexAPSInt,
+                                      ComplexAPFloat, Vec, Mat, Arr, StructData,
+                                      UnionData, AddrLabelDiffData,
+                                      ReflectionData>
       DataType;
   static const size_t DataSize = sizeof(DataType);
 
   DataType Data;
+
+  // A reflection can represent a value, but is also -itself- a value.
+  //
+  // When 'ReflectionDepth' is nonzero 'N', the APValue represents the otherwise
+  // described value with N "layers of reflection" over it. The otherwise
+  // equivalent APValue for which ReflectionDepth is zero is referred to as the
+  // "underlying value". Since two reflections of values are equivalent only if
+  // their types are the same, it becomes necessary to store the type of the
+  // underlying value ('UnderlyingTy').
+  QualType UnderlyingTy;
+  uint8_t ReflectionDepth;
 
 public:
   bool allowConstexprUnknown() const { return AllowConstexprUnknown; }
@@ -348,39 +360,53 @@ public:
   }
 
   /// Creates an empty APValue of type None.
-  APValue() : Kind(None), AllowConstexprUnknown(false) {}
+  APValue()
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {}
   /// Creates an integer APValue holding the given value.
-  explicit APValue(APSInt I) : Kind(None), AllowConstexprUnknown(false) {
+  explicit APValue(APSInt I)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeInt(std::move(I));
   }
   /// Creates a float APValue holding the given value.
-  explicit APValue(APFloat F) : Kind(None), AllowConstexprUnknown(false) {
+  explicit APValue(APFloat F)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeFloat(std::move(F));
   }
   /// Creates a fixed-point APValue holding the given value.
-  explicit APValue(APFixedPoint FX) : Kind(None), AllowConstexprUnknown(false) {
+  explicit APValue(APFixedPoint FX)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeFixedPoint(std::move(FX));
   }
   /// Creates a vector APValue with \p N elements. The elements
   /// are read from \p E.
   explicit APValue(const APValue *E, unsigned N)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeVector(); setVector(E, N);
   }
   /// Creates a matrix APValue with given dimensions. The elements
   /// are read from \p E and assumed to be in row-major order.
   explicit APValue(const APValue *E, unsigned NumRows, unsigned NumCols)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeMatrix();
     setMatrix(E, NumRows, NumCols);
   }
   /// Creates an integer complex APValue with the given real and imaginary
   /// values.
-  APValue(APSInt R, APSInt I) : Kind(None), AllowConstexprUnknown(false) {
+  APValue(APSInt R, APSInt I)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeComplexInt(); setComplexInt(std::move(R), std::move(I));
   }
   /// Creates a float complex APValue with the given real and imaginary values.
-  APValue(APFloat R, APFloat I) : Kind(None), AllowConstexprUnknown(false) {
+  APValue(APFloat R, APFloat I)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeComplexFloat(); setComplexFloat(std::move(R), std::move(I));
   }
   APValue(const APValue &RHS);
@@ -391,7 +417,8 @@ public:
   /// \param IsNullPtr Whether this lvalue is a null pointer.
   APValue(LValueBase Base, CharUnits Offset, NoLValuePath,
           bool IsNullPtr = false)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeLValue();
     setLValue(Base, Offset, NoLValuePath{}, IsNullPtr);
   }
@@ -404,7 +431,8 @@ public:
   /// \param IsNullPtr Whether this lvalue is a null pointer.
   APValue(LValueBase Base, CharUnits Offset, ArrayRef<LValuePathEntry> Path,
           bool OnePastTheEnd, bool IsNullPtr = false)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeLValue();
     setLValue(Base, Offset, Path, OnePastTheEnd, IsNullPtr);
   }
@@ -414,7 +442,8 @@ public:
   /// \param IsNullPtr Whether this lvalue is a null pointer.
   APValue(LValueBase Base, CharUnits Offset, ConstexprUnknown,
           bool IsNullPtr = false)
-      : Kind(None), AllowConstexprUnknown(true) {
+      : Kind(None), AllowConstexprUnknown(true), UnderlyingTy(),
+        ReflectionDepth() {
     MakeLValue();
     setLValue(Base, Offset, NoLValuePath{}, IsNullPtr);
   }
@@ -425,17 +454,10 @@ public:
   /// array.
   /// \param Size Full size of the array.
   APValue(UninitArray, unsigned InitElts, unsigned Size)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeArray(InitElts, Size);
   }
-
-  /// Creates a new Reflection APValue.
-  /// \param OperandKind The kind of reflection.
-  /// \param Operand The entity being reflected.
-  APValue(ReflectionKind OperandKind, const void *Operand) : Kind(None) {
-    MakeReflection(OperandKind, Operand);
-  }
-
   /// Creates a new struct APValue.
   /// \param UninitStruct Marker. Pass an empty UninitStruct.
   /// \param NumBases Number of bases.
@@ -443,7 +465,8 @@ public:
   /// \param NumVirtualBases Number of virtual bases.
   APValue(UninitStruct, unsigned NumBases, unsigned NumMembers,
           unsigned NumVirtualBases = 0)
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeStruct(NumBases, NumMembers, NumVirtualBases);
   }
   /// Creates a new union APValue.
@@ -451,7 +474,8 @@ public:
   /// \param ActiveValue The value of the active union member.
   explicit APValue(const FieldDecl *ActiveDecl,
                    const APValue &ActiveValue = APValue())
-      : Kind(None), AllowConstexprUnknown(false) {
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeUnion();
     setUnion(ActiveDecl, ActiveValue);
   }
@@ -460,22 +484,31 @@ public:
   /// \param IsDerivedMember Whether member is a derived one.
   /// \param Path The path of the member.
   APValue(const ValueDecl *Member, bool IsDerivedMember,
-          ArrayRef<const CXXRecordDecl *> Path)
-      : Kind(None), AllowConstexprUnknown(false) {
+          ArrayRef<const CXXRecordDecl*> Path)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeMemberPointer(Member, IsDerivedMember, Path);
   }
   /// Creates a new address label diff APValue.
   /// \param LHSExpr The left-hand side of the difference.
   /// \param RHSExpr The right-hand side of the difference.
-  APValue(const AddrLabelExpr *LHSExpr, const AddrLabelExpr *RHSExpr)
-      : Kind(None), AllowConstexprUnknown(false) {
+  APValue(const AddrLabelExpr* LHSExpr, const AddrLabelExpr* RHSExpr)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
     MakeAddrLabelDiff(); setAddrLabelDiff(LHSExpr, RHSExpr);
+  }
+  APValue(ReflectionKind RK, const void *Data)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
+    MakeReflection(); setReflection(RK, Data);
   }
   static APValue IndeterminateValue() {
     APValue Result;
     Result.Kind = Indeterminate;
     return Result;
   }
+  APValue Lift(QualType ResultType) const;
+  APValue Lower() const;
 
   APValue &operator=(const APValue &RHS);
   APValue &operator=(APValue &&RHS);
@@ -500,26 +533,75 @@ public:
   /// typically also be profiled if it's not implied by the context.
   void Profile(llvm::FoldingSetNodeID &ID) const;
 
-  ValueKind getKind() const { return Kind; }
+  ValueKind getKind() const {
+    return isReflection() ? Reflection : Kind;
+  }
 
   bool isAbsent() const { return Kind == None; }
   bool isIndeterminate() const { return Kind == Indeterminate; }
   bool hasValue() const { return Kind != None && Kind != Indeterminate; }
 
-  bool isInt() const { return Kind == Int; }
-  bool isFloat() const { return Kind == Float; }
-  bool isFixedPoint() const { return Kind == FixedPoint; }
-  bool isComplexInt() const { return Kind == ComplexInt; }
-  bool isComplexFloat() const { return Kind == ComplexFloat; }
-  bool isLValue() const { return Kind == LValue; }
-  bool isVector() const { return Kind == Vector; }
-  bool isMatrix() const { return Kind == Matrix; }
-  bool isArray() const { return Kind == Array; }
-  bool isStruct() const { return Kind == Struct; }
-  bool isUnion() const { return Kind == Union; }
-  bool isMemberPointer() const { return Kind == MemberPointer; }
-  bool isAddrLabelDiff() const { return Kind == AddrLabelDiff; }
-  bool isReflection() const { return Kind == Reflection; }
+  bool isInt() const { return !isReflection() && Kind == Int; }
+  bool isFloat() const { return !isReflection() && Kind == Float; }
+  bool isFixedPoint() const { return !isReflection() && Kind == FixedPoint; }
+  bool isComplexInt() const { return !isReflection() && Kind == ComplexInt; }
+  bool isComplexFloat() const {
+    return !isReflection() && Kind == ComplexFloat;
+  }
+  bool isLValue() const { return !isReflection() && Kind == LValue; }
+  bool isVector() const { return !isReflection() && Kind == Vector; }
+  bool isMatrix() const { return !isReflection() && Kind == Matrix; }
+  bool isArray() const { return !isReflection() && Kind == Array; }
+  bool isStruct() const { return !isReflection() && Kind == Struct; }
+  bool isUnion() const { return !isReflection() && Kind == Union; }
+  bool isMemberPointer() const {
+    return !isReflection() && Kind == MemberPointer;
+  }
+  bool isAddrLabelDiff() const {
+    return !isReflection() && Kind == AddrLabelDiff;
+  }
+
+  bool isReflection() const {
+    return Kind == Reflection || getReflectionDepth() > 0;
+  }
+  bool isNullReflection() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Null;
+  }
+  bool isReflectedType() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Type;
+  }
+  bool isReflectedObject() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Object;
+  }
+  bool isReflectedValue() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Value;
+  }
+  bool isReflectedDecl() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Declaration;
+  }
+  bool isReflectedTemplate() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Template;
+  }
+  bool isReflectedNamespace() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Namespace;
+  }
+  bool isReflectedEntityProxy() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::EntityProxy;
+  }
+  bool isReflectedParameter() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Parameter;
+  }
+  bool isReflectedBaseSpecifier() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::BaseSpecifier;
+  }
+  bool isReflectedDataMemberSpec() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::DataMemberSpec;
+  }
+  bool isReflectedAnnotation() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
+  }
 
   void dump() const;
   void dump(raw_ostream &OS, const ASTContext &Context) const;
@@ -531,7 +613,7 @@ public:
   std::string getAsString(const ASTContext &Ctx, QualType Ty) const;
 
   APSInt &getInt() {
-    assert(isInt() && "Invalid accessor");
+    assert(Kind == Int && "Invalid accessor");
     return *(APSInt *)(char *)&Data;
   }
   const APSInt &getInt() const {
@@ -545,7 +627,7 @@ public:
                           const ASTContext &Ctx) const;
 
   APFloat &getFloat() {
-    assert(isFloat() && "Invalid accessor");
+    assert(Kind == Float && "Invalid accessor");
     return *(APFloat *)(char *)&Data;
   }
   const APFloat &getFloat() const {
@@ -553,7 +635,7 @@ public:
   }
 
   APFixedPoint &getFixedPoint() {
-    assert(isFixedPoint() && "Invalid accessor");
+    assert(Kind == FixedPoint && "Invalid accessor");
     return *(APFixedPoint *)(char *)&Data;
   }
   const APFixedPoint &getFixedPoint() const {
@@ -561,7 +643,7 @@ public:
   }
 
   APSInt &getComplexIntReal() {
-    assert(isComplexInt() && "Invalid accessor");
+    assert(Kind == ComplexInt && "Invalid accessor");
     return ((ComplexAPSInt *)(char *)&Data)->Real;
   }
   const APSInt &getComplexIntReal() const {
@@ -569,7 +651,7 @@ public:
   }
 
   APSInt &getComplexIntImag() {
-    assert(isComplexInt() && "Invalid accessor");
+    assert(Kind == ComplexInt && "Invalid accessor");
     return ((ComplexAPSInt *)(char *)&Data)->Imag;
   }
   const APSInt &getComplexIntImag() const {
@@ -577,7 +659,7 @@ public:
   }
 
   APFloat &getComplexFloatReal() {
-    assert(isComplexFloat() && "Invalid accessor");
+    assert(Kind == ComplexFloat && "Invalid accessor");
     return ((ComplexAPFloat *)(char *)&Data)->Real;
   }
   const APFloat &getComplexFloatReal() const {
@@ -585,7 +667,7 @@ public:
   }
 
   APFloat &getComplexFloatImag() {
-    assert(isComplexFloat() && "Invalid accessor");
+    assert(Kind == ComplexFloat && "Invalid accessor");
     return ((ComplexAPFloat *)(char *)&Data)->Imag;
   }
   const APFloat &getComplexFloatImag() const {
@@ -605,7 +687,7 @@ public:
   bool isNullPointer() const;
 
   APValue &getVectorElt(unsigned I) {
-    assert(isVector() && "Invalid accessor");
+    assert(Kind == Vector && "Invalid accessor");
     assert(I < getVectorLength() && "Index out of range");
     return ((Vec *)(char *)&Data)->Elts[I];
   }
@@ -613,7 +695,7 @@ public:
     return const_cast<APValue*>(this)->getVectorElt(I);
   }
   unsigned getVectorLength() const {
-    assert(isVector() && "Invalid accessor");
+    assert(Kind == Vector && "Invalid accessor");
     return ((const Vec *)(const void *)&Data)->NumElts;
   }
 
@@ -649,7 +731,7 @@ public:
   }
 
   APValue &getArrayInitializedElt(unsigned I) {
-    assert(isArray() && "Invalid accessor");
+    assert(Kind == Array && "Invalid accessor");
     assert(I < getArrayInitializedElts() && "Index out of range");
     return ((Arr *)(char *)&Data)->Elts[I];
   }
@@ -660,7 +742,7 @@ public:
     return getArrayInitializedElts() != getArraySize();
   }
   APValue &getArrayFiller() {
-    assert(isArray() && "Invalid accessor");
+    assert(Kind == Array && "Invalid accessor");
     assert(hasArrayFiller() && "No array filler");
     return ((Arr *)(char *)&Data)->Elts[getArrayInitializedElts()];
   }
@@ -668,20 +750,20 @@ public:
     return const_cast<APValue*>(this)->getArrayFiller();
   }
   unsigned getArrayInitializedElts() const {
-    assert(isArray() && "Invalid accessor");
+    assert(Kind == Array && "Invalid accessor");
     return ((const Arr *)(const void *)&Data)->NumElts;
   }
   unsigned getArraySize() const {
-    assert(isArray() && "Invalid accessor");
+    assert(Kind == Array && "Invalid accessor");
     return ((const Arr *)(const void *)&Data)->ArrSize;
   }
 
   unsigned getStructNumBases() const {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     return ((const StructData *)(const char *)&Data)->NumBases;
   }
   unsigned getStructNumFields() const {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     return ((const StructData *)(const char *)&Data)->NumFields;
   }
   unsigned getStructNumVirtualBases() const {
@@ -689,12 +771,12 @@ public:
     return ((const StructData *)(const char *)&Data)->NumVirtualBases;
   }
   APValue &getStructBase(unsigned i) {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     assert(i < getStructNumBases() && "base class index OOB");
     return ((StructData *)(char *)&Data)->Elts[i];
   }
   APValue &getStructField(unsigned i) {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     assert(i < getStructNumFields() && "field index OOB");
     return ((StructData *)(char *)&Data)->Elts[getStructNumBases() + i];
   }
@@ -715,11 +797,11 @@ public:
   }
 
   const FieldDecl *getUnionField() const {
-    assert(isUnion() && "Invalid accessor");
+    assert(Kind == Union && "Invalid accessor");
     return ((const UnionData *)(const char *)&Data)->Field;
   }
   APValue &getUnionValue() {
-    assert(isUnion() && "Invalid accessor");
+    assert(Kind == Union && "Invalid accessor");
     return *((UnionData *)(char *)&Data)->Value;
   }
   const APValue &getUnionValue() const {
@@ -731,23 +813,31 @@ public:
   ArrayRef<const CXXRecordDecl*> getMemberPointerPath() const;
 
   const AddrLabelExpr* getAddrLabelDiffLHS() const {
-    assert(isAddrLabelDiff() && "Invalid accessor");
+    assert(Kind == AddrLabelDiff && "Invalid accessor");
     return ((const AddrLabelDiffData *)(const char *)&Data)->LHSExpr;
   }
   const AddrLabelExpr* getAddrLabelDiffRHS() const {
-    assert(isAddrLabelDiff() && "Invalid accessor");
+    assert(Kind == AddrLabelDiff && "Invalid accessor");
     return ((const AddrLabelDiffData *)(const char *)&Data)->RHSExpr;
   }
 
-  ReflectionKind getReflectionOperandKind() const {
-    assert(isReflection() && "Invalid accessor");
-    return ((const ReflectionData *)(const char *)&Data)->OperandKind;
-  }
+  unsigned getReflectionDepth() const { return ReflectionDepth; }
+  QualType getTypeOfReflectedResult(const ASTContext &Ctx) const;
 
-  const void *getReflectionOpaqueOperand() const {
-    assert(isReflection() && "Invalid accessor");
-    return ((const ReflectionData *)(const char *)&Data)->Operand;
-  }
+  ReflectionKind getReflectionKind() const;
+  const void *getOpaqueReflectionData() const;
+
+  QualType getReflectedType() const;
+  APValue getReflectedObject() const;
+  APValue getReflectedValue() const;
+  ValueDecl *getReflectedDecl() const;
+  const TemplateName getReflectedTemplate() const;
+  Decl *getReflectedNamespace() const;
+  UsingShadowDecl *getReflectedEntityProxy() const;
+  ParmVarDecl *getReflectedParameter() const;
+  CXXBaseSpecifier *getReflectedBaseSpecifier() const;
+  TagDataMemberSpec *getReflectedDataMemberSpec() const;
+  CXX26AnnotationAttr *getReflectedAnnotation() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");
@@ -794,14 +884,10 @@ public:
     ((AddrLabelDiffData *)(char *)&Data)->LHSExpr = LHSExpr;
     ((AddrLabelDiffData *)(char *)&Data)->RHSExpr = RHSExpr;
   }
+  void setReflection(ReflectionKind RK, const void *Data);
 
 private:
   void DestroyDataAndMakeUninit();
-  void MakeReflection(ReflectionKind OperandKind, const void *Operand) {
-    assert(isAbsent() && "Bad state change");
-    new ((void *)(char *)Data.buffer) ReflectionData{OperandKind, Operand};
-    Kind = Reflection;
-  }
   void MakeInt(const APSInt &I) {
     assert(isAbsent() && "Bad state change");
     new ((void *)&Data) APSInt(std::move(I));
@@ -865,6 +951,12 @@ private:
     assert(isAbsent() && "Bad state change");
     new ((void *)(char *)&Data) AddrLabelDiffData();
     Kind = AddrLabelDiff;
+  }
+
+  void MakeReflection() {
+    assert(isAbsent() && "Bad state change");
+    new ((void*)(char *)&Data) ReflectionData();
+    Kind = Reflection;
   }
 
 private:

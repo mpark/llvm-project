@@ -548,8 +548,11 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
   do {
     Old = Init;
 
-    if (auto *FE = dyn_cast<FullExpr>(Init))
+    if (auto *FE = dyn_cast<FullExpr>(Init)) {
       Init = FE->getSubExpr();
+      if (!Init)
+        return;
+    }
 
     if (InitListExpr *ILE = dyn_cast<InitListExpr>(Init)) {
       // If this is just redundant braces around an initializer, step over it.
@@ -690,8 +693,11 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       Init = DIE->getExpr();
     }
 
-    if (auto *FE = dyn_cast<FullExpr>(Init))
+    if (auto *FE = dyn_cast<FullExpr>(Init)) {
       Init = FE->getSubExpr();
+      if (!Init)
+        return;
+    }
 
     // Dig out the expression which constructs the extended temporary.
     Init = const_cast<Expr *>(Init->skipRValueSubobjectAdjustments());

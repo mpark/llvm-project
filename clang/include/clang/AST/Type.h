@@ -1,5 +1,7 @@
 //===- Type.h - C Language Family Type Representation -----------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -17,6 +19,7 @@
 #ifndef LLVM_CLANG_AST_TYPE_H
 #define LLVM_CLANG_AST_TYPE_H
 
+#include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/TypeBase.h" // IWYU pragma: export

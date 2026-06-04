@@ -2675,19 +2675,6 @@ void StmtPrinter::VisitCXXUnresolvedConstructExpr(
     OS << ')';
 }
 
-void StmtPrinter::VisitCXXReflectExpr(CXXReflectExpr *S) {
-  // TODO(Reflection): add support for the remaining reflection kinds.
-  OS << "^^";
-  switch (S->getKind()) {
-  case ReflectionKind::Null:
-    assert(false && "null reflection can't be constructed from parsing a "
-                    "reflection operand");
-    break;
-  case ReflectionKind::Type:
-    S->getTypeSourceInfo()->getType().print(OS, Policy);
-    break;
-  }
-}
 
 void StmtPrinter::VisitDependentTemplateIdExpr(DependentTemplateIdExpr *Node) {
   Node->getTemplateName().print(OS, Policy, TemplateName::Qualified::None);
@@ -2896,6 +2883,44 @@ void StmtPrinter::VisitDependentCoawaitExpr(DependentCoawaitExpr *S) {
 void StmtPrinter::VisitCoyieldExpr(CoyieldExpr *S) {
   OS << "co_yield ";
   PrintExpr(S->getOperand());
+}
+
+void StmtPrinter::VisitCXXReflectExpr(CXXReflectExpr *S) {
+  // FIXME: Make this better.
+  OS << "^^(...)";
+}
+
+void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
+  OS << "__metafunction(";
+  for (unsigned I = 0; I < S->getNumArgs(); ++I) {
+    PrintExpr(S->getArg(I));
+    if (I + 1 != S->getNumArgs())
+      OS << ", ";
+  }
+  OS << ")";
+}
+
+void StmtPrinter::VisitCXXSpliceExpr(CXXSpliceExpr *S) {
+  OS << "[: ... :]";
+}
+
+void StmtPrinter::VisitCXXDependentMemberSpliceExpr(
+                                              CXXDependentMemberSpliceExpr *S) {
+  Visit(S->getBase());
+  OS << ".";
+  Visit(S->getRHS());
+}
+
+void StmtPrinter::VisitStackLocationExpr(StackLocationExpr *S) {
+  OS << "StackLoc(" << S->getFrameOffset() << ")";
+}
+
+void StmtPrinter::VisitExtractLValueExpr(ExtractLValueExpr *S) {
+  OS << "ExtractLValue(<Decl>)";
+}
+
+void StmtPrinter::VisitExplDependentCallExpr(ExplDependentCallExpr *S) {
+  PrintExpr(S->getSubExpr());
 }
 
 // Obj-C

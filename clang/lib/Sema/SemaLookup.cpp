@@ -1,5 +1,7 @@
 //===--------------------- SemaLookup.cpp - Name Lookup  ------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -291,6 +293,12 @@ static inline unsigned getIDNS(Sema::LookupNameKind NameKind,
     IDNS = Decl::IDNS_OMPMapper;
     break;
 
+  case Sema::LookupReflectOperandName:
+    IDNS = Decl::IDNS_Tag | Decl::IDNS_Type | Decl::IDNS_Member |
+           Decl::IDNS_Namespace | Decl::IDNS_Ordinary |
+           Decl::IDNS_NonMemberOperator | Decl::IDNS_LocalExtern;
+    break;
+
   case Sema::LookupAnyName:
     IDNS = Decl::IDNS_Ordinary | Decl::IDNS_Tag | Decl::IDNS_Member
       | Decl::IDNS_Using | Decl::IDNS_Namespace | Decl::IDNS_ObjCProtocol
@@ -451,6 +459,11 @@ static bool isPreferredLookupResult(Sema &S, Sema::LookupNameKind Kind,
 
   // For most kinds of declaration, it doesn't really matter which one we pick.
   if (!isa<FunctionDecl>(DUnderlying) && !isa<VarDecl>(DUnderlying)) {
+    // If this is in the context of taking a reflection and the existing
+    // declaration is a namespace alias, prefer the alias decl.
+    if (S.isReflectionContext() && isa<NamespaceAliasDecl>(Existing))
+      return true;
+
     // If the existing declaration is hidden, prefer the new one. Otherwise,
     // keep what we've got.
     return !S.isVisible(Existing);
@@ -2748,6 +2761,8 @@ bool Sema::LookupParsedName(LookupResult &R, Scope *S, CXXScopeSpec *SS,
         return LookupInSuper(R, Qualifier.getAsMicrosoftSuper());
     }
     IsDependent = !DC && isDependentScopeSpecifier(*SS);
+  } else if (R.getAsSingle<DependentNamespaceDecl>()) {
+    IsDependent = true;
   } else {
     // Perform unqualified name lookup starting in the given scope.
     return LookupName(R, S, AllowBuiltinCreation);
@@ -3310,6 +3325,13 @@ addAssociatedClassesAndNamespaces(AssociatedLookup &Result, QualType Ty) {
     if (Queue.empty())
       break;
     T = Queue.pop_back_val();
+  }
+
+  if (T->isReflectionType()) {
+    NamespaceDecl *StdMeta = Result.S.lookupStdMetaNamespace();
+    if (StdMeta) {
+      Result.Namespaces.insert(StdMeta);
+    }
   }
 }
 

@@ -1,5 +1,7 @@
 //===--- ParseTemplate.cpp - Template Parsing -----------------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -1342,6 +1344,22 @@ ParsedTemplateArgument Parser::ParseTemplateArgument() {
     Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated,
     /*LambdaContextDecl=*/nullptr,
     /*ExprContext=*/Sema::ExpressionEvaluationContextRecord::EK_TemplateArgument);
+
+  // P2996: Unparenthesized splice expressions are ill-formed (i.e., to carve out
+  // syntactic space for future splice template arguments).
+  if (Tok.is(tok::l_splice)) {
+    if (ParseSpliceSpecifier()) {
+      // Nothing to be done about a malformed splice-specifier.
+      return ParsedTemplateArgument();
+    } else if (NextToken().is(tok::ellipsis) ||
+               isEndOfTemplateArgument(NextToken())) {
+      SpliceResult SR = getSpliceAnnotation(Tok);
+      Diag(Tok.getLocation(), diag::err_splice_template_argument)
+          << SR.get()->getSourceRange();
+      return ParsedTemplateArgument();
+    }
+  }
+
   if (isCXXTypeId(TentativeCXXTypeIdContext::AsTemplateArgument)) {
     TypeResult TypeArg = ParseTypeName(
         /*Range=*/nullptr, DeclaratorContext::TemplateArg);

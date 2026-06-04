@@ -187,8 +187,14 @@ def CoyieldExpr : StmtNode<CoroutineSuspendExpr>;
 def ConceptSpecializationExpr : StmtNode<Expr>;
 def RequiresExpr : StmtNode<Expr>;
 
-// c++ 26 reflection
+// C++2c Reflection expressions
 def CXXReflectExpr : StmtNode<Expr>;
+def CXXMetafunctionExpr : StmtNode<Expr>;
+def CXXSpliceExpr : StmtNode<Expr>;
+def CXXDependentMemberSpliceExpr : StmtNode<Expr>;
+def StackLocationExpr : StmtNode<Expr>;
+def ExtractLValueExpr : StmtNode<Expr>;
+def ExplDependentCallExpr : StmtNode<Expr>;
 
 // C++26 Expansion statement support expressions
 def CXXExpansionSelectExpr : StmtNode<Expr>;
