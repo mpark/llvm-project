@@ -8205,6 +8205,7 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     break;
 
   case Decl::StaticAssert:
+  case Decl::ConstevalBlock:
   case Decl::ExplicitInstantiation:
     // Nothing to do.
     break;

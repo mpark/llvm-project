@@ -1,5 +1,7 @@
 //===--- DeclSpec.h - Parsed declaration specifiers -------------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -25,6 +27,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjCCommon.h"
 #include "clang/AST/NestedNameSpecifier.h"
+#include "clang/AST/SpliceSpecifier.h"
 #include "clang/Basic/ExceptionSpecificationType.h"
 #include "clang/Basic/Lambda.h"
 #include "clang/Basic/OperatorKinds.h"
@@ -47,6 +50,7 @@ namespace clang {
   class NamespaceBaseDecl;
   class ObjCDeclSpec;
   class Sema;
+  class SpliceSpecifier;
   class Declarator;
   class OverflowBehaviorType;
   struct TemplateIdAnnotation;
@@ -146,25 +150,39 @@ namespace clang {
                             SourceLocation SuperLoc,
                             SourceLocation ColonColonLoc);
 
-    /// Make a new nested-name-specifier from incomplete source-location
-    /// information.
-    ///
-    /// FIXME: This routine should be used very, very rarely, in cases where we
-    /// need to synthesize a nested-name-specifier. Most code should instead use
-    /// \c Adopt() with a proper \c NestedNameSpecifierLoc.
-    void MakeTrivial(ASTContext &Context, NestedNameSpecifier Qualifier,
-                     SourceRange R);
+  /// Turns this (empty) nested-name-specifier into a specifier having a single
+  /// component of splice-scope-specifier kind.
+  ///
+  /// \param Context The AST context in which this nested-name-specifier
+  /// resides.
+  ///
+  /// \param Expr The splice specifier.
+  ///
+  /// \param ColonColonLoc The location of the trailing '::'.
+  void MakeSpliceScopeSpecifier(ASTContext &Context,
+                                SourceLocation TemplateKWLoc,
+                                SpliceSpecifier *Splice,
+                                SourceLocation ColonColonLoc);
 
-    /// Adopt an existing nested-name-specifier (with source-range
-    /// information).
-    void Adopt(NestedNameSpecifierLoc Other);
+  /// Make a new nested-name-specifier from incomplete source-location
+  /// information.
+  ///
+  /// FIXME: This routine should be used very, very rarely, in cases where we
+  /// need to synthesize a nested-name-specifier. Most code should instead use
+  /// \c Adopt() with a proper \c NestedNameSpecifierLoc.
+  void MakeTrivial(ASTContext &Context, NestedNameSpecifier Qualifier,
+                   SourceRange R);
 
-    /// Retrieve a nested-name-specifier with location information, copied
-    /// into the given AST context.
-    ///
-    /// \param Context The context into which this nested-name-specifier will be
-    /// copied.
-    NestedNameSpecifierLoc getWithLocInContext(ASTContext &Context) const;
+  /// Adopt an existing nested-name-specifier (with source-range
+  /// information).
+  void Adopt(NestedNameSpecifierLoc Other);
+
+  /// Retrieve a nested-name-specifier with location information, copied
+  /// into the given AST context.
+  ///
+  /// \param Context The context into which this nested-name-specifier will be
+  /// copied.
+  NestedNameSpecifierLoc getWithLocInContext(ASTContext &Context) const;
 
     /// Retrieve the location of the name in the last qualifier
     /// in this nested name specifier.
@@ -282,6 +300,7 @@ public:
   static const TST TST_typeof_unqualType = clang::TST_typeof_unqualType;
   static const TST TST_typeof_unqualExpr = clang::TST_typeof_unqualExpr;
   static const TST TST_decltype = clang::TST_decltype;
+  static const TST TST_type_splice = clang::TST_type_splice;
   static const TST TST_decltype_auto = clang::TST_decltype_auto;
   static const TST TST_typename_pack_indexing =
       clang::TST_typename_pack_indexing;
@@ -395,6 +414,7 @@ private:
     Decl *DeclRep;
     Expr *ExprRep;
     TemplateIdAnnotation *TemplateIdRep;
+    SpliceSpecifier *SpliceRep;
   };
   Expr *PackIndexingExpr = nullptr;
 
@@ -445,6 +465,9 @@ private:
   }
   static bool isTemplateIdRep(TST T) {
     return (T == TST_auto || T == TST_decltype_auto);
+  }
+  static bool isSpliceRep(TST T) {
+    return (T == TST_type_splice);
   }
 
   DeclSpec(const DeclSpec &) = delete;
@@ -540,6 +563,11 @@ public:
   Expr *getRepAsExpr() const {
     assert(isExprRep((TST) TypeSpecType) && "DeclSpec does not store an expr");
     return ExprRep;
+  }
+  SpliceSpecifier *getRepAsSpliceSpecifier() const {
+    assert(isSpliceRep((TST) TypeSpecType) &&
+           "DeclSpec does not store a splice");
+    return SpliceRep;
   }
 
   Expr *getPackIndexingExpr() const {
@@ -766,6 +794,9 @@ public:
 
   bool SetTypeSpecType(TST T, SourceLocation Loc, const char *&PrevSpec,
                        unsigned &DiagID, Expr *Rep,
+                       const PrintingPolicy &policy);
+  bool SetTypeSpecType(TST T, SourceLocation Loc, const char *&PrevSpec,
+                       unsigned &DiagID, SpliceSpecifier *Rep,
                        const PrintingPolicy &policy);
   bool SetTypeAltiVecVector(bool isAltiVecVector, SourceLocation Loc,
                        const char *&PrevSpec, unsigned &DiagID,
@@ -1927,7 +1958,8 @@ enum class DeclaratorContext {
   AliasDecl,           // C++11 alias-declaration.
   AliasTemplate,       // C++11 alias-declaration template.
   RequiresExpr,        // C++2a requires-expression.
-  Association          // C11 _Generic selection expression association.
+  Association,         // C11 _Generic selection expression association.
+  ReflectOperator      // C++2c reflect operator (P2996).
 };
 
 // Describes whether the current context is a context where an implicit
@@ -2086,9 +2118,11 @@ public:
     assert(llvm::all_of(DeclarationAttrs,
                         [](const ParsedAttr &AL) {
                           return (AL.isStandardAttributeSyntax() ||
-                                  AL.isRegularKeywordAttribute());
+                                  AL.isRegularKeywordAttribute() ||
+                                  AL.isAnnotation());
                         }) &&
-           "DeclarationAttrs may only contain [[]] and keyword attributes");
+           "DeclarationAttrs may only contain [[]], keyword attributes, and "
+           "annotations");
   }
 
   ~Declarator() {
@@ -2214,6 +2248,7 @@ public:
     case DeclaratorContext::TrailingReturnVar:
     case DeclaratorContext::RequiresExpr:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       return true;
     }
     llvm_unreachable("unknown context kind!");
@@ -2254,6 +2289,7 @@ public:
     case DeclaratorContext::TrailingReturn:
     case DeclaratorContext::TrailingReturnVar:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       return false;
     }
     llvm_unreachable("unknown context kind!");
@@ -2298,6 +2334,7 @@ public:
     case DeclaratorContext::TrailingReturn:
     case DeclaratorContext::TrailingReturnVar:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       return false;
     }
     llvm_unreachable("unknown context kind!");
@@ -2355,6 +2392,7 @@ public:
     case DeclaratorContext::TrailingReturn:
     case DeclaratorContext::RequiresExpr:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       return false;
     }
     llvm_unreachable("unknown context kind!");
@@ -2594,6 +2632,7 @@ public:
     case DeclaratorContext::TrailingReturnVar:
     case DeclaratorContext::RequiresExpr:
     case DeclaratorContext::Association:
+    case DeclaratorContext::ReflectOperator:
       return false;
     }
     llvm_unreachable("unknown context kind!");
@@ -2636,6 +2675,7 @@ public:
     case DeclaratorContext::SelectionInit:
     case DeclaratorContext::Condition:
     case DeclaratorContext::TemplateArg:
+    case DeclaratorContext::ReflectOperator:
       return true;
     }
 

@@ -278,6 +278,13 @@ LANGOPT(HIPStdParInterposeAlloc, 1, 0, NotCompatible, "Replace allocations / dea
 
 LANGOPT(OpenACC           , 1, 0, NotCompatible, "OpenACC Enabled")
 
+LANGOPT(Reflection          ,  1, 0, NotCompatible, "Experimental C++26 Reflection")
+LANGOPT(ParameterReflection ,  1, 0, NotCompatible, "Augments C++26 Reflection with function parameter reflection")
+LANGOPT(ExpansionStatements ,  1, 0, NotCompatible, "Experimental C++26 Expansion Statements")
+LANGOPT(AnnotationAttributes,  1, 0, NotCompatible, "Experimental C++26 support for annotations")
+LANGOPT(EntityProxyReflection, 1, 0, NotCompatible, "Augments C++26 Reflection with entity proxy reflection")
+LANGOPT(ReflectionLatest    ,  1, 0, NotCompatible, "Enable all experimental C++26 features supported by Clang/P2996")
+
 LANGOPT(MSVCEnableStdcMacro , 1, 0, NotCompatible, "Define __STDC__ with '-fms-compatibility'")
 LANGOPT(SizedDeallocation , 1, 0, NotCompatible, "sized deallocation")
 LANGOPT(AlignedAllocation , 1, 0, NotCompatible, "aligned allocation")
@@ -535,7 +542,6 @@ LANGOPT(EnableLifetimeSafetyInference, 1, 0, Benign, "Lifetime safety inference 
 LANGOPT(EnableLifetimeSafetyTUAnalysis, 1, 0, Benign, "Lifetime safety at translation-unit end, analyzing functions in call graph post-order for C++")
 
 LANGOPT(PreserveVec3Type, 1, 0, NotCompatible, "Preserve 3-component vector type")
-LANGOPT(Reflection      , 1, 0, NotCompatible, "C++26 Reflection")
 
 LANGOPT(StablePointerSubtraction, 1, 0, NotCompatible, "Make unaligned pointer subtraction stable")
 

@@ -879,6 +879,9 @@ void TextNodeDumper::Visit(const APValue &Value, QualType Ty) {
     OS << " - ";
     OS << "&&" << Value.getAddrLabelDiffRHS()->getLabel()->getName();
     return;
+  case APValue::Reflection:
+    OS << "Reflection <todo>";
+    return;
   }
   llvm_unreachable("Unknown APValue kind!");
 }
@@ -1105,6 +1108,10 @@ void clang::TextNodeDumper::dumpNestedNameSpecifier(NestedNameSpecifier NNS) {
       break;
     case NestedNameSpecifier::Kind::MicrosoftSuper:
       OS << " Super";
+      break;
+    case NestedNameSpecifier::Kind::Splice:
+    case NestedNameSpecifier::Kind::SpliceWithTemplate:
+      OS << " Splice";
       break;
     case NestedNameSpecifier::Kind::Null:
       llvm_unreachable("unexpected null nested name specifier");

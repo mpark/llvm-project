@@ -1,5 +1,7 @@
 //===- ExprCXX.h - Classes for representing expressions ---------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -26,6 +28,8 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/OperationKinds.h"
+#include "clang/AST/Reflection.h"
+#include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/TemplateBase.h"
@@ -37,6 +41,7 @@
 #include "clang/Basic/Lambda.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/OperatorKinds.h"
+#include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TemplateKinds.h"
@@ -46,12 +51,14 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/TrailingObjects.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -1707,14 +1714,6 @@ public:
     getArgs()[Arg] = ArgExpr;
   }
 
-  bool isImmediateEscalating() const {
-    return CXXConstructExprBits.IsImmediateEscalating;
-  }
-
-  void setIsImmediateEscalating(bool Set) {
-    CXXConstructExprBits.IsImmediateEscalating = Set;
-  }
-
   /// Returns the WarnUnusedResultAttr that is declared on the callee
   /// or its return type declaration, together with a NamedDecl that
   /// refers to the declaration the attribute is attached to.
@@ -3209,7 +3208,7 @@ public:
     E = E->IgnoreParens();
     if (isa<UnaryOperator>(E)) {
       assert(cast<UnaryOperator>(E)->getOpcode() == UO_AddrOf);
-      E = cast<UnaryOperator>(E)->getSubExpr();
+      E = cast<UnaryOperator>(E)->getSubExpr()->IgnoreSplices();
       auto *Ovl = cast<OverloadExpr>(E->IgnoreParens());
 
       Result.HasFormOfMemberPointer = (E == Ovl && Ovl->getQualifier());
@@ -3217,7 +3216,7 @@ public:
       Result.IsAddressOfOperandWithParen = HasParen;
       Result.Expression = Ovl;
     } else {
-      Result.Expression = cast<OverloadExpr>(E);
+      Result.Expression = cast<OverloadExpr>(E->IgnoreSplices());
     }
 
     return Result;
@@ -5552,52 +5551,82 @@ public:
   }
 };
 
-/// Represents a C++26 reflect expression [expr.reflect]. The operand of the
-/// expression is either:
-///  - :: (global namespace),
-///  - a reflection-name,
-///  - a type-id, or
-///  - an id-expression.
+/// Represents a C++2c reflect expression (P2996). The operand of the expression
+/// is either a type, an expression, a template-name, or a namespace.
 class CXXReflectExpr : public Expr {
+  enum class OperandKind {
+    Unset,
+    Reflection,
+    DependentExpr
+  };
 
-  // TODO(Reflection): add support for TemplateReference, NamespaceReference and
-  // DeclRefExpr
-  using operand_type = llvm::PointerUnion<const TypeSourceInfo *>;
+  // The operand of the expression.
+  OperandKind Kind;
+  llvm::AlignedCharArrayUnion<APValue, Expr *> Operand;
 
-  SourceLocation CaretCaretLoc;
-  operand_type Operand;
+  // Source locations.
+  SourceLocation OperatorLoc;
+  SourceRange OperandRange;
 
-  CXXReflectExpr(SourceLocation CaretCaretLoc, const TypeSourceInfo *TSI);
+  CXXReflectExpr(const ASTContext &C, QualType ExprTy, APValue RV);
+  CXXReflectExpr(const ASTContext &C, QualType ExprTy, Expr *DepSubExpr);
   CXXReflectExpr(EmptyShell Empty);
 
 public:
   static CXXReflectExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
-                                TypeSourceInfo *TL);
+                                SourceRange OperandRange, APValue RV);
+  static CXXReflectExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
+                                Expr *DepSubExpr);
+  static CXXReflectExpr *CreateEmpty(const ASTContext &C);
 
-  static CXXReflectExpr *CreateEmpty(ASTContext &C);
-
-  SourceLocation getBeginLoc() const LLVM_READONLY {
-    return llvm::TypeSwitch<operand_type, SourceLocation>(Operand)
-        .Case<const TypeSourceInfo *>(
-            [](auto *Ptr) { return Ptr->getTypeLoc().getBeginLoc(); });
+  /// Returns the operand of the reflection expression.
+  APValue getReflection() const {
+    assert(Kind == OperandKind::Reflection);
+    return *(const APValue *)(const char *)&Operand;
+  }
+  Expr *getDependentSubExpr() const {
+    assert(Kind == OperandKind::DependentExpr);
+    return *(Expr **)const_cast<char *>((const char *)&Operand);
+  }
+  bool hasDependentSubExpr() const {
+    return Kind == OperandKind::DependentExpr;
   }
 
+  SourceLocation getBeginLoc() const LLVM_READONLY { return OperatorLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY {
-    return llvm::TypeSwitch<operand_type, SourceLocation>(Operand)
-        .Case<const TypeSourceInfo *>(
-            [](auto *Ptr) { return Ptr->getTypeLoc().getEndLoc(); });
+    return OperandRange.getEnd();
+  }
+  SourceRange getSourceRange() const {
+    return SourceRange(getBeginLoc(), getEndLoc());
   }
 
-  /// Returns location of the '^^'-operator.
-  SourceLocation getOperatorLoc() const { return CaretCaretLoc; }
+  /// Returns location of the '^'-operator.
+  SourceLocation getOperatorLoc() const { return OperatorLoc; }
+  SourceRange getOperandRange() const { return OperandRange; }
+
+  /// Sets the APValue operand.
+  void setAPValue(APValue RV) {
+    assert(Kind == OperandKind::Unset || Kind == OperandKind::Reflection);
+    Kind = OperandKind::Reflection;
+    new ((void *)(char *)&Operand) APValue(RV);
+  }
+
+  /// Sets the dependent subexpression operand.
+  void setDependentSubExpr(Expr *E) {
+    assert(Kind == OperandKind::Unset || Kind == OperandKind::DependentExpr);
+    Kind = OperandKind::DependentExpr;
+    new ((void *)(char *)&Operand) Expr *(E);
+  }
+
+  /// Sets the location of the '^'-operator.
+  void setOperatorLoc(SourceLocation L) { OperatorLoc = L; }
+  void setOperandRange(SourceRange R) { OperandRange = R; }
 
   child_range children() {
-    // TODO(Reflection)
     return child_range(child_iterator(), child_iterator());
   }
 
   const_child_range children() const {
-    // TODO(Reflection)
     return const_child_range(const_child_iterator(), const_child_iterator());
   }
 
@@ -5605,6 +5634,397 @@ public:
     return T->getStmtClass() == CXXReflectExprClass;
   }
 };
+
+/// Represents a C++2c "metafunction", a function that operates on one or more
+/// reflections (P2996). Arguments vary by function.
+class CXXMetafunctionExpr : public Expr {
+public:
+  // Type of callback provided to executing metafunctinons to help evaluate an
+  // expression in the current constant evaluation context.
+  using EvaluateFn = std::function<bool(APValue &, const Expr *,
+                                        bool ConvertToRValue)>;
+
+  // Type of callback provided to report a diagnistc to the evaluation context.
+  using DiagnoseFn = std::function<PartialDiagnostic &(SourceLocation,
+                                                       unsigned)>;
+
+  // Type of callback used to evaluate the metafunction during constant
+  // evaluation. This will be a lambda with the bound 'Sema' object.
+  using ImplFn = std::function<bool(APValue &, EvaluateFn, DiagnoseFn, bool,
+                                    QualType, SourceRange, ArrayRef<Expr *>,
+                                    Decl *ContainingDecl)>;
+
+private:
+
+  // The original ID of the corresponding metafunction. Needed to re-create the
+  // expression during Tree Transform.
+  unsigned MetaFnID;
+
+  // An unowned reference to a callback for executing the metafunction at
+  // constant evaluation time.
+  const ImplFn *Impl;
+
+  // Result type.
+  QualType ResultType;
+
+  // Arguments.
+  unsigned NumArgs;
+  Expr **Args;
+
+  // Source locations.
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXMetafunctionExpr(unsigned MetaFnID, const ImplFn &Impl,
+                      QualType ResultType, ExprValueKind VK, Expr ** Args,
+                      unsigned NumArgs, SourceLocation KwLoc,
+                      SourceLocation LParenLoc, SourceLocation RParenLoc);
+
+  CXXMetafunctionExpr(EmptyShell Empty);
+
+public:
+  static CXXMetafunctionExpr *Create(ASTContext &C, unsigned MetaFnID,
+                                     const ImplFn &Impl,
+                                     QualType ResultType,
+                                     ArrayRef<Expr *> Args,
+                                     SourceLocation KwLoc,
+                                     SourceLocation LParenLoc,
+                                     SourceLocation RParenLoc);
+
+  static CXXMetafunctionExpr *CreateEmpty(ASTContext &C);
+
+  unsigned getMetaFnID() const { return MetaFnID; }
+  void setMetaFnID(unsigned ID) { MetaFnID = ID; }
+
+  const ImplFn &getImpl() const { return *Impl; }
+  void setImpl(const ImplFn &Fn) { Impl = &Fn; }
+
+  QualType getResultType() const { return ResultType; }
+  void setResultType(QualType QT) { ResultType = QT; }
+
+  // TODO(P2996): Consider implementing this with trailing objects.
+  unsigned getNumArgs() const { return NumArgs; }
+
+  Expr *getArg(unsigned I) const {
+    assert(I < NumArgs && "argument out-of-range");
+    return cast<Expr>(Args[I]);
+  }
+  void setArgs(Expr **NewArgs, unsigned Count) {
+    Args = NewArgs;
+    NumArgs = Count;
+  }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const { return KwLoc; }
+  SourceLocation getEndLoc() const { return RParenLoc; }
+
+  SourceRange getSourceRange() const {
+    return SourceRange(getBeginLoc(), getEndLoc());
+  }
+
+  child_range children() {
+    return child_range(reinterpret_cast<Stmt **>(&Args[0]),
+                       reinterpret_cast<Stmt **>(&Args[NumArgs]));
+  }
+
+  const_child_range children() const {
+    return const_child_range(reinterpret_cast<Stmt **>(&Args[0]),
+                             reinterpret_cast<Stmt **>(&Args[NumArgs]));
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXMetafunctionExprClass;
+  }
+};
+
+// Implementation detail of the 'is_accessible' metafunction.
+// Used to "reach up the stack" to find the context from which the metafunction
+// was called, such that the accessibility of a class member can thereafter be
+// evaluated from that context.
+class StackLocationExpr : public Expr {
+  SourceRange Range;
+  int FrameOffset;
+
+  StackLocationExpr(QualType ResultTy, SourceRange Range, int FrameOffset);
+
+public:
+  static StackLocationExpr *Create(ASTContext &C, SourceRange Range,
+                                   int FrameOffset);
+
+  int getFrameOffset() const {
+    return FrameOffset;
+  }
+
+  SourceLocation getBeginLoc() const {
+    return Range.getBegin();
+  }
+
+  SourceLocation getEndLoc() const {
+    return Range.getEnd();
+  }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == StackLocationExprClass;
+  }
+};
+
+// Implementation detail of the 'value_of' metafunction.
+// Used to "reach up the stack" of a constant evaluation to obtain the "most
+// recent LValue" associated with a particular variable.
+class ExtractLValueExpr : public Expr {
+  SourceRange Range;
+  ValueDecl *Decl;
+
+  ExtractLValueExpr(QualType ResultTy, SourceRange Range, ValueDecl *VD);
+
+public:
+  static ExtractLValueExpr *Create(ASTContext &C, SourceRange Range,
+                                   QualType ResultTy, ValueDecl *VD);
+
+  ValueDecl *getValueDecl() const {
+    return Decl;
+  }
+
+  SourceLocation getBeginLoc() const {
+    return Range.getBegin();
+  }
+
+  SourceLocation getEndLoc() const {
+    return Range.getEnd();
+  }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == StackLocationExprClass;
+  }
+};
+
+// Implementation detail of the 'access_context::current()' metafunction.
+// Used to indicate an explicitly dependent call expression, wrapped in
+// 'TemplateDepth'-many layers of template parameters. Is value-dependent
+// if and only if 'TemplateDepth' is nonzero.
+class ExplDependentCallExpr : public Expr {
+  unsigned TemplateDepth;
+  Expr *SubExpr;
+
+  ExplDependentCallExpr(Expr *SubExpr, unsigned TemplateDepth);
+
+public:
+  static ExplDependentCallExpr *Create(ASTContext &C, Expr *SubExpr,
+                                       unsigned TemplateDepth);
+
+  Expr *getSubExpr() const {
+    return SubExpr;
+  }
+
+  int getTemplateDepth() const {
+    return TemplateDepth;
+  }
+
+  SourceLocation getBeginLoc() const {
+    return SubExpr->getBeginLoc();
+  }
+
+  SourceLocation getEndLoc() const {
+    return SubExpr->getEndLoc();
+  }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ExplDependentCallExprClass;
+  }
+};
+
+class CXXSpliceExpr final : public Expr {
+  SourceLocation TemplateKWLoc;
+  SpliceSpecifier *Splice;
+  Expr *Model;
+  bool AllowMemberReference;
+
+  CXXSpliceExpr(QualType ResultTy, ExprValueKind ValueKind,
+                SourceLocation TemplateKWLoc, SpliceSpecifier *Splice,
+                Expr *Model, bool AllowMemberReference);
+
+  CXXSpliceExpr(EmptyShell Empty);
+
+public:
+  static CXXSpliceExpr *Create(ASTContext &C, ExprValueKind ValueKind,
+                               SourceLocation TemplateKWLoc,
+                               SpliceSpecifier *Splice, Expr *Model,
+                               bool AllowMemberReference);
+
+  static CXXSpliceExpr *CreateEmpty(ASTContext &C);
+
+  SpliceSpecifier *getSplice() const { return Splice; }
+  void setSplice(SpliceSpecifier *S) { Splice = S; }
+
+  Expr *getModel() const { return Model; }
+  void setModel(Expr *M) { Model = M; }
+
+  bool allowMemberReference() const { return AllowMemberReference; }
+  void setAllowMemberReference(bool Allow) { AllowMemberReference = Allow; }
+
+  SourceLocation getTemplateKWLoc() const { return TemplateKWLoc; }
+  void setTemplateKWLoc(SourceLocation Loc) { TemplateKWLoc = Loc; }
+
+  /// Determines whether this splice had explicit template arguments.
+  bool hasExplicitTemplateArgs() const {
+    return Splice->isSpecialization();
+  }
+
+  TemplateArgumentLoc const *getTemplateArgs() const {
+    return Splice->getTemplateArgs()->getTemplateArgs();
+  }
+
+  unsigned getNumTemplateArgs() const {
+    if (!hasExplicitTemplateArgs())
+      return 0;
+
+    return Splice->getTemplateArgs()->getNumTemplateArgs();
+  }
+
+  ArrayRef<TemplateArgumentLoc> template_arguments() const {
+    return Splice->getTemplateArgs()->arguments();
+  }
+
+  /// Copies the template arguments into the given structure.
+  void copyTemplateArgumentsInto(TemplateArgumentListInfo &List) const {
+    if (hasExplicitTemplateArgs())
+      for (const TemplateArgumentLoc &Arg :
+           Splice->getTemplateArgs()->arguments())
+        List.addArgument(Arg);
+  }
+
+  /// Retrieve location of the template keyword preceding this splice, if any.
+  SourceLocation getTemplateKeywordLoc() const { return TemplateKWLoc; }
+
+  /// Retrieve location of the left angle bracket starting the explicit template
+  /// argument list following the splice, if any.
+  SourceLocation getLAngleLoc() const {
+    if (Splice->isSpecialization())
+      return Splice->getLAngleLoc();
+    return SourceLocation();
+  }
+
+  /// Retrieve the location of the right angle bracket ending the explicit
+  /// template argument list following the splice, if any.
+  SourceLocation getRAngleLoc() const {
+    if (Splice->isSpecialization())
+      return Splice->getRAngleLoc();
+    return SourceLocation();
+  }
+
+  SourceLocation getBeginLoc() const {
+    if (SourceLocation KWLoc = getTemplateKeywordLoc(); KWLoc.isValid())
+      return KWLoc;
+
+    return Splice->getBeginLoc();
+  }
+
+  SourceLocation getEndLoc() const {
+    if (SourceLocation RAngleLoc = getRAngleLoc(); RAngleLoc.isValid())
+      return RAngleLoc;
+
+    return Splice->getEndLoc();
+  }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXSpliceExprClass;
+  }
+};
+
+// Represents a member access expression having an expression splice following
+// the member access operator (e.g., 'a.[:r:]') for which the expression splice
+// is dependent on a template. This expression will be rewritten as a MemberExpr
+// (or an UnresolvedMemberExpr) during Tree Transform.
+class CXXDependentMemberSpliceExpr : public Expr {
+  Stmt *SubExprs[2];
+
+  SourceLocation OpLoc;
+  bool IsArrow;
+
+  CXXDependentMemberSpliceExpr(QualType ResultTy, Expr *Base,
+                               SourceLocation OpLoc, bool IsArrow,
+                               CXXSpliceExpr *RHS);
+
+  CXXDependentMemberSpliceExpr(EmptyShell Empty);
+
+public:
+  static CXXDependentMemberSpliceExpr *Create(ASTContext &C, Expr *Base,
+                                              SourceLocation OpLoc,
+                                              bool IsArrow, CXXSpliceExpr *RHS);
+
+  static CXXDependentMemberSpliceExpr *CreateEmpty(ASTContext &C);
+
+  Expr *getBase() const { return cast<Expr>(SubExprs[0]); }
+  void setBase(Expr *E) { SubExprs[0] = E; }
+
+  SourceLocation getOpLoc() const { return OpLoc; }
+  void setOpLoc(SourceLocation Loc) { OpLoc = Loc; }
+
+  bool isArrow() const { return IsArrow; }
+  void setIsArrow(bool Arrow) { IsArrow = Arrow; }
+
+  CXXSpliceExpr *getRHS() const { return cast<CXXSpliceExpr>(SubExprs[1]); }
+  void setRHS(CXXSpliceExpr *E) { SubExprs[1] = E; }
+
+  SourceLocation getBeginLoc() const { return getBase()->getBeginLoc(); }
+  SourceLocation getEndLoc() const { return getRHS()->getEndLoc(); }
+
+  child_range children() {
+    return child_range(SubExprs, SubExprs + 2);
+  }
+
+  const_child_range children() const {
+    return const_child_range(SubExprs, SubExprs + 2);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXDependentMemberSpliceExprClass;
+  }
+};
+
+// Represents an expansion-init-list to be expanded over by an expansion
+// statement (C++2c, P1306).
 
 /// Helper that selects an expression from an InitListExpr depending on the
 /// current expansion index. See 'CXXExpansionStmtPattern' for how this is used.
