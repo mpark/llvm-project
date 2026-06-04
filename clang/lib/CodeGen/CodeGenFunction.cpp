@@ -2694,6 +2694,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
 
     case Type::Typedef:
     case Type::Decltype:
+    case Type::ReflectionSplice:
     case Type::Auto:
     case Type::DeducedTemplateSpecialization:
     case Type::PackIndexing:
