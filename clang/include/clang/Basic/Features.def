@@ -382,6 +382,13 @@ FEATURE(cxx_abi_relative_vtable, LangOpts.CPlusPlus && LangOpts.RelativeCXXABIVT
 
 FEATURE(clang_atomic_attributes, true)
 
+FEATURE(reflection, LangOpts.Reflection)
+FEATURE(parameter_reflection, LangOpts.ParameterReflection)
+FEATURE(expansion_statements, LangOpts.ExpansionStatements)
+FEATURE(annotation_attributes, LangOpts.AnnotationAttributes)
+FEATURE(entity_proxy_reflection, LangOpts.EntityProxyReflection)
+FEATURE(reflection_latest, LangOpts.ReflectionLatest)
+
 // CUDA/HIP Features
 FEATURE(cuda_noinline_keyword, LangOpts.CUDA)
 EXTENSION(cuda_implicit_host_device_templates, LangOpts.CUDA && LangOpts.OffloadImplicitHostDeviceTemplates)

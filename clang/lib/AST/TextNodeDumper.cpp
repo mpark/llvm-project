@@ -619,7 +619,6 @@ static bool isSimpleAPValue(const APValue &Value) {
   case APValue::LValue:
   case APValue::MemberPointer:
   case APValue::AddrLabelDiff:
-  case APValue::Reflection:
     return true;
   case APValue::Vector:
   case APValue::Array:
@@ -881,19 +880,7 @@ void TextNodeDumper::Visit(const APValue &Value, QualType Ty) {
     OS << "&&" << Value.getAddrLabelDiffRHS()->getLabel()->getName();
     return;
   case APValue::Reflection:
-    OS << "Reflection ";
-    switch (Value.getReflectionOperandKind()) {
-    case ReflectionKind::Null:
-      OS << "std::meta::info{}";
-      break;
-    case ReflectionKind::Type: {
-      OS << "^^";
-      const TypeSourceInfo *TSI = static_cast<const TypeSourceInfo *>(
-          Value.getReflectionOpaqueOperand());
-      TSI->getType().print(OS, PrintPolicy);
-      break;
-    }
-    }
+    OS << "Reflection <todo>";
     return;
   }
   llvm_unreachable("Unknown APValue kind!");
@@ -1121,6 +1108,10 @@ void clang::TextNodeDumper::dumpNestedNameSpecifier(NestedNameSpecifier NNS) {
       break;
     case NestedNameSpecifier::Kind::MicrosoftSuper:
       OS << " Super";
+      break;
+    case NestedNameSpecifier::Kind::Splice:
+    case NestedNameSpecifier::Kind::SpliceWithTemplate:
+      OS << " Splice";
       break;
     case NestedNameSpecifier::Kind::Null:
       llvm_unreachable("unexpected null nested name specifier");

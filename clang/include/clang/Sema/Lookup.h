@@ -1,5 +1,7 @@
 //===- Lookup.h - Classes for name lookup -----------------------*- C++ -*-===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -569,6 +571,8 @@ public:
   NamedDecl *getFoundDecl() const {
     assert(getResultKind() == LookupResultKind::Found &&
            "getFoundDecl called on non-unique result");
+    if (getSema().isReflectionContext() && isa<NamespaceAliasDecl>(*begin()))
+      return *begin();
     return (*begin())->getUnderlyingDecl();
   }
 
@@ -761,8 +765,7 @@ public:
 
 private:
   void diagnoseAccess() {
-    if (!isAmbiguous() && isClassLookup() &&
-        getSema().getLangOpts().AccessControl)
+    if (!isAmbiguous() && isClassLookup() && getSema().languageAccessControl())
       getSema().CheckLookupAccess(*this);
   }
 

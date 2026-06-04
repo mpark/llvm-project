@@ -1,5 +1,7 @@
 //===- USRGeneration.cpp - Routines for USR generation --------------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -807,7 +809,7 @@ void USRGenerator::VisitType(QualType T) {
         Out << 'n';
         break;
       case BuiltinType::MetaInfo:
-        Out << "@BT@MetaInfo";
+        Out << 'm';
         break;
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
   case BuiltinType::Id:                                                        \

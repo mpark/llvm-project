@@ -2,6 +2,6 @@
 // RUN:   -emit-llvm -o - %s -verify
 
 int main() {
-  (void)(^^int); // expected-error {{cannot compile this scalar expression yet}}
+  (void)(^^int); // expected-error {{expressions of consteval-only type are only allowed in constant-evaluated contexts}}
   return 0;
 }
