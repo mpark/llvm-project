@@ -19,6 +19,7 @@
 #include <__new/exceptions.h>
 #include <__type_traits/is_const.h>
 #include <__type_traits/is_constant_evaluated.h>
+#include <__type_traits/is_consteval_only.h>
 #include <__type_traits/is_same.h>
 #include <__type_traits/is_void.h>
 #include <__type_traits/is_volatile.h>
@@ -99,13 +100,20 @@ public:
     static_assert(sizeof(_Tp) >= 0, "cannot allocate memory for an incomplete type");
     if (__n > allocator_traits<allocator>::max_size(*this))
       std::__throw_bad_array_new_length();
-    if (__libcpp_is_constant_evaluated())
+    if (__libcpp_is_constant_evaluated()) {
       return static_cast<_Tp*>(::operator new(sizeof(_Tp) * __n));
-#if _LIBCPP_HAS_ALIGNED_ALLOCATION
-    if _LIBCPP_CONSTEXPR (_LIBCPP_ALIGNOF(value_type) > _LIBCPP_DEFAULT_NEW_ALIGNMENT)
-      return std::__operator_new_wrapper<value_type>(__n, static_cast<align_val_t>(_LIBCPP_ALIGNOF(value_type)));
+#if _LIBCPP_STD_VER >= 26
+    } else if constexpr (is_consteval_only_v<_Tp>) {
+      return nullptr;
 #endif
-    return std::__operator_new_wrapper<value_type>(__n);
+    } else {
+#if _LIBCPP_HAS_ALIGNED_ALLOCATION
+      if _LIBCPP_CONSTEXPR (_LIBCPP_ALIGNOF(value_type) > _LIBCPP_DEFAULT_NEW_ALIGNMENT)
+        return std::__operator_new_wrapper<value_type>(
+            __n, static_cast<align_val_t>(_LIBCPP_ALIGNOF(value_type)));
+#endif
+      return std::__operator_new_wrapper<value_type>(__n);
+    }
   }
 
 #if _LIBCPP_STD_VER >= 23
@@ -123,14 +131,23 @@ public:
 
   _LIBCPP_HIDE_FROM_ABI
   _LIBCPP_CONSTEXPR_SINCE_CXX20 void deallocate(_Tp* __p, [[__maybe_unused__]] size_t __n) _NOEXCEPT {
-    if (__libcpp_is_constant_evaluated())
-      return ::operator delete(__p);
-#if _LIBCPP_HAS_ALIGNED_ALLOCATION
-    if (_LIBCPP_ALIGNOF(value_type) > _LIBCPP_DEFAULT_NEW_ALIGNMENT)
-      return std::__operator_delete_wrapper(__p _LIBCPP_ONLY_IF_SIZED_DEALLOCATION(, __n * sizeof(value_type)),
-                                            static_cast<align_val_t>(_LIBCPP_ALIGNOF(value_type)));
+    if (__libcpp_is_constant_evaluated()) {
+      ::operator delete(__p);
+#if _LIBCPP_STD_VER >= 26
+    } else if constexpr (!is_consteval_only_v<_Tp>) {
+#else
+    } else {
 #endif
-    return std::__operator_delete_wrapper(__p _LIBCPP_ONLY_IF_SIZED_DEALLOCATION(, __n * sizeof(value_type)));
+#if _LIBCPP_HAS_ALIGNED_ALLOCATION
+      if (_LIBCPP_ALIGNOF(value_type) > _LIBCPP_DEFAULT_NEW_ALIGNMENT)
+        return std::__operator_delete_wrapper(
+            __p _LIBCPP_ONLY_IF_SIZED_DEALLOCATION(, __n * sizeof(value_type)),
+            static_cast<align_val_t>(_LIBCPP_ALIGNOF(value_type)));
+#endif
+      return std::__operator_delete_wrapper(
+          __p _LIBCPP_ONLY_IF_SIZED_DEALLOCATION(,
+                                                 __n * sizeof(value_type)));
+    }
   }
 
 #undef _LIBCPP_ONLY_IF_SIZED_DEALLOCATION

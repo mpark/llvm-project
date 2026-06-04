@@ -128,6 +128,8 @@ inline bool isForManglingOnly(ConstantExprKind Kind) {
   case ConstantExprKind::Normal:
   case ConstantExprKind::ClassTemplateArgument:
   case ConstantExprKind::ImmediateInvocation:
+  case ConstantExprKind::EscalatoryImmediateInvocation:
+  case ConstantExprKind::PlainlyConstantEvaluated:
   case ConstantExprKind::Initializer:
     // Note that non-type template arguments of class type are emitted as
     // template parameter objects.
@@ -143,6 +145,8 @@ inline bool isTemplateArgument(ConstantExprKind Kind) {
   switch (Kind) {
   case ConstantExprKind::Normal:
   case ConstantExprKind::ImmediateInvocation:
+  case ConstantExprKind::EscalatoryImmediateInvocation:
+  case ConstantExprKind::PlainlyConstantEvaluated:
   case ConstantExprKind::Initializer:
     return false;
 

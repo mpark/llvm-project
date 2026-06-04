@@ -1,5 +1,4 @@
-// RUN: %clang_cc1 -std=c++2a -Wno-unused-value %s -verify
-// RUN: %clang_cc1 -std=c++2a -Wno-unused-value %s -verify -fexperimental-new-constant-interpreter
+// RUN: %clang_cc1 -std=c++2a -Wno-unused-value %s -verify=cxx2a,expected
 // RUN: %clang_cc1 -std=c++2b -Wno-unused-value %s -verify
 // RUN: %clang_cc1 -std=c++2b -Wno-unused-value %s -verify -fexperimental-new-constant-interpreter
 
@@ -334,15 +333,16 @@ S s(0); // expected-note {{in the default initializer of 'j'}}
 }
 
 namespace GH65985 {
-consteval int invalid(); // expected-note 2{{declared here}}
+consteval int invalid(); // expected-note {{declared here}} cxx2a-note {{declared here}}
 constexpr int escalating(auto) {
     return invalid();
-    // expected-note@-1 {{'escalating<int>' is an immediate function because its body contains a call to a consteval function 'invalid' and that call is not a constant expression}}
-    // expected-note@-2 2{{undefined function 'invalid' cannot be used in a constant expression}}
+    // cxx2a-note@-1 {{'escalating<int>' is an immediate function because its body contains a call to a consteval function 'invalid' and that call is not a constant expression}}
+    // expected-note@-2 {{undefined function 'invalid' cannot be used in a constant expression}} \
+    // cxx2a-note@-2 {{undefined function 'invalid' cannot be used in a constant expression}}
 }
 struct S {
-    static constexpr int a = escalating(0); // expected-note 2{{in call to}}
-    // expected-error@-1 {{call to immediate function 'GH65985::escalating<int>' is not a constant expression}}
+    static constexpr int a = escalating(0); // expected-note {{in call to}} cxx2a-note {{in call to}}
+    // cxx2a-error@-1 {{call to immediate function 'GH65985::escalating<int>' is not a constant expression}}
     // expected-error@-2 {{constexpr variable 'a' must be initialized by a constant expression}}
 };
 
@@ -350,19 +350,17 @@ struct S {
 
 namespace GH66324 {
 
-consteval int allocate();  // expected-note  2{{declared here}}
+consteval int allocate();  // expected-note  1{{declared here}}
 
 struct _Vector_base {
-  int b =  allocate(); // expected-note 2{{undefined function 'allocate' cannot be used in a constant expression}} \
-  // expected-error {{call to consteval function 'GH66324::allocate' is not a constant expression}} \
-  // expected-note  {{declared here}}
+  int b =  allocate(); // expected-note {{undefined function 'allocate' cannot be used in a constant expression}}
 };
 
 template <typename>
 struct vector : _Vector_base {
   constexpr vector()
   // expected-note@-1 {{'vector' is an immediate constructor because its body contains a call to a consteval function 'allocate' and that call is not a constant expression}}
-  : _Vector_base{} {} // expected-note {{in the default initializer of 'b'}}
+  : _Vector_base{} {}
 };
 
 vector<void> v{};
@@ -402,7 +400,7 @@ namespace lvalue_to_rvalue_init_from_heap {
 
 struct S {
     int *value;
-    constexpr S(int v) : value(new int {v}) {}  // expected-note 2 {{heap allocation performed here}}
+    constexpr S(int v) : value(new int {v}) {}  // expected-note 1 {{heap allocation performed here}}
     constexpr ~S() { delete value; }
 };
 consteval S fn() { return S(5); }
@@ -414,9 +412,7 @@ const int c = *fn().value;
 int d = *fn().value;
 
 constexpr int e = *fn().value + fn2(); // expected-error {{must be initialized by a constant expression}} \
-                                       // expected-error {{call to consteval function 'lvalue_to_rvalue_init_from_heap::fn' is not a constant expression}} \
-                                       // expected-note {{non-constexpr function 'fn2'}} \
-                                       // expected-note {{pointer to heap-allocated object}}
+                                       // expected-note {{non-constexpr function 'fn2'}}
 
 int f = *fn().value + fn2();  // expected-error {{call to consteval function 'lvalue_to_rvalue_init_from_heap::fn' is not a constant expression}} \
                               // expected-note {{pointer to heap-allocated object}}

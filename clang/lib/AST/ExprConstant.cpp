@@ -1,5 +1,7 @@
 //===--- ExprConstant.cpp - Expression Constant Evaluator -----------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -67,7 +69,6 @@
 #include "llvm/Support/CRC.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/SipHash.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -793,6 +794,11 @@ namespace {
     /// evaluated, if any.
     APValue::LValueBase EvaluatingDecl;
 
+    /// ContainingDecl - This is the declaration within which the expression
+    /// under evaluation appears. Used to verify rules around injected
+    /// declarations that may be produced by plainly constant evaluations.
+    Decl *ContainingDecl;
+
     enum class EvaluatingDeclKind {
       None,
       /// We're evaluating the construction of EvaluatingDecl.
@@ -880,6 +886,11 @@ namespace {
     /// The current array initialization index, if we're performing array
     /// initialization.
     uint64_t ArrayInitIndex = -1;
+
+    /// Whether we're evaluating an immediate invocation that may escalate.
+    /// If so, do not fail on constructs that may become in an immediate
+    /// function context later.
+    bool IsImmediateEscalating = false;
 
     EvalInfo(const ASTContext &C, SemaProxy *SProxy, Expr::EvalStatus &S,
              EvaluationMode Mode)
@@ -2310,6 +2321,14 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
     Info.FFDiag(Loc, diag::note_consteval_address_accessible)
         << !Type->isAnyPointerType();
     Info.Note(FD->getLocation(), diag::note_declared_at);
+    return false;
+  }
+
+  if (!Type->isConstevalOnly() &&
+      ((BaseE && BaseE->getType()->isConstevalOnly()) ||
+       (BaseVD && BaseVD->getType()->isConstevalOnly()))) {
+    Info.FFDiag(Loc, diag::note_consteval_only_smuggling)
+        << !Type->isAnyPointerType();
     return false;
   }
 
@@ -5086,7 +5105,6 @@ handleLValueToRValueConversion(EvalInfo &Info, const Expr *Conv, QualType Type,
       return true;
     }
   }
-
   CompleteObject Obj = findCompleteObject(Info, Conv, AK, LVal, Type);
   return Obj && extractSubobject(Info, Conv, Obj, LVal.Designator, RVal, AK);
 }
@@ -6534,6 +6552,7 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
   case Stmt::CXXTryStmtClass:
     // Evaluate try blocks by evaluating all sub statements.
     return EvaluateStmt(Result, Info, cast<CXXTryStmt>(S)->getTryBlock(), Case);
+
   }
 }
 
@@ -8111,10 +8130,10 @@ class APValueToBufferConverter {
 
     case APValue::LValue:
     case APValue::Matrix:
+    case APValue::Reflection:
     case APValue::Union:
     case APValue::MemberPointer:
-    case APValue::AddrLabelDiff:
-    case APValue::Reflection: {
+    case APValue::AddrLabelDiff: {
       Info.FFDiag(BCE->getBeginLoc(),
                   diag::note_constexpr_bit_cast_unsupported_type)
           << Ty;
@@ -8991,6 +9010,12 @@ public:
     return true;
   }
 
+  bool VisitExplDependentCallExpr(const ExplDependentCallExpr *E) {
+    assert(E->getTemplateDepth() == 0 &&
+           "should not be evaluating dependent call expression");
+    return StmtVisitorTy::Visit(E->getSubExpr());
+  }
+
   bool VisitCallExpr(const CallExpr *E) {
     APValue Result;
     if (!handleCallExpr(E, Result, nullptr))
@@ -9437,7 +9462,108 @@ public:
       return;
     VisitIgnoredValue(E);
   }
+
+  /// Visit a metafunction evaluation (P2996).
+  bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
+
+  bool VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
+    return this->Visit(E->getModel());
+  }
+
+  bool VisitStackLocationExpr(const StackLocationExpr *E);
 };
+
+/// EvaluateAsRValue - Try to evaluate this expression, performing an implicit
+/// lvalue-to-rvalue cast if it is an lvalue.
+template <typename Derived>
+bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
+                                                 const CXXMetafunctionExpr *E) {
+  EvalInfo &Info = this->Info;
+  auto Evaluator = [&Info](APValue &Result, const Expr *E,
+                           bool ConvertToRValue) {
+    assert(!E->isValueDependent());
+
+    if (E->getType().isNull())
+      return false;
+
+    if (!CheckLiteralType(Info, E))
+      return false;
+
+    if (Info.EnableNewConstInterp) {
+      if (!Info.Ctx.getInterpContext().evaluateAsRValue(Info, E, Result))
+        return false;
+    } else {
+      if (!::Evaluate(Result, Info, E))
+        return false;
+    }
+
+    if (ConvertToRValue) {
+      if (E->isGLValue()) {
+        LValue LV;
+        LV.setFrom(Info.Ctx, Result);
+        if (!handleLValueToRValueConversion(Info, E, E->getType(), LV, Result))
+          return false;
+      }
+
+      // Check this core constant expression is a constant expression.
+      return CheckConstantExpression(Info, E->getExprLoc(), E->getType(),
+                                     Result, ConstantExprKind::Normal);
+    }
+    return true;
+  };
+
+  std::vector<PartialDiagnosticAt> Diagnostics;
+  auto Diagnoser = [&](SourceLocation Loc,
+                           diag::kind DiagID) -> PartialDiagnostic & {
+    auto &D = Diagnostics.emplace_back(
+        std::piecewise_construct,
+        std::make_tuple(Loc),
+        std::make_tuple(DiagID, std::ref(Info.Ctx.getDiagAllocator())));
+
+    return D.second;
+  };
+
+  // Construct array of arguments.
+  SmallVector<Expr *, 2> Args(E->getNumArgs() - 1);
+  for (std::size_t I = 1; I < E->getNumArgs(); ++I) {
+    Args[I - 1] = E->getArg(I);
+  }
+
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+
+  // Decide if injection is allowed.
+  bool AllowInjection =
+      (Info.EvalMode ==
+       EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
+
+  // Evaluate the metafunction.
+  APValue Result;
+  const CXXMetafunctionExpr::ImplFn &Implementation = E->getImpl();
+  if (Implementation(Result, Evaluator, Diagnoser, AllowInjection,
+                     E->getResultType(), Info.CurrentCall->CallRange, Args,
+                     Info.ContainingDecl)) {
+    bool Result = Error(E);
+    Info.addNotes(Diagnostics);
+
+    return Result;
+  }
+  return DerivedSuccess(Result, E);
+}
+
+template <typename Derived>
+bool ExprEvaluatorBase<Derived>::VisitStackLocationExpr(
+                                                   const StackLocationExpr *E) {
+  CallStackFrame *Frame = Info.CurrentCall;
+  for (int Offset = E->getFrameOffset(); Frame && Offset > 0; --Offset)
+    Frame = Frame->Caller;
+  if (!Frame)
+    return Error(E);
+
+  APValue RV(ReflectionKind::Declaration,
+             const_cast<FunctionDecl *>(Frame->Callee));
+  return DerivedSuccess(RV, E);
+}
 
 } // namespace
 
@@ -9644,6 +9770,8 @@ public:
       return HandleDynamicCast(Info, cast<ExplicitCastExpr>(E), Result);
     }
   }
+
+  bool VisitExtractLValueExpr(const ExtractLValueExpr *E);
 };
 } // end anonymous namespace
 
@@ -9752,7 +9880,8 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
     // variable) or be ill-formed (and trigger an appropriate evaluation
     // diagnostic)).
     CallStackFrame *CurrFrame = Info.CurrentCall;
-    if (CurrFrame->Callee && CurrFrame->Callee->Equals(VD->getDeclContext())) {
+    if (CurrFrame->Callee &&
+        CurrFrame->Callee->Equals(VD->getDeclContext())) {
       // Function parameters are stored in some caller's frame. (Usually the
       // immediate caller, but for an inherited constructor they may be more
       // distant.)
@@ -10135,6 +10264,20 @@ bool LValueExprEvaluator::VisitBinAssign(const BinaryOperator *E) {
 
   return handleAssignment(this->Info, E, Result, E->getLHS()->getType(),
                           NewVal);
+}
+
+bool LValueExprEvaluator::VisitExtractLValueExpr(const ExtractLValueExpr *E) {
+  CallStackFrame *Frame = Info.CurrentCall;
+  do {
+    if (Frame->getCurrentTemporary(E->getValueDecl())) {
+      unsigned Version = Frame->getCurrentTemporaryVersion(E->getValueDecl());
+
+      APValue::LValueBase LV(E->getValueDecl(), Frame->Index, Version);
+      return Success(LV);
+    }
+  } while ((Frame = Frame->Caller));
+
+  return Success(E->getValueDecl());
 }
 
 //===----------------------------------------------------------------------===//
@@ -11379,59 +11522,6 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
 
   return true;
 }
-
-//===----------------------------------------------------------------------===//
-// Reflection expression evaluation
-//===----------------------------------------------------------------------===//
-
-namespace {
-class ReflectionEvaluator : public ExprEvaluatorBase<ReflectionEvaluator> {
-
-  using BaseType = ExprEvaluatorBase<ReflectionEvaluator>;
-
-  APValue &Result;
-
-public:
-  ReflectionEvaluator(EvalInfo &E, APValue &Result)
-      : ExprEvaluatorBaseTy(E), Result(Result) {}
-
-  bool Success(const APValue &V, const Expr *E) {
-    Result = V;
-    return true;
-  }
-
-  bool VisitCXXReflectExpr(const CXXReflectExpr *E);
-  bool ZeroInitialization(const Expr *E);
-};
-
-bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  switch (E->getKind()) {
-  case ReflectionKind::Null: {
-    assert(false && "null reflection can't be constructed from parsing a "
-                    "reflection operand");
-    return false;
-  }
-  case ReflectionKind::Type: {
-    APValue ReflectionValue(ReflectionKind::Type, E->getOpaqueValue());
-    return Success(ReflectionValue, E);
-  }
-  }
-  assert(false && "unknown or unimplemented reflection entities");
-  return false;
-}
-
-bool ReflectionEvaluator::ZeroInitialization(const Expr *E) {
-  Result = APValue(ReflectionKind::Null, /*Operand=*/nullptr);
-  return true;
-}
-
-} // end anonymous namespace
-
-static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
-  assert(E->isPRValue() && E->getType()->isMetaInfoType());
-  return ReflectionEvaluator(Info, Result).Visit(E);
-}
-
 //===----------------------------------------------------------------------===//
 // Member Pointer Evaluation
 //===----------------------------------------------------------------------===//
@@ -11519,7 +11609,8 @@ bool MemberPointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
 bool MemberPointerExprEvaluator::VisitUnaryAddrOf(const UnaryOperator *E) {
   // C++11 [expr.unary.op]p3 has very strict rules on how the address of a
   // member can be formed.
-  return Success(cast<DeclRefExpr>(E->getSubExpr())->getDecl());
+  Expr *SubExpr = E->getSubExpr()->IgnoreSplices();
+  return Success(cast<DeclRefExpr>(SubExpr)->getDecl());
 }
 
 //===----------------------------------------------------------------------===//
@@ -16535,6 +16626,7 @@ GCCTypeClass EvaluateBuiltinClassifyType(QualType T,
     case BuiltinType::ULong:
     case BuiltinType::ULongLong:
     case BuiltinType::UInt128:
+    case BuiltinType::MetaInfo:
       return GCCTypeClass::Integer;
 
     case BuiltinType::UShortAccum:
@@ -16585,7 +16677,6 @@ GCCTypeClass EvaluateBuiltinClassifyType(QualType T,
 #include "clang/Basic/HLSLPackedTypes.def"
 #define SPIRV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
 #include "clang/Basic/SPIRVTypes.def"
-    case BuiltinType::MetaInfo:
       return GCCTypeClass::None;
 
     case BuiltinType::Dependent:
@@ -17305,6 +17396,7 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
     // size of the referenced object.
     switch (Info.EvalMode) {
     case EvaluationMode::ConstantExpression:
+    case EvaluationMode::ConstantExpressionPlainlyConstantEvaluated:
     case EvaluationMode::ConstantFold:
     case EvaluationMode::IgnoreSideEffects:
       // Leave it to IR generation.
@@ -19848,7 +19940,7 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
     return Success(CmpResult::Equal, E);
   }
 
-  if (LHSTy->isMetaInfoType() && RHSTy->isMetaInfoType()) {
+  if (LHSTy->isReflectionType() && RHSTy->isReflectionType()) {
     APValue LHSValue, RHSValue;
     llvm::FoldingSetNodeID LID, RID;
     if (!Evaluate(LHSValue, Info, E->getLHS()))
@@ -21946,55 +22038,6 @@ public:
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
 
-    case Builtin::BIstdc_memreverse8:
-    case Builtin::BI__builtin_stdc_memreverse8: {
-      APSInt N;
-      if (!EvaluateInteger(E->getArg(0), N, Info))
-        return false;
-      uint64_t NElems = N.getZExtValue();
-
-      LValue Ptr;
-      if (!EvaluatePointer(E->getArg(1), Ptr, Info))
-        return false;
-
-      if (!Ptr.checkNullPointerForFoldAccess(Info, E, AK_Assign) ||
-          Ptr.Designator.Invalid)
-        return false;
-
-      QualType CharTy = Ptr.Designator.getType(Info.Ctx);
-      uint64_t RemainingElems = Ptr.Designator.validIndexAdjustments().second;
-      if (NElems > RemainingElems) {
-        uint64_t ArrayIndex =
-            Ptr.Designator.MostDerivedIsArrayElement
-                ? Ptr.Designator.Entries.back().getAsArrayIndex()
-                : (uint64_t)Ptr.Designator.IsOnePastTheEnd;
-        APSInt Index =
-            APSInt::getUnsigned(llvm::SaturatingAdd(ArrayIndex, NElems - 1));
-        Ptr.Designator.diagnosePointerArithmetic(Info, E, Index);
-        return false;
-      }
-
-      if (NElems <= 1)
-        return true;
-
-      LValue Lo = Ptr;
-      LValue Hi = Ptr;
-      if (!HandleLValueArrayAdjustment(Info, E, Hi, CharTy, NElems - 1))
-        return false;
-
-      for (uint64_t I = 0, Half = NElems / 2; I < Half; ++I) {
-        APValue LoVal, HiVal;
-        if (!handleLValueToRValueConversion(Info, E, CharTy, Lo, LoVal) ||
-            !handleLValueToRValueConversion(Info, E, CharTy, Hi, HiVal) ||
-            !handleAssignment(Info, E, Lo, CharTy, HiVal) ||
-            !handleAssignment(Info, E, Hi, CharTy, LoVal) ||
-            !HandleLValueArrayAdjustment(Info, E, Lo, CharTy, 1) ||
-            !HandleLValueArrayAdjustment(Info, E, Hi, CharTy, -1))
-          return false;
-      }
-      return true;
-    }
-
     default:
       return false;
     }
@@ -22087,6 +22130,64 @@ static bool EvaluateVoid(const Expr *E, EvalInfo &Info) {
 }
 
 //===----------------------------------------------------------------------===//
+// Reflection expression evaluation
+//===----------------------------------------------------------------------===//
+
+namespace {
+class ReflectionEvaluator
+  : public ExprEvaluatorBase<ReflectionEvaluator> {
+
+  using BaseType = ExprEvaluatorBase<ReflectionEvaluator>;
+
+  APValue &Result;
+public:
+  ReflectionEvaluator(EvalInfo &E, APValue &Result)
+    : ExprEvaluatorBaseTy(E), Result(Result) {}
+
+  bool Success(const APValue &V, const Expr *e) {
+    return Success(V);
+  }
+
+  bool Success(const APValue &V) {
+    Result = V;
+    return true;
+  }
+
+  bool ZeroInitialization(const Expr *E) {
+    Result = APValue(ReflectionKind::Null, nullptr);
+    return true;
+  }
+
+  bool VisitImplicitValueInitExpr(const ImplicitValueInitExpr *E) {
+    return ZeroInitialization(E);
+  }
+
+  bool VisitCXXReflectExpr(const CXXReflectExpr *E);
+  bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
+  bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
+};
+
+bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
+  APValue Result(E->getReflection());
+  return Success(Result, E);
+}
+
+bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
+                                                 const CXXMetafunctionExpr *E) {
+  return BaseType::VisitCXXMetafunctionExpr(E);
+}
+
+bool ReflectionEvaluator::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
+  return BaseType::VisitCXXSpliceExpr(E);
+}
+}  // end anonymous namespace
+
+static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
+  assert(E->isPRValue() && E->getType()->isReflectionType());
+  return ReflectionEvaluator(Info, Result).Visit(E);
+}
+
+//===----------------------------------------------------------------------===//
 // Top level Expr::EvaluateAsRValue method.
 //===----------------------------------------------------------------------===//
 
@@ -22109,7 +22210,7 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
   } else if (T->isIntegralOrEnumerationType()) {
     if (!IntExprEvaluator(Info, Result).Visit(E))
       return false;
-  } else if (T->isMetaInfoType()) {
+  } else if (T->isReflectionType()) {
     if (!EvaluateReflection(E, Result, Info))
       return false;
   } else if (T->hasPointerRepresentation()) {
@@ -22281,6 +22382,9 @@ static bool FastEvaluateAsRValue(const Expr *Exp, APValue &Result,
         return true;
       }
     }
+
+    if (!CE->getSubExpr())
+      return false;
 
     // The SubExpr is usually just an IntegerLiteral.
     return FastEvaluateAsRValue(CE->getSubExpr(), Result, Ctx, IsConst);
@@ -22540,7 +22644,8 @@ static bool EvaluateDestruction(const ASTContext &Ctx, SemaProxy *SProxy,
 
 static bool doEvaluateConstantExpr(Expr::EvalResult &Result,
                                    const ASTContext &Ctx, SemaProxy *SProxy,
-                                   const Expr *E, ConstantExprKind Kind) {
+                                   const Expr *E, ConstantExprKind Kind,
+                                   Decl *ContainingDecl) {
   assert(!E->isValueDependent() &&
          "Expression evaluator can't be called on a dependent expression.");
 
@@ -22552,6 +22657,13 @@ static bool doEvaluateConstantExpr(Expr::EvalResult &Result,
   EvaluationMode EM = Kind == ConstantExprKind::Initializer
                           ? EvaluationMode::IgnoreSideEffects
                           : EvaluationMode::ConstantExpression;
+  if (Kind == ConstantExprKind::PlainlyConstantEvaluated) {
+    assert(ContainingDecl &&
+           "must specify a ContainingDecl when evaluating a plainly "
+           "constant-evaluated expression");
+    EM = EvaluationMode::ConstantExpressionPlainlyConstantEvaluated;
+  }
+
   if (Ctx.getLangOpts().EnableNewConstInterp) {
     interp::EvalSettings Settings(EM, Result, SProxy, Kind);
     Settings.InConstantContext = true;
@@ -22561,6 +22673,8 @@ static bool doEvaluateConstantExpr(Expr::EvalResult &Result,
 
   EvalInfo Info(Ctx, SProxy, Result, EM);
   Info.InConstantContext = true;
+  Info.IsImmediateEscalating =
+      (Kind == ConstantExprKind::EscalatoryImmediateInvocation);
 
   // The type of the object we're initializing is 'const T' for a class NTTP.
   QualType T = E->getType();
@@ -22573,6 +22687,9 @@ static bool doEvaluateConstantExpr(Expr::EvalResult &Result,
   MaterializeTemporaryExpr BaseMTE(T, const_cast<Expr *>(E), true);
   APValue::LValueBase Base(&BaseMTE);
   Info.setEvaluatingDecl(Base, Result.Val);
+
+  // Set the containing declaration, if one was provided.
+  Info.ContainingDecl = ContainingDecl;
 
   LValue LVal;
   LVal.set(Base);
@@ -22610,10 +22727,11 @@ static bool doEvaluateConstantExpr(Expr::EvalResult &Result,
 }
 
 bool Expr::EvaluateAsConstantExpr(EvalResult &Result, const ASTContext &Ctx,
-                                  ConstantExprKind Kind) const {
-
+                                  ConstantExprKind Kind,
+                                  Decl *ContainingDecl) const {
   ExprTimeTraceScope TimeScope(this, Ctx, "EvaluateAsConstantExpr");
-  return ::doEvaluateConstantExpr(Result, Ctx, /*SProxy=*/nullptr, this, Kind);
+  return ::doEvaluateConstantExpr(Result, Ctx, /*SProxy=*/nullptr, this, Kind,
+                                  ContainingDecl);
 }
 
 bool Expr::EvaluateAsMandatedConstantExpr(EvalResult &Result,
@@ -22621,7 +22739,8 @@ bool Expr::EvaluateAsMandatedConstantExpr(EvalResult &Result,
                                           SemaProxy &SProxy,
                                           ConstantExprKind Kind) const {
   ExprTimeTraceScope TimeScope(this, Ctx, "EvaluateAsMandatedConstantExpr");
-  return ::doEvaluateConstantExpr(Result, Ctx, &SProxy, this, Kind);
+  return ::doEvaluateConstantExpr(Result, Ctx, &SProxy, this, Kind,
+                                  /*ContainingDecl=*/nullptr);
 }
 
 static bool doEvaluateInitializer(const ASTContext &Ctx, SemaProxy *SProxy,
@@ -22651,6 +22770,9 @@ static bool doEvaluateInitializer(const ASTContext &Ctx, SemaProxy *SProxy,
   EvalInfo Info(Ctx, SProxy, EStatus, EvalMode);
   Info.setEvaluatingDecl(VD, EStatus.Val);
   Info.InConstantContext = IsConstantInitialization;
+
+  // Use the variable as the containing declaration.
+  Info.ContainingDecl = const_cast<VarDecl *>(VD);
 
   LValue LVal;
   LVal.set(VD);
@@ -23117,7 +23239,13 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::ExpressionTraitExprClass:
   case Expr::CXXNoexceptExprClass:
   case Expr::CXXReflectExprClass:
+  case Expr::CXXMetafunctionExprClass:
+  case Expr::CXXSpliceExprClass:
+  case Expr::StackLocationExprClass:
+  case Expr::ExtractLValueExprClass:
     return NoDiag();
+  case Expr::ExplDependentCallExprClass:
+    return CheckICE(cast<ExplDependentCallExpr>(E)->getSubExpr(), Ctx);
   case Expr::CallExprClass:
   case Expr::CXXOperatorCallExprClass: {
     // C99 6.6/3 allows function calls within unevaluated subexpressions of

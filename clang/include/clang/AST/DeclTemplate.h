@@ -49,6 +49,7 @@ namespace clang {
 enum BuiltinTemplateKind : int;
 class ClassTemplateDecl;
 class ClassTemplatePartialSpecializationDecl;
+class CXXExpansionStmt;
 class Expr;
 class FunctionTemplateDecl;
 class IdentifierInfo;
@@ -2745,6 +2746,8 @@ public:
     assert(Loc.isValid() && "point of instantiation must be valid!");
     PointOfInstantiation = Loc;
   }
+
+  bool isCompleteDefinition() { return IsCompleteDefinition; }
 
   void setCompleteDefinition() { IsCompleteDefinition = true; }
 

@@ -1,5 +1,7 @@
 //===- ASTContext.cpp - Context to hold long-lived AST nodes --------------===//
 //
+// Copyright 2024 Bloomberg Finance L.P.
+//
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -35,6 +37,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExternalASTSource.h"
+#include "clang/AST/LocInfoType.h"
 #include "clang/AST/Mangle.h"
 #include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/NestedNameSpecifier.h"
@@ -1506,7 +1509,7 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
   // nullptr type (C++0x 2.14.7)
   InitBuiltinType(NullPtrTy,           BuiltinType::NullPtr);
 
-  // std::meta::info type (C++26 21.4.1)
+  // meta::info type (C++2c P2996)
   InitBuiltinType(MetaInfoTy, BuiltinType::MetaInfo);
 
   // half type (OpenCL 6.1.1.1) / ARM NEON __fp16
@@ -2349,10 +2352,8 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       Align = Target->getPointerAlign(LangAS::Default);
       break;
     case BuiltinType::MetaInfo:
-      // sizeof(std::meta::info) == sizeof(void*)
-      Width = Target->getPointerWidth(LangAS::Default);
-      // alignof(std::meta::info) == alignof(void*)
-      Align = Target->getPointerAlign(LangAS::Default);
+      Width = Target->getMetaInfoWidth();
+      Align = Target->getMetaInfoAlign();
       break;
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
@@ -3563,6 +3564,10 @@ static void encodeTypeForFunctionPointerAuth(const ASTContext &Ctx,
       OS << "v";
       return;
 
+    case BuiltinType::MetaInfo:
+      OS << "m";
+      return;
+
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
     case BuiltinType::ObjCSel:
@@ -3581,7 +3586,6 @@ static void encodeTypeForFunctionPointerAuth(const ASTContext &Ctx,
     case BuiltinType::VectorPair:
     case BuiltinType::DMR1024:
     case BuiltinType::DMR2048:
-    case BuiltinType::MetaInfo:
       OS << "?";
       return;
 
@@ -4377,6 +4381,7 @@ QualType ASTContext::getVariableArrayDecayedType(QualType type) const {
   case Type::Auto:
   case Type::DeducedTemplateSpecialization:
   case Type::PackExpansion:
+  case Type::ReflectionSplice:
   case Type::PackIndexing:
   case Type::BitInt:
   case Type::DependentBitInt:
@@ -6364,6 +6369,23 @@ QualType ASTContext::getPackExpansionType(QualType Pattern,
   return QualType(T, 0);
 }
 
+QualType ASTContext::getReflectionSpliceType(SourceLocation TypenameKWLoc,
+                                             SpliceSpecifier *Splice,
+                                             QualType UnderlyingType) const {
+  ReflectionSpliceType *RST;
+
+  // Unwrap any LocInfoType introduced by reflection operator.
+  const Type *UnderlyingTyPtr = UnderlyingType.getTypePtr();
+  if (const LocInfoType *LIT = dyn_cast_or_null<LocInfoType>(UnderlyingTyPtr))
+    UnderlyingType = LIT->getType();
+
+  CanQualType Canon = getCanonicalType(UnderlyingType);
+  RST = new (*this, TypeAlignment) ReflectionSpliceType(TypenameKWLoc, Splice,
+                                                        Canon);
+  Types.push_back(RST);
+  return QualType(RST, 0);
+}
+
 /// CmpProtocolNames - Comparison predicate for sorting protocols
 /// alphabetically.
 static int CmpProtocolNames(ObjCProtocolDecl *const *LHS,
@@ -7357,6 +7379,8 @@ ASTContext::getNameForTemplate(TemplateName Name,
           DeclarationNameLoc::makeCXXOperatorNameLoc(SourceRange());
       return DeclarationNameInfo(DName, NameLoc, DNLoc);
     }
+
+    llvm_unreachable("unknown dependent template kind");
   }
 
   case TemplateName::SubstTemplateTemplateParm: {
@@ -9301,6 +9325,7 @@ static char getObjCEncodingForPrimitiveType(const ASTContext *C,
     case BuiltinType::SatUShortFract:
     case BuiltinType::SatUFract:
     case BuiltinType::SatULongFract:
+    case BuiltinType::MetaInfo:
       // FIXME: potentially need @encodes for these!
       return ' ';
 
@@ -9340,7 +9365,6 @@ static char getObjCEncodingForPrimitiveType(const ASTContext *C,
     case BuiltinType::OCLReserveID:
     case BuiltinType::OCLSampler:
     case BuiltinType::Dependent:
-    case BuiltinType::MetaInfo:
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
     case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
@@ -13960,6 +13984,55 @@ ASTContext::getPredefinedStringLiteralFromCache(StringRef Key) const {
   return Result;
 }
 
+VarDecl *
+ASTContext::getGeneratedCharArray(StringRef Key, bool Utf8) {
+  auto &Cache = Utf8 ? GenUTF8CharArrayCache : GenCharArrayCache;
+  VarDecl *&Result = Cache[Key];
+  if (!Result) {
+    std::string Name;
+    {
+      llvm::raw_string_ostream NameOut(Name);
+      NameOut << "__gen_char_array_" << Cache.size();
+    }
+
+    QualType CharGenTy = Utf8 ? Char8Ty : CharTy;
+    QualType LitTy = getStringLiteralArrayType(CharGenTy, Key.size());
+
+    Result = VarDecl::Create(*this, TUDecl, SourceLocation(), SourceLocation(),
+                             &Idents.get(Name), LitTy, nullptr, SC_Static);
+  }
+  return Result;
+}
+
+bool ASTContext::checkClassMemberSpecHash(QualType QT, unsigned &Out) {
+  if (ClsMemberSpecHashes.contains(QT)) {
+    Out = ClsMemberSpecHashes[QT];
+    return true;
+  }
+  return false;
+}
+
+void ASTContext::recordClassMemberSpecHash(QualType QT, unsigned Hash) {
+  assert(QT->isRecordType());
+
+  ClsMemberSpecHashes[QT] = Hash;
+}
+
+bool ASTContext::checkCachedSubstitution(unsigned Hash, APValue *Out) {
+  if (SubstitutionHashes.contains(Hash)) {
+    *Out = SubstitutionHashes[Hash];
+    return true;
+  }
+  return false;
+}
+
+void ASTContext::recordCachedSubstitution(unsigned Hash,
+                                          const APValue &Result) {
+  assert(Result.isReflection());
+
+  SubstitutionHashes[Hash] = Result;
+}
+
 MSGuidDecl *
 ASTContext::getMSGuidDecl(MSGuidDecl::Parts Parts) const {
   assert(MSGuidTagDecl && "building MS GUID without MS extensions?");
@@ -14487,6 +14560,7 @@ static QualType getCommonNonSugarTypeNode(const ASTContext &Ctx, const Type *X,
     SUGAR_FREE_TYPE(UnresolvedUsing)
     SUGAR_FREE_TYPE(HLSLAttributedResource)
     SUGAR_FREE_TYPE(HLSLInlineSpirv)
+    SUGAR_FREE_TYPE(ReflectionSplice)
 #undef SUGAR_FREE_TYPE
 #define NON_UNIQUE_TYPE(Class) UNEXPECTED_TYPE(Class, "non-unique")
     NON_UNIQUE_TYPE(TypeOfExpr)
@@ -14985,6 +15059,9 @@ static QualType getCommonSugarTypeNode(const ASTContext &Ctx, const Type *X,
       Kind = TypeOfKind::Unqualified;
     return Ctx.getTypeOfType(Ctx.getQualifiedType(Underlying), Kind);
   }
+  case Type::ReflectionSplice:
+    // TODO(P2996): Revisit this.
+    return QualType();
   case Type::TypeOfExpr:
     return QualType();
 
