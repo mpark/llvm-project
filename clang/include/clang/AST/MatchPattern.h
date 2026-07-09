@@ -346,10 +346,10 @@ class DecompositionPattern final
       : MatchPattern(DecompositionPatternClass), NumPatterns(NumPatterns) {}
 
   const MatchPattern *const *getPatterns() const {
-    return getTrailingObjects<MatchPattern *>();
+    return getTrailingObjects();
   }
 
-  MatchPattern **getPatterns() { return getTrailingObjects<MatchPattern *>(); }
+  MatchPattern **getPatterns() { return getTrailingObjects(); }
 
 public:
   unsigned numTrailingObjects(OverloadToken<MatchPattern *>) const {
