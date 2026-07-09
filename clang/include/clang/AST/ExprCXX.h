@@ -5667,7 +5667,7 @@ public:
   bool isConstexpr() const { return IsConstexpr; }
 
   ArrayRef<MatchCase> getCases() const {
-    return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
+    return llvm::ArrayRef(getTrailingObjects(), NumCases);
   }
 
   unsigned getNumCases() const { return NumCases; }
