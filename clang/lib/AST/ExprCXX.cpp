@@ -2268,7 +2268,7 @@ MatchSelectExpr::MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
       MatchLoc(MatchLoc), IsConstexpr(IsConstexpr),
       OrigResultType(OrigResultType), NumCases(Cases.size()), Braces(Braces) {
   std::uninitialized_copy(Cases.begin(), Cases.end(),
-                          getTrailingObjects<MatchCase>());
+                          getTrailingObjects());
   setDependence(computeDependence(this));
 }
 
