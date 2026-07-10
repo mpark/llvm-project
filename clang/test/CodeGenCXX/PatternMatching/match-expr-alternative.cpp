@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 struct Base { virtual ~Base() = default; };
@@ -33,7 +33,7 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:         %[[VAL_9:.*]] = icmp eq ptr %[[VAL_8]], null
 // CHECK:         br i1 %[[VAL_9]], label %[[VAL_10:.*]], label %[[VAL_11:.*]]
 // CHECK:       dynamic_cast.notnull:
-// CHECK:         %[[VAL_13:.*]] = call ptr @__dynamic_cast(ptr %[[VAL_8]], ptr @_ZTI4Base, ptr @_ZTI8DerivedA, i64 0) #2
+// CHECK:         %[[VAL_13:.*]] = call ptr @__dynamic_cast(ptr %[[VAL_8]], ptr @_ZTI4Base, ptr @_ZTI8DerivedA, i64 0) #{{[0-9]+}}
 // CHECK:         br label %[[VAL_14:.*]]
 // CHECK:       dynamic_cast.null:
 // CHECK:         br label %[[VAL_14]]
@@ -60,10 +60,18 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:         %[[VAL_28:.*]] = load i32, ptr %[[VAL_26]], align 8
 // CHECK:         %[[VAL_29:.*]] = mul nsw i32 %[[VAL_28]], 2
 // CHECK:         store i32 %[[VAL_29]], ptr %[[VAL_1]], align 4
-// CHECK:         br label %[[VAL_24]]
+// CHECK:         br label %[[SELECT_END:.*]]
+// CHECK:       match.select.next_pattern:
+// CHECK:         br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
+// CHECK:       [[THROW_ACTION]]:
+// CHECK:         call ptr @__cxa_allocate_exception
+// CHECK:         call void @__cxa_throw
+// CHECK:         unreachable
+// CHECK:       throw.cont:
+// CHECK:         br label %[[SELECT_END]]
 // CHECK:       match.select.end:
-// CHECK:         %[[VAL_30:.*]] = load i32, ptr %[[VAL_1]], align 4
-// CHECK:         ret i32 %[[VAL_30]]
+// CHECK:         %[[RET:.*]] = load i32, ptr %[[VAL_1]], align 4
+// CHECK:         ret i32 %[[RET]]
 
 struct Variant {
   Variant(int x) : i(0), x(x) {}
