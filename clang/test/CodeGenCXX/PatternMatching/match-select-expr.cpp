@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 auto char_pattern(char c) {
@@ -35,13 +35,24 @@ auto char_pattern(char c) {
 
 // CHECK: [[MATCH_LET_X]]:
 // CHECK:   store ptr %[[C_ADDR]], ptr %[[LET_X_ADDR]], align 8
-// CHECK:   br i1 true, label %[[ACTION_LET_X:.*]], label %[[SELECT_END]]
+// CHECK:   br i1 true, label %[[ACTION_LET_X:.*]], label %[[THROW_PATH:.*]]
 
 // CHECK: [[ACTION_LET_X]]:
 // CHECK:   %[[X_ADDR:.*]] = load ptr, ptr %[[LET_X_ADDR]], align 8
 // CHECK:   %[[X:.*]] = load i8, ptr %[[X_ADDR]], align 1
 // CHECK:   %[[SEXT_LET_X:.*]] = sext i8 %[[X]] to i32
 // CHECK:   store i32 %[[SEXT_LET_X]], ptr %[[SELECT_RES]], align 4
+// CHECK:   br label %[[SELECT_END:.*]]
+
+// CHECK: [[THROW_PATH]]:
+// CHECK:   br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
+
+// CHECK: [[THROW_ACTION]]:
+// CHECK:   call ptr @__cxa_allocate_exception
+// CHECK:   call void @__cxa_throw
+// CHECK:   unreachable
+
+// CHECK: throw.cont:
 // CHECK:   br label %[[SELECT_END]]
 
 // CHECK: [[SELECT_END]]:
