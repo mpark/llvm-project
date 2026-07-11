@@ -21,6 +21,14 @@ void test_throw_action() {
   } == 1);
 }
 
+void test_decomposition_pattern_arity() {
+  struct S { int a; int b; };
+  S s{1, 2};
+  s match {
+    [1, 2, 3] => 0; // expected-error {{type 'S' binds to 2 elements, but 3 names were provided}}
+  };
+}
+
 struct Variant {
   constexpr Variant(int x) : i(0), x(x) {}
   constexpr Variant(double y) : i(1), y(y) {}

@@ -221,6 +221,16 @@ void test_decomposition_pattern() {
   xss match [[1, _, _], [4, 5, _]];
 }
 
+void test_invalid_decomposition_pattern() {
+  struct S { int a; int b; };
+  S s{1, 2};
+  s match { [] => 0; }; // expected-error {{expected expression}}
+  s match { [0,] => 0; }; // expected-error {{expected expression}}
+  s match { [0,,] => 0; }; // expected-error {{expected expression}}
+  s match { [0 0] => 0; }; // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
+  s match { [,] => 0; }; // expected-error {{expected expression}}
+}
+
 void test_paren_pattern(int *p, int a, int b) {
   p match { (let x) => 0; };
   p match { ? (let x) => 0; };
