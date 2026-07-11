@@ -137,6 +137,17 @@ static_assert(test_decomposition_pattern({0, 2}) == 8);
 static_assert(test_decomposition_pattern({2, 3}) == 6);
 static_assert(test_decomposition_pattern({3, 4}) == 12);
 
+constexpr int test_vector_decomposition_pattern() {
+  using FourUInts = unsigned __attribute__((__vector_size__(16)));
+  FourUInts four_uints = {1, 2, 3, 4};
+  return four_uints match {
+    [1, 2, 3, 4] => 10;
+    _ => 20;
+  };
+}
+
+static_assert(test_vector_decomposition_pattern() == 10);
+
 enum Color { Red, Blue };
 
 struct S {
@@ -276,6 +287,16 @@ constexpr auto test_bitfields(int x) {
 static_assert(test_bitfields(8) == 0);
 static_assert(test_bitfields(2) == 2);
 static_assert(test_bitfields(4) == 4);
+
+constexpr int test_bitfield_decomposition(unsigned x, unsigned y) {
+  struct S { unsigned opc : 16, imm : 16; } s{x, y};
+  return s match {
+    [let opc, let imm] => int(opc + imm);
+  };
+}
+
+static_assert(test_bitfield_decomposition(1, 2) == 3);
+static_assert(test_bitfield_decomposition(5, 7) == 12);
 
 struct Pair {
   template <int I>
