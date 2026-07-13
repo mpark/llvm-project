@@ -72,10 +72,10 @@ _LIBCPP_PUSH_MACROS
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp, class _Ep>
-struct _LIBCPP_TEMPLATE_VIS variant_size<expected<_Tp, _Ep>> : integral_constant<size_t, 2> {};
+struct variant_size<expected<_Tp, _Ep>> : integral_constant<size_t, 2> {};
 
 template <size_t _Ip, class _Tp, class _Ep>
-struct _LIBCPP_TEMPLATE_VIS variant_alternative<_Ip, expected<_Tp, _Ep>> {
+struct variant_alternative<_Ip, expected<_Tp, _Ep>> {
   static_assert(_Ip < 2, "Index out of bounds in std::variant_alternative<>");
   using type = conditional_t<_Ip == 0, _Tp, _Ep>;
 };
@@ -88,8 +88,7 @@ _LIBCPP_HIDE_FROM_ABI constexpr bool holds_alternative(const expected<_Tp, _Ep>&
   return __e.index() == 0 ? __u_is_t : __u_is_e;
 }
 
-[[noreturn]] inline _LIBCPP_HIDE_FROM_ABI constexpr _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS void
-__throw_bad_expected_access() {
+[[noreturn]] inline _LIBCPP_HIDE_FROM_ABI void __throw_bad_expected_access() {
 #    if _LIBCPP_HAS_EXCEPTIONS
   throw bad_variant_access();
 #    else
@@ -98,7 +97,7 @@ __throw_bad_expected_access() {
 }
 
 template <size_t _Ip, class _Ep>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr auto&& __generic_expected_get(_Ep&& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr auto&& __generic_expected_get(_Ep&& __e) {
   if (__e.index() != _Ip) {
     std::__throw_bad_expected_access();
   }
@@ -110,8 +109,7 @@ _LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr au
 }
 
 template <size_t _Ip, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI
-_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
+_LIBCPP_HIDE_FROM_ABI constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
 get(expected<_Tp, _Ep>& __e) {
   static_assert(_Ip < 2u);
   static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
@@ -119,8 +117,7 @@ get(expected<_Tp, _Ep>& __e) {
 }
 
 template <size_t _Ip, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI
-_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
+_LIBCPP_HIDE_FROM_ABI constexpr variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
 get(expected<_Tp, _Ep>&& __e) {
   static_assert(_Ip < 2u);
   static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
@@ -128,8 +125,7 @@ get(expected<_Tp, _Ep>&& __e) {
 }
 
 template <size_t _Ip, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI
-_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
+_LIBCPP_HIDE_FROM_ABI constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&
 get(const expected<_Tp, _Ep>& __e) {
   static_assert(_Ip < 2u);
   static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
@@ -137,8 +133,7 @@ get(const expected<_Tp, _Ep>& __e) {
 }
 
 template <size_t _Ip, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI
-_LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
+_LIBCPP_HIDE_FROM_ABI constexpr const variant_alternative_t<_Ip, expected<_Tp, _Ep>>&&
 get(const expected<_Tp, _Ep>&& __e) {
   static_assert(_Ip < 2u);
   static_assert(!is_void_v<variant_alternative_t<_Ip, expected<_Tp, _Ep>>>);
@@ -146,8 +141,7 @@ get(const expected<_Tp, _Ep>&& __e) {
 }
 
 template <class _Up, class _Tp, class _Ep, class _Expected>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr auto&&
-__generic_expected_get(_Expected&& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr auto&& __generic_expected_get(_Expected&& __e) {
   constexpr bool __u_is_t = is_same_v<_Up, _Tp>;
   constexpr bool __u_is_e = is_same_v<_Up, _Ep>;
 
@@ -170,27 +164,25 @@ __generic_expected_get(_Expected&& __e) {
 }
 
 template <class _Up, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr _Up& get(expected<_Tp, _Ep>& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr _Up& get(expected<_Tp, _Ep>& __e) {
   static_assert(!is_void_v<_Up>);
   return std::__generic_expected_get<_Up, _Tp, _Ep>(__e);
 }
 
 template <class _Up, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr _Up&& get(expected<_Tp, _Ep>&& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr _Up&& get(expected<_Tp, _Ep>&& __e) {
   static_assert(!is_void_v<_Up>);
   return std::__generic_expected_get<_Up, _Tp, _Ep>(std::move(__e));
 }
 
 template <class _Up, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const _Up&
-get(const expected<_Tp, _Ep>& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr const _Up& get(const expected<_Tp, _Ep>& __e) {
   static_assert(!is_void_v<_Up>);
   return std::__generic_expected_get<_Up, _Tp, _Ep>(__e);
 }
 
 template <class _Up, class _Tp, class _Ep>
-_LIBCPP_HIDE_FROM_ABI _LIBCPP_AVAILABILITY_THROW_BAD_VARIANT_ACCESS constexpr const _Up&&
-get(const expected<_Tp, _Ep>&& __e) {
+_LIBCPP_HIDE_FROM_ABI constexpr const _Up&& get(const expected<_Tp, _Ep>&& __e) {
   static_assert(!is_void_v<_Up>);
   return std::__generic_expected_get<_Up, _Tp, _Ep>(std::move(__e));
 }
