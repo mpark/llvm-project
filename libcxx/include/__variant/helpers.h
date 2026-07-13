@@ -20,9 +20,9 @@
 
 namespace std { // explicitly not using versioning namespace
 
-class _LIBCPP_EXPORTED_FROM_ABI _LIBCPP_AVAILABILITY_BAD_VARIANT_ACCESS bad_variant_access : public exception {
+class _LIBCPP_EXPORTED_FROM_ABI bad_variant_access : public exception {
 public:
-  const char* what() const _NOEXCEPT override;
+  [[__nodiscard__]] const char* what() const _NOEXCEPT override;
 };
 
 } // namespace std
@@ -35,28 +35,28 @@ template <class _Tp>
 #if _LIBCPP_STD_VER >= 26
 requires requires { variant_size<_Tp>::value; }
 #endif
-struct _LIBCPP_TEMPLATE_VIS variant_size<const _Tp> : variant_size<_Tp> {};
+struct variant_size<const _Tp> : variant_size<_Tp> {};
 
 template <class _Tp>
 #if _LIBCPP_STD_VER >= 26
 requires requires { variant_size<_Tp>::value; }
 #endif
-struct _LIBCPP_TEMPLATE_VIS variant_size<volatile _Tp> : variant_size<_Tp> {};
+struct variant_size<volatile _Tp> : variant_size<_Tp> {};
 
 template <class _Tp>
 #if _LIBCPP_STD_VER >= 26
 requires requires { variant_size<_Tp>::value; }
 #endif
-struct _LIBCPP_TEMPLATE_VIS variant_size<const volatile _Tp> : variant_size<_Tp> {};
+struct variant_size<const volatile _Tp> : variant_size<_Tp> {};
 
 template <size_t _Ip, class _Tp>
-struct _LIBCPP_TEMPLATE_VIS variant_alternative<_Ip, const _Tp> : add_const<variant_alternative_t<_Ip, _Tp>> {};
+struct variant_alternative<_Ip, const _Tp> : add_const<variant_alternative_t<_Ip, _Tp>> {};
 
 template <size_t _Ip, class _Tp>
-struct _LIBCPP_TEMPLATE_VIS variant_alternative<_Ip, volatile _Tp> : add_volatile<variant_alternative_t<_Ip, _Tp>> {};
+struct variant_alternative<_Ip, volatile _Tp> : add_volatile<variant_alternative_t<_Ip, _Tp>> {};
 
 template <size_t _Ip, class _Tp>
-struct _LIBCPP_TEMPLATE_VIS variant_alternative<_Ip, const volatile _Tp> : add_cv<variant_alternative_t<_Ip, _Tp>> {};
+struct variant_alternative<_Ip, const volatile _Tp> : add_cv<variant_alternative_t<_Ip, _Tp>> {};
 
 #endif // _LIBCPP_STD_VER >= 17
 

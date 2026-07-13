@@ -247,7 +247,6 @@ exception typeinfo
 exception version
 execution version
 expected cstdint
-expected cstdlib
 expected exception
 expected initializer_list
 expected typeinfo
@@ -588,7 +587,6 @@ iterator compare
 iterator concepts
 iterator cstdint
 iterator cstdio
-iterator cstdlib
 iterator cstring
 iterator cwchar
 iterator cwctype
@@ -813,7 +811,6 @@ ranges compare
 ranges concepts
 ranges cstdint
 ranges cstdio
-ranges cstdlib
 ranges cstring
 ranges cwchar
 ranges cwctype
@@ -1143,7 +1140,6 @@ valarray limits
 valarray version
 variant compare
 variant cstdint
-variant cstdlib
 variant cstring
 variant exception
 variant initializer_list
