@@ -21,7 +21,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 #if _LIBCPP_STD_VER >= 23
 
 template <class _Tp, class _Ep>
-class _LIBCPP_TEMPLATE_VIS expected;
+class expected;
 
 #endif
 
