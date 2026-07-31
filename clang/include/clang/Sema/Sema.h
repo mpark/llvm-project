@@ -11081,7 +11081,8 @@ public:
   ExprResult ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                                 SourceLocation MatchLoc, MatchPattern *Pattern,
                                 SourceLocation IfLoc, MatchGuard Guard);
-  ExprResult ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+  ExprResult ActOnMatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
+                                  SourceLocation MatchLoc,
                                   bool IsConstexpr, TypeLoc OrigResultType,
                                   QualType RetTy,
                                   SmallVectorImpl<MatchCase> &Cases,
