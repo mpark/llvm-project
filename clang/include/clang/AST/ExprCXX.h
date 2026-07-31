@@ -5628,6 +5628,7 @@ class MatchSelectExpr final
       private llvm::TrailingObjects<MatchSelectExpr, MatchCase> {
   friend class TrailingObjects;
 
+  VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
   bool IsConstexpr;
@@ -5635,7 +5636,8 @@ class MatchSelectExpr final
   unsigned NumCases;
   SourceRange Braces;
 
-  explicit MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+  explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
+                           SourceLocation MatchLoc,
                            bool IsConstexpr, TypeLoc OrigResultType,
                            QualType Ty, ArrayRef<MatchCase> Cases,
                            SourceRange Braces);
@@ -5648,12 +5650,16 @@ public:
     return NumCases;
   }
 
-  static MatchSelectExpr *Create(const ASTContext &Ctx, Expr *Subject,
+  static MatchSelectExpr *Create(const ASTContext &Ctx, VarDecl *HoldingVar,
+                                 Expr *Subject,
                                  SourceLocation MatchLoc, bool IsConstexpr,
                                  TypeLoc OrigResultType, QualType Ty,
                                  ArrayRef<MatchCase> Cases, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases);
+
+  const VarDecl *getHoldingVar() const { return HoldingVar; }
+  VarDecl *getHoldingVar() { return HoldingVar; }
 
   const Expr* getSubject() const { return Subject; }
   Expr* getSubject() { return Subject; }
