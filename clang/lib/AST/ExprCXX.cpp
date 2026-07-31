@@ -2260,26 +2260,29 @@ CXXExpansionSelectExpr::CXXExpansionSelectExpr(const ASTContext &C,
   SubExprs[INDEX] = Idx;
 }
 
-MatchSelectExpr::MatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+MatchSelectExpr::MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
+                                 SourceLocation MatchLoc,
                                  bool IsConstexpr, TypeLoc OrigResultType,
                                  QualType Ty, ArrayRef<MatchCase> Cases,
                                  SourceRange Braces)
-    : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary), Subject(Subject),
-      MatchLoc(MatchLoc), IsConstexpr(IsConstexpr),
+    : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary),
+      HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
+      IsConstexpr(IsConstexpr),
       OrigResultType(OrigResultType), NumCases(Cases.size()), Braces(Braces) {
   std::uninitialized_copy(Cases.begin(), Cases.end(),
                           getTrailingObjects());
   setDependence(computeDependence(this));
 }
 
-MatchSelectExpr *MatchSelectExpr::Create(const ASTContext &Ctx, Expr *Subject,
+MatchSelectExpr *MatchSelectExpr::Create(const ASTContext &Ctx,
+                                         VarDecl *HoldingVar, Expr *Subject,
                                          SourceLocation MatchLoc,
                                          bool IsConstexpr,
                                          TypeLoc OrigResultType, QualType Ty,
                                          ArrayRef<MatchCase> Cases,
                                          SourceRange Braces) {
   void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase>(Cases.size()));
-  return new (Mem) MatchSelectExpr(Subject, MatchLoc, IsConstexpr,
+  return new (Mem) MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr,
                                    OrigResultType, Ty, Cases, Braces);
 }
 

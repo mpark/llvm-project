@@ -11,10 +11,13 @@ auto char_pattern(char c) {
 
 // CHECK: _Z12char_patternc
 // CHECK:   %[[C_ADDR:.*]] = alloca i8, align 1
+// CHECK:   %[[SUBJECT_HOLDER:.*]] = alloca ptr, align 8
 // CHECK:   %[[SELECT_RES:.*]] = alloca i32, align 4
 // CHECK:   %[[LET_X_ADDR:.*]] = alloca ptr, align 8
 // CHECK:   store i8 {{.*}}, ptr %[[C_ADDR]], align 1
-// CHECK:   %[[C_CHAR:.*]] = load i8, ptr %[[C_ADDR]], align 1
+// CHECK:   store ptr %[[C_ADDR]], ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:   %[[SUBJECT_A:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:   %[[C_CHAR:.*]] = load i8, ptr %[[SUBJECT_A]], align 1
 // CHECK:   %[[SEXT_A:.*]] = sext i8 %[[C_CHAR]] to i32
 // CHECK:   %[[CMP_MATCH_A:.*]] = icmp eq i32 %[[SEXT_A]], 97
 // CHECK:   br i1 %[[CMP_MATCH_A]], label %[[ACTION_A:.*]], label %[[MATCH_B:.*]]
@@ -24,8 +27,9 @@ auto char_pattern(char c) {
 // CHECK:   br label %[[SELECT_END:.*]]
 
 // CHECK: [[MATCH_B]]:
-// CHECK:   %[[SEXT_B:.*]] = load i8, ptr %[[C_ADDR]], align 1
-// CHECK:   %conv1 = sext i8 %[[SEXT_B]] to i32
+// CHECK:   %[[SUBJECT_B:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:   %[[CHAR_B:.*]] = load i8, ptr %[[SUBJECT_B]], align 1
+// CHECK:   %conv1 = sext i8 %[[CHAR_B]] to i32
 // CHECK:   %[[CMP_MATCH_B:.*]] = icmp eq i32 %conv1, 98
 // CHECK:   br i1 %[[CMP_MATCH_B]], label %[[ACTION_B:.*]], label %[[MATCH_LET_X:.*]]
 
@@ -34,7 +38,8 @@ auto char_pattern(char c) {
 // CHECK:   br label %[[SELECT_END]]
 
 // CHECK: [[MATCH_LET_X]]:
-// CHECK:   store ptr %[[C_ADDR]], ptr %[[LET_X_ADDR]], align 8
+// CHECK:   %[[SUBJECT_X:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:   store ptr %[[SUBJECT_X]], ptr %[[LET_X_ADDR]], align 8
 // CHECK:   br i1 true, label %[[ACTION_LET_X:.*]], label %[[THROW_PATH:.*]]
 
 // CHECK: [[ACTION_LET_X]]:
@@ -56,8 +61,8 @@ auto char_pattern(char c) {
 // CHECK:   br label %[[SELECT_END]]
 
 // CHECK: [[SELECT_END]]:
-// CHECK:   %5 = load i32, ptr %[[SELECT_RES]], align 4
-// CHECK:   ret i32 %5
+// CHECK:   %[[RESULT:.*]] = load i32, ptr %[[SELECT_RES]], align 4
+// CHECK:   ret i32 %[[RESULT]]
 // CHECK: }
 
 void test_void_returning_match() {
