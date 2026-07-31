@@ -3924,11 +3924,16 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     if (LHS.isInvalid()) {
       return ExprError();
     }
+    VarDecl *HoldingVar = nullptr;
+    LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
+    if (LHS.isInvalid())
+      return ExprError();
     if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces)) {
       return ExprError();
     }
-    return Actions.ActOnMatchSelectExpr(LHS.get(), MatchLoc, IsConstexpr,
-                                        OrigResultType, RetTy, Cases, Braces);
+    return Actions.ActOnMatchSelectExpr(HoldingVar, LHS.get(), MatchLoc,
+                                        IsConstexpr, OrigResultType, RetTy,
+                                        Cases, Braces);
   } else {
     VarDecl *HoldingVar = nullptr;
     if (InjectedDecls && LHS.isUsable()) {

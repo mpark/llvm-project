@@ -18970,6 +18970,15 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
   ExprResult LHS = getDerived().TransformExpr(E->getSubject());
   if (LHS.isInvalid())
     return ExprError();
+  bool SubjectIsXValue = HoldingVar
+                             ? HoldingVar->getType()->isRValueReferenceType() ||
+                                   (!HoldingVar->getType()->isReferenceType() &&
+                                    E->getSubject()->isXValue())
+                             : E->getSubject()->isXValue();
+  if (SubjectIsXValue && LHS.get()->isLValue())
+    LHS = ImplicitCastExpr::Create(getSema().Context, LHS.get()->getType(),
+                                   CK_NoOp, LHS.get(), nullptr, VK_XValue,
+                                   FPOptionsOverride());
 
   ActionResult<MatchPattern *> P = getDerived().TransformPattern(
       E->getPattern(), LHS.get() != E->getSubject());
@@ -18992,9 +19001,26 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
+  VarDecl *HoldingVar = nullptr;
+  if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
+    HoldingVar = cast_or_null<VarDecl>(getDerived().TransformDefinition(
+        OldHoldingVar->getLocation(), OldHoldingVar));
+    if (!HoldingVar)
+      return ExprError();
+  }
+
   ExprResult LHS = getDerived().TransformExpr(E->getSubject());
   if (LHS.isInvalid())
     return ExprError();
+  bool SubjectIsXValue = HoldingVar
+                             ? HoldingVar->getType()->isRValueReferenceType() ||
+                                   (!HoldingVar->getType()->isReferenceType() &&
+                                    E->getSubject()->isXValue())
+                             : E->getSubject()->isXValue();
+  if (SubjectIsXValue && LHS.get()->isLValue())
+    LHS = ImplicitCastExpr::Create(getSema().Context, LHS.get()->getType(),
+                                   CK_NoOp, LHS.get(), nullptr, VK_XValue,
+                                   FPOptionsOverride());
 
   QualType RetTy = E->getType();
   SmallVector<MatchCase, 32> Cases;
@@ -19027,7 +19053,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     Cases.push_back({Pattern.get(), Case.IfLoc, Guard.get(), Handler.get()});
   }
 
-  if (auto Cs = E->getCases();
+  if (auto Cs = E->getCases(); HoldingVar == E->getHoldingVar() &&
+      LHS.get() == E->getSubject() &&
       std::equal(Cs.begin(), Cs.end(), Cases.begin(), Cases.end(),
                  [](const MatchCase &LHS, const MatchCase &RHS) {
                    return LHS.Pattern == RHS.Pattern &&
@@ -19036,9 +19063,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     return E;
   }
 
-  return getSema().ActOnMatchSelectExpr(LHS.get(), E->getMatchLoc(),
-                                        E->isConstexpr(), E->getOrigResultType(), RetTy,
-                                        Cases, E->getBraces());
+  return getSema().ActOnMatchSelectExpr(
+      HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
+      E->getOrigResultType(), RetTy, Cases, E->getBraces());
 }
 
 } // end namespace clang

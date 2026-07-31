@@ -9,12 +9,15 @@ auto decomposition_pattern(const int (&xs)[2]) {
 
 // CHECK-LABEL: _Z21decomposition_patternRA2_Ki
 // CHECK:         %[[VAL_0:.*]] = alloca ptr, align 8
+// CHECK:         %[[SUBJECT_HOLDER:.*]] = alloca ptr, align 8
 // CHECK:         %[[VAL_1:.*]] = alloca i32, align 4
 // CHECK:         %[[VAL_2:.*]] = alloca i1, align 8
 // CHECK:         %[[VAL_3:.*]] = alloca ptr, align 8
 // CHECK:         store ptr %[[VAL_4:.*]], ptr %[[VAL_0]], align 8
 // CHECK:         %[[VAL_5:.*]] = load ptr, ptr %[[VAL_0]], align 8
-// CHECK:         store ptr %[[VAL_5]], ptr %[[VAL_3]], align 8
+// CHECK:         store ptr %[[VAL_5]], ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         %[[SUBJECT:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         store ptr %[[SUBJECT]], ptr %[[VAL_3]], align 8
 // CHECK:         br i1 true, label %[[VAL_6:.*]], label %[[VAL_7:.*]]
 // CHECK:       match.decomp.next_pattern:
 // CHECK:         %[[VAL_9:.*]] = load ptr, ptr %[[VAL_3]], align 8

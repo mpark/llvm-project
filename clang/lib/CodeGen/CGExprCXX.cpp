@@ -2641,6 +2641,9 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   // just like switch does. Is this already handled in Sema?
   llvm::ArrayRef<MatchCase> Cases = S.getCases();
 
+  if (const VarDecl *HoldingVar = S.getHoldingVar())
+    EmitVarDecl(*HoldingVar);
+
   bool IgnoreResult = S.getType()->isVoidType();
   Address MatchResAddr = Address::invalid();
   if (!IgnoreResult)

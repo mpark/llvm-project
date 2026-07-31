@@ -21,6 +21,7 @@ auto alternative_pattern_const(const Base &base) {
 
 // CHECK-LABEL: _Z25alternative_pattern_constRK4Base
 // CHECK:         %[[VAL_0:.*]] = alloca ptr, align 8
+// CHECK:         %[[SUBJECT_HOLDER:.*]] = alloca ptr, align 8
 // CHECK:         %[[VAL_1:.*]] = alloca i32, align 4
 // CHECK:         %[[VAL_2:.*]] = alloca ptr, align 8
 // CHECK:         %[[VAL_3:.*]] = alloca ptr, align 8
@@ -28,8 +29,10 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:         %[[VAL_5:.*]] = alloca ptr, align 8
 // CHECK:         store ptr %[[VAL_6:.*]], ptr %[[VAL_0]], align 8
 // CHECK:         %[[VAL_7:.*]] = load ptr, ptr %[[VAL_0]], align 8
-// CHECK:         store ptr %[[VAL_7]], ptr %[[VAL_2]], align 8
-// CHECK:         %[[VAL_8:.*]] = load ptr, ptr %[[VAL_0]], align 8
+// CHECK:         store ptr %[[VAL_7]], ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         %[[SUBJECT:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         store ptr %[[SUBJECT]], ptr %[[VAL_2]], align 8
+// CHECK:         %[[VAL_8:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
 // CHECK:         %[[VAL_9:.*]] = icmp eq ptr %[[VAL_8]], null
 // CHECK:         br i1 %[[VAL_9]], label %[[VAL_10:.*]], label %[[VAL_11:.*]]
 // CHECK:       dynamic_cast.notnull:

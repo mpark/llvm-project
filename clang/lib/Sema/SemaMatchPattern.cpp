@@ -24,12 +24,13 @@ using namespace clang;
 using namespace sema;
 
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
-                             Expr *Init) {
+                             Expr *Init, bool IsConstexpr = false) {
   DeclContext *DC = SemaRef.CurContext;
   TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
   VarDecl *Decl = VarDecl::Create(SemaRef.Context, DC, Loc, {}, /*Id=*/nullptr,
                                   Type, TInfo, SC_None);
   Decl->setImplicit();
+  Decl->setConstexpr(IsConstexpr);
   // TODO: Consider ActOnInitializerError
   SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false);
   SemaRef.FinalizeDeclaration(Decl);
@@ -435,15 +436,30 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
 }
 
 ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
-  QualType Deduced = Context.getAutoRRefDeductType();
-  VarDecl *VD = BuildVarDecl(*this, Subject->getExprLoc(), Deduced, Subject);
+  bool IsConstant = Subject->isCXX11ConstantExpr(Context);
+  bool MaterializeConstantPrValue =
+      IsConstant && Subject->isPRValue() && Subject->getType()->isRecordType();
+  if (IsConstant && !MaterializeConstantPrValue)
+    return Subject;
+
+  QualType Deduced = Subject->refersToBitField() ? Context.getAutoDeductType()
+                     : MaterializeConstantPrValue
+                         ? Subject->getType()
+                         : Context.getAutoRRefDeductType();
+  VarDecl *VD = BuildVarDecl(*this, Subject->getExprLoc(), Deduced, Subject,
+                             MaterializeConstantPrValue);
   if (VD->isInvalidDecl()) {
     return ExprError();
   }
   HoldingVar = VD;
-  return BuildDeclRefExpr(HoldingVar,
-                          HoldingVar->getType().getNonReferenceType(),
-                          VK_LValue, HoldingVar->getLocation());
+  ExprResult Ref = BuildDeclRefExpr(
+      HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
+      Subject->getExprLoc());
+  if (Ref.isInvalid() || Subject->isLValue())
+    return Ref;
+  return ImplicitCastExpr::Create(Context, Ref.get()->getType(), CK_NoOp,
+                                  Ref.get(), nullptr, VK_XValue,
+                                  FPOptionsOverride());
 }
 
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
@@ -494,7 +510,8 @@ ExprResult Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                                      Pattern, IfLoc, Guard);
 }
 
-ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
+ExprResult Sema::ActOnMatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
+                                      SourceLocation MatchLoc,
                                       bool IsConstexpr, TypeLoc OrigResultType,
                                       QualType RetTy,
                                       SmallVectorImpl<MatchCase> &Cases,
@@ -532,7 +549,8 @@ ExprResult Sema::ActOnMatchSelectExpr(Expr *Subject, SourceLocation MatchLoc,
                  Dummy.get());
   E = ActOnCXXThrow(getCurScope(), Braces.getEnd(), E.get());
   Cases.push_back({P.get(), Braces.getEnd(), {}, E.get()});
-  return MatchSelectExpr::Create(Context, Subject, MatchLoc, IsConstexpr,
+  return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
+                                 IsConstexpr,
                                  OrigResultType, RetTy, Cases, Braces);
 }
 
