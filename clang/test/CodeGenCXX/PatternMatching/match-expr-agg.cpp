@@ -23,6 +23,7 @@ auto nested_decomposition_pattern(const S& s) {
 // CHECK-LABEL: _Z28nested_decomposition_patternRK1S
 // CHECK:         %[[VAL_0:.*]] = alloca %[[VAL_1:.*]], align 4
 // CHECK:         %[[VAL_2:.*]] = alloca ptr, align 8
+// CHECK:         %[[SUBJECT_HOLDER:.*]] = alloca ptr, align 8
 // CHECK:         %[[VAL_3:.*]] = alloca %[[VAL_1]], align 4
 // CHECK:         %[[VAL_4:.*]] = alloca i1, align 8
 // CHECK:         %[[VAL_5:.*]] = alloca ptr, align 8
@@ -30,7 +31,9 @@ auto nested_decomposition_pattern(const S& s) {
 // CHECK:         %[[VAL_7:.*]] = alloca ptr, align 8
 // CHECK:         store ptr %[[VAL_8:.*]], ptr %[[VAL_2]], align 8
 // CHECK:         %[[VAL_9:.*]] = load ptr, ptr %[[VAL_2]], align 8
-// CHECK:         store ptr %[[VAL_9]], ptr %[[VAL_5]], align 8
+// CHECK:         store ptr %[[VAL_9]], ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         %[[SUBJECT:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
+// CHECK:         store ptr %[[SUBJECT]], ptr %[[VAL_5]], align 8
 // CHECK:         br i1 true, label %[[VAL_10:.*]], label %[[VAL_11:.*]]
 // CHECK:       match.decomp.next_pattern:
 // CHECK:         %[[VAL_13:.*]] = load ptr, ptr %[[VAL_5]], align 8

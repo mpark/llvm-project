@@ -30,7 +30,7 @@ int match_stmt_action(int limit) {
 // CHECK:   br label %for.end
 
 // CHECK: [[NEXT_SEVEN]]:
-// CHECK:   %[[SEVEN_CMP:.*]] = icmp eq i32 %8, 7
+// CHECK:   %[[SEVEN_CMP:.*]] = icmp eq i32 {{.*}}, 7
 // CHECK:   br i1 %[[SEVEN_CMP]], label %[[RETURN:.*]], label
 
 // CHECK: [[RETURN]]:

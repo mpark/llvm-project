@@ -1048,6 +1048,8 @@ public:
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
+    if (const VarDecl *HoldingVar = Node->getHoldingVar())
+      Visit(HoldingVar);
     Visit(Node->getSubject());
     for (const MatchCase &Case : Node->getCases()) {
       getNodeDelegate().AddChild([&] {

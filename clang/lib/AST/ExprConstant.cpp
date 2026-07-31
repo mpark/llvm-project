@@ -9765,6 +9765,9 @@ public:
   }
 
   bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
+    BlockScopeRAII MatchScope(Info);
+    if (E->getHoldingVar() && !EvaluateDecl(Info, E->getHoldingVar()))
+      return false;
     bool Result;
     for (const MatchCase &Case : E->getCases()) {
       BlockScopeRAII Scope(Info);
@@ -9773,8 +9776,15 @@ public:
       if (const auto &[CondVar, Cond] = Case.Guard; Result && Cond)
         if (!EvaluateCond(Info, CondVar, Cond, Result))
           return false;
-      if (Result)
-        return this->Visit(Case.Handler);
+      if (Result) {
+        if (!this->Visit(Case.Handler))
+          return false;
+        if (!Scope.destroy())
+          return false;
+        return MatchScope.destroy();
+      }
+      if (!Scope.destroy())
+        return false;
     }
     return Error(E);
   }

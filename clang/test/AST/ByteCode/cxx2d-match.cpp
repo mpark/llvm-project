@@ -604,3 +604,27 @@ constexpr int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
 static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({0, 1, 1}) == 0);
 static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({1, 1, 0}) == 1);
 static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({0, 0, 0}) == -1);
+
+constexpr int match_subject_is_evaluated_once() {
+  int evaluations = 0;
+  return (++evaluations, 5) match {
+    let value if (value < 0) => 0;
+    let value => evaluations;
+  };
+}
+
+static_assert(match_subject_is_evaluated_once() == 1);
+
+struct ConstantMatchSubject {
+  int value;
+};
+
+constexpr bool constant_prvalue_match_subject_has_one_identity() {
+  const ConstantMatchSubject *saved = nullptr;
+  return ConstantMatchSubject{42} match {
+    let value if ((saved = &value, false)) => false;
+    let value => &value == saved;
+  };
+}
+
+static_assert(constant_prvalue_match_subject_has_one_identity());
