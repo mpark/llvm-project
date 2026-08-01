@@ -850,6 +850,7 @@ set(files
   __type_traits/aligned_storage.h
   __type_traits/aligned_union.h
   __type_traits/alignment_of.h
+  __type_traits/alternative_traits.h
   __type_traits/common_reference.h
   __type_traits/common_type.h
   __type_traits/conditional.h
