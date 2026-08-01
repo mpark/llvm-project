@@ -11081,12 +11081,14 @@ public:
   ExprResult ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                                 SourceLocation MatchLoc, MatchPattern *Pattern,
                                 SourceLocation IfLoc, MatchGuard Guard);
-  ExprResult ActOnMatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
-                                  SourceLocation MatchLoc,
-                                  bool IsConstexpr, TypeLoc OrigResultType,
-                                  QualType RetTy,
-                                  SmallVectorImpl<MatchCase> &Cases,
-                                  SourceRange Braces);
+  ExprResult ActOnMatchSelectExpr(
+      VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
+      bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
+      SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
+      bool ExpandDeferredCases = false,
+      std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =
+          std::nullopt);
+  ExprResult ExpandDeferredMatchSelectExpr(MatchSelectExpr *E);
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
@@ -11102,6 +11104,10 @@ public:
   ActionResult<MatchPattern *>
   ActOnAlternativePattern(SourceRange DiscriminatorRange, TypeSourceInfo *TSI,
                           SourceLocation ColonLoc, MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnAutoAlternativePattern(SourceRange DiscriminatorRange,
+                              SourceLocation ColonLoc,
+                              MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
@@ -11117,6 +11123,15 @@ public:
     };
 
     SmallVector<Entry, 8> Entries;
+    struct AlternativeChoice {
+      SmallVector<unsigned, 4> Alternatives;
+      unsigned Selected;
+    };
+    SmallVector<AlternativeChoice, 4> AlternativeChoices;
+    SmallVector<unsigned, 4> ForcedAlternativeSelections;
+    unsigned NextForcedAlternativeSelection = 0;
+    bool DeferAlternativeChoices = false;
+    bool HasDeferredAlternativeChoices = false;
   };
   bool
   CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
@@ -13455,6 +13470,9 @@ public:
       /// We are performing overload resolution for a call to a function
       /// template or variable template named 'sycl_kernel_launch'.
       SYCLKernelLaunchOverloadResolution,
+
+      /// We are expanding dependent pattern-matching alternatives.
+      PatternMatchingExpansion,
     } Kind;
 
     /// Whether we're substituting into constraints.

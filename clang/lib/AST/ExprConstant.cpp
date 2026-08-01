@@ -9471,7 +9471,7 @@ public:
     MatchProjectionEvaluationCache ProjectionCache;
 
     bool Result;
-    for (const MatchCase &Case : E->getCases()) {
+    for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info, &ProjectionCache))
         return false;
       BlockScopeRAII Scope(Info);
