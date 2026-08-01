@@ -5623,9 +5623,22 @@ struct MatchCase {
   Stmt *Handler;
 };
 
+/// A semantically checked form of a source match case. A source case can have
+/// multiple instantiations when its pattern matches more than one alternative.
+struct MatchCaseInstantiation {
+  static constexpr unsigned ImplicitCase = ~0U;
+
+  MatchPattern *Pattern;
+  SourceLocation IfLoc;
+  MatchGuard Guard;
+  Stmt *Handler;
+  unsigned CaseIndex = ImplicitCase;
+};
+
 class MatchSelectExpr final
     : public Expr,
-      private llvm::TrailingObjects<MatchSelectExpr, MatchCase> {
+      private llvm::TrailingObjects<MatchSelectExpr, MatchCase,
+                                    MatchCaseInstantiation> {
   friend class TrailingObjects;
 
   VarDecl *HoldingVar;
@@ -5634,29 +5647,38 @@ class MatchSelectExpr final
   bool IsConstexpr;
   TypeLoc OrigResultType;
   unsigned NumCases;
+  unsigned NumCaseInstantiations;
   SourceRange Braces;
 
   explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
                            SourceLocation MatchLoc,
                            bool IsConstexpr, TypeLoc OrigResultType,
                            QualType Ty, ArrayRef<MatchCase> Cases,
+                           ArrayRef<MatchCaseInstantiation> Instantiations,
                            SourceRange Braces);
 
-  explicit MatchSelectExpr(unsigned NumCases, EmptyShell Empty)
-      : Expr(MatchSelectExprClass, Empty), NumCases(NumCases) {}
+  explicit MatchSelectExpr(unsigned NumCases, unsigned NumCaseInstantiations,
+                           EmptyShell Empty)
+      : Expr(MatchSelectExprClass, Empty), NumCases(NumCases),
+        NumCaseInstantiations(NumCaseInstantiations) {}
 
 public:
   unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
     return NumCases;
   }
 
-  static MatchSelectExpr *Create(const ASTContext &Ctx, VarDecl *HoldingVar,
-                                 Expr *Subject,
-                                 SourceLocation MatchLoc, bool IsConstexpr,
-                                 TypeLoc OrigResultType, QualType Ty,
-                                 ArrayRef<MatchCase> Cases, SourceRange Braces);
+  unsigned numTrailingObjects(OverloadToken<MatchCaseInstantiation>) const {
+    return NumCaseInstantiations;
+  }
 
-  static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases);
+  static MatchSelectExpr *
+  Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
+         SourceLocation MatchLoc, bool IsConstexpr, TypeLoc OrigResultType,
+         QualType Ty, ArrayRef<MatchCase> Cases,
+         ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
+
+  static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases,
+                                      unsigned NumCaseInstantiations);
 
   const VarDecl *getHoldingVar() const { return HoldingVar; }
   VarDecl *getHoldingVar() { return HoldingVar; }
@@ -5673,10 +5695,16 @@ public:
   bool isConstexpr() const { return IsConstexpr; }
 
   ArrayRef<MatchCase> getCases() const {
-    return llvm::ArrayRef(getTrailingObjects(), NumCases);
+    return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
+  }
+
+  ArrayRef<MatchCaseInstantiation> getCaseInstantiations() const {
+    return llvm::ArrayRef(getTrailingObjects<MatchCaseInstantiation>(),
+                          NumCaseInstantiations);
   }
 
   unsigned getNumCases() const { return NumCases; }
+  unsigned getNumCaseInstantiations() const { return NumCaseInstantiations; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return Subject->getBeginLoc();
