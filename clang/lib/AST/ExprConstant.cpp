@@ -20946,7 +20946,13 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
     return Result = true;
   }
   case MatchPattern::DeclarationPatternClass: {
-    return Result = true;
+    const auto *P = static_cast<const DeclarationPattern *>(Pattern);
+    const MatchProjection *Projection = P->getProjection();
+    if (!Projection || Projection->getKind() != MatchProjection::CastProjection)
+      return Result = true;
+    return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
+           EvaluateAsBooleanCondition(Projection->getConditionExpr(), Result,
+                                      Info);
   }
   case MatchPattern::ExpressionPatternClass: {
     const auto *P = static_cast<const ExpressionPattern *>(Pattern);
@@ -21005,7 +21011,8 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
 static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
                                         EvalInfo &Info) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    if (P->getProjection())
+    if (P->getProjection() && P->getProjection()->getKind() ==
+                                  MatchProjection::DecompositionProjection)
       return true;
     const VarDecl *Declaration = P->getDeclaration();
     if (!EvaluateDecl(Info, Declaration))
@@ -21027,8 +21034,9 @@ static bool EvaluateSharedDeclarationProjections(
     const MatchPattern *Pattern, EvalInfo &Info,
     MatchProjectionEvaluationCache &ProjectionCache) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    return !P->getProjection() ||
-           EvaluateProjectionValue(P->getProjection(), Info, &ProjectionCache);
+    const MatchProjection *Projection = P->getProjection();
+    return !Projection ||
+           EvaluateProjectionValue(Projection, Info, &ProjectionCache);
   }
   for (const MatchPattern *Child : Pattern->children())
     if (!EvaluateSharedDeclarationProjections(Child, Info, ProjectionCache))
