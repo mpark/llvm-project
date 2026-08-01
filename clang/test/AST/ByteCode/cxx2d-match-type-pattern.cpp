@@ -108,3 +108,56 @@ constexpr int dependent(T value) {
 
 static_assert(dependent(Left{3}) == 3);
 static_assert(dependent(Right{4}) == 4);
+
+namespace std {
+template<class T>
+struct alternative_traits;
+}
+
+struct VoidOrInt {
+  bool has_value;
+  int value;
+};
+
+template<__SIZE_TYPE__ I>
+struct VoidOrIntAlternative;
+
+template<>
+struct VoidOrIntAlternative<0> {
+  using type = void;
+};
+
+template<>
+struct VoidOrIntAlternative<1> {
+  using type = int;
+};
+
+template<>
+struct std::alternative_traits<VoidOrInt> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using projection_type = typename VoidOrIntAlternative<I>::type;
+
+  static constexpr __SIZE_TYPE__ index(const VoidOrInt& value) noexcept {
+    return value.has_value ? 0 : 1;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& value) {
+    if constexpr (I == 0)
+      return;
+    else
+      return (static_cast<Self&&>(value).value);
+  }
+};
+
+constexpr int project_void(VoidOrInt value) {
+  return value match {
+    case { void } => 5;
+    case { int } => 6;
+  };
+}
+
+static_assert(project_void({true, 0}) == 5);
+static_assert(project_void({false, 0}) == 6);

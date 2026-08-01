@@ -1091,7 +1091,8 @@ public:
         break;
       case MatchPattern::AlternativePatternClass: {
         auto *P = static_cast<const AlternativePattern *>(Node);
-        Visit(P->getTypeSourceInfo()->getType());
+        if (TypeSourceInfo *TSI = P->getTypeSourceInfo())
+          Visit(TSI->getType());
         break;
       }
       default:
