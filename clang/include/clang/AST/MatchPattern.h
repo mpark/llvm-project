@@ -380,47 +380,87 @@ public:
 };
 
 class AlternativePattern final : public MatchPattern {
+public:
+  enum AlternativeKind { Type, Concept, Auto, Generic, Named, Empty };
+
+private:
+  AlternativeKind Kind;
   SourceRange DiscriminatorRange;
+  SourceRange Braces;
 
   // Discriminator is either a type or a type-constraint.
   TypeSourceInfo* TInfo = nullptr;
   ConceptReference* CR = nullptr;
+  IdentifierInfo *Name = nullptr;
 
   SourceLocation ColonLoc;
-  MatchPattern *Pattern;
+  MatchPattern *Pattern = nullptr;
   MatchProjection *Projection = nullptr;
-  bool IsAuto = false;
 
 public:
   explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), DiscriminatorRange(ConceptRange),
-        CR(CR), ColonLoc(ColonLoc), Pattern(Pattern) {
+      : MatchPattern(AlternativePatternClass), Kind(Concept),
+        DiscriminatorRange(ConceptRange), CR(CR), ColonLoc(ColonLoc),
+        Pattern(Pattern) {
     // FIXME(mpark): Account for ConceptReference.
     setDependence(computeDependence());
   }
 
   explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), DiscriminatorRange(TypeRange),
-        TInfo(TInfo), ColonLoc(ColonLoc), Pattern(Pattern) {
-     setDependence(
+      : MatchPattern(AlternativePatternClass), Kind(Type),
+        DiscriminatorRange(TypeRange), TInfo(TInfo), ColonLoc(ColonLoc),
+        Pattern(Pattern) {
+    setDependence(
         toExprDependenceForImpliedType(TInfo->getType()->getDependence()) |
         computeDependence());
   }
 
   explicit AlternativePattern(SourceRange AutoRange, SourceLocation ColonLoc,
                               MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass),
-        DiscriminatorRange(AutoRange), ColonLoc(ColonLoc), Pattern(Pattern),
-        IsAuto(true) {
+      : MatchPattern(AlternativePatternClass), Kind(Auto),
+        DiscriminatorRange(AutoRange), ColonLoc(ColonLoc), Pattern(Pattern) {
     setDependence(computeDependence());
   }
 
+  explicit AlternativePattern(SourceRange Braces, MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass), Kind(Generic), Braces(Braces),
+        Pattern(Pattern) {
+    setDependence(computeDependence());
+  }
+
+  explicit AlternativePattern(SourceRange Braces, SourceRange NameRange,
+                              IdentifierInfo *Name, SourceLocation ColonLoc,
+                              MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass), Kind(Named),
+        DiscriminatorRange(NameRange), Braces(Braces), Name(Name),
+        ColonLoc(ColonLoc), Pattern(Pattern) {
+    setDependence(computeDependence());
+  }
+
+  explicit AlternativePattern(SourceRange Braces)
+      : MatchPattern(AlternativePatternClass), Kind(Empty), Braces(Braces) {
+    setDependence(ExprDependence::None);
+  }
+
+  AlternativeKind getAlternativeKind() const { return Kind; }
+  bool isBraced() const {
+    return Kind == Generic || Kind == Named || Kind == Empty;
+  }
+  bool isNamed() const { return Kind == Named; }
+  bool isEmpty() const { return Kind == Empty; }
+
   SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
+  SourceRange getBraces() const { return Braces; }
+  IdentifierInfo *getName() const { return Name; }
   SourceLocation getColonLoc() const { return ColonLoc; }
-  SourceLocation getBeginLoc() const { return DiscriminatorRange.getBegin(); }
-  SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
+  SourceLocation getBeginLoc() const {
+    return isBraced() ? Braces.getBegin() : DiscriminatorRange.getBegin();
+  }
+  SourceLocation getEndLoc() const {
+    return isBraced() ? Braces.getEnd() : Pattern->getEndLoc();
+  }
 
   ConceptReference *getConceptReference() const {
     return CR;
@@ -430,7 +470,7 @@ public:
     return TInfo;
   }
 
-  bool isAuto() const { return IsAuto; }
+  bool isAuto() const { return Kind == Auto; }
 
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
@@ -439,7 +479,7 @@ public:
   void setProjection(MatchProjection *P) { Projection = P; }
 
   llvm::iterator_range<MatchPattern **> children() {
-    return {&Pattern, &Pattern + 1};
+    return {&Pattern, &Pattern + (Pattern != nullptr)};
   }
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
