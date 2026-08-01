@@ -19024,11 +19024,12 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
   QualType RetTy = E->getType();
   SmallVector<MatchCase, 32> Cases;
+  Sema::MatchProjectionCache ProjectionCache;
   for (const MatchCase &Case : E->getCases()) {
     ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
         Case.Pattern, LHS.get() != E->getSubject());
-    if (Pattern.isInvalid() ||
-        getSema().CheckCompleteMatchPattern(LHS.get(), Pattern.get()))
+    if (Pattern.isInvalid() || getSema().CheckCompleteMatchPattern(
+                                   LHS.get(), Pattern.get(), &ProjectionCache))
       return ExprError();
 
     // Transform the condition

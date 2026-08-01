@@ -217,7 +217,8 @@ static QualType getVariantLikeAlternativeType(Sema &S, SourceLocation Loc,
 
 static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
                                         AlternativePattern *P, QualType Type,
-                                        const llvm::APSInt &VariantSize) {
+                                        const llvm::APSInt &VariantSize,
+                                        Sema::MatchProjectionCache *Cache) {
   SourceLocation Loc = P->getBeginLoc();
 
   DeclRefExpr *DRE = S.BuildDeclRefExpr(HoldingVar, Type, VK_LValue,
@@ -326,13 +327,22 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   if (TargetIndex.isInvalid())
     return true;
 
-  ExprResult Cond =
+  ExprResult RawCond =
       S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::equalequal,
                    IndexExpr.get(), TargetIndex.get());
-  if (Cond.isInvalid()) {
+  if (RawCond.isInvalid())
     return true;
-  }
-  P->setCond(Cond.get());
+  VarDecl *ConditionVar =
+      BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCond.get());
+  if (ConditionVar->isInvalidDecl())
+    return true;
+  P->getProjection()->setConditionVar(ConditionVar);
+  Expr *ConditionRef = S.BuildDeclRefExpr(
+      ConditionVar, S.Context.BoolTy, VK_LValue, ConditionVar->getLocation());
+  ExprResult Cond = S.CheckBooleanCondition(Loc, ConditionRef);
+  if (Cond.isInvalid())
+    return true;
+  P->getProjection()->setConditionExpr(Cond.get());
 
   DeclarationName GetDN = S.PP.getIdentifierInfo("get");
 
@@ -425,14 +435,15 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
   RefVD->setInit(E.get());
   S.CheckCompleteVariableDeclaration(RefVD);
 
-  P->setBindingVar(RefVD);
+  P->getProjection()->setProjectedVar(RefVD);
 
   E = S.BuildDeclRefExpr(RefVD, RefVD->getType().getNonReferenceType(),
                          VK_LValue, RefVD->getLocation());
   if (E.isInvalid())
     return true;
 
-  return S.CheckCompleteMatchPattern(E.get(), P->getSubPattern());
+  P->getProjection()->setProjectedExpr(E.get());
+  return S.CheckCompleteMatchPattern(E.get(), P->getSubPattern(), Cache);
 }
 
 ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
@@ -609,7 +620,50 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
   return DecompositionPattern::Create(Context, Patterns, Squares, BindingOnly);
 }
 
-bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
+static MatchProjection *
+findMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
+                    const Expr *Subject, MatchProjection::ProjectionKind Kind,
+                    QualType Discriminator = QualType(), unsigned Arity = 0) {
+  if (!Cache)
+    return nullptr;
+  for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
+    if (Entry.Subject != Subject || Entry.Projection->getKind() != Kind ||
+        Entry.Arity != Arity)
+      continue;
+    if (Discriminator.isNull() == Entry.Discriminator.isNull() &&
+        (Discriminator.isNull() ||
+         S.Context.hasSameType(Discriminator, Entry.Discriminator)))
+      return Entry.Projection;
+  }
+  return nullptr;
+}
+
+static MatchProjection *
+createMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
+                      const Expr *Subject, MatchProjection::ProjectionKind Kind,
+                      QualType Discriminator = QualType(), unsigned Arity = 0) {
+  auto *Projection = new (S.Context) MatchProjection(Kind);
+  if (Cache)
+    Cache->Entries.push_back({Subject, Projection, Discriminator, Arity});
+  return Projection;
+}
+
+static ExprResult buildMatchProjectionCondition(Sema &S,
+                                                MatchProjection *Projection,
+                                                SourceLocation Loc) {
+  if (Expr *Condition = Projection->getConditionExpr())
+    return Condition;
+  VarDecl *ConditionVar = Projection->getConditionVar();
+  Expr *ConditionRef =
+      S.BuildDeclRefExpr(ConditionVar, S.Context.BoolTy, VK_LValue, Loc);
+  ExprResult Condition = S.CheckBooleanCondition(Loc, ConditionRef);
+  if (Condition.isUsable())
+    Projection->setConditionExpr(Condition.get());
+  return Condition;
+}
+
+bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
+                                     MatchProjectionCache *ProjectionCache) {
   if (Subject && Subject->isTypeDependent())
     return CheckCompleteMatchPattern(nullptr, Pattern);
   // TODO(mpark): Skip if Pattern is type-dependent as well.
@@ -652,41 +706,95 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
   }
   case MatchPattern::ParenPatternClass: {
     ParenPattern *P = static_cast<ParenPattern *>(Pattern);
-    return CheckCompleteMatchPattern(Subject, P->getSubPattern());
+    return CheckCompleteMatchPattern(Subject, P->getSubPattern(),
+                                     ProjectionCache);
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
     if (!Subject)
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern());
+
+    if (MatchProjection *Projection =
+            findMatchProjection(*this, ProjectionCache, Subject,
+                                MatchProjection::OptionalProjection)) {
+      P->setProjection(Projection);
+      return CheckCompleteMatchPattern(Projection->getProjectedExpr(),
+                                       P->getSubPattern(), ProjectionCache);
+    }
+
+    MatchProjection *Projection = createMatchProjection(
+        *this, ProjectionCache, Subject, MatchProjection::OptionalProjection);
+    P->setProjection(Projection);
     QualType Type = Context.getAutoRRefDeductType();
-    VarDecl *CondVar = BuildVarDecl(*this, Loc, Type, Subject);
-    if (CondVar->isInvalidDecl()) {
+    VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Type, Subject);
+    if (HoldingVar->isInvalidDecl()) {
       return true;
     }
-    P->setCondVar(CondVar);
-    DeclRefExpr *DRE =
-        BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
-                         VK_LValue, CondVar->getLocation());
-    ExprResult Cond = CheckBooleanCondition(Loc, DRE);
-    if (Cond.isInvalid()) {
+    Projection->setHoldingVar(HoldingVar);
+    DeclRefExpr *DRE = BuildDeclRefExpr(
+        HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
+        HoldingVar->getLocation());
+    ExprResult RawCond = CheckBooleanCondition(Loc, DRE);
+    if (RawCond.isInvalid()) {
       return true;
     }
-    P->setCond(Cond.get());
+    VarDecl *ConditionVar =
+        BuildVarDecl(*this, Loc, Context.getAutoDeductType(), RawCond.get());
+    if (ConditionVar->isInvalidDecl())
+      return true;
+    Projection->setConditionVar(ConditionVar);
+    ExprResult Cond = buildMatchProjectionCondition(*this, Projection, Loc);
+    if (Cond.isInvalid())
+      return true;
+
     ExprResult Deref = ActOnUnaryOp(S, Loc, tok::TokenKind::star, DRE);
-    if (Deref.isInvalid()) {
+    if (Deref.isInvalid())
       return true;
-    }
-    return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
+    QualType ProjectedType = Deref.get()->refersToBitField()
+                                 ? Context.getAutoDeductType()
+                                 : Context.getAutoRRefDeductType();
+    VarDecl *ProjectedVar =
+        BuildVarDecl(*this, Loc, ProjectedType, Deref.get());
+    if (ProjectedVar->isInvalidDecl())
+      return true;
+    Projection->setProjectedVar(ProjectedVar);
+    Expr *Projected = BuildDeclRefExpr(
+        ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
+        ProjectedVar->getLocation());
+    Projection->setProjectedExpr(Projected);
+    return CheckCompleteMatchPattern(Projected, P->getSubPattern(),
+                                     ProjectionCache);
   }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject)
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern());
+
+    QualType Discriminator =
+        P->getTypeSourceInfo() ? P->getTypeSourceInfo()->getType() : QualType();
+    MatchProjectionCache *AlternativeCache =
+        Discriminator.isNull() ? nullptr : ProjectionCache;
+    if (MatchProjection *Projection = findMatchProjection(
+            *this, AlternativeCache, Subject,
+            MatchProjection::AlternativeProjection, Discriminator)) {
+      P->setProjection(Projection);
+      ExprResult Cond =
+          buildMatchProjectionCondition(*this, Projection, P->getBeginLoc());
+      if (Cond.isInvalid())
+        return true;
+      return CheckCompleteMatchPattern(Projection->getProjectedExpr(),
+                                       P->getSubPattern(), ProjectionCache);
+    }
+
+    MatchProjection *Projection = createMatchProjection(
+        *this, AlternativeCache, Subject,
+        MatchProjection::AlternativeProjection, Discriminator);
+    P->setProjection(Projection);
     QualType Deduced = Context.getAutoRRefDeductType();
     VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
     if (HoldingVar->isInvalidDecl())
       return true;
-    P->setHoldingVar(HoldingVar);
+    Projection->setHoldingVar(HoldingVar);
     SourceLocation Loc = P->getBeginLoc();
     QualType Type = HoldingVar->getType();
     Type = Type.getNonReferenceType();
@@ -696,7 +804,8 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     case IsVariantLike::Error:
       return true;
     case IsVariantLike::VariantLike:
-      return checkVariantLikeAlternative(*this, HoldingVar, P, Type, VariantSize);
+      return checkVariantLikeAlternative(*this, HoldingVar, P, Type,
+                                         VariantSize, ProjectionCache);
     case IsVariantLike::NotVariantLike:
       break;
     }
@@ -730,19 +839,39 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
     VarDecl *CondVar = BuildVarDecl(*this, Loc, VarType, CastExpr.get());
     if (CondVar->isInvalidDecl())
       return true;
-    P->setCondVar(CondVar);
+    Projection->setIntermediateVar(CondVar);
     DRE = BuildDeclRefExpr(CondVar, CondVar->getType().getNonReferenceType(),
                            VK_LValue, CondVar->getLocation());
-    ExprResult Cond = CheckBooleanCondition(Loc, DRE);
-    if (Cond.isInvalid()) {
+    ExprResult RawCond = CheckBooleanCondition(Loc, DRE);
+    if (RawCond.isInvalid()) {
       return true;
     }
-    P->setCond(Cond.get());
+    VarDecl *ConditionVar =
+        BuildVarDecl(*this, Loc, Context.getAutoDeductType(), RawCond.get());
+    if (ConditionVar->isInvalidDecl())
+      return true;
+    Projection->setConditionVar(ConditionVar);
+    ExprResult Cond = buildMatchProjectionCondition(*this, Projection, Loc);
+    if (Cond.isInvalid())
+      return true;
     ExprResult Deref = ActOnUnaryOp(S, Loc, tok::TokenKind::star, DRE);
     if (Deref.isInvalid()) {
       return true;
     }
-    return CheckCompleteMatchPattern(Deref.get(), P->getSubPattern());
+    QualType ProjectedType = Deref.get()->refersToBitField()
+                                 ? Context.getAutoDeductType()
+                                 : Context.getAutoRRefDeductType();
+    VarDecl *ProjectedVar =
+        BuildVarDecl(*this, Loc, ProjectedType, Deref.get());
+    if (ProjectedVar->isInvalidDecl())
+      return true;
+    Projection->setProjectedVar(ProjectedVar);
+    Expr *Projected = BuildDeclRefExpr(
+        ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
+        ProjectedVar->getLocation());
+    Projection->setProjectedExpr(Projected);
+    return CheckCompleteMatchPattern(Projected, P->getSubPattern(),
+                                     ProjectionCache);
   }
   case MatchPattern::DecompositionPatternClass: {
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
@@ -753,6 +882,35 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern) {
       }
       return false;
     }
+    if (MatchProjection *Projection =
+            findMatchProjection(*this, ProjectionCache, Subject,
+                                MatchProjection::DecompositionProjection,
+                                QualType(), P->getNumPatterns())) {
+      DecompositionDecl *Decomposed = Projection->getDecomposedDecl();
+      P->setProjection(Projection);
+      P->setDecomposedDecl(Decomposed);
+      for (auto [Binding, Child] :
+           llvm::zip(Decomposed->bindings(), P->children())) {
+        if (Child->getMatchPatternClass() ==
+            MatchPattern::BindingPatternClass) {
+          BindingDecl *Alias =
+              static_cast<BindingPattern *>(Child)->getBinding();
+          Expr *Canonical = BuildDeclRefExpr(Binding, Binding->getType(),
+                                             VK_LValue, Alias->getLocation());
+          Alias->setBinding(Binding->getType(), Canonical);
+          Alias->setDecomposedDecl(Decomposed);
+          continue;
+        }
+        if (CheckCompleteMatchPattern(Binding->getBinding(), Child))
+          return true;
+      }
+      return false;
+    }
+    MatchProjection *Projection =
+        createMatchProjection(*this, ProjectionCache, Subject,
+                              MatchProjection::DecompositionProjection,
+                              QualType(), P->getNumPatterns());
+    P->setProjection(Projection);
     QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TInfo = Context.getTrivialTypeSourceInfo(Type, Loc);
     SmallVector<BindingDecl *, 8> Bindings;
