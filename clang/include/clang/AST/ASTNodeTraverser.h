@@ -1051,7 +1051,7 @@ public:
     if (const VarDecl *HoldingVar = Node->getHoldingVar())
       Visit(HoldingVar);
     Visit(Node->getSubject());
-    for (const MatchCase &Case : Node->getCases()) {
+    for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
       getNodeDelegate().AddChild([&] {
         VisitMatchPattern(Case.Pattern);
         if (const auto &[CondVar, Cond] = Case.Guard; Cond) {
