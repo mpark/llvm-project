@@ -595,6 +595,7 @@ bool Sema::CodeSynthesisContext::isInstantiationRecord() const {
   case PartialOrderingTTP:
   case SYCLKernelLaunchLookup:
   case SYCLKernelLaunchOverloadResolution:
+  case PatternMatchingExpansion:
     return false;
 
   // This function should never be called when Kind's value is Memoization.
@@ -1304,6 +1305,8 @@ void Sema::PrintInstantiationStack(InstantiationContextDiagFuncRef DiagFunc) {
                                                 Active->NumCallArgs)));
       break;
     }
+    case CodeSynthesisContext::PatternMatchingExpansion:
+      break;
     }
   }
 }
@@ -4514,6 +4517,19 @@ Sema::SubstStmt(Stmt *S, const MultiLevelTemplateArgumentList &TemplateArgs) {
                                     SourceLocation(),
                                     DeclarationName());
   return Instantiator.TransformStmt(S);
+}
+
+ExprResult Sema::ExpandDeferredMatchSelectExpr(MatchSelectExpr *E) {
+  CodeSynthesisContext Ctx;
+  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
+  Ctx.PointOfInstantiation = E->getMatchLoc();
+  Ctx.Entity = cast<Decl>(CurContext);
+  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
+  LocalInstantiationScope Scope(*this);
+  MultiLevelTemplateArgumentList TemplateArgs;
+  TemplateInstantiator Instantiator(*this, TemplateArgs, E->getMatchLoc(),
+                                    DeclarationName());
+  return Instantiator.TransformExpr(E);
 }
 
 bool Sema::SubstTemplateArgument(
