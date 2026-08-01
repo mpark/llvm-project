@@ -628,3 +628,64 @@ constexpr bool constant_prvalue_match_subject_has_one_identity() {
 }
 
 static_assert(constant_prvalue_match_subject_has_one_identity());
+
+struct SharedMatchProjection {
+  int first;
+  int second;
+  int *projections;
+
+  template <int I>
+  constexpr int &get() & {
+    static_assert(I == 0 || I == 1);
+    ++projections[I];
+    if constexpr (I == 0)
+      return first;
+    else
+      return second;
+  }
+};
+
+namespace std {
+template <>
+struct tuple_size<SharedMatchProjection> {
+  static constexpr int value = 2;
+};
+
+template <int I>
+struct tuple_element<I, SharedMatchProjection> {
+  static_assert(I == 0 || I == 1);
+  using type = int;
+};
+} // namespace std
+
+constexpr int structural_arms_share_match_projections() {
+  int projections[2] = {};
+  SharedMatchProjection source{1, 2, projections};
+  int result = source match {
+    [0, 0] => 0;
+    [let x, 0] => x;
+    [0, let y] => y;
+    [let x, let y] => x + y;
+  };
+  return projections[0] * 100 + projections[1] * 10 + result;
+}
+
+static_assert(structural_arms_share_match_projections() == 113);
+
+constexpr int dependent_structural_arms_share_match_projections(auto &source) {
+  return source match {
+    [0, 0] => 0;
+    [1, 0] => 1;
+    [0, 2] => 2;
+    [_, _] => 3;
+  };
+}
+
+constexpr int instantiate_shared_match_projection() {
+  int projections[2] = {};
+  SharedMatchProjection source{1, 2, projections};
+  int result = dependent_structural_arms_share_match_projections(source);
+  return projections[0] * 100 + projections[1] * 10 + result;
+}
+
+static_assert(instantiate_shared_match_projection() == 113);

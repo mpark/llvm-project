@@ -18,6 +18,11 @@
 
 using namespace clang;
 
+void *MatchProjection::operator new(size_t Bytes, const ASTContext &C,
+                                    unsigned Alignment) {
+  return ::operator new(Bytes, C, Alignment);
+}
+
 void *MatchPattern::operator new(size_t bytes, const ASTContext &C,
                                  unsigned alignment) {
   return ::operator new(bytes, C, alignment);
