@@ -3921,6 +3921,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     TypeLoc OrigResultType = TSI->getTypeLoc();
     SmallVector<MatchCase, 32> Cases;
     SourceRange Braces;
+    bool HasDeferredCases = false;
     if (LHS.isInvalid()) {
       return ExprError();
     }
@@ -3928,12 +3929,13 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
     if (LHS.isInvalid())
       return ExprError();
-    if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces)) {
+    if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces,
+                       HasDeferredCases)) {
       return ExprError();
     }
     return Actions.ActOnMatchSelectExpr(HoldingVar, LHS.get(), MatchLoc,
                                         IsConstexpr, OrigResultType, RetTy,
-                                        Cases, Braces);
+                                        Cases, Braces, HasDeferredCases);
   } else {
     VarDecl *HoldingVar = nullptr;
     if (InjectedDecls && LHS.isUsable()) {
@@ -3961,7 +3963,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
 
 bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, SmallVectorImpl<MatchCase> &Result,
-                            SourceRange &Braces) {
+                            SourceRange &Braces, bool &HasDeferredCases) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in match body");
@@ -3969,9 +3971,23 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   if (T.expectAndConsume())
     return true;
   Sema::MatchProjectionCache ProjectionCache;
+  // Parse each source arm once. Sema specializes an arm whose selector can
+  // project more than one alternative after its guard and handler are parsed.
+  ProjectionCache.DeferAlternativeChoices = true;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
+    ProjectionCache.AlternativeChoices.clear();
+    ProjectionCache.HasDeferredAlternativeChoices = false;
+    size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
-    if (ParseMatchCase(Subject, OrigResultType, RetTy, Case, ProjectionCache)) {
+    bool Invalid = ParseMatchCase(Subject, OrigResultType, RetTy, Case,
+                                  ProjectionCache);
+    if (ProjectionCache.HasDeferredAlternativeChoices) {
+      ProjectionCache.Entries.resize(SavedProjectionCount);
+      HasDeferredCases = true;
+    }
+    ProjectionCache.AlternativeChoices.clear();
+
+    if (Invalid) {
       SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
       TryConsumeToken(tok::semi);
       continue;
@@ -4254,6 +4270,17 @@ Parser::ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr) {
 
 ActionResult<MatchPattern *>
 Parser::TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr) {
+  if (Tok.is(tok::kw_auto)) {
+    SourceRange DiscriminatorRange = ConsumeToken();
+    assert(Tok.is(tok::colon) && "not an auto alternative pattern");
+    SourceLocation ColonLoc = ConsumeToken();
+    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
+    if (Pattern.isInvalid())
+      return true;
+    return Actions.ActOnAutoAlternativePattern(
+        DiscriminatorRange, ColonLoc, Pattern.get());
+  }
+
   if (TryAnnotateTypeConstraint())
     return true;
 

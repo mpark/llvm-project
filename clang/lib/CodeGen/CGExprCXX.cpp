@@ -2658,7 +2658,7 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   // FIXME: check if we can constant fold to simple integer,
   // just like switch does. Is this already handled in Sema?
-  llvm::ArrayRef<MatchCase> Cases = S.getCases();
+  llvm::ArrayRef<MatchCaseInstantiation> Cases = S.getCaseInstantiations();
 
   if (const VarDecl *HoldingVar = S.getHoldingVar())
     EmitVarDecl(*HoldingVar);
@@ -2672,7 +2672,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   unsigned CasePatternIdx = 0;
   bool isAggregate = false;
-  for (MatchCase MatchC : Cases) {
+  for (MatchCaseInstantiation MatchC : Cases) {
     if (!SelectEndBB)
       SelectEndBB = createBasicBlock("match.select.end");
 

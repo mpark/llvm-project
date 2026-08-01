@@ -4507,7 +4507,8 @@ private:
                                  InjectedDeclSet *InjectedDecls);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
-                      SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
+                      SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,
+                      bool &HasDeferredCases);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case,
                       Sema::MatchProjectionCache &ProjectionCache);

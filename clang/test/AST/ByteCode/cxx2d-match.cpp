@@ -576,6 +576,31 @@ concept integral = __is_integral(T);
 template <typename T, typename U>
 concept same = __is_same(T, U);
 
+template <typename T>
+concept arithmetic =
+    __is_same(T, int) || __is_same(T, double) || __is_same(T, float);
+
+template <typename T>
+struct alternative_code;
+
+template <typename T>
+struct alternative_code<const T> : alternative_code<T> {};
+
+template <>
+struct alternative_code<int> {
+  static constexpr int value = 1;
+};
+
+template <>
+struct alternative_code<double> {
+  static constexpr int value = 2;
+};
+
+template <>
+struct alternative_code<float> {
+  static constexpr int value = 3;
+};
+
 constexpr int test_variant_like_alternative_pattern_with_type_constraint(const Variant &var) {
   return var match {
     integral: 0 => 0;
@@ -591,6 +616,28 @@ static_assert(test_variant_like_alternative_pattern_with_type_constraint(2) == -
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(3.0) == 7);
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(4.0) == 8);
 static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) == -1);
+
+constexpr int test_concept_selects_every_matching_alternative(const Variant &var) {
+  return var match {
+    arithmetic: let value =>
+        alternative_code<decltype(value)>::value * 10 +
+        static_cast<int>(value);
+  };
+}
+
+static_assert(test_concept_selects_every_matching_alternative(1) == 11);
+static_assert(test_concept_selects_every_matching_alternative(2.0) == 22);
+static_assert(test_concept_selects_every_matching_alternative(3.0f) == 33);
+
+constexpr int test_auto_selects_every_alternative(const Variant &var) {
+  return var match {
+    auto: let value => alternative_code<decltype(value)>::value;
+  };
+}
+
+static_assert(test_auto_selects_every_alternative(1) == 1);
+static_assert(test_auto_selects_every_alternative(2.0) == 2);
+static_assert(test_auto_selects_every_alternative(3.0f) == 3);
 
 template <int... Is, int N>
 constexpr int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {

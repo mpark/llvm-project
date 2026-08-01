@@ -278,14 +278,16 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
     Alternatives.push_back(Alternative);
   }
   unsigned I = 0;
-  if (ConceptReference* CR = P->getConceptReference()) {
+  SmallVector<unsigned, 4> Selected;
+  if (ConceptReference *CR = P->getConceptReference()) {
     CXXScopeSpec SS;
     SS.Adopt(CR->getNestedNameSpecifierLoc());
 
-    for (; I < NumAlternatives; ++I) {
+    for (unsigned Candidate = 0; Candidate < NumAlternatives; ++Candidate) {
       TemplateArgumentListInfo TemplateArgs;
       TemplateArgs.addArgument(S.getTrivialTemplateArgumentLoc(
-          TemplateArgument(Alternatives[I]), /*NTTPType=*/QualType(), Loc));
+          TemplateArgument(Alternatives[Candidate]), /*NTTPType=*/QualType(),
+          Loc));
       if (const ASTTemplateArgumentListInfo *ArgsAsWritten =
               CR->getTemplateArgsAsWritten()) {
         TemplateArgs.setLAngleLoc(ArgsAsWritten->getLAngleLoc());
@@ -299,17 +301,19 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
           CR->getFoundDecl(), CR->getNamedConcept(), &TemplateArgs);
       if (E.isInvalid())
         return true;
-      ConceptSpecializationExpr* CSE = cast<ConceptSpecializationExpr>(E.get());
-      if (CSE->isSatisfied()) {
-        break;
-      }
+      ConceptSpecializationExpr *CSE = cast<ConceptSpecializationExpr>(E.get());
+      if (CSE->isSatisfied())
+        Selected.push_back(Candidate);
     }
-    if (I == NumAlternatives) {
+    if (Selected.empty()) {
       // S.Diag(Loc, diag::err_no_viable_alternative)
       //     << *CR << Type.getUnqualifiedType().getAsString();
       return true;
     }
-  } else if (TypeSourceInfo* TSI = P->getTypeSourceInfo()) {
+  } else if (P->isAuto()) {
+    for (unsigned Candidate = 0; Candidate < NumAlternatives; ++Candidate)
+      Selected.push_back(Candidate);
+  } else if (TypeSourceInfo *TSI = P->getTypeSourceInfo()) {
     QualType TargetType = TSI->getType();
     for (; I < NumAlternatives; ++I) {
       if (S.Context.hasSameType(Alternatives[I], TargetType)) {
@@ -320,6 +324,26 @@ static bool checkVariantLikeAlternative(Sema &S, VarDecl *HoldingVar,
       S.Diag(Loc, diag::err_no_viable_alternative)
           << TargetType << Type.getUnqualifiedType().getAsString();
       return true;
+    }
+    Selected.push_back(I);
+  }
+
+  if (!Selected.empty()) {
+    I = Selected.front();
+    if (Selected.size() > 1 && Cache) {
+      if (Cache->DeferAlternativeChoices) {
+        Cache->AlternativeChoices.push_back({Selected, I});
+        Cache->HasDeferredAlternativeChoices = true;
+        return S.CheckCompleteMatchPattern(nullptr, P->getSubPattern(), Cache);
+      }
+      if (Cache->NextForcedAlternativeSelection <
+          Cache->ForcedAlternativeSelections.size()) {
+        I = Cache->ForcedAlternativeSelections
+                [Cache->NextForcedAlternativeSelection++];
+        if (!llvm::is_contained(Selected, I))
+          return true;
+      }
+      Cache->AlternativeChoices.push_back({Selected, I});
     }
   }
 
@@ -480,6 +504,16 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   }
   Expr *E = ER.get();
   SourceLocation Loc = E->getBeginLoc();
+  const AutoType *HandlerAuto = E->getType()->getContainedAutoType();
+  bool HasDependentAuto =
+      HandlerAuto &&
+      (!HandlerAuto->isDeduced() || HandlerAuto->getDeducedType().isNull() ||
+       HandlerAuto->getDeducedType()->isDependentType());
+  if (E->isTypeDependent() || HasDependentAuto || RetTy->isDependentType()) {
+    if (OrigResultType.getType()->getContainedAutoType())
+      RetTy = Context.DependentTy;
+    return E;
+  }
   if (isa<CXXThrowExpr>(E->IgnoreParenImpCasts())) {
     if (ER.isInvalid())
       return StmtError();
@@ -521,12 +555,30 @@ ExprResult Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                                      Pattern, IfLoc, Guard);
 }
 
-ExprResult Sema::ActOnMatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
-                                      SourceLocation MatchLoc,
-                                      bool IsConstexpr, TypeLoc OrigResultType,
-                                      QualType RetTy,
-                                      SmallVectorImpl<MatchCase> &Cases,
-                                      SourceRange Braces) {
+ExprResult Sema::ActOnMatchSelectExpr(
+    VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
+    bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
+    SmallVectorImpl<MatchCase> &SourceCases, SourceRange Braces,
+    bool ExpandDeferredCases,
+    std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations) {
+  if (ExpandDeferredCases) {
+    auto *E = MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
+                                      IsConstexpr, OrigResultType, RetTy,
+                                      SourceCases, {}, Braces);
+    return ExpandDeferredMatchSelectExpr(E);
+  }
+
+  SmallVector<MatchCaseInstantiation, 32> CaseInstantiations;
+  if (Instantiations) {
+    CaseInstantiations.append(Instantiations->begin(), Instantiations->end());
+  } else {
+    CaseInstantiations.reserve(SourceCases.size() + 1);
+    for (auto [Index, Case] : llvm::enumerate(SourceCases))
+      CaseInstantiations.push_back({Case.Pattern, Case.IfLoc, Case.Guard,
+                                    Case.Handler,
+                                    static_cast<unsigned>(Index)});
+  }
+
   // Inject a fake '_ => throw (std::terminate(), 0);'
   SourceLocation Loc = Braces.getEnd();
   ActionResult<MatchPattern *> P = ActOnWildcardPattern(Loc);
@@ -559,10 +611,14 @@ ExprResult Sema::ActOnMatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
   E = BuildBinOp(/*Scope=*/nullptr, Loc, BinaryOperatorKind::BO_Comma, E.get(),
                  Dummy.get());
   E = ActOnCXXThrow(getCurScope(), Braces.getEnd(), E.get());
-  Cases.push_back({P.get(), Braces.getEnd(), {}, E.get()});
+  CaseInstantiations.push_back({P.get(),
+                                Braces.getEnd(),
+                                {},
+                                E.get(),
+                                MatchCaseInstantiation::ImplicitCase});
   return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
-                                 IsConstexpr,
-                                 OrigResultType, RetTy, Cases, Braces);
+                                 IsConstexpr, OrigResultType, RetTy,
+                                 SourceCases, CaseInstantiations, Braces);
 }
 
 ActionResult<MatchPattern *>
@@ -612,6 +668,13 @@ Sema::ActOnAlternativePattern(SourceRange DiscriminatorRange,
                               MatchPattern *SubPattern) {
   return new (Context)
       AlternativePattern(DiscriminatorRange, TSI, ColonLoc, SubPattern);
+}
+
+ActionResult<MatchPattern *> Sema::ActOnAutoAlternativePattern(
+    SourceRange DiscriminatorRange, SourceLocation ColonLoc,
+    MatchPattern *SubPattern) {
+  return new (Context)
+      AlternativePattern(DiscriminatorRange, ColonLoc, SubPattern);
 }
 
 ActionResult<MatchPattern *>

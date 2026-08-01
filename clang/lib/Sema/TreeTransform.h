@@ -4438,17 +4438,21 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-      if (ConceptReference* CR = P->getConceptReference()) {
-        llvm_unreachable("not implemented");
-      }
-      if (TypeSourceInfo* TSI = P->getTypeSourceInfo()) {
+      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
+      if (Sub.isInvalid())
+        return true;
+      if (P->isAuto())
+        return getSema().ActOnAutoAlternativePattern(
+            P->getDiscriminatorRange(), P->getColonLoc(), Sub.get());
+      if (ConceptReference *CR = P->getConceptReference())
+        return getSema().ActOnAlternativePattern(
+            P->getDiscriminatorRange(), CR, P->getColonLoc(), Sub.get());
+      if (TypeSourceInfo *TSI = P->getTypeSourceInfo()) {
         TSI = getDerived().TransformType(P->getTypeSourceInfo());
         if (!TSI)
           return true;
-        auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
-        if (Sub.isInvalid())
-          return true;
-        if (Sub.get() == P->getSubPattern())
+        if (Sub.get() == P->getSubPattern() &&
+            TSI == P->getTypeSourceInfo())
           return Pattern;
         return new (getSema().Context) AlternativePattern(
             P->getDiscriminatorRange(), TSI, P->getColonLoc(), Sub.get());
@@ -19022,51 +19026,82 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                                    CK_NoOp, LHS.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
 
-  QualType RetTy = E->getType();
-  SmallVector<MatchCase, 32> Cases;
+  QualType RetTy = E->getType()->isDependentType()
+                       ? E->getOrigResultType().getType()
+                       : E->getType();
+  SmallVector<MatchCase, 32> SourceCases(E->getCases());
+  SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchProjectionCache ProjectionCache;
-  for (const MatchCase &Case : E->getCases()) {
+  auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
+                           MatchCaseInstantiation &Transformed) -> bool {
+    LocalInstantiationScope Scope(getSema(),
+                                  /*CombineWithOuterScope=*/true);
     ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
         Case.Pattern, LHS.get() != E->getSubject());
     if (Pattern.isInvalid() || getSema().CheckCompleteMatchPattern(
                                    LHS.get(), Pattern.get(), &ProjectionCache))
-      return ExprError();
+      return true;
 
-    // Transform the condition
     Sema::ConditionResult Guard = getDerived().TransformCondition(
         Case.IfLoc, Case.Guard.first, Case.Guard.second,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf
                          : Sema::ConditionKind::Boolean);
     if (Guard.isInvalid())
-      return ExprError();
+      return true;
 
     StmtResult Handler =
         getDerived().TransformStmt(Case.Handler, StmtDiscardKind::NotDiscarded);
     if (Handler.isInvalid())
-      return ExprError();
+      return true;
 
-    Stmt* HS = Handler.get();
-    if (Expr *HE = dyn_cast<Expr>(HS)) {
+    Stmt *HS = Handler.get();
+    if (Expr *HE = dyn_cast<Expr>(HS))
       Handler =
           getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy, HE);
+    if (Handler.isInvalid())
+      return true;
+
+    Transformed = {Pattern.get(), Case.IfLoc, Guard.get(), Handler.get(),
+                   CaseIndex};
+    return false;
+  };
+
+  for (auto [CaseIndex, Case] : llvm::enumerate(E->getCases())) {
+    SmallVector<unsigned, 4> ForcedSelections;
+    while (true) {
+      ProjectionCache.AlternativeChoices.clear();
+      ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
+      ProjectionCache.NextForcedAlternativeSelection = 0;
+      MatchCaseInstantiation ExpandedCase;
+      if (TransformCase(Case, static_cast<unsigned>(CaseIndex), ExpandedCase))
+        return ExprError();
+      Instantiations.push_back(ExpandedCase);
+
+      SmallVector<unsigned, 4> NextSelections;
+      bool HasNextSelection = false;
+      for (unsigned I = ProjectionCache.AlternativeChoices.size(); I-- > 0;) {
+        const auto &Choice = ProjectionCache.AlternativeChoices[I];
+        auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
+        if (std::next(Selected) == Choice.Alternatives.end())
+          continue;
+        for (unsigned J = 0; J < I; ++J)
+          NextSelections.push_back(
+              ProjectionCache.AlternativeChoices[J].Selected);
+        NextSelections.push_back(*std::next(Selected));
+        HasNextSelection = true;
+        break;
+      }
+      if (!HasNextSelection)
+        break;
+      ForcedSelections = std::move(NextSelections);
     }
-
-    Cases.push_back({Pattern.get(), Case.IfLoc, Guard.get(), Handler.get()});
-  }
-
-  if (auto Cs = E->getCases(); HoldingVar == E->getHoldingVar() &&
-      LHS.get() == E->getSubject() &&
-      std::equal(Cs.begin(), Cs.end(), Cases.begin(), Cases.end(),
-                 [](const MatchCase &LHS, const MatchCase &RHS) {
-                   return LHS.Pattern == RHS.Pattern &&
-                          LHS.Guard == RHS.Guard && LHS.Handler == RHS.Handler;
-                 })) {
-    return E;
   }
 
   return getSema().ActOnMatchSelectExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
-      E->getOrigResultType(), RetTy, Cases, E->getBraces());
+      E->getOrigResultType(), RetTy, SourceCases, E->getBraces(),
+      /*ExpandDeferredCases=*/false,
+      ArrayRef<MatchCaseInstantiation>(Instantiations));
 }
 
 } // end namespace clang
