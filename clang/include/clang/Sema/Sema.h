@@ -11117,6 +11117,13 @@ public:
   ActOnAutoAlternativePattern(SourceRange DiscriminatorRange,
                               SourceLocation ColonLoc,
                               MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnBracedAlternativePattern(SourceRange Braces, MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnNamedAlternativePattern(SourceRange Braces, SourceRange NameRange,
+                               IdentifierInfo *Name, SourceLocation ColonLoc,
+                               MatchPattern *SubPattern);
+  ActionResult<MatchPattern *> ActOnEmptyAlternativePattern(SourceRange Braces);
   ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>

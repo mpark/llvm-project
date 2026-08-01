@@ -4536,6 +4536,7 @@ private:
   ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *>
   TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
+  ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
   ActionResult<MatchPattern *>
   ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);
