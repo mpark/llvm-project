@@ -4164,6 +4164,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     return ParseParenPattern();
   case tok::question:
     return ParseOptionalPattern(LHSOfMatchTestExpr);
+  case tok::l_brace:
+    return ParseBracedAlternativePattern();
   case tok::l_square:
     return ParseDecompositionPattern();
   case tok::identifier: {
@@ -4496,6 +4498,50 @@ Parser::TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr) {
                                            Pattern.get());
   }
   return false;
+}
+
+ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
+  assert(Tok.is(tok::l_brace) && "not a braced alternative pattern");
+  BalancedDelimiterTracker T(*this, tok::l_brace);
+  if (T.expectAndConsume())
+    return true;
+
+  if (Tok.is(tok::r_brace)) {
+    T.consumeClose();
+    return Actions.ActOnEmptyAlternativePattern(T.getRange());
+  }
+
+  SourceRange NameRange;
+  IdentifierInfo *Name = nullptr;
+  SourceLocation ColonLoc;
+  if (Tok.is(tok::period)) {
+    SourceLocation PeriodLoc = ConsumeToken();
+    if (Tok.isNot(tok::identifier)) {
+      Diag(Tok, diag::err_expected) << tok::identifier;
+      T.skipToEnd();
+      return true;
+    }
+    Name = Tok.getIdentifierInfo();
+    NameRange = {PeriodLoc, ConsumeToken()};
+    if (ExpectAndConsume(tok::colon)) {
+      T.skipToEnd();
+      return true;
+    }
+    ColonLoc = PrevTokLocation;
+  }
+
+  ActionResult<MatchPattern *> Pattern = ParsePattern();
+  if (Pattern.isInvalid()) {
+    T.skipToEnd();
+    return true;
+  }
+  if (T.consumeClose())
+    return true;
+
+  if (Name)
+    return Actions.ActOnNamedAlternativePattern(T.getRange(), NameRange, Name,
+                                                ColonLoc, Pattern.get());
+  return Actions.ActOnBracedAlternativePattern(T.getRange(), Pattern.get());
 }
 
 ActionResult<MatchPattern *> Parser::ParseBindingPattern(SourceLocation LetLoc) {

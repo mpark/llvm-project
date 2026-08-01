@@ -14466,5 +14466,24 @@ def err_alternative_pattern_std_variant_alternative_not_specialized : Error<
 def err_alternative_pattern_std_variant_size_not_constant : Error<
   "invalid variant-like protocol; 'std::variant_size<%0>::value' "
   "is not a valid integral constant expression">;
+def err_alternative_traits_missing : Error<
+  "type %0 does not provide a usable 'std::alternative_traits' specialization">;
+def err_alternative_traits_size_not_constant : Error<
+  "invalid alternative protocol; 'std::alternative_traits<%0>::size' "
+  "is not a valid integral constant expression">;
+def err_alternative_traits_member_missing : Error<
+  "invalid alternative protocol; 'std::alternative_traits<%0>' does not "
+  "provide a usable %1 member">;
+def err_alternative_traits_index_not_noexcept : Error<
+  "invalid alternative protocol; 'std::alternative_traits<%0>::index' "
+  "must be noexcept">;
+def err_alternative_name_not_found : Error<
+  "alternative name %0 is not defined by 'std::alternative_traits<%1>::names'">;
+def err_braced_alternative_not_unique : Error<
+  "braced alternative pattern does not select a unique projectable state of %0">;
+def err_braced_alternative_no_viable_state : Error<
+  "braced alternative pattern does not match any projectable state of %0">;
+def err_empty_alternative_not_found : Error<
+  "type %0 has no non-projectable alternative state">;
 
 } // end of sema component.

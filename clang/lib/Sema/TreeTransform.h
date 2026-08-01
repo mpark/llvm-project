@@ -4458,9 +4458,19 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
+      if (P->isEmpty())
+        return getSema().ActOnEmptyAlternativePattern(P->getBraces());
+
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
       if (Sub.isInvalid())
         return true;
+      if (P->isNamed())
+        return getSema().ActOnNamedAlternativePattern(
+            P->getBraces(), P->getDiscriminatorRange(), P->getName(),
+            P->getColonLoc(), Sub.get());
+      if (P->getAlternativeKind() == AlternativePattern::Generic)
+        return getSema().ActOnBracedAlternativePattern(P->getBraces(),
+                                                       Sub.get());
       if (P->isAuto())
         return getSema().ActOnAutoAlternativePattern(
             P->getDiscriminatorRange(), P->getColonLoc(), Sub.get());

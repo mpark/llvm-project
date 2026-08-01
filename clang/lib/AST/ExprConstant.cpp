@@ -20706,10 +20706,11 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
                                        ProjectionCache) &&
            EvaluateAsBooleanCondition(P->getProjection()->getConditionExpr(),
                                       Result, Info) &&
-           (!Result || (EvaluateProjectionValue(P->getProjection(), Info,
-                                                ProjectionCache) &&
-                        EvaluateMatchPattern(P->getSubPattern(), Result, Info,
-                                             ProjectionCache)));
+           (!Result ||
+            (EvaluateProjectionValue(P->getProjection(), Info,
+                                     ProjectionCache) &&
+             (P->isEmpty() || EvaluateMatchPattern(P->getSubPattern(), Result,
+                                                   Info, ProjectionCache))));
   }
   case MatchPattern::DecompositionPatternClass:
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);

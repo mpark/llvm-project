@@ -30,6 +30,18 @@ static_assert([](int x) { return x match case _; }(0));
 static_assert([](auto x) -> bool { return x match case _; }(0));
 static_assert([](int* p) { return p match case _; }(nullptr));
 static_assert([](auto* p) -> bool { return p match case _; }((int*)nullptr));
+static_assert([](int* p) { return p match case {}; }(nullptr));
+static_assert(![](int value) { return &value match case {}; }(0));
+
+constexpr int match_pointer(int *pointer) {
+  return pointer match {
+    case {} => -1;
+    case { auto &&value } => value;
+  };
+}
+
+static_assert(match_pointer(nullptr) == -1);
+static_assert([] { int value = 42; return match_pointer(&value); }() == 42);
 
 static_assert([](int x) { return x match case 0; }(0));
 static_assert([](auto x) -> bool { return x match case 0; }(0));

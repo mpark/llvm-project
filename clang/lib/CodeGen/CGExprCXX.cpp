@@ -2450,7 +2450,13 @@ CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
   if (const VarDecl *Projected = Projection->getProjectedVar();
       Projected && !LocalDeclMap.count(Projected))
     EmitVarDecl(*Projected);
-  RValue MatchResult = EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
+  else if (!Projected && Projection->getProjectedExpr() &&
+           Projection->getProjectedExpr()->getType()->isVoidType())
+    EmitIgnoredExpr(Projection->getProjectedExpr());
+  RValue MatchResult =
+      AltPattern->isEmpty()
+          ? RValue::get(Builder.getTrue())
+          : EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
   Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
   EmitBranch(AltEndBB);
 
