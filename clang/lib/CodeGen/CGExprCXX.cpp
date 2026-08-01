@@ -2527,7 +2527,18 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     return RValue::get(Builder.getTrue());
   }
   case MatchPattern::MatchPatternClass::DeclarationPatternClass: {
-    return RValue::get(Builder.getTrue());
+    const auto *Declaration = static_cast<const DeclarationPattern *>(Pattern);
+    const MatchProjection *Projection = Declaration->getProjection();
+    if (!Projection || Projection->getKind() != MatchProjection::CastProjection)
+      return RValue::get(Builder.getTrue());
+
+    if (!LocalDeclMap.count(Projection->getHoldingVar()))
+      EmitVarDecl(*Projection->getHoldingVar());
+    if (!LocalDeclMap.count(Projection->getIntermediateVar()))
+      EmitVarDecl(*Projection->getIntermediateVar());
+    if (!LocalDeclMap.count(Projection->getConditionVar()))
+      EmitVarDecl(*Projection->getConditionVar());
+    return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
   }
   case MatchPattern::MatchPatternClass::ParenPatternClass:
     llvm_unreachable("Pattern Matching: codegen not implemented for "
@@ -2595,7 +2606,8 @@ bool hasMatchGuard(const MatchGuard &MG) { return MG.hasGuard(); }
 static void emitPatternDeclarations(CodeGenFunction &CGF,
                                     const MatchPattern *Pattern) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    if (P->getProjection())
+    if (P->getProjection() && P->getProjection()->getKind() ==
+                                  MatchProjection::DecompositionProjection)
       return;
     CGF.EmitVarDecl(*P->getDeclaration());
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
@@ -2609,10 +2621,17 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     const MatchPattern *Pattern) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
     if (const MatchProjection *Projection = P->getProjection()) {
-      const DecompositionDecl *D = Projection->getDecomposedDecl();
-      assert(D && "expected declaration decomposition projection");
-      if (!LocalDeclMap.count(D))
-        EmitDecl(*D, /*EvaluateConditionDecl=*/true);
+      if (Projection->getKind() == MatchProjection::DecompositionProjection) {
+        const DecompositionDecl *D = Projection->getDecomposedDecl();
+        assert(D && "expected declaration decomposition projection");
+        if (!LocalDeclMap.count(D))
+          EmitDecl(*D, /*EvaluateConditionDecl=*/true);
+      } else {
+        assert(Projection->getKind() == MatchProjection::CastProjection &&
+               "unexpected declaration projection");
+        if (!LocalDeclMap.count(Projection->getProjectedVar()))
+          EmitVarDecl(*Projection->getProjectedVar());
+      }
     }
     return;
   }

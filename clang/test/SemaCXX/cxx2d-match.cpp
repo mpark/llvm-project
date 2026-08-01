@@ -167,6 +167,20 @@ struct MovePair {
   Movable second;
 };
 
+struct Shape {
+  virtual ~Shape();
+};
+
+struct Circle : Shape {
+  int radius;
+};
+
+struct SpecialCircle : Circle {};
+
+struct Square : Shape {
+  int width;
+};
+
 bool sees_mutable(Guarded &);
 bool sees_mutable(const Guarded &) = delete;
 
@@ -186,6 +200,38 @@ int condition(int value) {
   if (value match case int copy)
     return copy;
   return -1;
+}
+
+int polymorphic_reference(Shape &shape) {
+  return shape match {
+    case Circle &circle => circle.radius;
+    case Square &square => square.width;
+    case _ => -1;
+  };
+}
+
+int polymorphic_const_reference(const Shape &shape) {
+  return shape match {
+    case const Circle &circle => circle.radius;
+    case const Square &square => square.width;
+    case _ => -1;
+  };
+}
+
+int polymorphic_rvalue_reference(Shape &&shape) {
+  return static_cast<Shape &&>(shape) match {
+    case Circle &&circle => circle.radius;
+    case Square &&square => square.width;
+    case _ => -1;
+  };
+}
+
+int polymorphic_pointer(Shape *shape) {
+  return shape match {
+    case Circle *circle => circle->radius;
+    case Square *square => square->width;
+    case _ => -1;
+  };
 }
 
 int forwarding(int &&value) {
