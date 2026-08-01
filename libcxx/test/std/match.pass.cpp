@@ -434,6 +434,23 @@ int variant_like_alternative_pattern(const Variant &var) {
   };
 }
 
+int classify(const int&) { return 10; }
+int classify(const double&) { return 20; }
+int classify(const float&) { return 30; }
+
+int auto_alternative_pattern(const std::variant<int, double, float>& var) {
+  return var match {
+    auto: let value => classify(value);
+  };
+}
+
+template<class T>
+int dependent_auto_alternative_pattern(const T& var) {
+  return var match {
+    auto: let value => classify(value);
+  };
+}
+
 void test_variant_like_alternative_pattern() {
   check(variant_alternative_pattern(0) == 0);
   check(variant_alternative_pattern(1) == 1);
@@ -447,6 +464,15 @@ void test_variant_like_alternative_pattern() {
   check(variant_like_alternative_pattern(3.0) == 7);
   check(variant_like_alternative_pattern(4.0) == 8);
   check(variant_like_alternative_pattern(0.f) == -1);
+  check(auto_alternative_pattern(1) == 10);
+  check(auto_alternative_pattern(2.0) == 20);
+  check(auto_alternative_pattern(3.0f) == 30);
+  check(dependent_auto_alternative_pattern(
+            std::variant<int, double, float>(1)) == 10);
+  check(dependent_auto_alternative_pattern(
+            std::variant<int, double, float>(2.0)) == 20);
+  check(dependent_auto_alternative_pattern(
+            std::variant<int, double, float>(3.0f)) == 30);
 }
 
 int match_stmt_action(int limit) {
