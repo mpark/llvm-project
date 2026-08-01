@@ -103,6 +103,66 @@ int guarded_copy(CopyCounter value) {
   };
 }
 
+struct Shape {
+  virtual ~Shape();
+};
+
+struct Circle : Shape {
+  int radius;
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z20downcast_declarationR5Shape
+// CHECK: call ptr @__dynamic_cast
+// CHECK-NOT: call ptr @__dynamic_cast
+// CHECK: ret i32
+int downcast_declaration(Shape &shape) {
+  return shape match {
+    case Circle &circle if (circle.radius == 0) => 0;
+    case Circle &circle => circle.radius;
+    case _ => -1;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z28downcast_pointer_declarationP5Shape
+// CHECK: call ptr @__dynamic_cast
+// CHECK: ret i32
+int downcast_pointer_declaration(Shape *shape) {
+  return shape match {
+    case Circle *circle => circle->radius;
+    case _ => -1;
+  };
+}
+
+struct Erased {};
+
+template<class T>
+T *try_cast(Erased &);
+
+template<class T>
+T *try_cast(Erased &&);
+
+// CHECK-LABEL: define{{.*}} i32 @_Z20try_cast_declarationR6Erased
+// CHECK: call{{.*}} ptr @_Z8try_castIiEPT_R6Erased
+// CHECK-NOT: call{{.*}} ptr @_Z8try_castIiEPT_R6Erased
+// CHECK: ret i32
+int try_cast_declaration(Erased &erased) {
+  return erased match {
+    case int &value if (value == 0) => 0;
+    case int &value => value;
+    case _ => -1;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z27try_cast_rvalue_declarationO6Erased
+// CHECK: call{{.*}} ptr @_Z8try_castIiEPT_O6Erased
+// CHECK: ret i32
+int try_cast_rvalue_declaration(Erased &&erased) {
+  return static_cast<Erased &&>(erased) match {
+    case int &&value => value;
+    case _ => -1;
+  };
+}
+
 namespace std {
 template<class T> struct tuple_size;
 template<__SIZE_TYPE__ I, class T> struct tuple_element;

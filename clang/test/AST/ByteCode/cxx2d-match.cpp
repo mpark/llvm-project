@@ -656,6 +656,20 @@ static_assert(test_try_cast_alternative_pattern(N1::S{0, 1, 2.2}) == 1);
 static_assert(test_try_cast_alternative_pattern(N1::S{1, 1, 2.2}) == 2);
 static_assert(test_try_cast_alternative_pattern(N1::S{2, 1, 2.2}) == -1);
 
+constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
+  return s match -> int {
+    case const int& i if (i == 0) => 0;
+    case const int& i => i;
+    case const double& d => d;
+    case const short& value => value;
+    case _ => -1;
+  };
+}
+
+static_assert(test_try_cast_declaration_pattern(N1::S{0, 1, 2.2}) == 1);
+static_assert(test_try_cast_declaration_pattern(N1::S{1, 1, 2.2}) == 2);
+static_assert(test_try_cast_declaration_pattern(N1::S{2, 1, 2.2}) == -1);
+
 template <typename T>
 concept integral = __is_integral(T);
 
