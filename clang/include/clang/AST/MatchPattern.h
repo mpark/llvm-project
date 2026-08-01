@@ -34,6 +34,7 @@ public:
   enum ProjectionKind {
     OptionalProjection,
     AlternativeProjection,
+    CastProjection,
     DecompositionProjection,
   };
 

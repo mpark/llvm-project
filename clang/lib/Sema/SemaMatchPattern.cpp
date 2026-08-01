@@ -796,6 +796,145 @@ static bool isReusableDecompositionDeclaration(const VarDecl *Declaration) {
          Declaration->getType()->getContainedAutoType();
 }
 
+enum class CastProjectionResult { NotApplicable, Success, Error };
+
+static bool isDynamicCastDeclaration(Sema &S, SourceLocation Loc,
+                                     QualType SubjectType, QualType PatternType,
+                                     bool &ProjectsPointer) {
+  QualType SourceClass = SubjectType;
+  QualType TargetClass = PatternType;
+  ProjectsPointer = false;
+
+  if (SubjectType->isPointerType() && PatternType->isPointerType()) {
+    SourceClass = SubjectType->getPointeeType();
+    TargetClass = PatternType->getPointeeType();
+    ProjectsPointer = true;
+  } else if (!SubjectType->isRecordType() || !PatternType->isRecordType()) {
+    return false;
+  }
+
+  SourceClass = SourceClass.getUnqualifiedType();
+  TargetClass = TargetClass.getUnqualifiedType();
+  CXXRecordDecl *SourceRecord = SourceClass->getAsCXXRecordDecl();
+  CXXRecordDecl *TargetRecord = TargetClass->getAsCXXRecordDecl();
+  return SourceRecord && TargetRecord && SourceRecord->isPolymorphic() &&
+         S.IsDerivedFrom(Loc, TargetClass, SourceClass);
+}
+
+static Expr *asValueKind(Sema &S, Expr *E, ExprValueKind ValueKind) {
+  if (ValueKind == VK_LValue)
+    return E;
+  return ImplicitCastExpr::Create(S.Context, E->getType(), CK_NoOp, E, nullptr,
+                                  ValueKind, FPOptionsOverride());
+}
+
+static CastProjectionResult buildDeclarationCastProjection(
+    Sema &S, Expr *Subject, DeclarationPattern *Pattern, QualType PatternType,
+    Sema::MatchProjectionCache *Cache) {
+  SourceLocation Loc = Pattern->getBeginLoc();
+  QualType TargetType = PatternType.getNonReferenceType().getUnqualifiedType();
+  if (MatchProjection *Projection = findMatchProjection(
+          S, Cache, Subject, MatchProjection::CastProjection, TargetType)) {
+    Pattern->setProjection(Projection);
+    return CastProjectionResult::Success;
+  }
+
+  ExprValueKind SubjectValueKind = Subject->getValueKind();
+  QualType Deduced = S.Context.getAutoRRefDeductType();
+  VarDecl *HoldingVar = BuildVarDecl(S, Loc, Deduced, Subject);
+  if (HoldingVar->isInvalidDecl())
+    return CastProjectionResult::Error;
+  QualType SubjectType = HoldingVar->getType().getNonReferenceType();
+  Expr *HoldingRef =
+      S.BuildDeclRefExpr(HoldingVar, SubjectType, VK_LValue, Loc);
+  Expr *ForwardedRef = asValueKind(S, HoldingRef, SubjectValueKind);
+
+  DeclarationNameInfo TryCastNameInfo(S.PP.getIdentifierInfo("try_cast"), Loc);
+  OverloadCandidateSet CandidateSet(Loc, OverloadCandidateSet::CSK_Normal);
+  ExprResult CastExpr = S.BuildTryCastCall(Loc, TryCastNameInfo, &CandidateSet,
+                                           TargetType, ForwardedRef);
+  bool DereferenceResult = true;
+
+  if (CastExpr.isUnset()) {
+    bool ProjectsPointer = false;
+    if (!isDynamicCastDeclaration(S, Loc, SubjectType, TargetType,
+                                  ProjectsPointer))
+      return CastProjectionResult::NotApplicable;
+
+    QualType DynamicTargetType = TargetType;
+    Expr *CastOperand = HoldingRef;
+    if (!ProjectsPointer) {
+      DynamicTargetType =
+          DynamicTargetType.withCVRQualifiers(SubjectType.getCVRQualifiers());
+      DynamicTargetType = S.Context.getPointerType(DynamicTargetType);
+      ExprResult AddrOf =
+          S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::amp, HoldingRef);
+      if (AddrOf.isInvalid())
+        return CastProjectionResult::Error;
+      CastOperand = AddrOf.get();
+    } else {
+      DereferenceResult = false;
+    }
+
+    TypeSourceInfo *TSI =
+        S.Context.getTrivialTypeSourceInfo(DynamicTargetType, Loc);
+    CastExpr =
+        S.BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, CastOperand, {}, {});
+  }
+
+  if (CastExpr.isInvalid())
+    return CastProjectionResult::Error;
+
+  MatchProjection *Projection = createMatchProjection(
+      S, Cache, Subject, MatchProjection::CastProjection, TargetType);
+  Pattern->setProjection(Projection);
+  Projection->setHoldingVar(HoldingVar);
+
+  VarDecl *CastVar =
+      BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), CastExpr.get());
+  if (CastVar->isInvalidDecl())
+    return CastProjectionResult::Error;
+  Projection->setIntermediateVar(CastVar);
+  Expr *CastRef = S.BuildDeclRefExpr(
+      CastVar, CastVar->getType().getNonReferenceType(), VK_LValue, Loc);
+
+  ExprResult RawCondition = S.CheckBooleanCondition(Loc, CastRef);
+  if (RawCondition.isInvalid())
+    return CastProjectionResult::Error;
+  VarDecl *ConditionVar =
+      BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCondition.get());
+  if (ConditionVar->isInvalidDecl())
+    return CastProjectionResult::Error;
+  Projection->setConditionVar(ConditionVar);
+  ExprResult Condition = buildMatchProjectionCondition(S, Projection, Loc);
+  if (Condition.isInvalid())
+    return CastProjectionResult::Error;
+
+  ExprResult Projected = CastRef;
+  if (DereferenceResult) {
+    Projected =
+        S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::star, CastRef);
+    if (Projected.isInvalid())
+      return CastProjectionResult::Error;
+  }
+  ExprValueKind ProjectedValueKind = SubjectValueKind;
+  Expr *ProjectedExpr =
+      asValueKind(S, Projected.get(), ProjectedValueKind);
+  QualType ProjectedType = ProjectedExpr->refersToBitField()
+                               ? S.Context.getAutoDeductType()
+                               : S.Context.getAutoRRefDeductType();
+  VarDecl *ProjectedVar = BuildVarDecl(S, Loc, ProjectedType, ProjectedExpr);
+  if (ProjectedVar->isInvalidDecl())
+    return CastProjectionResult::Error;
+  Projection->setProjectedVar(ProjectedVar);
+  Expr *ProjectedRef = S.BuildDeclRefExpr(
+      ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
+      Loc);
+  ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
+  Projection->setProjectedExpr(ProjectedRef);
+  return CastProjectionResult::Success;
+}
+
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                      MatchProjectionCache *ProjectionCache) {
   bool PatternIsInstantiationDependent = static_cast<bool>(
@@ -892,10 +1031,20 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                  *this, Decomposition, Subject));
     } else if (!Subject->isTypeDependent()) {
       if (!isExactDeclarationPatternMatch(*this, Subject, PatternType)) {
-        Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_exact_match)
-            << PatternType << Subject->getType();
-        VD->setInvalidDecl();
-        return true;
+        switch (buildDeclarationCastProjection(*this, Subject, P, PatternType,
+                                               ProjectionCache)) {
+        case CastProjectionResult::Success:
+          Subject = P->getProjection()->getProjectedExpr();
+          break;
+        case CastProjectionResult::NotApplicable:
+          Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_exact_match)
+              << PatternType << Subject->getType();
+          VD->setInvalidDecl();
+          return true;
+        case CastProjectionResult::Error:
+          VD->setInvalidDecl();
+          return true;
+        }
       }
     }
 
