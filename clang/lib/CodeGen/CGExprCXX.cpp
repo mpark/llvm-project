@@ -2420,10 +2420,17 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
 
 RValue
 CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
-  assert(AltPattern->getHoldingVar() && "expected holding var");
-  EmitVarDecl(*AltPattern->getHoldingVar());
-  if (AltPattern->getCondVar())
-    EmitVarDecl(*AltPattern->getCondVar());
+  const MatchProjection *Projection = AltPattern->getProjection();
+  assert(Projection && Projection->getHoldingVar() &&
+         "expected alternative projection");
+  if (!LocalDeclMap.count(Projection->getHoldingVar()))
+    EmitVarDecl(*Projection->getHoldingVar());
+  if (const VarDecl *Intermediate = Projection->getIntermediateVar();
+      Intermediate && !LocalDeclMap.count(Intermediate))
+    EmitVarDecl(*Intermediate);
+  if (const VarDecl *Condition = Projection->getConditionVar();
+      Condition && !LocalDeclMap.count(Condition))
+    EmitVarDecl(*Condition);
 
   RawAddress AltResultAddr = CreateTempAlloca(
       Builder.getInt1Ty(), getPointerAlign(), "match.alt.result");
@@ -2434,13 +2441,15 @@ CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
       createBasicBlock("match.alt.type.check.pass");
   llvm::BasicBlock *AltEndBB = createBasicBlock("match.alt.end");
 
-  EmitBranchOnBoolExpr(AltPattern->getCond(), AltTypeCheckPassBB,
-                       AltTypeCheckFailBB,
-                       getProfileCount(AltPattern->getCond()));
+  const Expr *Cond = Projection->getConditionExpr();
+  assert(Cond && "expected alternative condition");
+  EmitBranchOnBoolExpr(Cond, AltTypeCheckPassBB, AltTypeCheckFailBB,
+                       getProfileCount(Cond));
 
   EmitBlock(AltTypeCheckPassBB);
-  if (AltPattern->getBindingVar())
-    EmitVarDecl(*AltPattern->getBindingVar());
+  if (const VarDecl *Projected = Projection->getProjectedVar();
+      Projected && !LocalDeclMap.count(Projected))
+    EmitVarDecl(*Projected);
   RValue MatchResult = EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
   Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
   EmitBranch(AltEndBB);
@@ -2465,8 +2474,9 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   llvm::BasicBlock *DecompEndBB = createBasicBlock("match.decomp.end");
 
   // Emit the actual decomposition variables
-  const Decl *D = cast<Decl>(DecompPattern->getDecomposedDecl());
-  EmitDecl(*D, /*EvaluateConditionDecl=*/true);
+  const auto *D = DecompPattern->getDecomposedDecl();
+  if (!LocalDeclMap.count(D))
+    EmitDecl(*D, /*EvaluateConditionDecl=*/true);
 
   for (auto *SubPattern : DecompPattern->children()) {
     RValue MatchResult = EmitMatchPattern(SubPattern, nullptr);
@@ -2532,8 +2542,14 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   }
   case MatchPattern::MatchPatternClass::OptionalPatternClass: {
     auto *OptExpr = static_cast<const OptionalPattern *>(Pattern);
-    EmitVarDecl(*OptExpr->getCondVar());
-    const Expr *Cond = OptExpr->getCond();
+    const MatchProjection *Projection = OptExpr->getProjection();
+    assert(Projection && Projection->getHoldingVar() &&
+           Projection->getConditionVar() && "expected optional projection");
+    if (!LocalDeclMap.count(Projection->getHoldingVar()))
+      EmitVarDecl(*Projection->getHoldingVar());
+    if (!LocalDeclMap.count(Projection->getConditionVar()))
+      EmitVarDecl(*Projection->getConditionVar());
+    const Expr *Cond = Projection->getConditionExpr();
     assert(Cond && "expected available cond-expr");
 
     // Address to track the final match boolean result.
@@ -2548,6 +2564,9 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     // Now that null ptr check is performed, run the sub patter test and
     // deal with the result.
     EmitBlock(TestSubPatternBB);
+    if (const VarDecl *Projected = Projection->getProjectedVar();
+        Projected && !LocalDeclMap.count(Projected))
+      EmitVarDecl(*Projected);
     RValue matchResult = EmitMatchPattern(OptExpr->getSubPattern(), Subject);
     Builder.CreateStore(matchResult.getScalarVal(), finalMatchResultAddr);
     EmitBranch(ResultBB);

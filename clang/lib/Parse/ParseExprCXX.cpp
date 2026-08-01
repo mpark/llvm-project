@@ -3968,9 +3968,10 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   BalancedDelimiterTracker T(*this, tok::l_brace);
   if (T.expectAndConsume())
     return true;
+  Sema::MatchProjectionCache ProjectionCache;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     MatchCase Case;
-    if (ParseMatchCase(Subject, OrigResultType, RetTy, Case)) {
+    if (ParseMatchCase(Subject, OrigResultType, RetTy, Case, ProjectionCache)) {
       SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
       TryConsumeToken(tok::semi);
       continue;
@@ -3983,7 +3984,8 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
 }
 
 bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
-                            QualType &RetTy, MatchCase &Case) {
+                            QualType &RetTy, MatchCase &Case,
+                            Sema::MatchProjectionCache &ProjectionCache) {
   ParseScope MatchCaseScope(this, Scope::DeclScope);
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();
@@ -3992,7 +3994,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
               StopAtSemi | StopBeforeMatch);
     if (Tok.isOneOf(tok::semi, tok::r_brace))
       return true;
-  } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get()))
+  } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get(),
+                                               &ProjectionCache))
     return true;
   SourceLocation IfLoc;
   Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);

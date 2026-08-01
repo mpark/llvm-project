@@ -11108,7 +11108,19 @@ public:
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                             SourceRange Squares, bool BindingOnly);
 
-  bool CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern);
+  struct MatchProjectionCache {
+    struct Entry {
+      const Expr *Subject;
+      MatchProjection *Projection;
+      QualType Discriminator;
+      unsigned Arity;
+    };
+
+    SmallVector<Entry, 8> Entries;
+  };
+  bool
+  CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
+                             MatchProjectionCache *ProjectionCache = nullptr);
 
   ///@}
 

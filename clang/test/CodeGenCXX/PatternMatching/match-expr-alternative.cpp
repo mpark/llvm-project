@@ -25,8 +25,10 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:         %[[VAL_1:.*]] = alloca i32, align 4
 // CHECK:         %[[VAL_2:.*]] = alloca ptr, align 8
 // CHECK:         %[[VAL_3:.*]] = alloca ptr, align 8
-// CHECK:         %[[VAL_4:.*]] = alloca i1, align 8
-// CHECK:         %[[VAL_5:.*]] = alloca ptr, align 8
+// CHECK:         %[[COND_STORAGE:.*]] = alloca i8, align 1
+// CHECK:         %[[ALT_RESULT:.*]] = alloca i1, align 8
+// CHECK:         %[[PROJECTED:.*]] = alloca ptr, align 8
+// CHECK:         %[[BINDING:.*]] = alloca ptr, align 8
 // CHECK:         store ptr %[[VAL_6:.*]], ptr %[[VAL_0]], align 8
 // CHECK:         %[[VAL_7:.*]] = load ptr, ptr %[[VAL_0]], align 8
 // CHECK:         store ptr %[[VAL_7]], ptr %[[SUBJECT_HOLDER]], align 8
@@ -45,20 +47,26 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:         store ptr %[[VAL_15]], ptr %[[VAL_3]], align 8
 // CHECK:         %[[VAL_16:.*]] = load ptr, ptr %[[VAL_3]], align 8
 // CHECK:         %[[VAL_17:.*]] = icmp ne ptr %[[VAL_16]], null
-// CHECK:         br i1 %[[VAL_17]], label %[[VAL_18:.*]], label %[[VAL_19:.*]]
+// CHECK:         %[[STORED_COND:.*]] = zext i1 %[[VAL_17]] to i8
+// CHECK:         store i8 %[[STORED_COND]], ptr %[[COND_STORAGE]], align 1
+// CHECK:         %[[COND_VALUE:.*]] = load i8, ptr %[[COND_STORAGE]], align 1
+// CHECK:         %[[COND:.*]] = icmp ne i8 %[[COND_VALUE]], 0
+// CHECK:         br i1 %[[COND]], label %[[VAL_18:.*]], label %[[VAL_19:.*]]
 // CHECK:       match.alt.type.check.pass:
 // CHECK:         %[[VAL_20:.*]] = load ptr, ptr %[[VAL_3]], align 8
-// CHECK:         store ptr %[[VAL_20]], ptr %[[VAL_5]], align 8
-// CHECK:         store i1 true, ptr %[[VAL_4]], align 8
+// CHECK:         store ptr %[[VAL_20]], ptr %[[PROJECTED]], align 8
+// CHECK:         %[[PROJECTED_VALUE:.*]] = load ptr, ptr %[[PROJECTED]], align 8
+// CHECK:         store ptr %[[PROJECTED_VALUE]], ptr %[[BINDING]], align 8
+// CHECK:         store i1 true, ptr %[[ALT_RESULT]], align 8
 // CHECK:         br label %[[VAL_21:.*]]
 // CHECK:       match.alt.type.check.fail:
-// CHECK:         store i1 false, ptr %[[VAL_4]], align 8
+// CHECK:         store i1 false, ptr %[[ALT_RESULT]], align 8
 // CHECK:         br label %[[VAL_21]]
 // CHECK:       match.alt.end:
-// CHECK:         %[[VAL_22:.*]] = load i1, ptr %[[VAL_4]], align 8
+// CHECK:         %[[VAL_22:.*]] = load i1, ptr %[[ALT_RESULT]], align 8
 // CHECK:         br i1 %[[VAL_22]], label %[[VAL_23:.*]], label %[[VAL_24:.*]]
 // CHECK:       match.select.action:
-// CHECK:         %[[VAL_25:.*]] = load ptr, ptr %[[VAL_5]], align 8
+// CHECK:         %[[VAL_25:.*]] = load ptr, ptr %[[BINDING]], align 8
 // CHECK:         %[[VAL_26:.*]] = getelementptr inbounds nuw %[[VAL_27:.*]], ptr %[[VAL_25]], i32 0, i32 1
 // CHECK:         %[[VAL_28:.*]] = load i32, ptr %[[VAL_26]], align 8
 // CHECK:         %[[VAL_29:.*]] = mul nsw i32 %[[VAL_28]], 2
@@ -138,3 +146,18 @@ int variant_like_alternative_pattern(const Variant &var) {
 // CHECK: match.alt.type.check.pass:
 // CHECK-NEXT: load ptr, ptr %{{.*}}, align 8
 // CHECK-NEXT: call {{.*}} ptr @_ZNK7Variant3getILi0EEERKDav
+
+int reuse_variant_projection(const Variant &var) {
+  return var match {
+    int: 0 => 0;
+    int: let x => x;
+    _ => -1;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z24reuse_variant_projectionRK7Variant
+// CHECK: call{{.*}} @_ZNK7Variant5indexEv
+// CHECK-NOT: call{{.*}} @_ZNK7Variant5indexEv
+// CHECK: call{{.*}} @_ZNK7Variant3getILi0EEERKDav
+// CHECK-NOT: call{{.*}} @_ZNK7Variant3getILi0EEERKDav
+// CHECK: ret i32
