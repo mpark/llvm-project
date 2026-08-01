@@ -29,6 +29,55 @@ class BindingDecl;
 class DecompositionDecl;
 class VarDecl;
 
+class MatchProjection {
+public:
+  enum ProjectionKind {
+    OptionalProjection,
+    AlternativeProjection,
+    DecompositionProjection,
+  };
+
+private:
+  ProjectionKind Kind;
+  VarDecl *HoldingVar = nullptr;
+  VarDecl *IntermediateVar = nullptr;
+  VarDecl *ConditionVar = nullptr;
+  VarDecl *ProjectedVar = nullptr;
+  DecompositionDecl *DecomposedDecl = nullptr;
+  Expr *ConditionExpr = nullptr;
+  Expr *ProjectedExpr = nullptr;
+
+public:
+  explicit MatchProjection(ProjectionKind Kind) : Kind(Kind) {}
+
+  void *operator new(size_t Bytes, const ASTContext &Context,
+                     unsigned Alignment = 8);
+  void operator delete(void *, const ASTContext &, unsigned) noexcept {}
+
+  ProjectionKind getKind() const { return Kind; }
+
+  VarDecl *getHoldingVar() const { return HoldingVar; }
+  void setHoldingVar(VarDecl *D) { HoldingVar = D; }
+
+  VarDecl *getIntermediateVar() const { return IntermediateVar; }
+  void setIntermediateVar(VarDecl *D) { IntermediateVar = D; }
+
+  VarDecl *getConditionVar() const { return ConditionVar; }
+  void setConditionVar(VarDecl *D) { ConditionVar = D; }
+
+  VarDecl *getProjectedVar() const { return ProjectedVar; }
+  void setProjectedVar(VarDecl *D) { ProjectedVar = D; }
+
+  DecompositionDecl *getDecomposedDecl() const { return DecomposedDecl; }
+  void setDecomposedDecl(DecompositionDecl *D) { DecomposedDecl = D; }
+
+  Expr *getConditionExpr() const { return ConditionExpr; }
+  void setConditionExpr(Expr *E) { ConditionExpr = E; }
+
+  Expr *getProjectedExpr() const { return ProjectedExpr; }
+  void setProjectedExpr(Expr *E) { ProjectedExpr = E; }
+};
+
 class MatchPattern {
 public:
   enum MatchPatternClass {
@@ -217,8 +266,7 @@ public:
 class OptionalPattern final : public MatchPattern {
   SourceLocation QuestionLoc;
   MatchPattern *Pattern;
-  VarDecl *CondVar = nullptr;
-  Expr *Cond = nullptr;
+  MatchProjection *Projection = nullptr;
 
 public:
   explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
@@ -233,15 +281,8 @@ public:
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
 
-  const VarDecl *getCondVar() const { return CondVar; }
-  VarDecl *getCondVar() { return CondVar; }
-
-  void setCondVar(VarDecl *CondVar) { this->CondVar = CondVar; }
-
-  const Expr *getCond() const { return Cond; }
-  Expr *getCond() { return Cond; }
-
-  void setCond(Expr *Cond) { this->Cond = Cond; }
+  MatchProjection *getProjection() const { return Projection; }
+  void setProjection(MatchProjection *P) { Projection = P; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {&Pattern, &Pattern + 1};
@@ -261,10 +302,7 @@ class AlternativePattern final : public MatchPattern {
 
   SourceLocation ColonLoc;
   MatchPattern *Pattern;
-  VarDecl *HoldingVar = nullptr;
-  VarDecl *CondVar = nullptr;
-  Expr *Cond = nullptr;
-  VarDecl *BindingVar = nullptr;
+  MatchProjection *Projection = nullptr;
 
 public:
   explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
@@ -300,25 +338,8 @@ public:
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
 
-  const VarDecl *getHoldingVar() const { return HoldingVar; }
-  VarDecl *getHoldingVar() { return HoldingVar; }
-
-  void setHoldingVar(VarDecl *HoldingVar) { this->HoldingVar = HoldingVar; }
-
-  const VarDecl *getCondVar() const { return CondVar; }
-  VarDecl *getCondVar() { return CondVar; }
-
-  void setCondVar(VarDecl *CondVar) { this->CondVar = CondVar; }
-
-  const Expr *getCond() const { return Cond; }
-  Expr *getCond() { return Cond; }
-
-  void setCond(Expr *Cond) { this->Cond = Cond; }
-
-  const VarDecl *getBindingVar() const { return BindingVar; }
-  VarDecl *getBindingVar() { return BindingVar; }
-
-  void setBindingVar(VarDecl *BindingVar) { this->BindingVar = BindingVar; }
+  MatchProjection *getProjection() const { return Projection; }
+  void setProjection(MatchProjection *P) { Projection = P; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {&Pattern, &Pattern + 1};
@@ -337,7 +358,7 @@ class DecompositionPattern final
   unsigned NumPatterns;
   SourceRange Squares;
   bool BindingOnly;
-  DecompositionDecl *Decomposed = nullptr;
+  MatchProjection *Projection = nullptr;
 
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares, bool BindingOnly);
@@ -365,10 +386,15 @@ public:
 
   unsigned getNumPatterns() const { return NumPatterns; }
 
-  DecompositionDecl *getDecomposedDecl() const { return Decomposed; }
+  MatchProjection *getProjection() const { return Projection; }
+  void setProjection(MatchProjection *P) { Projection = P; }
+
+  DecompositionDecl *getDecomposedDecl() const {
+    return Projection ? Projection->getDecomposedDecl() : nullptr;
+  }
 
   void setDecomposedDecl(DecompositionDecl *Decomposed) {
-    this->Decomposed = Decomposed;
+    Projection->setDecomposedDecl(Decomposed);
   }
 
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
