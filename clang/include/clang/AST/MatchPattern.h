@@ -303,6 +303,7 @@ class AlternativePattern final : public MatchPattern {
   SourceLocation ColonLoc;
   MatchPattern *Pattern;
   MatchProjection *Projection = nullptr;
+  bool IsAuto = false;
 
 public:
   explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
@@ -322,6 +323,14 @@ public:
         computeDependence());
   }
 
+  explicit AlternativePattern(SourceRange AutoRange, SourceLocation ColonLoc,
+                              MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass),
+        DiscriminatorRange(AutoRange), ColonLoc(ColonLoc), Pattern(Pattern),
+        IsAuto(true) {
+    setDependence(computeDependence());
+  }
+
   SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
   SourceLocation getColonLoc() const { return ColonLoc; }
   SourceLocation getBeginLoc() const { return DiscriminatorRange.getBegin(); }
@@ -334,6 +343,8 @@ public:
   TypeSourceInfo *getTypeSourceInfo() const {
     return TInfo;
   }
+
+  bool isAuto() const { return IsAuto; }
 
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
