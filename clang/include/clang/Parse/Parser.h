@@ -4510,7 +4510,8 @@ private:
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
-                      MatchCase &Case);
+                      MatchCase &Case,
+                      Sema::MatchProjectionCache &ProjectionCache);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
   ActionResult<MatchPattern *>
