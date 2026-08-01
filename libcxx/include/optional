@@ -269,6 +269,10 @@ namespace std {
 #  include <__optional/optional_ref.h>
 #  include <__optional/swap.h>
 
+#  if _LIBCPP_STD_VER >= 26
+#    include <__type_traits/alternative_traits.h>
+#    include <__utility/forward.h>
+#  endif
 #  include <initializer_list>
 
 // standard-mandated includes
@@ -288,6 +292,34 @@ namespace std {
 #    pragma GCC system_header
 #  endif
 
+#  if _LIBCPP_STD_VER >= 26
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template <class _Tp>
+struct alternative_traits<optional<_Tp>> {
+  static constexpr size_t size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  template <size_t _Ip>
+    requires(_Ip == 1)
+  using projection_type = _Tp;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const optional<_Tp>& __value) noexcept {
+    return __value.has_value() ? 1 : 0;
+  }
+
+  template <size_t _Ip, class _Self>
+    requires(_Ip == 1)
+  _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
+    return *std::forward<_Self>(__self);
+  }
+
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#  endif // _LIBCPP_STD_VER >= 26
 #endif // __cplusplus < 201103L && defined(_LIBCPP_USE_FROZEN_CXX03_HEADERS)
 
 #endif // _LIBCPP_OPTIONAL

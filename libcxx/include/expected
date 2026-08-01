@@ -59,6 +59,7 @@ namespace std {
 #      include <__fwd/variant.h>
 #      include <__memory/addressof.h>
 #      include <__type_traits/add_pointer.h>
+#      include <__type_traits/alternative_traits.h>
 #      include <__type_traits/conditional.h>
 #      include <__type_traits/is_same.h>
 #      include <__type_traits/is_void.h>
@@ -246,6 +247,32 @@ _LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<const _Up> get_if(const expected<_
   static_assert(!is_void_v<_Up>);
   return std::__generic_expected_get_if<add_pointer_t<const _Up>, _Up, _Tp, _Ep>(__e);
 }
+
+template <class _Tp, class _Ep>
+struct alternative_traits<expected<_Tp, _Ep>> {
+  static constexpr size_t size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  template <size_t _Ip>
+  using projection_type = conditional_t<_Ip == 0, _Tp, _Ep>;
+
+  struct names {
+    static constexpr size_t value = 0;
+    static constexpr size_t error = 1;
+  };
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const expected<_Tp, _Ep>& __value) noexcept {
+    return __value.has_value() ? 0 : 1;
+  }
+
+  template <size_t _Ip, class _Self>
+  _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) {
+    if constexpr (_Ip == 0)
+      return *std::forward<_Self>(__self);
+    else
+      return std::forward<_Self>(__self).error();
+  }
+};
 
 _LIBCPP_END_NAMESPACE_STD
 
