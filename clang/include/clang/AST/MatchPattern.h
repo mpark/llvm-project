@@ -87,6 +87,7 @@ public:
     BindingPatternClass,
     ParenPatternClass,
     DeclarationPatternClass,
+    TypePatternClass,
     OptionalPatternClass,
     AlternativePatternClass,
     DecompositionPatternClass,
@@ -292,6 +293,59 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<DeclarationPattern *>(this)->children();
+  }
+};
+
+class TypePattern final : public MatchPattern {
+  TypeSourceInfo *TInfo;
+  MatchProjection *Projection = nullptr;
+  QualType SubjectType;
+  bool Resolved = false;
+  bool Matches = false;
+
+public:
+  explicit TypePattern(TypeSourceInfo *TInfo)
+      : MatchPattern(TypePatternClass), TInfo(TInfo) {
+    setDependence(
+        toExprDependenceForImpliedType(TInfo->getType()->getDependence()));
+  }
+
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == TypePatternClass;
+  }
+
+  TypeSourceInfo *getTypeSourceInfo() const { return TInfo; }
+  QualType getType() const { return TInfo->getType(); }
+
+  MatchProjection *getProjection() const { return Projection; }
+  void setProjection(MatchProjection *P) { Projection = P; }
+
+  bool isResolved() const { return Resolved; }
+  bool matches() const {
+    assert(Resolved && "unresolved type pattern");
+    return Matches;
+  }
+  QualType getSubjectType() const {
+    assert(Resolved && "unresolved type pattern");
+    return SubjectType;
+  }
+  void setMatches(bool Value, QualType CheckedSubjectType) {
+    Resolved = true;
+    Matches = Value;
+    SubjectType = CheckedSubjectType;
+  }
+
+  SourceLocation getBeginLoc() const {
+    return TInfo->getTypeLoc().getBeginLoc();
+  }
+  SourceLocation getEndLoc() const { return TInfo->getTypeLoc().getEndLoc(); }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {nullptr, nullptr};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<TypePattern *>(this)->children();
   }
 };
 
