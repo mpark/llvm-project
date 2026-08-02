@@ -16,7 +16,7 @@ void test_match_dump(int x, int *p) {
 
   x match { case _ if (true) => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:36> 'int'
-  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> <invalid sloc> implicit used 'int &' cinit
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
   // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
   // CHECK-NEXT: `-
@@ -27,7 +27,7 @@ void test_match_dump(int x, int *p) {
 
   x match constexpr -> int { case _ => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:43> 'int' constexpr
-  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> <invalid sloc> implicit used 'int &' cinit
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
   // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
   // CHECK-NEXT: `-
@@ -38,7 +38,7 @@ void test_match_dump(int x, int *p) {
   // CHECK:      BinaryOperator 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:30> 'int' '+'
   // CHECK-NEXT: |-IntegerLiteral 0x{{[^ ]*}} <col:3> 'int' 4
   // CHECK-NEXT: `-MatchSelectExpr 0x{{[^ ]*}} <col:7, col:30> 'int'
-  // CHECK-NEXT:   |-VarDecl 0x{{[^ ]*}} <col:7> <invalid sloc> implicit used 'int &' cinit
+  // CHECK-NEXT:   |-VarDecl 0x{{[^ ]*}} <col:7> col:7 implicit used 'int &' cinit
   // CHECK-NEXT:   | `-DeclRefExpr 0x{{[^ ]*}} <col:7> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT:   |-DeclRefExpr 0x{{[^ ]*}} <col:7> 'int' lvalue Var 0x{{[^ ]*}} <col:7> 'int &'
   // CHECK-NEXT:   `-
@@ -47,7 +47,7 @@ void test_match_dump(int x, int *p) {
 
   x match { case int value => value; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:38> 'int'
-  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> <invalid sloc> implicit used 'int &' cinit
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
   // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
   // CHECK-NEXT: `-
@@ -58,4 +58,12 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT:   `-ImplicitCastExpr 0x{{[^ ]*}} <col:31> 'int' <LValueToRValue>
   // CHECK-NEXT:     `-ImplicitCastExpr 0x{{[^ ]*}} <col:31> 'int' xvalue <NoOp>
   // CHECK-NEXT:       `-DeclRefExpr 0x{{[^ ]*}} <col:31> 'int' lvalue Var 0x{{[^ ]*}} 'value' 'int'
+}
+
+void test_type_pattern_dump(int x) {
+  x match case int;
+  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:16> 'bool'
+  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
+  // CHECK-NEXT: `-TypePattern 0x{{[^ ]*}} <col:16>
+  // CHECK-NEXT:   `-BuiltinType 0x{{[^ ]*}} 'int'
 }

@@ -2568,6 +2568,21 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   case MatchPattern::MatchPatternClass::ParenPatternClass:
     llvm_unreachable("Pattern Matching: codegen not implemented for "
                      "ParenPatternClass");
+  case MatchPattern::MatchPatternClass::TypePatternClass: {
+    const auto *Type = static_cast<const TypePattern *>(Pattern);
+    const MatchProjection *Projection = Type->getProjection();
+    if (Projection &&
+        Projection->getKind() == MatchProjection::CastProjection) {
+      if (!LocalDeclMap.count(Projection->getHoldingVar()))
+        EmitVarDecl(*Projection->getHoldingVar());
+      if (!LocalDeclMap.count(Projection->getIntermediateVar()))
+        EmitVarDecl(*Projection->getIntermediateVar());
+      if (!LocalDeclMap.count(Projection->getConditionVar()))
+        EmitVarDecl(*Projection->getConditionVar());
+      return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
+    }
+    return RValue::get(Builder.getInt1(Type->matches()));
+  }
   case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
     auto *DecompExpr = static_cast<const DecompositionPattern *>(Pattern);
     return EmitDecompositionPattern(DecompExpr);
@@ -2716,6 +2731,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   auto emitMatchTest = [&]() {
     if (S.getHoldingVar())
       EmitVarDecl(*S.getHoldingVar());
+    else if (S.getSubject()->getType()->isVoidType())
+      EmitIgnoredExpr(S.getSubject());
 
     const Expr *Subject = S.getSubject();
     assert(Subject);
@@ -2767,6 +2784,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   if (const VarDecl *HoldingVar = S.getHoldingVar())
     EmitVarDecl(*HoldingVar);
+  else if (S.getSubject()->getType()->isVoidType())
+    EmitIgnoredExpr(S.getSubject());
 
   bool IgnoreResult = S.getType()->isVoidType();
   bool IsReference = S.isGLValue();
