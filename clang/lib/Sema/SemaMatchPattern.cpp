@@ -870,14 +870,6 @@ ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation LetLoc,
   return new (Context) BindingPattern(LetLoc, BD);
 }
 
-ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
-                                                     MatchPattern *SubPattern) {
-  assert(SubPattern->getMatchPatternClass() !=
-             MatchPattern::ExpressionPatternClass &&
-         "Parenthesized pattern shouldn't contain an expression.");
-  return new (Context) ParenPattern(Parens, SubPattern);
-}
-
 ActionResult<MatchPattern *>
 Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange) {
   return new (Context) DeclarationPattern(Declaration, WrittenRange);
@@ -1459,11 +1451,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
     BD->setBinding(Type, Subject);
     BD->setDecomposedDecl(nullptr);
     break;
-  }
-  case MatchPattern::ParenPatternClass: {
-    ParenPattern *P = static_cast<ParenPattern *>(Pattern);
-    return CheckCompleteMatchPattern(Subject, P->getSubPattern(), State,
-                                     ProjectionCache);
   }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
