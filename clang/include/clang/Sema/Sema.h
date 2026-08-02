@@ -11268,8 +11268,6 @@ public:
   ActionResult<MatchPattern *> ActOnBindingPattern(SourceLocation LetLoc,
                                                    SourceLocation NameLoc,
                                                    IdentifierInfo *Name);
-  ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
-                                                 MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
