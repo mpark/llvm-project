@@ -20860,11 +20860,6 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
            "expected expression pattern state");
     return EvaluateAsBooleanCondition(PatternInfo->Condition, Result, Info);
   }
-  case MatchPattern::ParenPatternClass: {
-    const auto *P = static_cast<const ParenPattern *>(Pattern);
-    return EvaluateMatchPattern(P->getSubPattern(), Instantiation, Result, Info,
-                                ProjectionCache);
-  }
   case MatchPattern::OptionalPatternClass: {
     const auto *P = static_cast<const OptionalPattern *>(Pattern);
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);

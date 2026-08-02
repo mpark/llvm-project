@@ -2554,9 +2554,6 @@ RValue CodeGenFunction::EmitMatchPattern(
       EmitVarDecl(*Projection->getConditionVar());
     return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
   }
-  case MatchPattern::MatchPatternClass::ParenPatternClass:
-    llvm_unreachable("Pattern Matching: codegen not implemented for "
-                     "ParenPatternClass");
   case MatchPattern::MatchPatternClass::TypePatternClass: {
     const auto *Type = static_cast<const TypePattern *>(Pattern);
     const MatchPatternInfo *Info = Instantiation->find(Type);

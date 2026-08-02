@@ -277,12 +277,7 @@ void test_invalid_decomposition_pattern() {
   s match { case [,] => 0; case _ => 0; }; // expected-error {{expected expression}}
 }
 
-void test_paren_pattern(int *p, int a, int b) {
-  p match { case (let x) => 0; };
-  p match { case ? (let x) => 0; };
-  int **pp = &p;
-  pp match { case ?(? _) => 0; };
-  pp match { case ?(? (let x)) => 0; };
+void test_parenthesized_expression_pattern(int *p, int a, int b) {
   p match {
     case ? (a) + b => 0;
     case _ => 0;

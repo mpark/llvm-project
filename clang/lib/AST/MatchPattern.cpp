@@ -55,8 +55,6 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "ExpressionPattern";
   case BindingPatternClass:
     return "BindingPattern";
-  case ParenPatternClass:
-    return "ParenPattern";
   case DeclarationPatternClass:
     return "DeclarationPattern";
   case TypePatternClass:
@@ -79,8 +77,6 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const ExpressionPattern *>(this)->getBeginLoc();
   case BindingPatternClass:
     return static_cast<const BindingPattern *>(this)->getBeginLoc();
-  case ParenPatternClass:
-    return static_cast<const ParenPattern *>(this)->getBeginLoc();
   case DeclarationPatternClass:
     return static_cast<const DeclarationPattern *>(this)->getBeginLoc();
   case TypePatternClass:
@@ -103,8 +99,6 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const ExpressionPattern *>(this)->getEndLoc();
   case BindingPatternClass:
     return static_cast<const BindingPattern *>(this)->getEndLoc();
-  case ParenPatternClass:
-    return static_cast<const ParenPattern *>(this)->getEndLoc();
   case DeclarationPatternClass:
     return static_cast<const DeclarationPattern *>(this)->getEndLoc();
   case TypePatternClass:
@@ -127,8 +121,6 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<ExpressionPattern *>(this)->children();
   case BindingPatternClass:
     return static_cast<BindingPattern *>(this)->children();
-  case ParenPatternClass:
-    return static_cast<ParenPattern *>(this)->children();
   case DeclarationPatternClass:
     return static_cast<DeclarationPattern *>(this)->children();
   case TypePatternClass:

@@ -4408,16 +4408,6 @@ public:
         return Pattern;
       return new (getSema().Context) BindingPattern(P->getLetLoc(), BD);
     }
-    case MatchPattern::ParenPatternClass: {
-      ParenPattern *P = static_cast<ParenPattern *>(Pattern);
-      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
-      if (Sub.isInvalid())
-        return true;
-      if (Sub.get() == P->getSubPattern()) {
-        return Pattern;
-      }
-      return getSema().ActOnParenPattern(P->getParens(), Sub.get());
-    }
     case MatchPattern::DeclarationPatternClass: {
       auto *P = static_cast<DeclarationPattern *>(Pattern);
       auto *VD = dyn_cast_or_null<VarDecl>(getDerived().TransformDefinition(

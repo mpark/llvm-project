@@ -4212,7 +4212,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
 
   switch (Tok.getKind()) {
   case tok::l_paren:
-    return ParseParenPattern();
+    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
+                                  CorrectionBehavior);
   case tok::question:
     return ParseOptionalPattern(LHSOfMatchTestExpr);
   case tok::l_brace:
@@ -4356,106 +4357,6 @@ Parser::ParseExpressionPattern(
       return true;
   }
   return Actions.ActOnExpressionPattern(Expr.get(), IsPackExpansion);
-}
-
-ActionResult<MatchPattern *> Parser::ParseParenPattern() {
-  assert(Tok.is(tok::l_paren) && "Not a parenthesized pattern");
-  BalancedDelimiterTracker T(*this, tok::l_paren);
-  if (T.expectAndConsume())
-    return true;
-
-  ActionResult<MatchPattern *> Result;
-  switch (Tok.getKind()) {
-  case tok::question:
-    Result = ParseOptionalPattern();
-    break;
-  case tok::l_square:
-    Result = ParseDecompositionPattern();
-    break;
-  case tok::identifier: {
-    IdentifierInfo *II = Tok.getIdentifierInfo();
-    if (II == Ident_wildcard) {
-      Result = ParseWildcardPattern();
-    } else if (II == Ident_let) {
-      Result = ParseBindingPattern(ConsumeToken());
-    }
-    break;
-  }
-  default: break;
-  }
-  if (Result.isUsable()) {
-    if (T.consumeClose()) {
-      return true;
-    }
-    return Actions.ActOnParenPattern(T.getRange(), Result.get());
-  }
-
-  ParenParseOption ExprType = ParenParseOption::CastExpr;
-  ParsedType CastTy;
-  SourceLocation RParenLoc;
-  bool Fallback = false;
-  ExprResult ER = ParseExpressionWithLeadingParen(
-      ExprType, /*StopIfCastExpr=*/false, ParenExprKind::Unknown,
-      TypoCorrectionTypeBehavior::AllowBoth, CastTy, RParenLoc, T, Fallback);
-  if (!Fallback) {
-    // In the non-fallback cases, the close paren is already consumed.
-    return Actions.ActOnExpressionPattern(ER.get());
-  }
-
-  InMessageExpressionRAIIObject InMessage(*this, false);
-  Result = ParsePattern(nullptr, /*Decomp=*/false,
-                        TypoCorrectionTypeBehavior::AllowBoth);
-  if (Result.isInvalid()) {
-    SkipUntil(tok::r_paren, StopAtSemi);
-    return true;
-  }
-  if (Result.get()->getMatchPatternClass() !=
-      MatchPattern::ExpressionPatternClass) {
-    if (T.consumeClose())
-      return true;
-    return Actions.ActOnParenPattern(T.getRange(), Result.get());
-  }
-  Expr *E = Result.getAs<ExpressionPattern>()->getExpr();
-  if (ExprType >= ParenParseOption::FoldExpr && isFoldOperator(Tok) &&
-      NextToken().is(tok::ellipsis)) {
-    ExprType = ParenParseOption::FoldExpr;
-    ExprResult ER = ParseFoldExpression(E, T);
-    if (ER.isInvalid()) {
-      return true;
-    }
-    // Fold expr parsing consumes the close paren.
-    return Actions.ActOnExpressionPattern(ER.get());
-  }
-  ExprType = ParenParseOption::SimpleExpr;
-
-  if (T.consumeClose()) {
-    return true;
-  }
-  ER = Actions.ActOnParenExpr(T.getOpenLocation(), T.getCloseLocation(), E);
-  if (ER.isInvalid()) {
-    return true;
-  }
-  switch (ExprType) {
-  case ParenParseOption::SimpleExpr:
-    break; // Nothing else to do.
-  case ParenParseOption::CompoundStmt:
-    break; // Nothing else to do.
-  case ParenParseOption::CompoundLiteral:
-    // We parsed '(' type-name ')' '{' ... '}'.  If any suffixes of
-    // postfix-expression exist, parse them now.
-    break;
-  case ParenParseOption::CastExpr:
-    // We have parsed the cast-expression and no postfix-expr pieces are
-    // following.
-    return Actions.ActOnExpressionPattern(ER.get());
-  case ParenParseOption::FoldExpr:
-    // We only parsed a fold-expression. There might be postfix-expr pieces
-    // afterwards; parse them now.
-    break;
-  }
-  ER = ParsePostfixExpressionSuffix(ER);
-  ER = ParseRHSOfBinaryExpression(ER, prec::Comma);
-  return Actions.ActOnExpressionPattern(ER.get());
 }
 
 ActionResult<MatchPattern *>
