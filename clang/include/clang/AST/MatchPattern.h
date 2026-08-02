@@ -85,7 +85,6 @@ public:
     WildcardPatternClass,
     ExpressionPatternClass,
     BindingPatternClass,
-    ParenPatternClass,
     DeclarationPatternClass,
     TypePatternClass,
     OptionalPatternClass,
@@ -231,32 +230,6 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<BindingPattern *>(this)->children();
-  }
-};
-
-class ParenPattern final : public MatchPattern {
-  SourceRange Parens;
-  MatchPattern *Pattern;
-
-public:
-  explicit ParenPattern(SourceRange Parens, MatchPattern *Pattern)
-      : MatchPattern(ParenPatternClass), Parens(Parens), Pattern(Pattern) {
-    setDependence(computeDependence());
-  }
-
-  SourceLocation getBeginLoc() const { return Parens.getBegin(); }
-  SourceLocation getEndLoc() const { return Parens.getEnd(); }
-  SourceRange getParens() const { return Parens; }
-
-  const MatchPattern *getSubPattern() const { return Pattern; }
-  MatchPattern *getSubPattern() { return Pattern; }
-
-  llvm::iterator_range<MatchPattern **> children() {
-    return {&Pattern, &Pattern + 1};
-  }
-
-  llvm::iterator_range<const MatchPattern *const *> children() const {
-    return const_cast<ParenPattern *>(this)->children();
   }
 };
 
