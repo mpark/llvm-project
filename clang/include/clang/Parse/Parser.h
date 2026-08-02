@@ -4547,10 +4547,8 @@ private:
   ActionResult<MatchPattern *> ParseDeclarationPattern();
   ActionResult<MatchPattern *> ParseTypePattern();
   ActionResult<MatchPattern *>
-  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr,
-                         bool Decomp,
+  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
-  ActionResult<MatchPattern *> ParseParenPattern();
   ActionResult<MatchPattern *>
   ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *>
