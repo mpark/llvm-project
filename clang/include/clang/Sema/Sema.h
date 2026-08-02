@@ -11106,6 +11106,7 @@ public:
                                                  MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
+  ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
   ActionResult<MatchPattern *>
   ActOnAlternativePattern(SourceRange DiscriminatorRange, ConceptReference *CR,
                           SourceLocation ColonLoc, MatchPattern *SubPattern);

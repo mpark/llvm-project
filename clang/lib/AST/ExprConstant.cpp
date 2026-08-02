@@ -9467,6 +9467,9 @@ public:
     BlockScopeRAII MatchScope(Info);
     if (E->getHoldingVar() && !EvaluateDecl(Info, E->getHoldingVar()))
       return false;
+    if (!E->getHoldingVar() && E->getSubject()->getType()->isVoidType() &&
+        !EvaluateIgnoredValue(Info, E->getSubject()))
+      return false;
 
     MatchProjectionEvaluationCache ProjectionCache;
 
@@ -20634,6 +20637,10 @@ EvaluateProjectionValue(const MatchProjection *Projection, EvalInfo &Info,
   if (const VarDecl *D = Projection->getProjectedVar();
       D && !EvaluateDecl(Info, D))
     return false;
+  if (!Projection->getProjectedVar() && Projection->getProjectedExpr() &&
+      Projection->getProjectedExpr()->getType()->isVoidType() &&
+      !EvaluateIgnoredValue(Info, Projection->getProjectedExpr()))
+    return false;
   if (const DecompositionDecl *D = Projection->getDecomposedDecl();
       D && !EvaluateDecl(Info, D, /*EvaluateConditionDecl=*/true))
     return false;
@@ -20663,6 +20670,15 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
     return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
            EvaluateAsBooleanCondition(Projection->getConditionExpr(), Result,
                                       Info);
+  }
+  case MatchPattern::TypePatternClass: {
+    const auto *P = static_cast<const TypePattern *>(Pattern);
+    if (const MatchProjection *Projection = P->getProjection())
+      return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
+             EvaluateAsBooleanCondition(Projection->getConditionExpr(), Result,
+                                        Info);
+    Result = P->matches();
+    return true;
   }
   case MatchPattern::ExpressionPatternClass: {
     const auto *P = static_cast<const ExpressionPattern *>(Pattern);
@@ -20757,6 +20773,9 @@ static bool EvaluateSharedDeclarationProjections(
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
   MatchProjectionEvaluationCache ProjectionCache;
+  if (!E->getHoldingVar() && E->getSubject()->getType()->isVoidType() &&
+      !EvaluateIgnoredValue(Info, E->getSubject()))
+    return false;
   if (const VarDecl *VD = E->getHoldingVar()) {
     // This means that the subject and the bindings have the lifetime
     // of a hypothetical condition variable, skip the `BlockScopeRAII`.

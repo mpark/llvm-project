@@ -14453,6 +14453,8 @@ def err_cuda_device_kernel_launch_require_rdc
 // Pattern Matching
 def err_declaration_pattern_not_exact_match : Error<
   "declaration pattern of type %0 is not an exact match for subject of type %1">;
+def err_type_pattern_not_exact_match : Error<
+  "type pattern of type %0 is not an exact match for subject of type %1">;
 def err_guarded_declaration_pattern_move : Error<
   "guarded declaration pattern of type %0 would move from the match subject">;
 def err_no_viable_alternative : Error<
