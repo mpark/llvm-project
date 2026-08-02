@@ -4190,6 +4190,26 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                 ? GetLookAheadToken(2).is(tok::kw_auto)
                 : NextToken().is(tok::kw_auto);
   };
+
+  auto StartsTypePattern = [&] {
+    if (Tok.isOneOf(tok::kw_static, tok::kw_extern, tok::kw_register,
+                    tok::kw_thread_local, tok::kw_mutable, tok::kw_typedef,
+                    tok::kw_inline, tok::kw_virtual, tok::kw_explicit,
+                    tok::kw_friend, tok::kw_constexpr, tok::kw_consteval,
+                    tok::kw_constinit))
+      return false;
+
+    RevertingTentativeParsingAction TPA(*this);
+    if (!isCXXTypeId(TentativeCXXTypeIdContext::InMatchPattern))
+      return false;
+
+    TypeResult Type = ParseTypeName();
+    if (Type.isInvalid())
+      return false;
+
+    return Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi, tok::comma,
+                       tok::r_paren, tok::r_square, tok::r_brace, tok::eof);
+  };
   if (StartsAttributedDeclarationPattern())
     return ParseDeclarationPattern();
 
@@ -4260,6 +4280,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     }
     if (StartsConstrainedPlaceholderDeclarationPattern())
       return ParseDeclarationPattern();
+    if (StartsTypePattern())
+      return ParseTypePattern();
     if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                /*AllowPatternDecl=*/true))
       return ParseDeclarationPattern();
@@ -4296,6 +4318,17 @@ ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
   if (!VD)
     return true;
   return Actions.ActOnDeclarationPattern(VD, VD->getSourceRange());
+}
+
+ActionResult<MatchPattern *> Parser::ParseTypePattern() {
+  TypeSourceInfo *TInfo = nullptr;
+  TypeResult Type = ParseTypeName();
+  if (Type.isInvalid())
+    return true;
+  Actions.GetTypeFromParser(Type.get(), &TInfo);
+  if (!TInfo)
+    return true;
+  return Actions.ActOnTypePattern(TInfo);
 }
 
 ActionResult<MatchPattern *>

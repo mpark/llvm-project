@@ -4462,6 +4462,16 @@ public:
         return Pattern;
       return getSema().ActOnDeclarationPattern(VD, P->getSourceRange());
     }
+    case MatchPattern::TypePatternClass: {
+      auto *P = static_cast<TypePattern *>(Pattern);
+      TypeSourceInfo *TInfo =
+          getDerived().TransformType(P->getTypeSourceInfo());
+      if (!TInfo)
+        return true;
+      if (!Rebuild && TInfo == P->getTypeSourceInfo())
+        return Pattern;
+      return getSema().ActOnTypePattern(TInfo);
+    }
     case MatchPattern::OptionalPatternClass: {
       OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
@@ -19133,14 +19143,20 @@ template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
   VarDecl *HoldingVar = nullptr;
+  ExprResult LHS;
   if (VarDecl *HV = E->getHoldingVar()) {
-    HoldingVar =
-        cast<VarDecl>(getDerived().TransformDefinition(HV->getLocation(), HV));
-    if (!HoldingVar)
+    assert(HV->hasInit() && "match subject holder must have an initializer");
+    ExprResult Subject = getDerived().TransformExpr(HV->getInit());
+    if (Subject.isInvalid())
       return ExprError();
+    LHS = getSema().ActOnMatchSubject(Subject.get(), HoldingVar);
+    if (LHS.isInvalid())
+      return ExprError();
+    if (HoldingVar)
+      getDerived().transformedLocalDecl(HV, {HoldingVar});
+  } else {
+    LHS = getDerived().TransformExpr(E->getSubject());
   }
-
-  ExprResult LHS = getDerived().TransformExpr(E->getSubject());
   if (LHS.isInvalid())
     return ExprError();
   bool SubjectIsXValue = HoldingVar
@@ -19191,14 +19207,22 @@ template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   VarDecl *HoldingVar = nullptr;
+  ExprResult LHS;
   if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
-    HoldingVar = cast_or_null<VarDecl>(getDerived().TransformDefinition(
-        OldHoldingVar->getLocation(), OldHoldingVar));
-    if (!HoldingVar)
+    assert(OldHoldingVar->hasInit() &&
+           "match subject holder must have an initializer");
+    ExprResult Subject =
+        getDerived().TransformExpr(OldHoldingVar->getInit());
+    if (Subject.isInvalid())
       return ExprError();
+    LHS = getSema().ActOnMatchSubject(Subject.get(), HoldingVar);
+    if (LHS.isInvalid())
+      return ExprError();
+    if (HoldingVar)
+      getDerived().transformedLocalDecl(OldHoldingVar, {HoldingVar});
+  } else {
+    LHS = getDerived().TransformExpr(E->getSubject());
   }
-
-  ExprResult LHS = getDerived().TransformExpr(E->getSubject());
   if (LHS.isInvalid())
     return ExprError();
   bool SubjectIsXValue = HoldingVar
