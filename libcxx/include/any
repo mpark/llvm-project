@@ -560,17 +560,26 @@ template <class _ValueType>
 
 template <class _Tp, same_as<any> _Any>
 _LIBCPP_HIDE_FROM_ABI const _Tp* try_cast(const _Any& __any) _NOEXCEPT {
-  return any_cast<_Tp>(&__any);
+  if constexpr (is_void_v<_Tp>)
+    return __any.has_value() ? nullptr : static_cast<const void*>(&__any);
+  else
+    return any_cast<_Tp>(&__any);
 }
 
 template <class _Tp, same_as<any> _Any>
 _LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any& __any) _NOEXCEPT {
-  return any_cast<_Tp>(&__any);
+  if constexpr (is_void_v<_Tp>)
+    return __any.has_value() ? nullptr : static_cast<void*>(&__any);
+  else
+    return any_cast<_Tp>(&__any);
 }
 
 template <class _Tp, same_as<any> _Any>
 _LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any&& __any) _NOEXCEPT {
-  return any_cast<_Tp>(&__any);
+  if constexpr (is_void_v<_Tp>)
+    return __any.has_value() ? nullptr : static_cast<void*>(&__any);
+  else
+    return any_cast<_Tp>(&__any);
 }
 
 #    endif // _LIBCPP_STD_VER >= 26
