@@ -3,7 +3,8 @@
 
 auto decomposition_pattern(const int (&xs)[2]) {
   return xs match {
-    [let x, 0] => x * 2;
+    case [let x, 0] => x * 2;
+    case _ => throw 0;
   };
 }
 
@@ -94,6 +95,7 @@ namespace std {
 
 int tuple_like_decomposition_pattern(const Pair &tup) {
   return tup match {
-    [0, let y] => y * 2;
+    case [0, let y] => y * 2;
+    case _ => throw 0;
   };
 }
