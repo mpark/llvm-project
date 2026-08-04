@@ -20083,6 +20083,8 @@ bool Sema::tryCaptureVariable(
   DeclContext *DC = CurContext;
 
   // Skip past RequiresExprBodys because they don't constitute function scopes.
+  while (VarDC->isRequiresExprBody() || VarDC->isExpansionStmt())
+    VarDC = VarDC->getParent();
   while (DC->isRequiresExprBody() || DC->isExpansionStmt())
     DC = DC->getParent();
 
