@@ -5628,6 +5628,7 @@ struct MatchCase {
   SourceLocation IfLoc;
   MatchGuard Guard;
   Stmt *Handler;
+  bool MaybeUseful = false;
 };
 
 /// A semantically checked form of a source match case. A source case can have

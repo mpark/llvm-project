@@ -182,6 +182,12 @@ int reference(int &value) {
   };
 }
 
+int condition(int value) {
+  if (value match case int copy)
+    return copy;
+  return -1;
+}
+
 int forwarding(int &&value) {
   return static_cast<int &&>(value) match {
     case auto &&ref => ref;
@@ -345,6 +351,31 @@ constexpr int dependent_decomposition_guard(T value) {
 
 static_assert(dependent_guard(3) == 3);
 static_assert(dependent_decomposition_guard(Pair{2, 3}) == 5);
+static_assert(dependent_decomposition_guard(0) == 0);
+
+template<class T>
+concept MatchesIntDeclaration = requires(T value) {
+  value match case int copy;
+};
+
+template<class T>
+concept MatchesPairDecomposition = requires(T value) {
+  value match case auto &&[first, second];
+};
+
+static_assert(MatchesIntDeclaration<int>);
+static_assert(!MatchesIntDeclaration<double>);
+static_assert(MatchesPairDecomposition<Pair>);
+static_assert(!MatchesPairDecomposition<int>);
+
+template<class T>
+bool dependent_single_match(T value) {
+  return value match case int copy; // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
+}
+
+bool instantiate_invalid_single_match() {
+  return dependent_single_match(0.0); // expected-note {{in instantiation of function template specialization 'declaration_patterns::dependent_single_match<double>' requested here}}
+}
 
 template<class T>
 T dependent_auto(T value) {
@@ -355,6 +386,49 @@ T dependent_auto(T value) {
 
 static_assert(__is_same(decltype(dependent(1)), int));
 static_assert(__is_same(decltype(dependent_auto(1)), int));
+
+struct DispatchClass {};
+
+template<class T>
+constexpr int dependent_declaration_dispatch(T value) {
+  return value match {
+    case int i => i + 10;
+    case char c => c == '1' ? 20 : 21;
+    case DispatchClass object => static_cast<int>(sizeof(object));
+  };
+}
+
+static_assert(dependent_declaration_dispatch(1) == 11);
+static_assert(dependent_declaration_dispatch('1') == 20);
+static_assert(dependent_declaration_dispatch(DispatchClass{}) == 1);
+
+template<class U>
+constexpr int dependent_pattern_type_dispatch(int value) {
+  return value match {
+    case U copy => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(dependent_pattern_type_dispatch<int>(1) == 1);
+static_assert(dependent_pattern_type_dispatch<double>(1) == 0);
+
+struct DeletedCopy {
+  DeletedCopy();
+  DeletedCopy(const DeletedCopy&) = delete; // expected-note {{has been explicitly marked deleted here}}
+};
+
+template<class T>
+int dependent_deleted_copy_does_not_fall_back(T& value) {
+  return value match {
+    case DeletedCopy copy => 1; // expected-error {{call to deleted constructor of 'DeletedCopy'}}
+    case _ => 0;
+  };
+}
+
+int instantiate_dependent_deleted_copy(DeletedCopy& value) {
+  return dependent_deleted_copy_does_not_fall_back(value); // expected-note {{in instantiation of function template specialization 'declaration_patterns::dependent_deleted_copy_does_not_fall_back<declaration_patterns::DeletedCopy>' requested here}}
+}
 
 int bad_conversion(int value) {
   return value match {
