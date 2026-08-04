@@ -282,7 +282,7 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
   if (Tok.isNot(tok::semi) && (!AllowForRangeDecl || Tok.isNot(tok::colon)) &&
       (!AllowPatternDecl ||
        !Tok.isOneOf(tok::kw_if, tok::equalgreater, tok::comma, tok::r_square,
-                    tok::r_brace)))
+                    tok::r_brace, tok::r_paren)))
     return TPResult::False;
 
   return TPResult::Ambiguous;
