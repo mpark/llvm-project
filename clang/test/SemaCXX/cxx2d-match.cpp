@@ -2,22 +2,22 @@
 
 void test_throw_does_not_contribute_to_type_deduction() {
   static_assert(__is_same(decltype(0 match {
-    0 => 0;
-    1 => 1;
-    _ => throw;
+    case 0 => 0;
+    case 1 => 1;
+    case _ => throw;
   }), int));
 }
 
 void test_throw_action() {
   static_assert(0 match {
-    0 => 0;
-    1 => 1;
-    _ => throw;
+    case 0 => 0;
+    case 1 => 1;
+    case _ => throw;
   } == 0);
   static_assert(1 match {
-    0 => 0;
-    1 => 1;
-    _ => throw;
+    case 0 => 0;
+    case 1 => 1;
+    case _ => throw;
   } == 1);
 }
 
@@ -25,7 +25,8 @@ void test_decomposition_pattern_arity() {
   struct S { int a; int b; };
   S s{1, 2};
   s match {
-    [1, 2, 3] => 0; // expected-error {{type 'S' binds to 2 elements, but 3 names were provided}}
+    case [1, 2, 3] => 0; // expected-error {{type 'S' binds to 2 elements, but 3 names were provided}}
+    case _ => 0;
   };
 }
 
@@ -83,9 +84,9 @@ namespace std {
 
 constexpr int test_variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    int: _ => 0;
-    short: _ => 1; // expected-error {{no viable alternative; target type 'short' does not match any 'std::variant_alternative<I, Variant>::type' for I in [0, 'std::variant_size<Variant>::value')}}
-    _ => -1;
+    case int: _ => 0;
+    case short: _ => 1; // expected-error {{no viable alternative; target type 'short' does not match any 'std::variant_alternative<I, Variant>::type' for I in [0, 'std::variant_size<Variant>::value')}}
+    case _ => -1;
   };
 }
 
@@ -96,8 +97,8 @@ struct std::variant_size<S1> { void value(); };
 
 int test_bad_variant_like_protocol_variant_size_value() {
   return S1{} match {
-    int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_size<S1>::value' is not a valid integral constant expression}}
-    _ => -1;
+    case int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_size<S1>::value' is not a valid integral constant expression}}
+    case _ => -1;
   };
 }
 
@@ -108,8 +109,8 @@ struct std::variant_size<S2> { static constexpr int value = 1; };
 
 int test_bad_variant_like_protocol_missing_index() {
   return S2{} match {
-    int: _ => 0; // expected-error {{use of undeclared identifier 'index'}}
-    _ => -1;
+    case int: _ => 0; // expected-error {{use of undeclared identifier 'index'}}
+    case _ => -1;
   };
 }
 
@@ -122,8 +123,8 @@ struct std::variant_size<S3> { static constexpr int value = 1; };
 
 int test_bad_variant_like_protocol_missing_variant_alternative() {
   return S3{} match {
-    int: _ => 0; // expected-error {{implicit instantiation of undefined template 'std::variant_alternative<0, S3>'}}
-    _ => -1;
+    case int: _ => 0; // expected-error {{implicit instantiation of undefined template 'std::variant_alternative<0, S3>'}}
+    case _ => -1;
   };
 }
 
@@ -139,7 +140,7 @@ struct std::variant_alternative<0, S4> {};
 
 int test_bad_variant_like_protocol_variant_alternative_missing_type() {
   return S4{} match {
-    int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_alternative<0UL, S4>::type' does not name a type}}
-    _ => -1;
+    case int: _ => 0; // expected-error {{invalid variant-like protocol; 'std::variant_alternative<0UL, S4>::type' does not name a type}}
+    case _ => -1;
   };
 }

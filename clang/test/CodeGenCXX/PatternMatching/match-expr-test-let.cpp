@@ -2,7 +2,7 @@
 // RUN: FileCheck --input-file=%t.ll %s
 
 int match_in_if_condition(const int *p) {
-  if (p match ? let v) {
+  if (p match case ? let v) {
     return v;
   }
   return -1;

@@ -5,7 +5,7 @@ void check(bool b);
 
 // CHECK-LABEL: _Z5basicv
 void basic() {
-  check([]() { return 0 match let _; }());
+  check([]() { return 0 match case let _; }());
   // CHECK: "_ZZ5basicvENK3$_0clEv"
 
   // CHECK: alloca ptr, align 8
@@ -16,7 +16,7 @@ void basic() {
   // CHECK: store ptr %[[ZERO_VAR]], ptr %[[LET_VAR]], align 8
   // CHECK: ret i1 true
 
-  check([]() { return 0 match let x; }());
+  check([]() { return 0 match case let x; }());
   // CHECK: "_ZZ5basicvENK3$_1clEv"
 
   // CHECK: alloca ptr, align 8
@@ -27,7 +27,7 @@ void basic() {
   // CHECK: store ptr %[[ZERO_VAR]], ptr %[[LET_VAR]], align 8
   // CHECK: ret i1 true
 
-  check([]() { int x = 0; return &x match ? let x; }());
+  check([]() { int x = 0; return &x match case ? let x; }());
   // CHECK: "_ZZ5basicvENK3$_2clEv"
 
   // CHECK: alloca ptr, align 8

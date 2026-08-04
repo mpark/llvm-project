@@ -16,7 +16,7 @@ struct Result {
 
 auto nested_decomposition_pattern(const S& s) {
   return s match -> Result {
-    [let c, [0, 0]] => {c, -1};
+    case [let c, [0, 0]] => {c, -1};
   };
 }
 
