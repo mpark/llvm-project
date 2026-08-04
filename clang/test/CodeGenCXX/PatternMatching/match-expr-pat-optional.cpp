@@ -5,9 +5,9 @@ void check(bool b);
 
 // CHECK-LABEL: _Z5basicii
 void basic(int a, int b) {
-  check([]() { int x = 0; return &x match ? _; }());
-  check([]() { int x = 0; return &x match ? 0; }());
-  check(![]() { int x = 0, *p = &x; return &p match ?? 1; }());
+  check([]() { int x = 0; return &x match case ? _; }());
+  check([]() { int x = 0; return &x match case ? 0; }());
+  check(![]() { int x = 0, *p = &x; return &p match case ?? 1; }());
 }
 
 // CHECK-LABEL: "_ZZ5basiciiENK3$_0clEv"
@@ -96,9 +96,9 @@ struct OptionalProjection {
 
 int reuse_optional_projection(OptionalProjection &subject) {
   return subject match {
-    ? 0 => 0;
-    ? let x => x;
-    _ => -1;
+    case ? 0 => 0;
+    case ? let x => x;
+    case _ => -1;
   };
 }
 
