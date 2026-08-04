@@ -15,7 +15,7 @@ struct DerivedB : Base {
 
 auto alternative_pattern_const(const Base &base) {
   return base match {
-    DerivedA: let a => a.x * 2;
+    case DerivedA: let a => a.x * 2;
   };
 }
 
@@ -135,7 +135,7 @@ namespace std {
 
 int variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    int: 0 => 0;
+    case int: 0 => 0;
   };
 }
 
@@ -149,9 +149,9 @@ int variant_like_alternative_pattern(const Variant &var) {
 
 int reuse_variant_projection(const Variant &var) {
   return var match {
-    int: 0 => 0;
-    int: let x => x;
-    _ => -1;
+    case int: 0 => 0;
+    case int: let x => x;
+    case _ => -1;
   };
 }
 

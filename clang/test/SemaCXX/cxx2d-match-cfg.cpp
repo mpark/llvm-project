@@ -20,7 +20,7 @@ int guarded(int value) {
 
 int guarded_init_statement(int value) {
   return value match {
-    let copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
-    _ => 0;
+    case let copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
+    case _ => 0;
   };
 }
