@@ -38,6 +38,11 @@ static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
   return Decl;
 }
 
+static bool hasFailedVariableInitialization(const VarDecl *Declaration) {
+  return Declaration->isInvalidDecl() || !Declaration->hasInit() ||
+         Declaration->getInit()->containsErrors();
+}
+
 // Copied from SemaDeclCXX.cpp
 static std::string printTemplateArgs(const PrintingPolicy &PrintingPolicy,
                                      TemplateArgumentListInfo &Args,
@@ -729,6 +734,47 @@ createMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
   return Projection;
 }
 
+static bool isExactDeclarationPatternMatch(Sema &S, Expr *Subject,
+                                           QualType PatternType) {
+  ImplicitConversionSequence ICS = S.TryCopyInitializationConversion(
+      Subject, PatternType, /*SuppressUserConversions=*/false,
+      /*InOverloadResolution=*/true,
+      /*AllowObjCWritebackConversion=*/false);
+  return ICS.isStandard() && ICS.Standard.getRank() == ICR_Exact_Match;
+}
+
+static bool isDeducedDeclarationPatternApplicable(Sema &S, VarDecl *Declaration,
+                                                  Expr *Subject) {
+  if (!Declaration->getType()->isUndeducedType())
+    return true;
+
+  QualType DeducedType;
+  TemplateDeductionInfo Info(Subject->getExprLoc());
+  Sema::SFINAETrap Trap(S, /*WithAccessChecking=*/true);
+  TemplateDeductionResult Result =
+      S.DeduceAutoType(Declaration->getTypeSourceInfo()->getTypeLoc(), Subject,
+                       DeducedType, Info);
+  return Result == TemplateDeductionResult::Success &&
+         !Trap.hasErrorOccurred() &&
+         isExactDeclarationPatternMatch(S, Subject, DeducedType);
+}
+
+static bool isDecompositionDeclarationPatternApplicable(
+    Sema &S, DecompositionDecl *Declaration, Expr *Subject) {
+  Sema::SFINAETrap Trap(S, /*WithAccessChecking=*/true);
+  UnsignedOrNone ElementCount = S.GetDecompositionElementCount(
+      Subject->getType().getNonReferenceType(), Declaration->getLocation());
+  if (!ElementCount || Trap.hasErrorOccurred())
+    return false;
+
+  ArrayRef<BindingDecl *> Bindings = Declaration->bindings();
+  bool HasPack = llvm::any_of(Bindings, [](BindingDecl *Binding) {
+    return Binding->isParameterPack();
+  });
+  return HasPack ? *ElementCount >= Bindings.size() - 1
+                 : *ElementCount == Bindings.size();
+}
+
 static ExprResult buildMatchProjectionCondition(Sema &S,
                                                 MatchProjection *Projection,
                                                 SourceLocation Loc) {
@@ -752,11 +798,16 @@ static bool isReusableDecompositionDeclaration(const VarDecl *Declaration) {
 
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                      MatchProjectionCache *ProjectionCache) {
+  bool PatternIsInstantiationDependent = static_cast<bool>(
+      Pattern->getDependence() & ExprDependence::Instantiation);
+  if (Subject && PatternIsInstantiationDependent &&
+      Pattern->getMatchPatternClass() ==
+          MatchPattern::DeclarationPatternClass)
+    return CheckCompleteMatchPattern(nullptr, Pattern);
   if (Subject && Subject->isTypeDependent() &&
       Pattern->getMatchPatternClass() !=
           MatchPattern::DeclarationPatternClass)
     return CheckCompleteMatchPattern(nullptr, Pattern);
-  // TODO(mpark): Skip if Pattern is type-dependent as well.
   SourceLocation Loc = Pattern->getBeginLoc();
   Scope *S = getCurScope();
   switch (Pattern->getMatchPatternClass()) {
@@ -833,13 +884,14 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
     }
 
     QualType PatternType = VD->getType();
-    if (!Subject->isTypeDependent() && !PatternType->getContainedAutoType()) {
-      ImplicitConversionSequence ICS = TryCopyInitializationConversion(
-          Subject, PatternType, /*SuppressUserConversions=*/false,
-          /*InOverloadResolution=*/true,
-          /*AllowObjCWritebackConversion=*/false);
-      if (!ICS.isStandard() ||
-          ICS.Standard.getRank() != ICR_Exact_Match) {
+    bool IsApplicable = true;
+    if (!Subject->isTypeDependent() && PatternType->getContainedAutoType()) {
+      IsApplicable =
+          isDeducedDeclarationPatternApplicable(*this, VD, Subject) &&
+          (!Decomposition || isDecompositionDeclarationPatternApplicable(
+                                 *this, Decomposition, Subject));
+    } else if (!Subject->isTypeDependent()) {
+      if (!isExactDeclarationPatternMatch(*this, Subject, PatternType)) {
         Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_exact_match)
             << PatternType << Subject->getType();
         VD->setInvalidDecl();
@@ -847,10 +899,21 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
       }
     }
 
-    AddInitializerToDecl(VD, Subject, /*DirectInit=*/false);
-    FinalizeDeclaration(VD);
-    if (VD->isInvalidDecl())
+    auto Initialize = [&] {
+      AddInitializerToDecl(VD, Subject, /*DirectInit=*/false);
+      FinalizeDeclaration(VD);
+      return hasFailedVariableInitialization(VD);
+    };
+    if (IsApplicable) {
+      // Candidate omission is analogous to overload candidate viability. Once
+      // the declaration selector applies, ordinary initialization failures do
+      // not cause matching to retry a later arm.
+      NonSFINAEContext NonSFINAE(*this);
+      if (Initialize())
+        return true;
+    } else if (Initialize()) {
       return true;
+    }
     if (P->getProjection())
       P->getProjection()->setDecomposedDecl(Decomposition);
     break;

@@ -19064,49 +19064,71 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchProjectionCache ProjectionCache;
+  enum class TransformCaseResult { Success, NoMatch, Error };
   auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
-                           MatchCaseInstantiation &Transformed) -> bool {
+                           MatchCaseInstantiation &Transformed)
+      -> TransformCaseResult {
     LocalInstantiationScope Scope(getSema(),
                                   /*CombineWithOuterScope=*/true);
-    ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
-        Case.Pattern, LHS.get() != E->getSubject());
-    if (Pattern.isInvalid() || getSema().CheckCompleteMatchPattern(
-                                   LHS.get(), Pattern.get(), &ProjectionCache))
-      return true;
+    MatchPattern *TransformedPattern = nullptr;
+    auto TransformAndCheckPattern = [&] {
+      ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
+          Case.Pattern, LHS.get() != E->getSubject());
+      if (Pattern.isInvalid())
+        return true;
+      TransformedPattern = Pattern.get();
+      return getSema().CheckCompleteMatchPattern(
+          LHS.get(), TransformedPattern, &ProjectionCache);
+    };
+
+    bool SourceWasMaybeUseful =
+        E->getSubject()->isTypeDependent() ||
+        static_cast<bool>(Case.Pattern->getDependence() &
+                          ExprDependence::Instantiation);
+    SourceCases[CaseIndex].MaybeUseful |= SourceWasMaybeUseful;
+    bool WasMaybeUseful = SourceWasMaybeUseful;
+    if (WasMaybeUseful) {
+      Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
+      if (TransformAndCheckPattern())
+        return Trap.hasErrorOccurred() ? TransformCaseResult::NoMatch
+                                       : TransformCaseResult::Error;
+    } else if (TransformAndCheckPattern()) {
+      return TransformCaseResult::Error;
+    }
 
     StmtResult GuardInit;
     if (Case.Guard.Init) {
       GuardInit = getDerived().TransformStmt(Case.Guard.Init);
       if (GuardInit.isInvalid())
-        return true;
+        return TransformCaseResult::Error;
     }
     if (Case.Guard.hasGuard())
-      getSema().CheckGuardedMatchPattern(Pattern.get());
+      getSema().CheckGuardedMatchPattern(TransformedPattern);
     Sema::ConditionResult Guard = getDerived().TransformCondition(
         Case.IfLoc, Case.Guard.ConditionVariable, Case.Guard.Condition,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf
                          : Sema::ConditionKind::Boolean);
     if (Guard.isInvalid())
-      return true;
+      return TransformCaseResult::Error;
 
     StmtResult Handler =
         getDerived().TransformStmt(Case.Handler, StmtDiscardKind::NotDiscarded);
     if (Handler.isInvalid())
-      return true;
+      return TransformCaseResult::Error;
 
     Stmt *HS = Handler.get();
     if (Expr *HE = dyn_cast<Expr>(HS))
       Handler = getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy,
                                                 HE);
     if (Handler.isInvalid())
-      return true;
+      return TransformCaseResult::Error;
 
-    Transformed = {Pattern.get(),
+    Transformed = {TransformedPattern,
                    Case.IfLoc,
                    {GuardInit.get(), Guard.get().first, Guard.get().second},
                    Handler.get(),
                    CaseIndex};
-    return false;
+    return TransformCaseResult::Success;
   };
 
   for (auto [CaseIndex, Case] : llvm::enumerate(E->getCases())) {
@@ -19115,9 +19137,16 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       ProjectionCache.AlternativeChoices.clear();
       ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
       ProjectionCache.NextForcedAlternativeSelection = 0;
+      size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
-      if (TransformCase(Case, static_cast<unsigned>(CaseIndex), ExpandedCase))
+      TransformCaseResult Result =
+          TransformCase(Case, static_cast<unsigned>(CaseIndex), ExpandedCase);
+      if (Result == TransformCaseResult::Error)
         return ExprError();
+      if (Result == TransformCaseResult::NoMatch) {
+        ProjectionCache.Entries.resize(SavedProjectionCount);
+        break;
+      }
       Instantiations.push_back(ExpandedCase);
 
       SmallVector<unsigned, 4> NextSelections;
