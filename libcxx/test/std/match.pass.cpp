@@ -18,57 +18,57 @@
 void check(bool b) { assert(b); }
 
 void test_match_test_expr() {
-  check(0 match _);
-  check(0 match 0);
-  check(!(0 match 1));
+  check(0 match case _);
+  check(0 match case 0);
+  check(!(0 match case 1));
 
   int x = 0;
-  check(x match _);
-  check(x match 0);
+  check(x match case _);
+  check(x match case 0);
 
   int y = 1;
-  check(!(0 match y));
-  check(!(x match y));
+  check(!(0 match case y));
+  check(!(x match case y));
 
-  check([]() { int* p = nullptr; return p match _; }());
+  check([]() { int* p = nullptr; return p match case _; }());
 
-  check([]() { int x = 0; return x match 0; }());
-  check(![]() { int y = 1; return 0 match y; }());
-  check([]() { int x = 0, y = 0; return x match y; }());
-  check(![]() { int x = 0, y = 1; return x match y; }());
+  check([]() { int x = 0; return x match case 0; }());
+  check(![]() { int y = 1; return 0 match case y; }());
+  check([]() { int x = 0, y = 0; return x match case y; }());
+  check(![]() { int x = 0, y = 1; return x match case y; }());
 
-  check([]() { int x = 0; return &x match ? _; }());
-  check([]() { int x = 0; return &x match ? 0; }());
-  check(![]() { int x = 0; return &x match ? 1; }());
-  check([]() { int x = 0, y = 0; return &x match ? y; }());
-  check(![]() { int x = 0, y = 1; return &x match ? y; }());
-  check(![]() { int* p = nullptr; return p match ? _; }());
-  check(![]() { int* p = nullptr; return p match ? 0; }());
+  check([]() { int x = 0; return &x match case ? _; }());
+  check([]() { int x = 0; return &x match case ? 0; }());
+  check(![]() { int x = 0; return &x match case ? 1; }());
+  check([]() { int x = 0, y = 0; return &x match case ? y; }());
+  check(![]() { int x = 0, y = 1; return &x match case ? y; }());
+  check(![]() { int* p = nullptr; return p match case ? _; }());
+  check(![]() { int* p = nullptr; return p match case ? 0; }());
 
-  check([]() { int x = 0, *p = &x; return &p match ?? _; }());
-  check([]() { int x = 0, *p = &x; return &p match ?? 0; }());
-  check(![]() { int x = 0, *p = &x; return &p match ?? 1; }());
+  check([]() { int x = 0, *p = &x; return &p match case ?? _; }());
+  check([]() { int x = 0, *p = &x; return &p match case ?? 0; }());
+  check(![]() { int x = 0, *p = &x; return &p match case ?? 1; }());
 
-  check([]() { int x = 0, *p = &x; return &p match ? _; }());
-  check([]() { int x = 0, *p = &x; return &p match ?? 0; }());
-  check(![]() { int x = 0, *p = &x; return &p match ?? 1; }());
-  check(![]() { int** pp = nullptr; return pp match ? _; }());
-  check(![]() { int** pp = nullptr; return pp match ?? _; }());
-  check(![]() { int** pp = nullptr; return pp match ?? 0; }());
+  check([]() { int x = 0, *p = &x; return &p match case ? _; }());
+  check([]() { int x = 0, *p = &x; return &p match case ?? 0; }());
+  check(![]() { int x = 0, *p = &x; return &p match case ?? 1; }());
+  check(![]() { int** pp = nullptr; return pp match case ? _; }());
+  check(![]() { int** pp = nullptr; return pp match case ?? _; }());
+  check(![]() { int** pp = nullptr; return pp match case ?? 0; }());
 
-  check([]() { return 0 match let _; }());
-  check([]() { return 0 match let x; }());
+  check([]() { return 0 match case let _; }());
+  check([]() { return 0 match case let x; }());
   check([]() {
     int x = 0;
-    return &x match ? let x;
+    return &x match case ? let x;
   }());
 }
 
 auto char_pattern(char c) {
   return c match {
-    'a'   => 1;
-    'b'   => 2;
-    let x => int(x);
+    case 'a'   => 1;
+    case 'b'   => 2;
+    case let x => int(x);
   };
 }
 
@@ -80,10 +80,10 @@ void test_char_pattern() {
 
 auto decomposition_pattern(const int (&xs)[2]) {
   return xs match {
-    [ 0, 0 ]     => -1;
-    [ let x, 0 ] => x * 2;
-    [ 0, let y ] => y * 4;
-    let[x, y]    => x * y;
+    case [ 0, 0 ]     => -1;
+    case [ let x, 0 ] => x * 2;
+    case [ 0, let y ] => y * 4;
+    case let[x, y]    => x * y;
   };
 }
 
@@ -114,10 +114,10 @@ struct Result {
 
 auto nested_decomposition_pattern(const S& s) {
   return s match -> Result {
-    [let c, [0, 0]] => {c, -1};
-    [let c, [let x, 0]] => {c, x * 2};
-    [let c, [0, let y]] => {c, y * 4};
-    let [c, [x, y]] => {c, x * y};
+    case [let c, [0, 0]] => {c, -1};
+    case [let c, [let x, 0]] => {c, x * 2};
+    case [let c, [0, let y]] => {c, y * 4};
+    case let [c, [x, y]] => {c, x * y};
   };
 }
 
@@ -143,10 +143,10 @@ bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
     State s = states[i - 1];
     int n = elems[i - 1];
     result &= (int[2]){i % 3, i % 5} match {
-      [0, 0] => s == FizzBuzz && n == 0;
-      [0, let y] => s == Fizz && n == y;
-      [let x, 0] => s == Buzz && n == x;
-      let [x, y] => s == N && n == x + y;
+      case [0, 0] => s == FizzBuzz && n == 0;
+      case [0, let y] => s == Fizz && n == y;
+      case [let x, 0] => s == Buzz && n == x;
+      case let [x, y] => s == N && n == x + y;
     };
   }
   return result;
@@ -166,9 +166,10 @@ void test_fizzbuzz() {
 
 auto trailing_return_type(int x) {
   return x match -> int {
-    0 => 0;
-    1 => 3.0;
-    2 => 'c';
+    case 0 => 0;
+    case 1 => 3.0;
+    case 2 => 'c';
+    case _ => 0;
   };
 }
 
@@ -192,9 +193,9 @@ struct DerivedB : Base {
 
 auto alternative_pattern_const(const Base &base) {
   return base match {
-    DerivedA: let a => a.x * 2;
-    const DerivedB: let b => (int)b.c;
-    _ => 0;
+    case DerivedA: let a => a.x * 2;
+    case const DerivedB: let b => (int)b.c;
+    case _ => 0;
   };
 }
 
@@ -206,9 +207,9 @@ void test_alternative_pattern_const() {
 auto alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
-    DerivedA: [let x] => x * 2;
-    DerivedB: [let c] => (int)c;
-    _ => 0;
+    case DerivedA: [let x] => x * 2;
+    case DerivedB: [let c] => (int)c;
+    case _ => 0;
   };
 }
 
@@ -220,8 +221,8 @@ void test_alternative_pattern_non_const() {
 auto bitfields(int x) {
   struct S { int i : 6; } s{x};
   return s.i match {
-    8 => 0;
-    let n => n;
+    case 8 => 0;
+    case let n => n;
   };
 }
 
@@ -257,21 +258,19 @@ namespace std {
 
 int tuple_decomposition_pattern(const std::tuple<int, int> &tup) {
   return tup match {
-    [0, 0] => -1;
-    [0, let y] => y * 2;
-    [let x, 0] => x * 4;
-    let [x, y] => x * y;
-    _ => 0;
+    case [0, 0] => -1;
+    case [0, let y] => y * 2;
+    case [let x, 0] => x * 4;
+    case let [x, y] => x * y;
   };
 }
 
 int tuple_like_decomposition_pattern(const Pair &tup) {
   return tup match {
-    [0, 0] => -1;
-    [0, let y] => y * 2;
-    [let x, 0] => x * 4;
-    let [x, y] => x * y;
-    _ => 0;
+    case [0, 0] => -1;
+    case [0, let y] => y * 2;
+    case [let x, 0] => x * 4;
+    case let [x, y] => x * y;
   };
 }
 
@@ -287,7 +286,7 @@ void test_tuple_like_decomposition_pattern() {
 }
 
 bool match_test_with_guard(const int (&xs)[2]) {
-  return xs match let [x, y] if (x == y);
+  return xs match case let [x, y] if (x == y);
 }
 
 void test_match_test_with_guard() {
@@ -299,10 +298,10 @@ void test_match_test_with_guard() {
 
 auto match_pattern_guards(const Pair& p) {
   return p match {
-    let [x, y] if (x < 0 && y < 0) => 0;
-    let [x, y] if (x < 0) => y;
-    let [x, y] if (y < 0) => x;
-    let [x, y] => x + y;
+    case let [x, y] if (x < 0 && y < 0) => 0;
+    case let [x, y] if (x < 0) => y;
+    case let [x, y] if (y < 0) => x;
+    case let [x, y] => x + y;
   };
 }
 
@@ -315,7 +314,7 @@ void test_match_pattern_guards() {
 }
 
 int match_in_if_condition(const int *p) {
-  if (p match ? let v) {
+  if (p match case ? let v) {
     return v;
   }
   return -1;
@@ -338,7 +337,7 @@ struct Lifetime {
 
 bool match_in_if_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match [? let b, 101]) {
+  if (Lifetime(&flag, n) match case [? let b, 101]) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -354,7 +353,7 @@ void test_match_in_if_condition_lifetime_extended() {
 
 bool match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match [? let b, 101])) {
+  if ((Lifetime(&flag, n) match case [? let b, 101])) {
     return flag;
   } else if (n == 202) {
     return flag;
@@ -373,7 +372,7 @@ int match_in_while_condition() {
   auto next = [&]() -> int* {
     return i < 4 ? &i : nullptr;
   };
-  while (next() match ? let v) {
+  while (next() match case ? let v) {
     ++v;
   }
   return i;
@@ -418,19 +417,19 @@ namespace std {
 
 int variant_alternative_pattern(const std::variant<int, double, float> &var) {
   return var match {
-    int: 0 => 0;
-    int: 1 => 1;
-    double: let y => (int)y + 4;
-    _ => -1;
+    case int: 0 => 0;
+    case int: 1 => 1;
+    case double: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
 int variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    int: 0 => 0;
-    int: 1 => 1;
-    double: let y => (int)y + 4;
-    _ => -1;
+    case int: 0 => 0;
+    case int: 1 => 1;
+    case double: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
@@ -440,14 +439,14 @@ int classify(const float&) { return 30; }
 
 int auto_alternative_pattern(const std::variant<int, double, float>& var) {
   return var match {
-    auto: let value => classify(value);
+    case auto: let value => classify(value);
   };
 }
 
 template<class T>
 int dependent_auto_alternative_pattern(const T& var) {
   return var match {
-    auto: let value => classify(value);
+    case auto: let value => classify(value);
   };
 }
 
@@ -479,10 +478,11 @@ int match_stmt_action(int limit) {
   int r = 0;
   for (int i = limit; i >= 0; i--) {
     r += i match {
-      let x if (x < 5) => 1;
-      5 => continue;
-      6 => break;
-      7 => return 99;
+      case let x if (x < 5) => 1;
+      case 5 => continue;
+      case 6 => break;
+      case 7 => return 99;
+      case _ => 0;
     };
   }
   return r;
@@ -496,10 +496,10 @@ void test_match_stmt_action() {
 
 int try_cast_alternative_pattern(const std::any& a) {
   return a match {
-    int: 0 => 0;
-    int: 1 => 1;
-    double: let y => (int)y + 4;
-    _ => -1;
+    case int: 0 => 0;
+    case int: 1 => 1;
+    case double: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
@@ -513,14 +513,14 @@ void test_try_cast_alternative_pattern() {
 }
 
 void test_void_returning_match() {
-  0 match { _ => []() {}(); };
+  0 match { case _ => []() {}(); };
 }
 
 int throw_action(int x) {
   return x match {
-    0 => 0;
-    1 => 1;
-    _ => throw 101;
+    case 0 => 0;
+    case 1 => 1;
+    case _ => throw 101;
   };
 }
 
@@ -537,9 +537,9 @@ void test_throw_action() {
 template <int... Is, int N>
 int pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
   return p match {
-    [0, Is...] => 0;
-    [Is..., 0] => 1;
-    _ => -1;
+    case [0, Is...] => 0;
+    case [Is..., 0] => 1;
+    case _ => -1;
   };
 }
 

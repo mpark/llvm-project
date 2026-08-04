@@ -11,7 +11,7 @@ struct Lifetime {
 // CHECK-LABEL: _Z6extendi
 bool extend(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match [? let b, 101]) {
+  if (Lifetime(&flag, n) match case [? let b, 101]) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -27,7 +27,7 @@ bool extend(int n) {
 // CHECK-LABEL: _Z13do_not_extendi
 bool do_not_extend(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match [? let b, 101])) {
+  if ((Lifetime(&flag, n) match case [? let b, 101])) {
     // CHECK: match.decomp.end
     // CHECK: %[[RES:.*]] = load i1, ptr %{{.*}}, align 8
     // CHECK: call void @_ZN8LifetimeD1Ev
