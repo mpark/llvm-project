@@ -5,10 +5,11 @@ int match_stmt_action(int limit) {
   int r = 0;
   for (int i = limit; i >= 0; i--) {
     r += i match {
-      let x if (x < 5) => 1;
-      5 => continue;
-      6 => break;
-      7 => return 99;
+      case let x if (x < 5) => 1;
+      case 5 => continue;
+      case 6 => break;
+      case 7 => return 99;
+      case _ => 0;
     };
   }
   return r;

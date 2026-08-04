@@ -3,91 +3,91 @@
 void test_decltypes() {
   constexpr int x = 0;
   constexpr int y = 0;
-  static_assert(__is_same(decltype(0 match _), bool));
-  static_assert(__is_same(decltype(x match 0), bool));
-  static_assert(__is_same(decltype(x match y), bool));
-  static_assert(__is_same(decltype(&x match ? _), bool));
-  static_assert(__is_same(decltype(&x match ? 0), bool));
+  static_assert(__is_same(decltype(0 match case _), bool));
+  static_assert(__is_same(decltype(x match case 0), bool));
+  static_assert(__is_same(decltype(x match case y), bool));
+  static_assert(__is_same(decltype(&x match case ? _), bool));
+  static_assert(__is_same(decltype(&x match case ? 0), bool));
 }
 
-static_assert(0 match _);
-static_assert(0 match 0);
-static_assert(!(0 match 1));
+static_assert(0 match case _);
+static_assert(0 match case 0);
+static_assert(!(0 match case 1));
 
 constexpr int x = 0;
-static_assert(x match _);
-static_assert(x match 0);
+static_assert(x match case _);
+static_assert(x match case 0);
 
 constexpr int y = 1;
-static_assert(!(0 match y));
-static_assert(!(x match y));
+static_assert(!(0 match case y));
+static_assert(!(x match case y));
 
-static_assert([]() { return 0 match let _; }());
-static_assert([]() { return 0 match let x; }());
-static_assert([]() { int x = 0; return &x match ? let x; }());
+static_assert([]() { return 0 match case let _; }());
+static_assert([]() { return 0 match case let x; }());
+static_assert([]() { int x = 0; return &x match case ? let x; }());
 
-static_assert([](int x) { return x match _; }(0));
-static_assert([](auto x) -> bool { return x match _; }(0));
-static_assert([](int* p) { return p match _; }(nullptr));
-static_assert([](auto* p) -> bool { return p match _; }((int*)nullptr));
+static_assert([](int x) { return x match case _; }(0));
+static_assert([](auto x) -> bool { return x match case _; }(0));
+static_assert([](int* p) { return p match case _; }(nullptr));
+static_assert([](auto* p) -> bool { return p match case _; }((int*)nullptr));
 
-static_assert([](int x) { return x match 0; }(0));
-static_assert([](auto x) -> bool { return x match 0; }(0));
-static_assert(![](int y) { return 0 match y; }(1));
-static_assert(![](auto y) -> bool { return 0 match y; }(1));
-static_assert([](int x, int y) { return x match y; }(0, 0));
-static_assert([](auto x, auto y) -> bool { return x match y; }(0, 0));
-static_assert(![](int x, int y) { return x match y; }(0, 1));
-static_assert(![](auto x, auto y) -> bool { return x match y; }(0, 1));
+static_assert([](int x) { return x match case 0; }(0));
+static_assert([](auto x) -> bool { return x match case 0; }(0));
+static_assert(![](int y) { return 0 match case y; }(1));
+static_assert(![](auto y) -> bool { return 0 match case y; }(1));
+static_assert([](int x, int y) { return x match case y; }(0, 0));
+static_assert([](auto x, auto y) -> bool { return x match case y; }(0, 0));
+static_assert(![](int x, int y) { return x match case y; }(0, 1));
+static_assert(![](auto x, auto y) -> bool { return x match case y; }(0, 1));
 
-static_assert([](int x) { return &x match ? _; }(0));
-static_assert([](auto x) { return &x match ? _; }(0));
-static_assert([](int x) { return &x match ? 0; }(0));
-static_assert([](auto x) { return &x match ? 0; }(0));
-static_assert(![](int x) { return &x match ? 1; }(0));
-static_assert(![](auto x) { return &x match ? 1; }(0));
-static_assert([](int x, int y) { return &x match ? y; }(0, 0));
-static_assert([](auto x, auto y) { return &x match ? y; }(0, 0));
-static_assert(![](int x, int y) { return &x match ? y; }(0, 1));
-static_assert(![](auto x, auto y) { return &x match ? y; }(0, 1));
-static_assert(![](int *p) { return p match ? _; }(nullptr));
-static_assert(![](auto *p) { return p match ? _; }((int*)nullptr));
-static_assert(![](int *p) { return p match ? 0; }(nullptr));
-static_assert(![](auto *p) { return p match ? 0; }((int*)nullptr));
+static_assert([](int x) { return &x match case ? _; }(0));
+static_assert([](auto x) { return &x match case ? _; }(0));
+static_assert([](int x) { return &x match case ? 0; }(0));
+static_assert([](auto x) { return &x match case ? 0; }(0));
+static_assert(![](int x) { return &x match case ? 1; }(0));
+static_assert(![](auto x) { return &x match case ? 1; }(0));
+static_assert([](int x, int y) { return &x match case ? y; }(0, 0));
+static_assert([](auto x, auto y) { return &x match case ? y; }(0, 0));
+static_assert(![](int x, int y) { return &x match case ? y; }(0, 1));
+static_assert(![](auto x, auto y) { return &x match case ? y; }(0, 1));
+static_assert(![](int *p) { return p match case ? _; }(nullptr));
+static_assert(![](auto *p) { return p match case ? _; }((int*)nullptr));
+static_assert(![](int *p) { return p match case ? 0; }(nullptr));
+static_assert(![](auto *p) { return p match case ? 0; }((int*)nullptr));
 
-static_assert([](int x) { int *p = &x; return &p match ?? _; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match ?? _; }(0));
-static_assert([](int x) { int *p = &x; return &p match ?? 0; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match ?? 0; }(0));
-static_assert(![](int x) { int *p = &x; return &p match ?? 1; }(0));
-static_assert(![](auto x) { auto *p = &x; return &p match ?? 1; }(0));
+static_assert([](int x) { int *p = &x; return &p match case ?? _; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match case ?? _; }(0));
+static_assert([](int x) { int *p = &x; return &p match case ?? 0; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match case ?? 0; }(0));
+static_assert(![](int x) { int *p = &x; return &p match case ?? 1; }(0));
+static_assert(![](auto x) { auto *p = &x; return &p match case ?? 1; }(0));
 
-static_assert([](int x) { int *p = &x; return &p match ? _; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match ? _; }(0));
-static_assert([](int x) { int *p = &x; return &p match ?? 0; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match ?? 0; }(0));
-static_assert(![](int x) { int *p = &x; return &p match ?? 1; }(0));
-static_assert(![](auto x) { auto *p = &x; return &p match ?? 1; }(0));
-static_assert(![](int **pp) { return pp match ? _; }(nullptr));
-static_assert(![](auto **pp) { return pp match ? _; }((int**)nullptr));
-static_assert(![](int **pp) { return pp match ?? _; }(nullptr));
-static_assert(![](auto **pp) { return pp match ?? _; }((int**)nullptr));
-static_assert(![](int **pp) { return pp match ?? 0; }(nullptr));
-static_assert(![](auto **pp) { return pp match ?? 0; }((int**)nullptr));
+static_assert([](int x) { int *p = &x; return &p match case ? _; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match case ? _; }(0));
+static_assert([](int x) { int *p = &x; return &p match case ?? 0; }(0));
+static_assert([](auto x) { auto *p = &x; return &p match case ?? 0; }(0));
+static_assert(![](int x) { int *p = &x; return &p match case ?? 1; }(0));
+static_assert(![](auto x) { auto *p = &x; return &p match case ?? 1; }(0));
+static_assert(![](int **pp) { return pp match case ? _; }(nullptr));
+static_assert(![](auto **pp) { return pp match case ? _; }((int**)nullptr));
+static_assert(![](int **pp) { return pp match case ?? _; }(nullptr));
+static_assert(![](auto **pp) { return pp match case ?? _; }((int**)nullptr));
+static_assert(![](int **pp) { return pp match case ?? 0; }(nullptr));
+static_assert(![](auto **pp) { return pp match case ?? 0; }((int**)nullptr));
 
-constexpr bool test_dependent_match_0(auto x, auto y) { return x match y; }
+constexpr bool test_dependent_match_0(auto x, auto y) { return x match case y; }
 
 static_assert(test_dependent_match_0(0, 0));
 static_assert(test_dependent_match_0(0.0, 0));
 static_assert(!test_dependent_match_0(1, 0));
 
-constexpr bool test_dependent_match_1(auto x) { return x match 0; }
+constexpr bool test_dependent_match_1(auto x) { return x match case 0; }
 
 static_assert(test_dependent_match_1(0));
 static_assert(test_dependent_match_1(0.0));
 static_assert(!test_dependent_match_1(1));
 
-constexpr bool test_dependent_match_2(auto y) { return 0 match y; }
+constexpr bool test_dependent_match_2(auto y) { return 0 match case y; }
 
 static_assert(test_dependent_match_2(0));
 static_assert(test_dependent_match_2(0.0));
@@ -95,9 +95,9 @@ static_assert(!test_dependent_match_2(1));
 
 constexpr auto test(char c) {
   return c match {
-    'a' => 1;
-    'b' => 2;
-    let x => int(x);
+    case 'a' => 1;
+    case 'b' => 2;
+    case let x => int(x);
   };
 }
 
@@ -108,9 +108,9 @@ static_assert(test('c') == 99);
 template <auto v>
 constexpr auto test_dependent(auto c) {
   return c match {
-    'a' => 1;
-    v => 2;
-    let x => int(x);
+    case 'a' => 1;
+    case v => 2;
+    case let x => int(x);
   };
 }
 
@@ -120,10 +120,10 @@ static_assert(test_dependent<'b'>('c') == 99);
 
 constexpr auto test_decomposition_pattern(const int (&xs)[2]) {
   return xs match {
-    [0, 0] => -1;
-    [let x, 0] => x * 2;
-    [0, let y] => y * 4;
-    let [x, y] => x * y;
+    case [0, 0] => -1;
+    case [let x, 0] => x * 2;
+    case [0, let y] => y * 4;
+    case let [x, y] => x * y;
   };
 }
 
@@ -141,8 +141,8 @@ constexpr int test_vector_decomposition_pattern() {
   using FourUInts = unsigned __attribute__((__vector_size__(16)));
   FourUInts four_uints = {1, 2, 3, 4};
   return four_uints match {
-    [1, 2, 3, 4] => 10;
-    _ => 20;
+    case [1, 2, 3, 4] => 10;
+    case _ => 20;
   };
 }
 
@@ -163,10 +163,10 @@ struct Result {
 
 constexpr auto test_nested_decomposition_pattern(const S& s) {
   return s match -> Result {
-    [let c, [0, 0]] => {c, -1};
-    [let c, [let x, 0]] => {c, x * 2};
-    [let c, [0, let y]] => {c, y * 4};
-    let [c, [x, y]] => {c, x * y};
+    case [let c, [0, 0]] => {c, -1};
+    case [let c, [let x, 0]] => {c, x * 2};
+    case [let c, [0, let y]] => {c, y * 4};
+    case let [c, [x, y]] => {c, x * y};
   };
 }
 
@@ -190,10 +190,10 @@ constexpr bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
     State s = states[i - 1];
     int n = elems[i - 1];
     result &= (int[2]){i % 3, i % 5} match {
-      [0, 0] => s == FizzBuzz && n == 0;
-      [0, let y] => s == Fizz && n == y;
-      [let x, 0] => s == Buzz && n == x;
-      let [x, y] => s == N && n == x + y;
+      case [0, 0] => s == FizzBuzz && n == 0;
+      case [0, let y] => s == Fizz && n == y;
+      case [let x, 0] => s == Buzz && n == x;
+      case let [x, y] => s == N && n == x + y;
     };
   }
   return result;
@@ -211,9 +211,10 @@ static_assert(!fizzbuzz(
 
 constexpr auto test_trailing_return_type(int x) {
   return x match -> int {
-    0 => 0;
-    1 => 3.0;
-    2 => 'c';
+    case 0 => 0;
+    case 1 => 3.0;
+    case 2 => 'c';
+    case _ => 0;
   };
 }
 
@@ -235,21 +236,21 @@ struct DerivedB : Base {
 
 constexpr auto test_alternative_pattern_const(const Base &base) {
   return base match {
-    DerivedA: let a => ({
+    case DerivedA: let a => ({
       static_assert(__is_same(decltype(a), const DerivedA));
       static_assert(__is_same(decltype((a)), const DerivedA &));
       static_assert(__is_same(decltype(a.x), int));
       static_assert(__is_same(decltype((a.x)), const int&));
       a.x * 2;
     });
-    const DerivedB: let b => ({
+    case const DerivedB: let b => ({
       static_assert(__is_same(decltype(b), const DerivedB));
       static_assert(__is_same(decltype((b)), const DerivedB &));
       static_assert(__is_same(decltype(b.c), char));
       static_assert(__is_same(decltype((b.c)), const char&));
       (int)b.c;
     });
-    _ => 0;
+    case _ => 0;
   };
 }
 
@@ -259,17 +260,17 @@ static_assert(test_alternative_pattern_const(DerivedB{'a'}) == 97);
 constexpr auto test_alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
-    DerivedA: [let x] => ({
+    case DerivedA: [let x] => ({
       static_assert(__is_same(decltype(x), int));
       static_assert(__is_same(decltype((x)), int&));
       x * 2;
     });
-    DerivedB: [let c] => ({
+    case DerivedB: [let c] => ({
       static_assert(__is_same(decltype(c), char));
       static_assert(__is_same(decltype((c)), char&));
       (int)c;
     });
-    _ => 0;
+    case _ => 0;
   };
 }
 
@@ -279,8 +280,8 @@ static_assert(test_alternative_pattern_non_const(DerivedA{202}) == 404);
 constexpr auto test_bitfields(int x) {
   struct S { int i : 6; } s{x};
   return s.i match {
-    8 => 0;
-    let n => n;
+    case 8 => 0;
+    case let n => n;
   };
 }
 
@@ -291,7 +292,7 @@ static_assert(test_bitfields(4) == 4);
 constexpr int test_bitfield_decomposition(unsigned x, unsigned y) {
   struct S { unsigned opc : 16, imm : 16; } s{x, y};
   return s match {
-    [let opc, let imm] => int(opc + imm);
+    case [let opc, let imm] => int(opc + imm);
   };
 }
 
@@ -341,11 +342,10 @@ namespace std {
 
 constexpr int test_tuple_like_decomposition_pattern(const Pair &tup) {
   return tup match {
-    [0, 0] => -1;
-    [0, let y] => y * 2;
-    [let x, 0] => x * 4;
-    let [x, y] => x * y;
-    _ => 0;
+    case [0, 0] => -1;
+    case [0, let y] => y * 2;
+    case [let x, 0] => x * 4;
+    case let [x, y] => x * y;
   };
 }
 
@@ -356,11 +356,11 @@ static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
 
 constexpr int test_tuple_like_decomposition_pattern_dependent(const auto &tup) {
   return tup match {
-    [0, 0] => -1;
-    [0, let y] => y * 2;
-    [let x, 0] => x * 4;
-    let [x, y] => x * y;
-    _ => 0;
+    case [0, 0] => -1;
+    case [0, let y] => y * 2;
+    case [let x, 0] => x * 4;
+    case let [x, y] => x * y;
+    case _ => 0;
   };
 }
 
@@ -370,7 +370,7 @@ static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 0}) == 8);
 static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 3}) == 6);
 
 constexpr bool test_match_test_with_guard(const int (&xs)[2]) {
-  return xs match let [x, y] if (x == y);
+  return xs match case let [x, y] if (x == y);
 }
 
 static_assert(test_match_test_with_guard({0, 0}));
@@ -380,10 +380,10 @@ static_assert(!test_match_test_with_guard({2, 3}));
 
 constexpr auto test_match_pattern_guards(const Pair& p) {
   return p match {
-    let [x, y] if (x < 0 && y < 0) => 0;
-    let [x, y] if (x < 0) => y;
-    let [x, y] if (y < 0) => x;
-    let [x, y] => x + y;
+    case let [x, y] if (x < 0 && y < 0) => 0;
+    case let [x, y] if (x < 0) => y;
+    case let [x, y] if (y < 0) => x;
+    case let [x, y] => x + y;
   };
 }
 
@@ -394,7 +394,7 @@ static_assert(test_match_pattern_guards({3, 0}) == 3);
 static_assert(test_match_pattern_guards({4, 7}) == 11);
 
 constexpr int test_match_in_if_condition(const int *p) {
-  if (p match ? let v) {
+  if (p match case ? let v) {
     return v;
   }
   return -1;
@@ -413,7 +413,7 @@ struct Lifetime {
 
 constexpr bool test_match_in_if_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match [? let b, 101]) {
+  if (Lifetime(&flag, n) match case [? let b, 101]) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -427,7 +427,7 @@ static_assert(!test_match_in_if_condition_lifetime_extended(303));
 
 constexpr bool test_match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match [? let b, 101])) {
+  if ((Lifetime(&flag, n) match case [? let b, 101])) {
     return flag;
   } else if (n == 202) {
     return flag;
@@ -444,7 +444,7 @@ constexpr int test_match_in_while_condition() {
   auto next = [&]() -> int* {
     return i < 4 ? &i : nullptr;
   };
-  while (next() match ? let v) {
+  while (next() match case ? let v) {
     ++v;
   }
   return i;
@@ -454,8 +454,8 @@ static_assert(test_match_in_while_condition() == 4);
 
 constexpr int test_match_guard_init_statement(const Pair &p) {
   return p match {
-    let [x, y] if (int sum = x + y; sum < 0) => sum;
-    let [x, y] => x + y;
+    case let [x, y] if (int sum = x + y; sum < 0) => sum;
+    case let [x, y] => x + y;
   };
 }
 
@@ -463,7 +463,7 @@ static_assert(test_match_guard_init_statement({-1, -2}) == -3);
 static_assert(test_match_guard_init_statement({4, 7}) == 11);
 
 constexpr int test_match_test_guard_init_statement(int value) {
-  if (value match let copy if (int doubled = copy * 2; doubled == 4))
+  if (value match case let copy if (int doubled = copy * 2; doubled == 4))
     return doubled;
   return -1;
 }
@@ -481,8 +481,8 @@ struct GuardInitLifetime {
 constexpr int test_match_guard_init_lifetime(bool take_first) {
   int live = 0;
   int result = take_first match {
-    _ if (GuardInitLifetime guard(live); take_first) => live;
-    _ => live;
+    case _ if (GuardInitLifetime guard(live); take_first) => live;
+    case _ => live;
   };
   return result * 10 + live;
 }
@@ -545,10 +545,10 @@ namespace std {
 
 constexpr int test_variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    int: 0 => 0;
-    int: 1 => 1;
-    double: let y => (int)y + 4;
-    _ => -1;
+    case int: 0 => 0;
+    case int: 1 => 1;
+    case double: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
@@ -562,10 +562,10 @@ static_assert(test_variant_like_alternative_pattern(0.f) == -1);
 template <typename T, typename U>
 constexpr int test_variant_like_alternative_pattern_dependent(const auto &var) {
   return var match {
-    T: 0 => 0;
-    T: 1 => 1;
-    U: let y => (int)y + 4;
-    _ => -1;
+    case T: 0 => 0;
+    case T: 1 => 1;
+    case U: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
@@ -597,10 +597,10 @@ namespace N1 {
 
 constexpr int test_try_cast_alternative_pattern(const N1::S& s) {
   return s match -> int {
-    int: let x => x;
-    double: let d => d;
-    short: let s => s;
-    _ => -1;
+    case int: let x => x;
+    case double: let d => d;
+    case short: let s => s;
+    case _ => -1;
   };
 }
 
@@ -641,10 +641,10 @@ struct alternative_code<float> {
 
 constexpr int test_variant_like_alternative_pattern_with_type_constraint(const Variant &var) {
   return var match {
-    integral: 0 => 0;
-    same<int>: 1 => 1;
-    double: let y => (int)y + 4;
-    _ => -1;
+    case integral: 0 => 0;
+    case same<int>: 1 => 1;
+    case double: let y => (int)y + 4;
+    case _ => -1;
   };
 }
 
@@ -657,7 +657,7 @@ static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) ==
 
 constexpr int test_concept_selects_every_matching_alternative(const Variant &var) {
   return var match {
-    arithmetic: let value =>
+    case arithmetic: let value =>
         alternative_code<decltype(value)>::value * 10 +
         static_cast<int>(value);
   };
@@ -669,7 +669,7 @@ static_assert(test_concept_selects_every_matching_alternative(3.0f) == 33);
 
 constexpr int test_auto_selects_every_alternative(const Variant &var) {
   return var match {
-    auto: let value => alternative_code<decltype(value)>::value;
+    case auto: let value => alternative_code<decltype(value)>::value;
   };
 }
 
@@ -680,9 +680,9 @@ static_assert(test_auto_selects_every_alternative(3.0f) == 3);
 template <int... Is, int N>
 constexpr int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
   return p match {
-    [0, Is...] => 0;
-    [Is..., 0] => 1;
-    _ => -1;
+    case [0, Is...] => 0;
+    case [Is..., 0] => 1;
+    case _ => -1;
   };
 }
 
@@ -693,8 +693,8 @@ static_assert(test_pack_expansion_in_decomposition_pattern<1, 1>({0, 0, 0}) == -
 constexpr int match_subject_is_evaluated_once() {
   int evaluations = 0;
   return (++evaluations, 5) match {
-    let value if (value < 0) => 0;
-    let value => evaluations;
+    case let value if (value < 0) => 0;
+    case let value => evaluations;
   };
 }
 
@@ -707,8 +707,8 @@ struct ConstantMatchSubject {
 constexpr bool constant_prvalue_match_subject_has_one_identity() {
   const ConstantMatchSubject *saved = nullptr;
   return ConstantMatchSubject{42} match {
-    let value if ((saved = &value, false)) => false;
-    let value => &value == saved;
+    case let value if ((saved = &value, false)) => false;
+    case let value => &value == saved;
   };
 }
 
@@ -747,10 +747,10 @@ constexpr int structural_arms_share_match_projections() {
   int projections[2] = {};
   SharedMatchProjection source{1, 2, projections};
   int result = source match {
-    [0, 0] => 0;
-    [let x, 0] => x;
-    [0, let y] => y;
-    [let x, let y] => x + y;
+    case [0, 0] => 0;
+    case [let x, 0] => x;
+    case [0, let y] => y;
+    case [let x, let y] => x + y;
   };
   return projections[0] * 100 + projections[1] * 10 + result;
 }
@@ -759,10 +759,10 @@ static_assert(structural_arms_share_match_projections() == 113);
 
 constexpr int dependent_structural_arms_share_match_projections(auto &source) {
   return source match {
-    [0, 0] => 0;
-    [1, 0] => 1;
-    [0, 2] => 2;
-    [_, _] => 3;
+    case [0, 0] => 0;
+    case [1, 0] => 1;
+    case [0, 2] => 2;
+    case [_, _] => 3;
   };
 }
 
@@ -779,8 +779,8 @@ constexpr bool reference_match_result_selects_referent(bool first) {
   int x = 1;
   int y = 2;
   int &selected = first match -> int & {
-    true => static_cast<int &>(x);
-    false => static_cast<int &>(y);
+    case true => static_cast<int &>(x);
+    case false => static_cast<int &>(y);
   };
   selected = 3;
   return x == (first ? 3 : 1) && y == (first ? 2 : 3);

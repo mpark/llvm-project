@@ -3,9 +3,9 @@
 
 auto char_pattern(char c) {
   return c match {
-    'a' => 1;
-    'b' => 2;
-    let x => int(x);
+    case 'a' => 1;
+    case 'b' => 2;
+    case let x => int(x);
   };
 }
 
@@ -59,7 +59,7 @@ auto char_pattern(char c) {
 // CHECK: }
 
 void test_void_returning_match() {
-  0 match { _ => []() {}(); };
+  0 match { case _ => []() {}(); };
 }
 
 // CHECK-LABEL: _Z25test_void_returning_matchv
@@ -82,15 +82,15 @@ struct GuardInit {
 // CHECK: ret i32
 int guard_init_statement(int value) {
   return value match {
-    let copy if (GuardInit init; init.accept()) => copy;
-    _ => 0;
+    case let copy if (GuardInit init; init.accept()) => copy;
+    case _ => 0;
   };
 }
 
 int &select_lvalue_reference(bool first, int &x, int &y) {
   return first match -> int & {
-    true => x;
-    false => y;
+    case true => x;
+    case false => y;
   };
 }
 
@@ -104,8 +104,8 @@ int &select_lvalue_reference(bool first, int &x, int &y) {
 
 int &&select_rvalue_reference(bool first, int &&x, int &&y) {
   return first match -> int && {
-    true => static_cast<int &&>(x);
-    false => static_cast<int &&>(y);
+    case true => static_cast<int &&>(x);
+    case false => static_cast<int &&>(y);
   };
 }
 
@@ -119,8 +119,8 @@ int &&select_rvalue_reference(bool first, int &&x, int &&y) {
 template <class T>
 T &select_reference_template(bool first, T &x, T &y) {
   return first match -> decltype(auto) {
-    true => (x);
-    false => (y);
+    case true => (x);
+    case false => (y);
   };
 }
 
@@ -136,8 +136,8 @@ template int &select_reference_template(bool, int &, int &);
 _Complex double select_complex(bool first, _Complex double x,
                                _Complex double y) {
   return first match -> _Complex double {
-    true => x;
-    false => y;
+    case true => x;
+    case false => y;
   };
 }
 

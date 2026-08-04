@@ -3970,6 +3970,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                         IsConstexpr, OrigResultType, RetTy,
                                         Cases, Braces, HasDeferredCases);
   } else {
+    if (ExpectAndConsume(tok::kw_case))
+      return ExprError();
     VarDecl *HoldingVar = nullptr;
     if (InjectedDecls && LHS.isUsable()) {
       LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
@@ -4038,6 +4040,9 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
 bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, MatchCase &Case,
                             Sema::MatchProjectionCache &ProjectionCache) {
+  if (ExpectAndConsume(tok::kw_case))
+    return true;
+
   ParseScope MatchCaseScope(this, Scope::DeclScope);
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();

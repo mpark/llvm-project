@@ -21,26 +21,26 @@
 
 int matching_integrals(int x) {
   return x match {
-    0 => 0;
-    1 => 1;
-    _ => 2;
+    case 0 => 0;
+    case 1 => 1;
+    case _ => 2;
   };
 }
 
 int matching_strings(const std::string& s) {
   return s match {
-    "foo" => 0;
-    "bar" => 1;
-    _ => 2;
+    case "foo" => 0;
+    case "bar" => 1;
+    case _ => 2;
   };
 }
 
 int matching_tuples(std::pair<int, int> p) {
   return p match {
-    [0, 0] => 0;
-    [0, let y] => 10 + y;
-    [let x, 0] => 20 + x;
-    let [x, y] => 30 + x + y;
+    case [0, 0] => 0;
+    case [0, let y] => 10 + y;
+    case [let x, 0] => 20 + x;
+    case let [x, y] => 30 + x + y;
   };
 }
 
@@ -48,17 +48,17 @@ using Number = std::variant<std::int32_t, std::int64_t, float, double>;
 
 int matching_variants(Number v) {
   return v match {
-    std::int32_t: let i32 => 100 + i32;
-    std::int64_t: let i64 => 200 + static_cast<int>(i64);
-    float: let f => 300 + static_cast<int>(f);
-    double: let d => 400 + static_cast<int>(d);
+    case std::int32_t: let i32 => 100 + i32;
+    case std::int64_t: let i64 => 200 + static_cast<int>(i64);
+    case float: let f => 300 + static_cast<int>(f);
+    case double: let d => 400 + static_cast<int>(d);
   };
 }
 
 int matching_variant_concepts(Number v) {
   return v match {
-    std::integral: let i => 500 + static_cast<int>(i);
-    std::floating_point: let f => 600 + static_cast<int>(f);
+    case std::integral: let i => 500 + static_cast<int>(i);
+    case std::floating_point: let f => 600 + static_cast<int>(f);
   };
 }
 
@@ -76,8 +76,8 @@ int get_area(const Shape& shape) {
   // R5 omits the trailing return type, but its handlers deduce different
   // types. Its specified -> auto deduction therefore requires -> int here.
   return shape match -> int {
-    Circle: let [r] => 3.14 * r * r;
-    Rectangle: let [w, h] => w * h;
+    case Circle: let [r] => 3.14 * r * r;
+    case Rectangle: let [w, h] => w * h;
   };
 }
 
@@ -105,11 +105,11 @@ using Command = std::variant<Quit, Move, Write, ChangeColor>;
 
 int matching_nested_structures(Command cmd) {
   return cmd match {
-    Quit: _ => 0;
-    Move: let [x, y] => 100 + x + y;
-    Write: let [text] => 200 + static_cast<int>(text.size());
-    ChangeColor: [Rgb: let [r, g, b]] => 300 + r + g + b;
-    ChangeColor: [Hsv: let [h, s, v]] => 400 + h + s + v;
+    case Quit: _ => 0;
+    case Move: let [x, y] => 100 + x + y;
+    case Write: let [text] => 200 + static_cast<int>(text.size());
+    case ChangeColor: [Rgb: let [r, g, b]] => 300 + r + g + b;
+    case ChangeColor: [Hsv: let [h, s, v]] => 400 + h + s + v;
   };
 }
 
