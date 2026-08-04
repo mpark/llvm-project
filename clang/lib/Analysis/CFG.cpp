@@ -592,6 +592,7 @@ private:
   CFGBlock *VisitCompoundStmt(CompoundStmt *C, bool ExternallyDestructed);
   CFGBlock *VisitConditionalOperator(AbstractConditionalOperator *C,
                                      AddStmtChoice asc);
+  CFGBlock *VisitMatchSelectExpr(MatchSelectExpr *E, AddStmtChoice asc);
   CFGBlock *VisitContinueStmt(ContinueStmt *C);
   CFGBlock *VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E,
                                       AddStmtChoice asc);
@@ -2394,6 +2395,9 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
     case Stmt::ConditionalOperatorClass:
       return VisitConditionalOperator(cast<ConditionalOperator>(S), asc);
 
+    case Stmt::MatchSelectExprClass:
+      return VisitMatchSelectExpr(cast<MatchSelectExpr>(S), asc);
+
     case Stmt::ContinueStmtClass:
       return VisitContinueStmt(cast<ContinueStmt>(S));
 
@@ -3086,6 +3090,52 @@ CFGBlock *CFGBuilder::VisitConditionalOperator(AbstractConditionalOperator *C,
   }
 
   return addStmt(condExpr);
+}
+
+CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
+                                           AddStmtChoice asc) {
+  CFGBlock *ConfluenceBlock = Block ? Block : createBlock();
+  if (!E->getType()->isVoidType() && asc.alwaysAdd(*this, E))
+    appendStmt(ConfluenceBlock, E);
+
+  auto IsUnguardedWildcard = [](const MatchCaseInstantiation &Case) {
+    return Case.Pattern->getMatchPatternClass() ==
+               MatchPattern::WildcardPatternClass &&
+           !Case.Guard.first && !Case.Guard.second;
+  };
+
+  auto Cases = E->getCaseInstantiations();
+  auto LastCase = llvm::find_if(Cases, IsUnguardedWildcard);
+  if (LastCase != Cases.end())
+    Cases = Cases.take_front(std::distance(Cases.begin(), LastCase) + 1);
+
+  CFGBlock *NextCaseBlock = ConfluenceBlock;
+  for (const MatchCaseInstantiation &Case : llvm::reverse(Cases)) {
+    Succ = ConfluenceBlock;
+    Block = nullptr;
+    CFGBlock *HandlerBlock = addStmt(Case.Handler);
+    if (!HandlerBlock)
+      HandlerBlock = ConfluenceBlock;
+    if (badCFG)
+      return nullptr;
+
+    Block = createBlock(false);
+    Block->setTerminator(E);
+    addSuccessor(Block, HandlerBlock);
+
+    if (!IsUnguardedWildcard(Case))
+      addSuccessor(Block, NextCaseBlock);
+
+    if (Expr *Guard = Case.Guard.second)
+      addStmt(Guard);
+    NextCaseBlock = Block;
+  }
+
+  Succ = NextCaseBlock;
+  Block = nullptr;
+  if (VarDecl *HoldingVar = E->getHoldingVar())
+    return addStmt(HoldingVar->getInit());
+  return addStmt(E->getSubject());
 }
 
 CFGBlock *CFGBuilder::VisitDeclStmt(DeclStmt *DS) {
