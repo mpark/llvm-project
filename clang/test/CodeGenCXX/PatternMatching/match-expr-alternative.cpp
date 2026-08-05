@@ -150,7 +150,7 @@ int variant_like_alternative_pattern(const Variant &var) {
 int reuse_variant_projection(const Variant &var) {
   return var match {
     case int: 0 => 0;
-    case int: let x => x;
+    case int: auto x => x;
     case _ => -1;
   };
 }
