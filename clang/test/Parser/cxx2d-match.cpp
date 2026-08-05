@@ -178,19 +178,19 @@ void test_expression_pattern(int x, int y) {
 
 void test_binding_pattern(int i) {
   i match { case let => 0; case _ => 0; }; // expected-error {{expected identifier or '['}}
-  i match case let x;
+  i match case auto&& x;
   x; // expected-error {{use of undeclared identifier 'x'}}
-  i match { case let x => 0; };
-  i match { case let x => x; };
-  i match { case let [x] => 0; case _ => 0; }; // expected-error {{cannot bind non-class, non-array type 'int'}}
+  i match { case auto&& x => 0; };
+  i match { case auto&& x => x; };
+  i match { case auto&& [x] => 0; case _ => 0; }; // expected-error {{cannot bind non-class, non-array type 'int'}}
   int i1[1] = {0};
-  i1 match { case let [x] => 0; };
-  i1 match { case let [x] => x; };
+  i1 match { case auto&& [x] => 0; };
+  i1 match { case auto&& [x] => x; };
   int i2[2] = {0, 0};
-  i2 match { case let [x, y] => 0; };
-  i2 match { case let [x, y] => x + y; };
-  i2 match { case [let x, let y] => 0; };
-  i2 match { case [let x, let y] =>  x + y; };
+  i2 match { case auto&& [x, y] => 0; };
+  i2 match { case auto&& [x, y] => x + y; };
+  i2 match { case [auto&& x, auto&& y] => 0; };
+  i2 match { case [auto&& x, auto&& y] =>  x + y; };
 }
 
 template <class T>
@@ -218,7 +218,7 @@ void test_alternative_pattern() {
   Base &b = d;
   b match case Derived: _;
   b match {
-    case Derived: let x => 0;
+    case Derived: auto&& x => 0;
     case _ => 0;
   };
 }
@@ -323,13 +323,13 @@ void test_trailing_return_type(int x) {
 }
 
 bool test_match_test_with_guard(const int (&xs)[2]) {
-  bool result = xs match case let [x, y] if (x == y);
+  bool result = xs match case auto&& [x, y] if (x == y);
   bool init_result =
-      xs match case let [x, y] if (int sum = x + y; sum == 0);
+      xs match case auto&& [x, y] if (int sum = x + y; sum == 0);
   x; // expected-error {{use of undeclared identifier 'x'}}
   y; // expected-error {{use of undeclared identifier 'y'}}
   sum; // expected-error {{use of undeclared identifier 'sum'}}
-  if (xs match case let [x, y] if (int sum = x + y; sum == 0)) {
+  if (xs match case auto&& [x, y] if (int sum = x + y; sum == 0)) {
     x;
     y;
     sum;
@@ -341,100 +341,100 @@ bool test_match_test_with_guard(const int (&xs)[2]) {
 
 int test_match_select_with_guards(const int (&p)[2]) {
   return p match {
-    case let [x, y] if (x < 0 && y < 0) => 0;
-    case let [x, y] if (x < 0) => y;
-    case let [x, y] if (bool b = y < 0) => [&] {
+    case auto&& [x, y] if (x < 0 && y < 0) => 0;
+    case auto&& [x, y] if (x < 0) => y;
+    case auto&& [x, y] if (bool b = y < 0) => [&] {
       y;
       b;
       return x;
     }();
-    case let [x, y] if (int sum = x + y; sum < 0) => sum;
-    case let [x, y] => x + y;
+    case auto&& [x, y] if (int sum = x + y; sum < 0) => sum;
+    case auto&& [x, y] => x + y;
   };
 }
 
 void test_match_in_condition(const int *p, const int (*q)[2]) {
-  p match case ? let v;
+  p match case ? auto&& v;
   v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case ? let v) v;
+  if (p match case ? auto&& v) v;
   else v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case ? let v) // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  if (p match case ? auto&& v) // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v'}}
   else
     int v;
-  if (p match case ? let v) {
+  if (p match case ? auto&& v) {
     v;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; p match case ? let v) {
+  if (int i = 0; p match case ? auto&& v) {
     i;
     v;
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (p match case ? let v) { // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+  if (p match case ? auto&& v) { // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v'}}
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case ? let v) { // expected-note {{previous definition is here}}
+      p match case ? auto&& v) { // expected-note {{previous definition is here}}
     int i; // expected-error {{redefinition of 'i'}}
-    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+    int v; // expected-error {{redefinition of 'v'}}
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case ? let v) { // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v' as different kind of symbol}}
+      p match case ? auto&& v) { // expected-note {{previous definition is here}}
+    int v; // expected-error {{redefinition of 'v'}}
   } else {
     int i; // expected-error {{redefinition of 'i'}}
     int v;
   }
-  if ((p match case ? let v)) {
+  if ((p match case ? auto&& v)) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; (p match case ? let v)) {
+  if (int i = 0; (p match case ? auto&& v)) {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (!(p match case ? let v)) {
+  if (!(p match case ? auto&& v)) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (q match case ? [0, let v] match case let w) {
+  if (q match case ? [0, auto&& v] match case auto&& w) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (p match case ? 0 match case let w) {
+  if (p match case ? 0 match case auto&& w) {
     w;
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (p match case ? (0 match case let w)) {
+  if (p match case ? (0 match case auto&& w)) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (q match case ? let [v, w]) {
+  if (q match case ? [auto&& v, auto&& w]) {
     v;
     w;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (q match case ? let [v, w] + 1) {
+  if (q match case ? [auto&& v, auto&& w] + 1) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
@@ -442,31 +442,31 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   auto next = []() -> int* { return nullptr; };
-  for (int i = 0; next() match case (? let elem); ++i) elem;
+  for (int i = 0; next() match case (? auto&& elem); ++i) elem;
   for (int i = 0;
-       next() match case (? let elem); // expected-note {{previous definition is here}}
+       next() match case (? auto&& elem); // expected-note {{previous definition is here}}
        ++i)
-    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
-  for (int i = 0; next() match case (? let elem); ++i) {
+    int elem; // expected-error {{redefinition of 'elem'}}
+  for (int i = 0; next() match case (? auto&& elem); ++i) {
     elem;
   }
   for (int i = 0;
-       next() match case (? let elem); // expected-note {{previous definition is here}}
+       next() match case (? auto&& elem); // expected-note {{previous definition is here}}
        ++i) {
-    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+    int elem; // expected-error {{redefinition of 'elem'}}
   }
-  while (next() match case (? let elem)) elem;
-  while (next() match case (? let elem)) // expected-note {{previous definition is here}}
-    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
-  while (next() match case (? let elem)) {
+  while (next() match case (? auto&& elem)) elem;
+  while (next() match case (? auto&& elem)) // expected-note {{previous definition is here}}
+    int elem; // expected-error {{redefinition of 'elem'}}
+  while (next() match case (? auto&& elem)) {
     elem;
   }
-  while (next() match case (? let elem)) { // expected-note {{previous definition is here}}
-    int elem; // expected-error {{redefinition of 'elem' as different kind of symbol}}
+  while (next() match case (? auto&& elem)) { // expected-note {{previous definition is here}}
+    int elem; // expected-error {{redefinition of 'elem'}}
   }
 
   auto f = [](int x, int y) { return true; };
-  if (q match case ? let [x, y] if (bool b = f(x, y))) {
+  if (q match case ? [auto&& x, auto&& y] if (bool b = f(x, y))) {
     x;
     y;
     b;

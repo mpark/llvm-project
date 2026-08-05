@@ -13,7 +13,7 @@ int exhaustive(bool value) {
 
 int guarded(int value) {
   return value match {
-    case let copy if (copy > 0) => copy;
+    case auto&& copy if (copy > 0) => copy;
     case _ => 0;
   };
 }
@@ -26,7 +26,7 @@ int declaration(int value) {
 
 int guarded_init_statement(int value) {
   return value match {
-    case let copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
+    case int copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
     case _ => 0;
   };
 }
