@@ -21,7 +21,6 @@ constexpr int match_variant(std::variant<int, long> v) {
     return v match {
         case { int } => 0;
         case { long } => 1;
-        case _ => -1;
     };
 }
 static_assert(match_variant(std::variant<int, long>(42)) == 0);

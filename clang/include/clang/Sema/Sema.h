@@ -11302,6 +11302,9 @@ public:
   bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache);
+  void CheckMatchSelectExhaustiveness(
+      Expr *Subject, ArrayRef<MatchCase> Cases,
+      ArrayRef<MatchCaseInstantiation> Instantiations);
 
   ///@}
 
