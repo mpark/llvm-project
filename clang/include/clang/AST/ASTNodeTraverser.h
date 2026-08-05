@@ -1039,6 +1039,28 @@ public:
   }
 
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
+    if (!Node->getInstantiations().empty()) {
+      if (const VarDecl *HoldingVar = Node->getHoldingVar())
+        Visit(HoldingVar);
+      Visit(Node->getSubject());
+      for (const MatchTestInstantiation &Instantiation :
+           Node->getInstantiations()) {
+        getNodeDelegate().AddChild([&] {
+          VisitMatchPattern(Instantiation.Pattern);
+          if (Instantiation.Guard.hasGuard()) {
+            if (Instantiation.Guard.Init)
+              Visit(Instantiation.Guard.Init);
+            Visit(Instantiation.Guard.ConditionVariable);
+            Visit(Instantiation.Guard.Condition);
+          }
+          if (Instantiation.Handler)
+            Visit(Instantiation.Handler);
+          if (Instantiation.Increment)
+            Visit(Instantiation.Increment);
+        });
+      }
+      return;
+    }
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
     const MatchGuard &Guard = Node->getGuard();
