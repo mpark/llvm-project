@@ -37,30 +37,30 @@ void test_match_test_expr() {
   check([]() { int x = 0, y = 0; return x match case y; }());
   check(![]() { int x = 0, y = 1; return x match case y; }());
 
-  check([]() { int x = 0; return &x match case ? _; }());
-  check([]() { int x = 0; return &x match case ? 0; }());
-  check(![]() { int x = 0; return &x match case ? 1; }());
-  check([]() { int x = 0, y = 0; return &x match case ? y; }());
-  check(![]() { int x = 0, y = 1; return &x match case ? y; }());
-  check(![]() { int* p = nullptr; return p match case ? _; }());
-  check(![]() { int* p = nullptr; return p match case ? 0; }());
+  check([]() { int x = 0; return &x match case { _ }; }());
+  check([]() { int x = 0; return &x match case { 0 }; }());
+  check(![]() { int x = 0; return &x match case { 1 }; }());
+  check([]() { int x = 0, y = 0; return &x match case { y }; }());
+  check(![]() { int x = 0, y = 1; return &x match case { y }; }());
+  check(![]() { int* p = nullptr; return p match case { _ }; }());
+  check(![]() { int* p = nullptr; return p match case { 0 }; }());
 
-  check([]() { int x = 0, *p = &x; return &p match case ?? _; }());
-  check([]() { int x = 0, *p = &x; return &p match case ?? 0; }());
-  check(![]() { int x = 0, *p = &x; return &p match case ?? 1; }());
+  check([]() { int x = 0, *p = &x; return &p match case { { _ } }; }());
+  check([]() { int x = 0, *p = &x; return &p match case { { 0 } }; }());
+  check(![]() { int x = 0, *p = &x; return &p match case { { 1 } }; }());
 
-  check([]() { int x = 0, *p = &x; return &p match case ? _; }());
-  check([]() { int x = 0, *p = &x; return &p match case ?? 0; }());
-  check(![]() { int x = 0, *p = &x; return &p match case ?? 1; }());
-  check(![]() { int** pp = nullptr; return pp match case ? _; }());
-  check(![]() { int** pp = nullptr; return pp match case ?? _; }());
-  check(![]() { int** pp = nullptr; return pp match case ?? 0; }());
+  check([]() { int x = 0, *p = &x; return &p match case { _ }; }());
+  check([]() { int x = 0, *p = &x; return &p match case { { 0 } }; }());
+  check(![]() { int x = 0, *p = &x; return &p match case { { 1 } }; }());
+  check(![]() { int** pp = nullptr; return pp match case { _ }; }());
+  check(![]() { int** pp = nullptr; return pp match case { { _ } }; }());
+  check(![]() { int** pp = nullptr; return pp match case { { 0 } }; }());
 
   check([]() { return 0 match case auto&& _; }());
   check([]() { return 0 match case [[maybe_unused]] auto&& x; }());
   check([]() {
     int x = 0;
-    return &x match case ? [[maybe_unused]] auto&& bound;
+    return &x match case { [[maybe_unused]] auto&& bound };
   }());
 }
 
@@ -314,7 +314,7 @@ void test_match_pattern_guards() {
 }
 
 int match_in_if_condition(const int *p) {
-  if (p match case ? [[maybe_unused]] auto&& v) {
+  if (p match case { [[maybe_unused]] auto&& v }) {
     return v;
   }
   return -1;
@@ -337,7 +337,7 @@ struct Lifetime {
 
 bool match_in_if_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match case [? [[maybe_unused]] auto&& b, 101]) {
+  if (Lifetime(&flag, n) match case [{ [[maybe_unused]] auto&& b }, 101]) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -353,7 +353,7 @@ void test_match_in_if_condition_lifetime_extended() {
 
 bool match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match case [? _ , 101])) {
+  if ((Lifetime(&flag, n) match case [{ _ }, 101])) {
     return flag;
   } else if (n == 202) {
     return flag;
@@ -372,7 +372,7 @@ int match_in_while_condition() {
   auto next = [&]() -> int* {
     return i < 4 ? &i : nullptr;
   };
-  while (next() match case ? [[maybe_unused]] auto&& v) {
+  while (next() match case { [[maybe_unused]] auto&& v }) {
     ++v;
   }
   return i;
