@@ -4445,15 +4445,6 @@ public:
         return Pattern;
       return getSema().ActOnTypePattern(TInfo);
     }
-    case MatchPattern::OptionalPatternClass: {
-      OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
-      if (Sub.isInvalid())
-        return true;
-      if (Sub.get() == P->getSubPattern())
-        return Pattern;
-      return getSema().ActOnOptionalPattern(P->getBeginLoc(), Sub.get());
-    }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
       if (P->isEmpty())
