@@ -11108,16 +11108,6 @@ public:
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
   ActionResult<MatchPattern *>
-  ActOnAlternativePattern(SourceRange DiscriminatorRange, ConceptReference *CR,
-                          SourceLocation ColonLoc, MatchPattern *SubPattern);
-  ActionResult<MatchPattern *>
-  ActOnAlternativePattern(SourceRange DiscriminatorRange, TypeSourceInfo *TSI,
-                          SourceLocation ColonLoc, MatchPattern *SubPattern);
-  ActionResult<MatchPattern *>
-  ActOnAutoAlternativePattern(SourceRange DiscriminatorRange,
-                              SourceLocation ColonLoc,
-                              MatchPattern *SubPattern);
-  ActionResult<MatchPattern *>
   ActOnBracedAlternativePattern(SourceRange Braces, MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnNamedAlternativePattern(SourceRange Braces, SourceRange NameRange,

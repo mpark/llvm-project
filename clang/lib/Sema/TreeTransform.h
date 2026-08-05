@@ -4434,26 +4434,8 @@ public:
         return getSema().ActOnNamedAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), P->getName(),
             P->getColonLoc(), Sub.get());
-      if (P->getAlternativeKind() == AlternativePattern::Generic)
-        return getSema().ActOnBracedAlternativePattern(P->getBraces(),
-                                                       Sub.get());
-      if (P->isAuto())
-        return getSema().ActOnAutoAlternativePattern(
-            P->getDiscriminatorRange(), P->getColonLoc(), Sub.get());
-      if (ConceptReference *CR = P->getConceptReference())
-        return getSema().ActOnAlternativePattern(
-            P->getDiscriminatorRange(), CR, P->getColonLoc(), Sub.get());
-      if (TypeSourceInfo *TSI = P->getTypeSourceInfo()) {
-        TSI = getDerived().TransformType(P->getTypeSourceInfo());
-        if (!TSI)
-          return true;
-        if (Sub.get() == P->getSubPattern() &&
-            TSI == P->getTypeSourceInfo())
-          return Pattern;
-        return new (getSema().Context) AlternativePattern(
-            P->getDiscriminatorRange(), TSI, P->getColonLoc(), Sub.get());
-      }
-      llvm_unreachable("unknown alternative pattern");
+      return getSema().ActOnBracedAlternativePattern(P->getBraces(),
+                                                     Sub.get());
     }
     case MatchPattern::DecompositionPatternClass: {
       DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
@@ -19261,9 +19243,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->getAlternativeKind() == AlternativePattern::Auto ||
-          Alternative->getAlternativeKind() == AlternativePattern::Concept)
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
