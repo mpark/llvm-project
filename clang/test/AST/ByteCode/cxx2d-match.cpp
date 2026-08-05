@@ -452,6 +452,44 @@ constexpr int test_match_in_while_condition() {
 
 static_assert(test_match_in_while_condition() == 4);
 
+constexpr int test_match_guard_init_statement(const Pair &p) {
+  return p match {
+    let [x, y] if (int sum = x + y; sum < 0) => sum;
+    let [x, y] => x + y;
+  };
+}
+
+static_assert(test_match_guard_init_statement({-1, -2}) == -3);
+static_assert(test_match_guard_init_statement({4, 7}) == 11);
+
+constexpr int test_match_test_guard_init_statement(int value) {
+  if (value match let copy if (int doubled = copy * 2; doubled == 4))
+    return doubled;
+  return -1;
+}
+
+static_assert(test_match_test_guard_init_statement(2) == 4);
+static_assert(test_match_test_guard_init_statement(3) == -1);
+
+struct GuardInitLifetime {
+  int &live;
+
+  constexpr GuardInitLifetime(int &live) : live(live) { ++live; }
+  constexpr ~GuardInitLifetime() { --live; }
+};
+
+constexpr int test_match_guard_init_lifetime(bool take_first) {
+  int live = 0;
+  int result = take_first match {
+    _ if (GuardInitLifetime guard(live); take_first) => live;
+    _ => live;
+  };
+  return result * 10 + live;
+}
+
+static_assert(test_match_guard_init_lifetime(true) == 10);
+static_assert(test_match_guard_init_lifetime(false) == 0);
+
 struct Variant {
   constexpr Variant(int x) : i(0), x(x) {}
   constexpr Variant(double y) : i(1), y(y) {}
