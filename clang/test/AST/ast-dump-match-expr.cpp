@@ -44,4 +44,18 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT:   `-
   // CHECK-NEXT:     |-WildcardPattern 0x{{[^ ]*}} <col:22>
   // CHECK-NEXT:     `-IntegerLiteral 0x{{[^ ]*}} <col:27> 'int' 0
+
+  x match { case int value => value; };
+  // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:38> 'int'
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> <invalid sloc> implicit used 'int &' cinit
+  // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
+  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
+  // CHECK-NEXT: `-
+  // CHECK-NEXT:   |-DeclarationPattern 0x{{[^ ]*}} <col:18, col:22>
+  // CHECK-NEXT:   | `-VarDecl 0x{{[^ ]*}} <col:18, col:3> col:22 used value 'int' cinit
+  // CHECK-NEXT:   |   `-ImplicitCastExpr 0x{{[^ ]*}} <col:3> 'int' <LValueToRValue>
+  // CHECK-NEXT:   |     `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
+  // CHECK-NEXT:   `-ImplicitCastExpr 0x{{[^ ]*}} <col:31> 'int' <LValueToRValue>
+  // CHECK-NEXT:     `-ImplicitCastExpr 0x{{[^ ]*}} <col:31> 'int' xvalue <NoOp>
+  // CHECK-NEXT:       `-DeclRefExpr 0x{{[^ ]*}} <col:31> 'int' lvalue Var 0x{{[^ ]*}} 'value' 'int'
 }

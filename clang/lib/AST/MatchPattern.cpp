@@ -38,6 +38,8 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "BindingPattern";
   case ParenPatternClass:
     return "ParenPattern";
+  case DeclarationPatternClass:
+    return "DeclarationPattern";
   case OptionalPatternClass:
     return "OptionalPattern";
   case AlternativePatternClass:
@@ -58,6 +60,8 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const BindingPattern *>(this)->getBeginLoc();
   case ParenPatternClass:
     return static_cast<const ParenPattern *>(this)->getBeginLoc();
+  case DeclarationPatternClass:
+    return static_cast<const DeclarationPattern *>(this)->getBeginLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getBeginLoc();
   case AlternativePatternClass:
@@ -78,6 +82,8 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const BindingPattern *>(this)->getEndLoc();
   case ParenPatternClass:
     return static_cast<const ParenPattern *>(this)->getEndLoc();
+  case DeclarationPatternClass:
+    return static_cast<const DeclarationPattern *>(this)->getEndLoc();
   case OptionalPatternClass:
     return static_cast<const OptionalPattern *>(this)->getEndLoc();
   case AlternativePatternClass:
@@ -98,6 +104,8 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<BindingPattern *>(this)->children();
   case ParenPatternClass:
     return static_cast<ParenPattern *>(this)->children();
+  case DeclarationPatternClass:
+    return static_cast<DeclarationPattern *>(this)->children();
   case OptionalPatternClass:
     return static_cast<OptionalPattern *>(this)->children();
   case AlternativePatternClass:
@@ -124,6 +132,22 @@ SourceLocation ExpressionPattern::getEndLoc() const {
 
 SourceLocation BindingPattern::getEndLoc() const {
   return Binding->getEndLoc();
+}
+
+DeclarationPattern::DeclarationPattern(VarDecl *Declaration,
+                                       SourceRange WrittenRange)
+    : MatchPattern(DeclarationPatternClass), Declaration(Declaration),
+      DeclarationRange(WrittenRange) {
+  setDependence(toExprDependenceForImpliedType(
+      Declaration->getType()->getDependence()));
+}
+
+SourceLocation DeclarationPattern::getBeginLoc() const {
+  return DeclarationRange.getBegin();
+}
+
+SourceLocation DeclarationPattern::getEndLoc() const {
+  return DeclarationRange.getEnd();
 }
 
 DecompositionPattern::DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
