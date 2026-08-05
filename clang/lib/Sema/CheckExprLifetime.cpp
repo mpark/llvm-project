@@ -14,6 +14,7 @@
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/PointerIntPair.h"
 
 namespace clang::sema {
@@ -234,8 +235,28 @@ struct RevertToOldSizeRAII {
   ~RevertToOldSizeRAII() { Path.resize(OldSize); }
 };
 
-using LocalVisitor = llvm::function_ref<bool(IndirectLocalPath &Path, Local L,
-                                             ReferenceKind RK)>;
+class LocalVisitor {
+  using Callback =
+      llvm::function_ref<bool(IndirectLocalPath &, Local, ReferenceKind)>;
+
+  Callback Visit;
+  bool VisitBindingDecls = false;
+
+public:
+  LocalVisitor(const LocalVisitor &) = default;
+
+  template <class Callable,
+            std::enable_if_t<
+                !std::is_same_v<std::decay_t<Callable>, LocalVisitor>, int> = 0>
+  LocalVisitor(Callable &&Visit) : Visit(Visit) {}
+
+  bool operator()(IndirectLocalPath &Path, Local L, ReferenceKind RK) const {
+    return Visit(Path, L, RK);
+  }
+
+  bool shouldVisitBindingDecls() const { return VisitBindingDecls; }
+  void enableBindingDecls() { VisitBindingDecls = true; }
+};
 } // namespace
 
 static bool isVarOnPath(const IndirectLocalPath &Path, VarDecl *VD) {
@@ -615,6 +636,21 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     // If we find the name of a local non-reference parameter, we could have a
     // lifetime problem.
     auto *DRE = cast<DeclRefExpr>(Init);
+    if (auto *BD = dyn_cast<BindingDecl>(DRE->getDecl());
+        Visit.shouldVisitBindingDecls() && BD) {
+      auto *Decomposition = dyn_cast<VarDecl>(BD->getDecomposedDecl());
+      if (!Decomposition || !Decomposition->hasLocalStorage())
+        break;
+      if (!Decomposition->getType()->isReferenceType()) {
+        Visit(Path, Local(DRE), RK);
+      } else if (Decomposition->getInit() &&
+                 !isVarOnPath(Path, Decomposition)) {
+        Path.push_back({IndirectLocalPathEntry::VarInit, DRE, Decomposition});
+        visitLocalsRetainedByReferenceBinding(Path, Decomposition->getInit(),
+                                              RK_ReferenceBinding, Visit);
+      }
+      break;
+    }
     auto *VD = dyn_cast<VarDecl>(DRE->getDecl());
     if (VD && VD->hasLocalStorage() &&
         !DRE->refersToEnclosingVariableOrCapture()) {
@@ -656,6 +692,24 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
       visitLocalsRetainedByReferenceBinding(Path, C->getTrueExpr(), RK, Visit);
     if (!C->getFalseExpr()->getType()->isVoidType())
       visitLocalsRetainedByReferenceBinding(Path, C->getFalseExpr(), RK, Visit);
+    break;
+  }
+
+  case Stmt::MatchSelectExprClass: {
+    llvm::SmallDenseSet<unsigned, 4> VisitedLocations;
+    auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
+                         ReferenceKind RK) {
+      if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
+        return false;
+      return Visit(Path, L, RK);
+    };
+    LocalVisitor MatchVisit(VisitOnce);
+    MatchVisit.enableBindingDecls();
+    for (const MatchCaseInstantiation &Case :
+         cast<MatchSelectExpr>(Init)->getCaseInstantiations())
+      if (auto *Handler = dyn_cast<Expr>(Case.Handler);
+          Handler && !Handler->getType()->isVoidType())
+        visitLocalsRetainedByReferenceBinding(Path, Handler, RK, MatchVisit);
     break;
   }
 
@@ -924,6 +978,24 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       visitLocalsRetainedByInitializer(Path, C->getTrueExpr(), Visit, true);
     if (!C->getFalseExpr()->getType()->isVoidType())
       visitLocalsRetainedByInitializer(Path, C->getFalseExpr(), Visit, true);
+    break;
+  }
+
+  case Stmt::MatchSelectExprClass: {
+    llvm::SmallDenseSet<unsigned, 4> VisitedLocations;
+    auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
+                         ReferenceKind RK) {
+      if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
+        return false;
+      return Visit(Path, L, RK);
+    };
+    LocalVisitor MatchVisit(VisitOnce);
+    MatchVisit.enableBindingDecls();
+    for (const MatchCaseInstantiation &Case :
+         cast<MatchSelectExpr>(Init)->getCaseInstantiations())
+      if (auto *Handler = dyn_cast<Expr>(Case.Handler))
+        visitLocalsRetainedByInitializer(Path, Handler, MatchVisit,
+                                         /*RevisitSubinits=*/true);
     break;
   }
 
