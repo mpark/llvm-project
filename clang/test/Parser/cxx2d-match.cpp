@@ -1,5 +1,31 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
 
+namespace std {
+template <class T>
+struct alternative_traits;
+
+template <class T>
+struct alternative_traits<T *> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  template <__SIZE_TYPE__ I>
+    requires(I == 0)
+  using projection_type = T;
+
+  static constexpr __SIZE_TYPE__ index(T *pointer) noexcept {
+    return pointer ? 0 : 1;
+  }
+
+  template <__SIZE_TYPE__ I, class Self>
+    requires(I == 0)
+  static constexpr decltype(auto) get(Self &&self) {
+    return *self;
+  }
+
+  static consteval __SIZE_TYPE__ index_of(decltype(nullptr)) { return 1; }
+};
+} // namespace std
+
 void test_match_is_not_keyword() {
   int match;
   int foo(int match);
@@ -59,7 +85,7 @@ void test_case_is_required(int x) {
 
 void test_match_structures(int x) {
   x match case _;
-  &x match case ? _;
+  &x match case { _ };
   x match case 0;
   x match { case _ => 0; };
   x match { case _ if (true) => 0; case _ => 0; };
@@ -77,7 +103,7 @@ void test_match_structures(int x) {
   x match constexpr -> int { case _ if (true) => 0; case _ => 0; };
   x match constexpr -> auto { case _ if (true) => 0; case _ => 0; };
   x match constexpr -> decltype(auto) { case _ if (true) => 0; case _ => 0; };
-  &x match { case ? _ => 0; case _ => 1; };
+  &x match { case { _ } => 0; case _ => 1; };
 }
 
 void test_match_precedence(int* p) {
@@ -354,87 +380,87 @@ int test_match_select_with_guards(const int (&p)[2]) {
 }
 
 void test_match_in_condition(const int *p, const int (*q)[2]) {
-  p match case ? auto&& v;
+  p match case { auto&& v };
   v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case ? auto&& v) v;
+  if (p match case { auto&& v }) v;
   else v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case ? auto&& v) // expected-note {{previous definition is here}}
+  if (p match case { auto&& v }) // expected-note {{previous definition is here}}
     int v; // expected-error {{redefinition of 'v'}}
   else
     int v;
-  if (p match case ? auto&& v) {
+  if (p match case { auto&& v }) {
     v;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; p match case ? auto&& v) {
+  if (int i = 0; p match case { auto&& v }) {
     i;
     v;
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (p match case ? auto&& v) { // expected-note {{previous definition is here}}
+  if (p match case { auto&& v }) { // expected-note {{previous definition is here}}
     int v; // expected-error {{redefinition of 'v'}}
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case ? auto&& v) { // expected-note {{previous definition is here}}
+      p match case { auto&& v }) { // expected-note {{previous definition is here}}
     int i; // expected-error {{redefinition of 'i'}}
     int v; // expected-error {{redefinition of 'v'}}
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case ? auto&& v) { // expected-note {{previous definition is here}}
+      p match case { auto&& v }) { // expected-note {{previous definition is here}}
     int v; // expected-error {{redefinition of 'v'}}
   } else {
     int i; // expected-error {{redefinition of 'i'}}
     int v;
   }
-  if ((p match case ? auto&& v)) {
+  if ((p match case { auto&& v })) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; (p match case ? auto&& v)) {
+  if (int i = 0; (p match case { auto&& v })) {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (!(p match case ? auto&& v)) {
+  if (!(p match case { auto&& v })) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (q match case ? [0, auto&& v] match case auto&& w) {
+  if (q match case { [0, auto&& v] } match case auto&& w) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (p match case ? 0 match case auto&& w) {
+  if (p match case { 0 } match case auto&& w) {
     w;
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (p match case ? (0 match case auto&& w)) {
+  if (p match case { (0 match case auto&& w) }) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (q match case ? [auto&& v, auto&& w]) {
+  if (q match case { [auto&& v, auto&& w] }) {
     v;
     w;
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (q match case ? [auto&& v, auto&& w] + 1) {
+  if (q match case { [auto&& v, auto&& w] } + 1) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
@@ -442,31 +468,31 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   auto next = []() -> int* { return nullptr; };
-  for (int i = 0; next() match case (? auto&& elem); ++i) elem;
+  for (int i = 0; next() match case { auto&& elem }; ++i) elem;
   for (int i = 0;
-       next() match case (? auto&& elem); // expected-note {{previous definition is here}}
+       next() match case { auto&& elem }; // expected-note {{previous definition is here}}
        ++i)
     int elem; // expected-error {{redefinition of 'elem'}}
-  for (int i = 0; next() match case (? auto&& elem); ++i) {
+  for (int i = 0; next() match case { auto&& elem }; ++i) {
     elem;
   }
   for (int i = 0;
-       next() match case (? auto&& elem); // expected-note {{previous definition is here}}
+       next() match case { auto&& elem }; // expected-note {{previous definition is here}}
        ++i) {
     int elem; // expected-error {{redefinition of 'elem'}}
   }
-  while (next() match case (? auto&& elem)) elem;
-  while (next() match case (? auto&& elem)) // expected-note {{previous definition is here}}
+  while (next() match case { auto&& elem }) elem;
+  while (next() match case { auto&& elem }) // expected-note {{previous definition is here}}
     int elem; // expected-error {{redefinition of 'elem'}}
-  while (next() match case (? auto&& elem)) {
+  while (next() match case { auto&& elem }) {
     elem;
   }
-  while (next() match case (? auto&& elem)) { // expected-note {{previous definition is here}}
+  while (next() match case { auto&& elem }) { // expected-note {{previous definition is here}}
     int elem; // expected-error {{redefinition of 'elem'}}
   }
 
   auto f = [](int x, int y) { return true; };
-  if (q match case ? [auto&& x, auto&& y] if (bool b = f(x, y))) {
+  if (q match case { [auto&& x, auto&& y] } if (bool b = f(x, y))) {
     x;
     y;
     b;
