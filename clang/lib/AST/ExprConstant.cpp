@@ -1937,6 +1937,11 @@ struct MatchProjectionEvaluationCache {
 static bool
 EvaluateMatchPattern(const MatchPattern *E, bool &Result, EvalInfo &Info,
                      MatchProjectionEvaluationCache *ProjectionCache = nullptr);
+static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
+                                        EvalInfo &Info);
+static bool EvaluateSharedDeclarationProjections(
+    const MatchPattern *Pattern, EvalInfo &Info,
+    MatchProjectionEvaluationCache &ProjectionCache);
 
 //===----------------------------------------------------------------------===//
 // Misc utilities
@@ -9741,7 +9746,12 @@ public:
     for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info, &ProjectionCache))
         return false;
+      if (Result && !EvaluateSharedDeclarationProjections(Case.Pattern, Info,
+                                                          ProjectionCache))
+        return false;
       BlockScopeRAII Scope(Info);
+      if (Result && !EvaluatePatternDeclarations(Case.Pattern, Info))
+        return false;
       if (Result && Case.Guard.Init) {
         APValue InitValue;
         StmtResult InitResult = {InitValue, nullptr};
@@ -20935,6 +20945,9 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
         return false;
     return Result = true;
   }
+  case MatchPattern::DeclarationPatternClass: {
+    return Result = true;
+  }
   case MatchPattern::ExpressionPatternClass: {
     const auto *P = static_cast<const ExpressionPattern *>(Pattern);
     return EvaluateAsBooleanCondition(P->getCond(), Result, Info);
@@ -20989,6 +21002,40 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
   llvm_unreachable("unknown match pattern kind");
 }
 
+static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
+                                        EvalInfo &Info) {
+  if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
+    if (P->getProjection())
+      return true;
+    const VarDecl *Declaration = P->getDeclaration();
+    if (!EvaluateDecl(Info, Declaration))
+      return false;
+    if (const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
+      for (const BindingDecl *Binding : Decomposition->flat_bindings())
+        if (const VarDecl *HoldingVar = Binding->getHoldingVar())
+          if (!EvaluateDecl(Info, HoldingVar))
+            return false;
+    return true;
+  }
+  for (const MatchPattern *Child : Pattern->children())
+    if (!EvaluatePatternDeclarations(Child, Info))
+      return false;
+  return true;
+}
+
+static bool EvaluateSharedDeclarationProjections(
+    const MatchPattern *Pattern, EvalInfo &Info,
+    MatchProjectionEvaluationCache &ProjectionCache) {
+  if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
+    return !P->getProjection() ||
+           EvaluateProjectionValue(P->getProjection(), Info, &ProjectionCache);
+  }
+  for (const MatchPattern *Child : Pattern->children())
+    if (!EvaluateSharedDeclarationProjections(Child, Info, ProjectionCache))
+      return false;
+  return true;
+}
+
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   bool Result;
   MatchProjectionEvaluationCache ProjectionCache;
@@ -21009,6 +21056,11 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
       return false;
     if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
       return false;
+    if (Result && !EvaluateSharedDeclarationProjections(E->getPattern(), Info,
+                                                        ProjectionCache))
+      return false;
+    if (Result && !EvaluatePatternDeclarations(E->getPattern(), Info))
+      return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;
       StmtResult InitResult = {InitValue, nullptr};
@@ -21024,6 +21076,11 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   } else {
     BlockScopeRAII Scope(Info);
     if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
+      return false;
+    if (Result && !EvaluateSharedDeclarationProjections(E->getPattern(), Info,
+                                                        ProjectionCache))
+      return false;
+    if (Result && !EvaluatePatternDeclarations(E->getPattern(), Info))
       return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;

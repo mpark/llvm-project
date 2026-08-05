@@ -1858,7 +1858,8 @@ private:
                          ParsedAttributes &DeclAttrs,
                          ParsedAttributes &DeclSpecAttrs, bool RequireSemi,
                          ForRangeInit *FRI = nullptr,
-                         SourceLocation *DeclSpecStart = nullptr);
+                         SourceLocation *DeclSpecStart = nullptr,
+                         bool IsPatternDecl = false);
 
   /// ParseDeclGroup - Having concluded that this is either a function
   /// definition or a group of object declarations, actually parse the
@@ -1871,7 +1872,8 @@ private:
                                 ParsedAttributes &Attrs,
                                 ParsedTemplateInfo &TemplateInfo,
                                 SourceLocation *DeclEnd = nullptr,
-                                ForRangeInit *FRI = nullptr);
+                                ForRangeInit *FRI = nullptr,
+                                bool IsPatternDecl = false);
 
   /// Parse 'declaration' after parsing 'declaration-specifiers
   /// declarator'. This method parses the remainder of the declaration
@@ -4514,6 +4516,7 @@ private:
                       MatchCase &Case,
                       Sema::MatchProjectionCache &ProjectionCache);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
+                                        MatchPattern *Pattern,
                                         StmtResult &InitStmt);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
   ActionResult<MatchPattern *>
@@ -4522,6 +4525,7 @@ private:
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *> ParseWildcardPattern();
+  ActionResult<MatchPattern *> ParseDeclarationPattern();
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr,
                          bool Decomp,
@@ -8771,7 +8775,8 @@ public:
   ///
   /// In any of the above cases there can be a preceding
   /// attribute-specifier-seq, but the caller is expected to handle that.
-  bool isCXXSimpleDeclaration(bool AllowForRangeDecl);
+  bool isCXXSimpleDeclaration(bool AllowForRangeDecl,
+                              bool AllowPatternDecl = false);
 
   /// isCXXFunctionDeclarator - Disambiguates between a function declarator or
   /// a constructor-style initializer, when parsing declaration statements.
@@ -9019,7 +9024,8 @@ public:
   ///    attribute-specifier-seqopt type-specifier-seq declarator
   /// \endverbatim
   ///
-  TPResult TryParseSimpleDeclaration(bool AllowForRangeDecl);
+  TPResult TryParseSimpleDeclaration(bool AllowForRangeDecl,
+                                     bool AllowPatternDecl = false);
 
   /// \verbatim
   /// [GNU] typeof-specifier:
