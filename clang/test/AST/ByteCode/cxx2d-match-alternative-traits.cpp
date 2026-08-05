@@ -8,7 +8,7 @@ struct alternative_traits;
 struct Choice {
   unsigned state;
   int first;
-  int second;
+  double second;
 };
 
 template<__SIZE_TYPE__ I>
@@ -21,7 +21,7 @@ struct ChoiceAlternative<0> {
 
 template<>
 struct ChoiceAlternative<1> {
-  using type = int;
+  using type = double;
 };
 
 template<>
@@ -76,7 +76,7 @@ struct std::alternative_traits<MaybeInt> {
 constexpr int match_choice(Choice choice) {
   return choice match {
     case { .first: int value } => value;
-    case { .second: int value } => value + 10;
+    case { .second: double value } => static_cast<int>(value) + 10;
   };
 }
 
@@ -87,7 +87,90 @@ constexpr int match_maybe(MaybeInt value) {
   };
 }
 
+constexpr int classify(const int&) { return 1; }
+constexpr int classify(const double&) { return 2; }
+
+constexpr int match_generic(Choice choice) {
+  return choice match {
+    case { auto&& value } => classify(value);
+  };
+}
+
+template<class T>
+constexpr int match_dependent_generic(T& choice) {
+  return choice match {
+    case { auto&& value } => classify(value);
+  };
+}
+
+template<class T>
+constexpr bool failed_dependent_guard_is_evaluated_once(T& choice) {
+  int guards = 0;
+  int result = choice match {
+    case { auto&& value } if (++guards == 2) => classify(value);
+    case _ => 0;
+  };
+  return result == 0 && guards == 1;
+}
+
+constexpr int match_condition_if(Choice choice) {
+  if (case { auto&& value } = choice)
+    return classify(value);
+  return 0;
+}
+
+constexpr int match_condition_while(Choice choice) {
+  int count = 0;
+  while (case { auto&& value } = choice if (value-- > 0))
+    ++count;
+  return count;
+}
+
+constexpr int match_condition_for(Choice choice) {
+  int count = 0;
+  for (; case { auto&& value } = choice if (value < 3); ++value) {
+    ++count;
+    if (value == 1)
+      continue;
+  }
+  return count;
+}
+
+template<class C>
+constexpr int dependent_match_condition_if(C choice) {
+  if (case { auto&& value } = choice)
+    return classify(value);
+  return 0;
+}
+
+template<class T>
+constexpr int dependent_pattern_condition_if(Choice choice) {
+  if (case { T value } = choice)
+    return sizeof(value);
+  return 0;
+}
+
 static_assert(match_choice({0, 3, 4}) == 3);
 static_assert(match_choice({1, 3, 4}) == 14);
 static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
+static_assert(match_generic({0, 3, 4}) == 1);
+static_assert(match_generic({1, 3, 4}) == 2);
+constexpr Choice dependent_first{0, 3, 4};
+constexpr Choice dependent_second{1, 3, 4};
+static_assert(match_dependent_generic(dependent_first) == 1);
+static_assert(match_dependent_generic(dependent_second) == 2);
+static_assert(failed_dependent_guard_is_evaluated_once(dependent_first));
+static_assert(failed_dependent_guard_is_evaluated_once(dependent_second));
+static_assert(match_condition_if({0, 3, 4}) == 1);
+static_assert(match_condition_if({1, 3, 4}) == 2);
+static_assert(match_condition_while({0, 3, 4}) == 3);
+static_assert(match_condition_while({1, 3, 2}) == 2);
+static_assert(match_condition_for({0, 0, 4}) == 3);
+static_assert(match_condition_for({1, 0, 1}) == 2);
+static_assert(dependent_match_condition_if(Choice{0, 3, 4}) == 1);
+static_assert(dependent_match_condition_if(Choice{1, 3, 4}) == 2);
+static_assert(dependent_pattern_condition_if<int>({0, 3, 4}) == sizeof(int));
+static_assert(dependent_pattern_condition_if<int>({1, 3, 4}) == 0);
+static_assert(dependent_pattern_condition_if<double>({1, 3, 4}) ==
+              sizeof(double));

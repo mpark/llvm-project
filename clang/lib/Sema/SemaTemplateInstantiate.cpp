@@ -2022,7 +2022,8 @@ Decl *TemplateInstantiator::TransformDecl(SourceLocation Loc, Decl *D) {
 
 bool TemplateInstantiator::instantiateMissingDeclsToScopeForConcepts(Decl *D) {
   if (!(D && (SemaRef.inConstraintSubstitution() ||
-              SemaRef.inParameterMappingSubstitution())))
+              SemaRef.inParameterMappingSubstitution() ||
+              isa<RequiresExprBodyDecl>(D->getDeclContext()))))
     return false;
 
   auto *Current = SemaRef.CurrentInstantiationScope;
@@ -4574,17 +4575,33 @@ Sema::SubstStmt(Stmt *S, const MultiLevelTemplateArgumentList &TemplateArgs) {
   return Instantiator.TransformStmt(S);
 }
 
-ExprResult Sema::ExpandDeferredMatchSelectExpr(MatchSelectExpr *E) {
+ExprResult Sema::ExpandDeferredMatchExpr(Expr *E) {
+  assert((isa<MatchSelectExpr, MatchTestExpr>(E)) &&
+         "expected a match expression");
   CodeSynthesisContext Ctx;
   Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
-  Ctx.PointOfInstantiation = E->getMatchLoc();
+  Ctx.PointOfInstantiation = E->getBeginLoc();
   Ctx.Entity = cast<Decl>(CurContext);
   ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
   LocalInstantiationScope Scope(*this);
   MultiLevelTemplateArgumentList TemplateArgs;
-  TemplateInstantiator Instantiator(*this, TemplateArgs, E->getMatchLoc(),
+  TemplateInstantiator Instantiator(*this, TemplateArgs, E->getBeginLoc(),
                                     DeclarationName());
   return Instantiator.TransformExpr(E);
+}
+
+StmtResult Sema::ExpandDeferredMatchConditionStmt(Stmt *S,
+                                                  SourceLocation MatchLoc) {
+  CodeSynthesisContext Ctx;
+  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
+  Ctx.PointOfInstantiation = MatchLoc;
+  Ctx.Entity = cast<Decl>(CurContext);
+  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
+  LocalInstantiationScope Scope(*this);
+  MultiLevelTemplateArgumentList TemplateArgs;
+  TemplateInstantiator Instantiator(*this, TemplateArgs, MatchLoc,
+                                    DeclarationName());
+  return Instantiator.TransformStmt(S);
 }
 
 bool Sema::SubstTemplateArgument(

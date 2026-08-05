@@ -889,6 +889,9 @@ public:
 #define ABSTRACT_STMT(Stmt)
 #include "clang/AST/StmtNodes.inc"
 
+  ExprResult TransformMatchTestExpr(MatchTestExpr *E, Stmt *Handler,
+                                    Expr *Increment);
+
 #define GEN_CLANG_CLAUSE_CLASS
 #define CLAUSE_CLASS(Enum, Str, Class)                                         \
   LLVM_ATTRIBUTE_NOINLINE                                                      \
@@ -4428,19 +4431,7 @@ public:
       ExprResult E = getDerived().TransformExpr(P->getExpr());
       if (E.isInvalid())
         return true;
-      // Even if the expression pattern is non-dependent, e.g. just a literal `0`
-      // we still rebuild the pattern if the subject is dependent.
-      // This is because at least for now, the matching conditions are tied to
-      // the pattern directly. So given something like:
-      //
-      //   void f(auto x) { return x match 0; }
-      //
-      // We want a pattern node for `0` for each instantiation such that each
-      // node can store the condition `x == 0` for each instantiation of `x`.
-      //
-      // This is likely more conservative than it needs to be... but it should
-      // be good enough for a prototype.
-      if (!Rebuild && E.get() == P->getExpr())
+      if (E.get() == P->getExpr())
         return Pattern;
       return getSema().ActOnExpressionPattern(E.get());
     }
@@ -4478,7 +4469,7 @@ public:
           getDerived().TransformType(P->getTypeSourceInfo());
       if (!TInfo)
         return true;
-      if (!Rebuild && TInfo == P->getTypeSourceInfo())
+      if (TInfo == P->getTypeSourceInfo())
         return Pattern;
       return getSema().ActOnTypePattern(TInfo);
     }
@@ -4494,11 +4485,13 @@ public:
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
       if (P->isEmpty())
-        return getSema().ActOnEmptyAlternativePattern(P->getBraces());
+        return Pattern;
 
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
       if (Sub.isInvalid())
         return true;
+      if (Sub.get() == P->getSubPattern())
+        return Pattern;
       if (P->isNamed())
         return getSema().ActOnNamedAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), P->getName(),
@@ -8777,6 +8770,30 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
   if (Init.isInvalid())
     return StmtError();
 
+  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
+          S->getCond() ? S->getCond()->IgnoreParens() : nullptr);
+      Match &&
+      (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
+    ExprResult CondExpr =
+        getDerived().TransformMatchTestExpr(Match, S->getThen(), nullptr);
+    if (CondExpr.isInvalid())
+      return StmtError();
+    auto *TransformedMatch = cast<MatchTestExpr>(CondExpr.get());
+    Sema::ConditionResult Cond = getSema().ActOnCondition(
+        nullptr, S->getIfLoc(), TransformedMatch, Sema::ConditionKind::Boolean,
+        /*MissingOK=*/false);
+    if (Cond.isInvalid())
+      return StmtError();
+
+    StmtResult Else = getDerived().TransformStmt(S->getElse());
+    if (Else.isInvalid())
+      return StmtError();
+    Stmt *Then = TransformedMatch->getInstantiations().front().Handler;
+    return getDerived().RebuildIfStmt(
+        S->getIfLoc(), S->getStatementKind(), S->getLParenLoc(), Cond,
+        S->getRParenLoc(), Init.get(), Then, S->getElseLoc(), Else.get());
+  }
+
   Sema::ConditionResult Cond;
   if (!S->isConsteval()) {
     // Transform the condition
@@ -8877,6 +8894,28 @@ TreeTransform<Derived>::TransformSwitchStmt(SwitchStmt *S) {
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformWhileStmt(WhileStmt *S) {
+  if (auto *Match =
+          dyn_cast_if_present<MatchTestExpr>(S->getCond()->IgnoreParens());
+      Match &&
+      (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
+    ExprResult CondExpr =
+        getDerived().TransformMatchTestExpr(Match, S->getBody(), nullptr);
+    if (CondExpr.isInvalid())
+      return StmtError();
+    auto *TransformedMatch = cast<MatchTestExpr>(CondExpr.get());
+    Sema::ConditionResult Cond = getSema().ActOnCondition(
+        nullptr, S->getWhileLoc(), TransformedMatch,
+        Sema::ConditionKind::Boolean, /*MissingOK=*/false);
+    if (Cond.isInvalid())
+      return StmtError();
+
+    SemaOpenACC::LoopInConstructRAII LCR{SemaRef.OpenACC()};
+    SemaRef.OpenACC().ActOnWhileStmt(S->getBeginLoc());
+    return getDerived().RebuildWhileStmt(
+        S->getWhileLoc(), S->getLParenLoc(), Cond, S->getRParenLoc(),
+        TransformedMatch->getInstantiations().front().Handler);
+  }
+
   // Transform the condition
   Sema::ConditionResult Cond = getDerived().TransformCondition(
       S->getWhileLoc(), S->getConditionVariable(), S->getCond(),
@@ -8947,6 +8986,38 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
   if (getSema().getLangOpts().getOpenMPVersion() && Init.isUsable())
     getSema().OpenMP().ActOnOpenMPLoopInitialization(S->getForLoc(),
                                                      Init.get());
+
+  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
+          S->getCond() ? S->getCond()->IgnoreParens() : nullptr);
+      Match &&
+      (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
+    ExprResult CondExpr =
+        getDerived().TransformMatchTestExpr(Match, S->getBody(), S->getInc());
+    if (CondExpr.isInvalid())
+      return StmtError();
+    auto *TransformedMatch = cast<MatchTestExpr>(CondExpr.get());
+    Sema::ConditionResult Cond = getSema().ActOnCondition(
+        nullptr, S->getForLoc(), TransformedMatch, Sema::ConditionKind::Boolean,
+        /*MissingOK=*/false);
+    if (Cond.isInvalid())
+      return StmtError();
+
+    const MatchTestInstantiation &Representative =
+        TransformedMatch->getInstantiations().front();
+    Sema::FullExprArg Inc(
+        getSema().MakeFullDiscardedValueExpr(Representative.Increment));
+    if (S->getInc() && !Inc.get())
+      return StmtError();
+
+    SemaOpenACC::LoopInConstructRAII LCR{SemaRef.OpenACC()};
+    SemaRef.OpenACC().ActOnForStmtBegin(
+        S->getBeginLoc(), S->getInit(), Init.get(), S->getCond(),
+        Cond.get().second, S->getInc(), Representative.Increment);
+    SemaRef.OpenACC().ActOnForStmtEnd(S->getBeginLoc(), Representative.Handler);
+    return getDerived().RebuildForStmt(S->getForLoc(), S->getLParenLoc(),
+                                       Init.get(), Cond, Inc, S->getRParenLoc(),
+                                       Representative.Handler);
+  }
 
   // Transform the condition
   Sema::ConditionResult Cond = getDerived().TransformCondition(
@@ -19203,6 +19274,13 @@ ExprResult TreeTransform<Derived>::TransformHLSLOutArgExpr(HLSLOutArgExpr *E) {
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
+  return getDerived().TransformMatchTestExpr(E, nullptr, nullptr);
+}
+
+template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
+                                                          Stmt *Handler,
+                                                          Expr *Increment) {
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
   if (VarDecl *HV = E->getHoldingVar()) {
@@ -19230,38 +19308,144 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
                                    CK_NoOp, LHS.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
 
-  ActionResult<MatchPattern *> P = getDerived().TransformPattern(
-      E->getPattern(), LHS.get() != E->getSubject());
-  if (P.isInvalid())
-    return ExprError();
+  Sema::MatchProjectionCache ProjectionCache;
+  SmallVector<MatchTestInstantiation, 4> Instantiations;
+  SmallVector<unsigned, 4> ForcedSelections;
+  bool SawAlternativeChoice = false;
 
-  // If nothing changed, just retain the existing expression.
-  if (!getDerived().AlwaysRebuild() && LHS.get() == E->getSubject() &&
-      P.get() == E->getPattern())
-    return E;
+  auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
+    if (Pattern->getMatchPatternClass() ==
+        MatchPattern::AlternativePatternClass) {
+      auto *Alternative = static_cast<AlternativePattern *>(Pattern);
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+          Alternative->getAlternativeKind() == AlternativePattern::Auto ||
+          Alternative->getAlternativeKind() == AlternativePattern::Concept)
+        return true;
+    }
+    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
+      return Recurse(Child, Recurse);
+    });
+  };
+  bool PatternHasAlternativeChoice =
+      HasAlternativeChoice(E->getPattern(), HasAlternativeChoice);
 
-  if (getSema().CheckCompleteMatchPattern(LHS.get(), P.get()))
-    return ExprError();
+  while (true) {
+    ProjectionCache.AlternativeChoices.clear();
+    ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
+    ProjectionCache.NextForcedAlternativeSelection = 0;
+    ProjectionCache.CurrentProjectionPath.clear();
+    size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
-  StmtResult GuardInit;
-  if (E->getGuard().Init) {
-    GuardInit = getDerived().TransformStmt(E->getGuard().Init);
-    if (GuardInit.isInvalid())
+    std::optional<LocalInstantiationScope> CandidateScope;
+    if (PatternHasAlternativeChoice)
+      CandidateScope.emplace(getSema(), /*CombineWithOuterScope=*/true);
+    MatchPattern *TransformedPattern = nullptr;
+    Sema::MatchPatternState PatternState;
+    auto TransformAndCheckPattern = [&] {
+      ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
+          E->getPattern(), LHS.get() != E->getSubject());
+      if (Pattern.isInvalid())
+        return true;
+      TransformedPattern = Pattern.get();
+      return getSema().CheckCompleteMatchPattern(
+          LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
+    };
+
+    bool NoMatch = false;
+    if (PatternHasAlternativeChoice) {
+      Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
+      if (TransformAndCheckPattern()) {
+        if (!Trap.hasErrorOccurred())
+          return ExprError();
+        NoMatch = true;
+      }
+    } else if (TransformAndCheckPattern()) {
       return ExprError();
-  }
-  if (E->getGuard().hasGuard())
-    getSema().CheckGuardedMatchPattern(P.get());
-  Sema::ConditionResult Guard = getDerived().TransformCondition(
-      E->getIfLoc(), E->getGuard().ConditionVariable,
-      E->getGuard().Condition,
-      Sema::ConditionKind::Boolean);
-  if (Guard.isInvalid())
-    return ExprError();
+    }
 
-  return getSema().ActOnMatchTestExpr(HoldingVar, LHS.get(), E->getMatchLoc(),
-                                      P.get(), E->getIfLoc(),
-                                      {GuardInit.get(), Guard.get().first,
-                                       Guard.get().second});
+    if (NoMatch) {
+      ProjectionCache.Entries.resize(SavedProjectionCount);
+    } else {
+      Sema::MatchPatternSemanticAnalysis Semantic =
+          getSema().AnalyzeMatchPatternSemantics(TransformedPattern,
+                                                 PatternState);
+      bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+      MatchPatternInstantiation *PatternInstantiation =
+          MatchPatternInstantiation::Create(
+              getSema().Context, TransformedPattern, PatternState.Infos);
+
+      StmtResult GuardInit;
+      if (E->getGuard().Init) {
+        GuardInit = getDerived().TransformStmt(E->getGuard().Init);
+        if (GuardInit.isInvalid())
+          return ExprError();
+      }
+      if (E->getGuard().hasGuard())
+        getSema().CheckGuardedMatchPattern(TransformedPattern);
+      Sema::ConditionResult Guard = getDerived().TransformCondition(
+          E->getIfLoc(), E->getGuard().ConditionVariable,
+          E->getGuard().Condition, Sema::ConditionKind::Boolean);
+      if (Guard.isInvalid())
+        return ExprError();
+
+      StmtResult TransformedHandler;
+      if (Handler) {
+        TransformedHandler = getDerived().TransformStmt(Handler);
+        if (TransformedHandler.isInvalid())
+          return ExprError();
+      }
+      ExprResult TransformedIncrement;
+      if (Increment) {
+        TransformedIncrement = getDerived().TransformExpr(Increment);
+        if (TransformedIncrement.isInvalid())
+          return ExprError();
+      }
+
+      Instantiations.push_back(
+          {TransformedPattern,
+           E->getIfLoc(),
+           {GuardInit.get(), Guard.get().first, Guard.get().second},
+           PatternInstantiation,
+           PatternIsIrrefutable,
+           TransformedHandler.get(),
+           TransformedIncrement.get()});
+    }
+
+    SawAlternativeChoice |= !ProjectionCache.AlternativeChoices.empty();
+    SmallVector<unsigned, 4> NextSelections;
+    bool HasNextSelection = false;
+    for (unsigned I = ProjectionCache.AlternativeChoices.size(); I-- > 0;) {
+      const auto &Choice = ProjectionCache.AlternativeChoices[I];
+      auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
+      if (std::next(Selected) == Choice.Alternatives.end())
+        continue;
+      for (unsigned J = 0; J < I; ++J)
+        NextSelections.push_back(
+            ProjectionCache.AlternativeChoices[J].Selected);
+      NextSelections.push_back(*std::next(Selected));
+      HasNextSelection = true;
+      break;
+    }
+    if (!HasNextSelection)
+      break;
+    ForcedSelections = std::move(NextSelections);
+  }
+
+  if (Instantiations.empty()) {
+    if (SawAlternativeChoice)
+      getSema().Diag(E->getPattern()->getBeginLoc(),
+                     diag::err_braced_alternative_no_viable_state)
+          << LHS.get()->getType();
+    return ExprError();
+  }
+
+  const MatchTestInstantiation &Representative = Instantiations.front();
+  bool StillNeedsCaseInstantiation = LHS.get()->isTypeDependent();
+  return getSema().ActOnMatchTestExpr(
+      HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
+      Representative.PatternInstantiation, Representative.IfLoc,
+      Representative.Guard, Representative.PatternIsIrrefutable,
+      StillNeedsCaseInstantiation, Instantiations);
 }
 
 template <typename Derived>
@@ -19306,32 +19490,43 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   else
     RetTy = E->getType();
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
-  SmallVector<MatchCase, 32> CasesToTransform;
-  SmallVector<unsigned, 32> SourceCaseIndices;
+  SmallVector<std::pair<unsigned, MatchCase>, 32> CasesToTransform;
   if (E->getCaseInstantiations().empty()) {
-    CasesToTransform.append(E->getCases().begin(), E->getCases().end());
-    for (unsigned I = 0; I != E->getNumCases(); ++I)
-      SourceCaseIndices.push_back(I);
+    for (auto [I, Case] : llvm::enumerate(E->getCases()))
+      CasesToTransform.emplace_back(I, Case);
   } else {
     CasesToTransform.reserve(E->getNumCaseInstantiations());
-    SourceCaseIndices.reserve(E->getNumCaseInstantiations());
     for (const MatchCaseInstantiation &Instantiation :
          E->getCaseInstantiations()) {
-      CasesToTransform.push_back(
-          {Instantiation.Pattern, Instantiation.IfLoc, Instantiation.Guard,
-           Instantiation.Handler});
-      SourceCaseIndices.push_back(Instantiation.CaseIndex);
+      CasesToTransform.emplace_back(
+          Instantiation.CaseIndex,
+          MatchCase{Instantiation.Pattern, Instantiation.IfLoc,
+                    Instantiation.Guard, Instantiation.Handler});
     }
   }
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchProjectionCache ProjectionCache;
   enum class TransformCaseResult { Success, NoMatch, Error };
-  auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
-                           MatchCaseInstantiation &Transformed)
-      -> TransformCaseResult {
+  auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
+    if (Pattern->getMatchPatternClass() ==
+        MatchPattern::AlternativePatternClass) {
+      auto *Alternative = static_cast<AlternativePattern *>(Pattern);
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+          Alternative->getAlternativeKind() == AlternativePattern::Auto ||
+          Alternative->getAlternativeKind() == AlternativePattern::Concept)
+        return true;
+    }
+    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
+      return Recurse(Child, Recurse);
+    });
+  };
+  auto TransformCase =
+      [&](const MatchCase &Case, unsigned CaseIndex,
+          MatchCaseInstantiation &Transformed) -> TransformCaseResult {
     LocalInstantiationScope Scope(getSema(),
                                   /*CombineWithOuterScope=*/true);
     MatchPattern *TransformedPattern = nullptr;
+    Sema::MatchPatternState PatternState;
     auto TransformAndCheckPattern = [&] {
       ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
           Case.Pattern, LHS.get() != E->getSubject());
@@ -19339,7 +19534,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         return true;
       TransformedPattern = Pattern.get();
       return getSema().CheckCompleteMatchPattern(
-          LHS.get(), TransformedPattern, &ProjectionCache);
+          LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
     };
 
     bool SourceWasMaybeUseful =
@@ -19347,7 +19542,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         static_cast<bool>(Case.Pattern->getDependence() &
                           ExprDependence::Instantiation);
     SourceCases[CaseIndex].MaybeUseful |= SourceWasMaybeUseful;
-    bool WasMaybeUseful = SourceWasMaybeUseful;
+    bool WasMaybeUseful =
+        SourceWasMaybeUseful ||
+        HasAlternativeChoice(Case.Pattern, HasAlternativeChoice);
     if (WasMaybeUseful) {
       Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
       if (TransformAndCheckPattern())
@@ -19388,28 +19585,36 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                    Case.IfLoc,
                    {GuardInit.get(), Guard.get().first, Guard.get().second},
                    Handler.get(),
-                   CaseIndex};
+                   CaseIndex,
+                   MatchPatternInstantiation::Create(getSema().Context,
+                                                     TransformedPattern,
+                                                     PatternState.Infos)};
     return TransformCaseResult::Success;
   };
 
-  for (auto [TransformIndex, Case] : llvm::enumerate(CasesToTransform)) {
-    unsigned CaseIndex = SourceCaseIndices[TransformIndex];
+  bool IsFirstSourceCase = true;
+  for (const auto &[CaseIndex, Case] : CasesToTransform) {
+    bool SawViableCandidate = false;
+    bool SawAlternativeChoice = false;
     SmallVector<unsigned, 4> ForcedSelections;
     while (true) {
       ProjectionCache.AlternativeChoices.clear();
       ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
       ProjectionCache.NextForcedAlternativeSelection = 0;
+      ProjectionCache.CurrentProjectionPath.clear();
       size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
       TransformCaseResult Result =
-          TransformCase(Case, static_cast<unsigned>(CaseIndex), ExpandedCase);
+          TransformCase(Case, CaseIndex, ExpandedCase);
       if (Result == TransformCaseResult::Error)
         return ExprError();
-      if (Result == TransformCaseResult::NoMatch) {
+      if (Result == TransformCaseResult::NoMatch)
         ProjectionCache.Entries.resize(SavedProjectionCount);
-        break;
+      else {
+        SawViableCandidate = true;
+        Instantiations.push_back(ExpandedCase);
       }
-      Instantiations.push_back(ExpandedCase);
+      SawAlternativeChoice |= !ProjectionCache.AlternativeChoices.empty();
 
       SmallVector<unsigned, 4> NextSelections;
       bool HasNextSelection = false;
@@ -19429,12 +19634,21 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         break;
       ForcedSelections = std::move(NextSelections);
     }
+    if (!SawViableCandidate && SawAlternativeChoice &&
+        (!E->getSubject()->isTypeDependent() ||
+         (IsFirstSourceCase && E->requiresFirstCaseViable()))) {
+      getSema().Diag(Case.Pattern->getBeginLoc(),
+                     diag::err_braced_alternative_no_viable_state)
+          << LHS.get()->getType();
+      return ExprError();
+    }
+    IsFirstSourceCase = false;
   }
 
   return getSema().ActOnMatchSelectExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
       E->getOrigResultType(), RetTy, SourceCases, E->getBraces(),
-      /*ExpandDeferredCases=*/false,
+      /*ExpandDeferredCases=*/false, E->requiresFirstCaseViable(),
       ArrayRef<MatchCaseInstantiation>(Instantiations));
 }
 

@@ -936,6 +936,26 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
   if (S.getConditionVariable())
     EmitDecl(*S.getConditionVariable());
 
+  if (auto *Match = dyn_cast<MatchTestExpr>(S.getCond()->IgnoreParens());
+      Match && Match->hasConditionInstantiations()) {
+    JumpDest Cont = getJumpDestInCurrentScope("if.end");
+    EmitMatchTestDispatch(
+        *Match, Cont,
+        [&](const MatchTestInstantiation &Instantiation) {
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation.Handler);
+        },
+        Cont,
+        [&] {
+          if (Else) {
+            RunCleanupsScope ElseScope(*this);
+            EmitStmt(Else);
+          }
+        });
+    EmitBlock(Cont.getBlock(), true);
+    return;
+  }
+
   // If the condition constant folds and can be elided, try to avoid emitting
   // the condition and the dead arm of the if/else.
   bool CondConstant;
@@ -1051,6 +1071,39 @@ bool CodeGenFunction::checkIfLoopMustProgress(const Expr *ControllingExpression,
 
 void CodeGenFunction::EmitWhileStmt(const WhileStmt &S,
                                     ArrayRef<const Attr *> WhileAttrs) {
+  if (auto *Match = dyn_cast<MatchTestExpr>(S.getCond()->IgnoreParens());
+      Match && Match->hasConditionInstantiations()) {
+    JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
+    EmitBlock(LoopHeader.getBlock());
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.push_back(
+          emitConvergenceLoopToken(LoopHeader.getBlock()));
+    JumpDest LoopExit = getJumpDestInCurrentScope("while.end");
+    BreakContinueStack.push_back(BreakContinue(S, LoopExit, LoopHeader));
+
+    const SourceRange &R = S.getSourceRange();
+    LoopStack.push(LoopHeader.getBlock(), CGM.getContext(),
+                   CGM.getCodeGenOpts(), WhileAttrs,
+                   SourceLocToDebugLoc(R.getBegin()),
+                   SourceLocToDebugLoc(R.getEnd()),
+                   checkIfLoopMustProgress(
+                       S.getCond(), CodeGenUtils::hasEmptyLoopBody(S)));
+    EmitMatchTestDispatch(
+        *Match, LoopHeader,
+        [&](const MatchTestInstantiation &Instantiation) {
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation.Handler);
+        },
+        LoopExit, [] {});
+
+    BreakContinueStack.pop_back();
+    LoopStack.pop();
+    EmitBlock(LoopExit.getBlock(), true);
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.pop_back();
+    return;
+  }
+
   // Emit the header for the loop, which will also become
   // the continue target.
   JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
@@ -1268,6 +1321,46 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     if (S.getInit())
       EmitStmt(S.getInit());
     LoopExit = getJumpDestInCurrentScope("for.end");
+  }
+
+  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
+          S.getCond() ? S.getCond()->IgnoreParens() : nullptr);
+      Match && Match->hasConditionInstantiations()) {
+    JumpDest CondDest = getJumpDestInCurrentScope("for.cond");
+    EmitBlock(CondDest.getBlock());
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.push_back(
+          emitConvergenceLoopToken(CondDest.getBlock()));
+    const SourceRange &R = S.getSourceRange();
+    LoopStack.push(CondDest.getBlock(), CGM.getContext(), CGM.getCodeGenOpts(),
+                   ForAttrs, SourceLocToDebugLoc(R.getBegin()),
+                   SourceLocToDebugLoc(R.getEnd()),
+                   checkIfLoopMustProgress(
+                       S.getCond(), CodeGenUtils::hasEmptyLoopBody(S)));
+    BreakContinueStack.push_back(BreakContinue(S, LoopExit, CondDest));
+
+    EmitMatchTestDispatch(
+        *Match, CondDest,
+        [&](const MatchTestInstantiation &Instantiation) {
+          JumpDest Increment = getJumpDestInCurrentScope("for.case.increment");
+          BreakContinueStack.back().ContinueBlock = Increment;
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation.Handler);
+          EmitBlock(Increment.getBlock());
+          if (Instantiation.Increment)
+            EmitStmt(Instantiation.Increment);
+          BreakContinueStack.back().ContinueBlock = CondDest;
+        },
+        LoopExit, [] {});
+
+    BreakContinueStack.pop_back();
+    if (ForScope)
+      ForScope->ForceCleanup();
+    LoopStack.pop();
+    EmitBlock(LoopExit.getBlock(), true);
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.pop_back();
+    return;
   }
 
   // Start the loop with a block that tests the condition.
