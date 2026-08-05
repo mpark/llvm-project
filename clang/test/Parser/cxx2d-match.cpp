@@ -193,6 +193,14 @@ void test_binding_pattern(int i) {
   i2 match { case [let x, let y] =>  x + y; };
 }
 
+template <class T>
+concept Integral = __is_integral(T);
+
+void test_constrained_declaration_pattern(int i) {
+  i match case Integral auto value;
+  i match { case Integral auto value => value; };
+}
+
 void test_optional_pattern(int *p) {
   p match case ? _;
   p match case ? 0;
@@ -216,6 +224,8 @@ void test_alternative_pattern() {
 }
 
 void test_decomposition_pattern() {
+  int nested_single[1][1] = { { 1 } };
+  nested_single match case [[_]];
   int xs[2] = { 1, 2 };
   xs match case [_, _];
   xs match case [_, 3];
@@ -223,6 +233,12 @@ void test_decomposition_pattern() {
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
   xss match case [[_, _, _], [_, _, _]];
   xss match case [[1, _, _], [4, 5, _]];
+}
+
+void test_attributed_declaration_pattern(int value) {
+  value match {
+    case [[maybe_unused]] int copy => copy;
+  };
 }
 
 void test_invalid_decomposition_pattern() {

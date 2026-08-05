@@ -10386,6 +10386,10 @@ public:
       AllowedExplicit AllowExplicit, bool InOverloadResolution, bool CStyle,
       bool AllowObjCWritebackConversion);
 
+  ImplicitConversionSequence TryCopyInitializationConversion(
+      Expr *From, QualType ToType, bool SuppressUserConversions,
+      bool InOverloadResolution, bool AllowObjCWritebackConversion);
+
   /// PerformImplicitConversion - Perform an implicit conversion of the
   /// expression From to the type ToType. Returns the
   /// converted expression. Flavor is the kind of conversion we're
@@ -11243,6 +11247,8 @@ public:
 
 public:
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
+  void CheckGuardedMatchPattern(MatchPattern *Pattern);
+
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
 
@@ -11266,6 +11272,8 @@ public:
                                                    IdentifierInfo *Name);
   ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
                                                  MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
   ActionResult<MatchPattern *>
   ActOnAlternativePattern(SourceRange DiscriminatorRange, ConceptReference *CR,
                           SourceLocation ColonLoc, MatchPattern *SubPattern);
