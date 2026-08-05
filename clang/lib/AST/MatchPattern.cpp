@@ -53,8 +53,6 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "WildcardPattern";
   case ExpressionPatternClass:
     return "ExpressionPattern";
-  case BindingPatternClass:
-    return "BindingPattern";
   case DeclarationPatternClass:
     return "DeclarationPattern";
   case TypePatternClass:
@@ -75,8 +73,6 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const WildcardPattern *>(this)->getBeginLoc();
   case ExpressionPatternClass:
     return static_cast<const ExpressionPattern *>(this)->getBeginLoc();
-  case BindingPatternClass:
-    return static_cast<const BindingPattern *>(this)->getBeginLoc();
   case DeclarationPatternClass:
     return static_cast<const DeclarationPattern *>(this)->getBeginLoc();
   case TypePatternClass:
@@ -97,8 +93,6 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const WildcardPattern *>(this)->getEndLoc();
   case ExpressionPatternClass:
     return static_cast<const ExpressionPattern *>(this)->getEndLoc();
-  case BindingPatternClass:
-    return static_cast<const BindingPattern *>(this)->getEndLoc();
   case DeclarationPatternClass:
     return static_cast<const DeclarationPattern *>(this)->getEndLoc();
   case TypePatternClass:
@@ -119,8 +113,6 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<WildcardPattern *>(this)->children();
   case ExpressionPatternClass:
     return static_cast<ExpressionPattern *>(this)->children();
-  case BindingPatternClass:
-    return static_cast<BindingPattern *>(this)->children();
   case DeclarationPatternClass:
     return static_cast<DeclarationPattern *>(this)->children();
   case TypePatternClass:
@@ -149,10 +141,6 @@ SourceLocation ExpressionPattern::getEndLoc() const {
   return E->getEndLoc();
 }
 
-SourceLocation BindingPattern::getEndLoc() const {
-  return Binding->getEndLoc();
-}
-
 DeclarationPattern::DeclarationPattern(VarDecl *Declaration,
                                        SourceRange WrittenRange)
     : MatchPattern(DeclarationPatternClass), Declaration(Declaration),
@@ -170,10 +158,9 @@ SourceLocation DeclarationPattern::getEndLoc() const {
 }
 
 DecompositionPattern::DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                                           SourceRange Squares,
-                                           bool BindingOnly)
+                                           SourceRange Squares)
     : MatchPattern(DecompositionPatternClass), NumPatterns(Patterns.size()),
-      Squares(Squares), BindingOnly(BindingOnly) {
+      Squares(Squares) {
   std::uninitialized_copy(Patterns.begin(), Patterns.end(), getPatterns());
   setDependence(computeDependence());
 }
@@ -181,9 +168,9 @@ DecompositionPattern::DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
 DecompositionPattern *
 DecompositionPattern::Create(const ASTContext &Ctx,
                              ArrayRef<MatchPattern *> Patterns,
-                             SourceRange Squares, bool BindingOnly) {
+                             SourceRange Squares) {
   void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchPattern *>(Patterns.size()));
-  return new (Mem) DecompositionPattern(Patterns, Squares, BindingOnly);
+  return new (Mem) DecompositionPattern(Patterns, Squares);
 }
 
 DecompositionPattern *DecompositionPattern::CreateEmpty(const ASTContext &Ctx,
