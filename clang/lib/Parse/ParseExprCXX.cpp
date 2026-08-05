@@ -4078,6 +4078,7 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   // Parse each source arm once. Sema specializes an arm whose selector can
   // project more than one alternative after its guard and handler are parsed.
   ProjectionCache.DeferAlternativeChoices = true;
+  bool InvalidBody = false;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     ProjectionCache.AlternativeChoices.clear();
     ProjectionCache.HasDeferredAlternativeChoices = false;
@@ -4092,6 +4093,7 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
     ProjectionCache.AlternativeChoices.clear();
 
     if (Invalid) {
+      InvalidBody = true;
       SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
       TryConsumeToken(tok::semi);
       continue;
@@ -4100,7 +4102,7 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   }
   T.consumeClose();
   Braces = T.getRange();
-  return false;
+  return InvalidBody;
 }
 
 bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
