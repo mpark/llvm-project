@@ -32,7 +32,6 @@ class VarDecl;
 class MatchProjection {
 public:
   enum ProjectionKind {
-    OptionalProjection,
     AlternativeProjection,
     CastProjection,
     DecompositionProjection,
@@ -86,7 +85,6 @@ public:
     ExpressionPatternClass,
     DeclarationPatternClass,
     TypePatternClass,
-    OptionalPatternClass,
     AlternativePatternClass,
     DecompositionPatternClass,
   };
@@ -260,36 +258,6 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<TypePattern *>(this)->children();
-  }
-};
-
-class OptionalPattern final : public MatchPattern {
-  SourceLocation QuestionLoc;
-  MatchPattern *Pattern;
-  MatchProjection *Projection = nullptr;
-
-public:
-  explicit OptionalPattern(SourceLocation QuestionLoc, MatchPattern *Pattern)
-      : MatchPattern(OptionalPatternClass), QuestionLoc(QuestionLoc),
-        Pattern(Pattern) {
-    setDependence(computeDependence());
-  }
-
-  SourceLocation getBeginLoc() const { return QuestionLoc; }
-  SourceLocation getEndLoc() const { return Pattern->getEndLoc(); }
-
-  const MatchPattern *getSubPattern() const { return Pattern; }
-  MatchPattern *getSubPattern() { return Pattern; }
-
-  MatchProjection *getProjection() const { return Projection; }
-  void setProjection(MatchProjection *P) { Projection = P; }
-
-  llvm::iterator_range<MatchPattern **> children() {
-    return {&Pattern, &Pattern + 1};
-  }
-
-  llvm::iterator_range<const MatchPattern *const *> children() const {
-    return const_cast<OptionalPattern *>(this)->children();
   }
 };
 

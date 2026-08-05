@@ -871,12 +871,6 @@ ActionResult<MatchPattern *> Sema::ActOnTypePattern(TypeSourceInfo *TInfo) {
 }
 
 ActionResult<MatchPattern *>
-Sema::ActOnOptionalPattern(SourceLocation QuestionLoc,
-                           MatchPattern *SubPattern) {
-  return new (Context) OptionalPattern(QuestionLoc, SubPattern);
-}
-
-ActionResult<MatchPattern *>
 Sema::ActOnAlternativePattern(SourceRange DiscriminatorRange,
                               ConceptReference *CR, SourceLocation ColonLoc,
                               MatchPattern *SubPattern) {
@@ -1576,63 +1570,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
     }
     break;
   }
-  case MatchPattern::OptionalPatternClass: {
-    OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
-    if (!Subject)
-      return CheckCompleteMatchPattern(nullptr, P->getSubPattern(), State);
-
-    if (MatchProjection *Projection =
-            findMatchProjection(*this, ProjectionCache, Subject,
-                                MatchProjection::OptionalProjection)) {
-      State.get(P).Projection = Projection;
-      return CheckCompleteMatchPattern(Projection->getProjectedExpr(),
-                                       P->getSubPattern(), State,
-                                       ProjectionCache);
-    }
-
-    MatchProjection *Projection = createMatchProjection(
-        *this, ProjectionCache, Subject, MatchProjection::OptionalProjection);
-    State.get(P).Projection = Projection;
-    QualType Type = Context.getAutoRRefDeductType();
-    VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Type, Subject);
-    if (HoldingVar->isInvalidDecl()) {
-      return true;
-    }
-    Projection->setHoldingVar(HoldingVar);
-    DeclRefExpr *DRE = BuildDeclRefExpr(
-        HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
-        HoldingVar->getLocation());
-    ExprResult RawCond = CheckBooleanCondition(Loc, DRE);
-    if (RawCond.isInvalid()) {
-      return true;
-    }
-    VarDecl *ConditionVar =
-        BuildVarDecl(*this, Loc, Context.getAutoDeductType(), RawCond.get());
-    if (ConditionVar->isInvalidDecl())
-      return true;
-    Projection->setConditionVar(ConditionVar);
-    ExprResult Cond = buildMatchProjectionCondition(*this, Projection, Loc);
-    if (Cond.isInvalid())
-      return true;
-
-    ExprResult Deref = ActOnUnaryOp(S, Loc, tok::TokenKind::star, DRE);
-    if (Deref.isInvalid())
-      return true;
-    QualType ProjectedType = Deref.get()->refersToBitField()
-                                 ? Context.getAutoDeductType()
-                                 : Context.getAutoRRefDeductType();
-    VarDecl *ProjectedVar =
-        BuildVarDecl(*this, Loc, ProjectedType, Deref.get());
-    if (ProjectedVar->isInvalidDecl())
-      return true;
-    Projection->setProjectedVar(ProjectedVar);
-    Expr *Projected = BuildDeclRefExpr(
-        ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
-        ProjectedVar->getLocation());
-    Projection->setProjectedExpr(Projected);
-    return CheckCompleteMatchPattern(Projected, P->getSubPattern(), State,
-                                     ProjectionCache);
-  }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject) {
@@ -1842,7 +1779,6 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
     case MatchPattern::WildcardPatternClass:
       return MatchPatternRefutability::Irrefutable;
     case MatchPattern::ExpressionPatternClass:
-    case MatchPattern::OptionalPatternClass:
     case MatchPattern::AlternativePatternClass:
       return MatchPatternRefutability::Refutable;
     case MatchPattern::DeclarationPatternClass:
