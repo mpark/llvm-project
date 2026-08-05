@@ -2418,9 +2418,11 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
-RValue
-CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
-  const MatchProjection *Projection = AltPattern->getProjection();
+RValue CodeGenFunction::EmitAlternativePattern(
+    const AlternativePattern *AltPattern,
+    const MatchPatternInstantiation *Instantiation) {
+  const MatchPatternInfo *Info = Instantiation->find(AltPattern);
+  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
   assert(Projection && Projection->getHoldingVar() &&
          "expected alternative projection");
   if (!LocalDeclMap.count(Projection->getHoldingVar()))
@@ -2453,10 +2455,10 @@ CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
   else if (!Projected && Projection->getProjectedExpr() &&
            Projection->getProjectedExpr()->getType()->isVoidType())
     EmitIgnoredExpr(Projection->getProjectedExpr());
-  RValue MatchResult =
-      AltPattern->isEmpty()
-          ? RValue::get(Builder.getTrue())
-          : EmitMatchPattern(AltPattern->getSubPattern(), nullptr);
+  RValue MatchResult = AltPattern->isEmpty()
+                           ? RValue::get(Builder.getTrue())
+                           : EmitMatchPattern(AltPattern->getSubPattern(),
+                                              Instantiation, nullptr);
   Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
   EmitBranch(AltEndBB);
 
@@ -2469,7 +2471,8 @@ CodeGenFunction::EmitAlternativePattern(const AlternativePattern *AltPattern) {
 }
 
 RValue CodeGenFunction::EmitDecompositionPattern(
-    const DecompositionPattern *DecompPattern) {
+    const DecompositionPattern *DecompPattern,
+    const MatchPatternInstantiation *Instantiation) {
   assert(DecompPattern->getNumPatterns() != 0 && "not implemented for empty.");
 
   RawAddress FinalDecompResultAddr = CreateTempAlloca(
@@ -2480,12 +2483,15 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   llvm::BasicBlock *DecompEndBB = createBasicBlock("match.decomp.end");
 
   // Emit the actual decomposition variables
-  const auto *D = DecompPattern->getDecomposedDecl();
+  const MatchPatternInfo *Info = Instantiation->find(DecompPattern);
+  const auto *D = Info && Info->Projection
+                      ? Info->Projection->getDecomposedDecl()
+                      : nullptr;
   if (!LocalDeclMap.count(D))
     EmitDecl(*D, /*EvaluateConditionDecl=*/true);
 
   for (auto *SubPattern : DecompPattern->children()) {
-    RValue MatchResult = EmitMatchPattern(SubPattern, nullptr);
+    RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr);
     llvm::BasicBlock *NextPatternBB =
         createBasicBlock("match.decomp.next_pattern");
     Builder.CreateCondBr(MatchResult.getScalarVal(), NextPatternBB,
@@ -2507,14 +2513,15 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   return RValue::get(Builder.CreateLoad(FinalDecompResultAddr));
 }
 
-RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
-                                         const Expr *Subject) {
+RValue CodeGenFunction::EmitMatchPattern(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    const Expr *Subject) {
   MatchPattern::MatchPatternClass PatternStyle =
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
   case MatchPattern::MatchPatternClass::AlternativePatternClass: {
     auto *AltExpr = static_cast<const AlternativePattern *>(Pattern);
-    return EmitAlternativePattern(AltExpr);
+    return EmitAlternativePattern(AltExpr, Instantiation);
   }
   case MatchPattern::MatchPatternClass::BindingPatternClass: {
     auto *BinPat = static_cast<const BindingPattern *>(Pattern);
@@ -2534,7 +2541,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   }
   case MatchPattern::MatchPatternClass::DeclarationPatternClass: {
     const auto *Declaration = static_cast<const DeclarationPattern *>(Pattern);
-    const MatchProjection *Projection = Declaration->getProjection();
+    const MatchPatternInfo *Info = Instantiation->find(Declaration);
+    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
     if (!Projection || Projection->getKind() != MatchProjection::CastProjection)
       return RValue::get(Builder.getTrue());
 
@@ -2551,7 +2559,9 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
                      "ParenPatternClass");
   case MatchPattern::MatchPatternClass::TypePatternClass: {
     const auto *Type = static_cast<const TypePattern *>(Pattern);
-    const MatchProjection *Projection = Type->getProjection();
+    const MatchPatternInfo *Info = Instantiation->find(Type);
+    assert(Info && "expected type pattern state");
+    const MatchProjection *Projection = Info->Projection;
     if (Projection &&
         Projection->getKind() == MatchProjection::CastProjection) {
       if (!LocalDeclMap.count(Projection->getHoldingVar()))
@@ -2562,20 +2572,22 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
         EmitVarDecl(*Projection->getConditionVar());
       return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
     }
-    return RValue::get(Builder.getInt1(Type->matches()));
+    return RValue::get(Builder.getInt1(Info->TypePatternMatches));
   }
   case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
     auto *DecompExpr = static_cast<const DecompositionPattern *>(Pattern);
-    return EmitDecompositionPattern(DecompExpr);
+    return EmitDecompositionPattern(DecompExpr, Instantiation);
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
-    assert(PatternExpr->getCond() && "expected available cond-expr");
-    return RValue::get(EmitScalarExpr(PatternExpr->getCond()));
+    const MatchPatternInfo *Info = Instantiation->find(PatternExpr);
+    assert(Info && Info->Condition && "expected available cond-expr");
+    return RValue::get(EmitScalarExpr(Info->Condition));
   }
   case MatchPattern::MatchPatternClass::OptionalPatternClass: {
     auto *OptExpr = static_cast<const OptionalPattern *>(Pattern);
-    const MatchProjection *Projection = OptExpr->getProjection();
+    const MatchPatternInfo *Info = Instantiation->find(OptExpr);
+    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
     assert(Projection && Projection->getHoldingVar() &&
            Projection->getConditionVar() && "expected optional projection");
     if (!LocalDeclMap.count(Projection->getHoldingVar()))
@@ -2600,7 +2612,8 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     if (const VarDecl *Projected = Projection->getProjectedVar();
         Projected && !LocalDeclMap.count(Projected))
       EmitVarDecl(*Projected);
-    RValue matchResult = EmitMatchPattern(OptExpr->getSubPattern(), Subject);
+    RValue matchResult =
+        EmitMatchPattern(OptExpr->getSubPattern(), Instantiation, Subject);
     Builder.CreateStore(matchResult.getScalarVal(), finalMatchResultAddr);
     EmitBranch(ResultBB);
 
@@ -2624,24 +2637,28 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
 
 bool hasMatchGuard(const MatchGuard &MG) { return MG.hasGuard(); }
 
-static void emitPatternDeclarations(CodeGenFunction &CGF,
-                                    const MatchPattern *Pattern) {
+static void
+emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
+                        const MatchPatternInstantiation *Instantiation) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    if (P->getProjection() && P->getProjection()->getKind() ==
-                                  MatchProjection::DecompositionProjection)
+    const MatchPatternInfo *Info = Instantiation->find(P);
+    if (Info && Info->Projection &&
+        Info->Projection->getKind() == MatchProjection::DecompositionProjection)
       return;
     CGF.EmitVarDecl(*P->getDeclaration());
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;
   }
   for (const MatchPattern *Child : Pattern->children())
-    emitPatternDeclarations(CGF, Child);
+    emitPatternDeclarations(CGF, Child, Instantiation);
 }
 
 void CodeGenFunction::EmitSharedDeclarationProjections(
-    const MatchPattern *Pattern) {
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    if (const MatchProjection *Projection = P->getProjection()) {
+    const MatchPatternInfo *Info = Instantiation->find(P);
+    if (const MatchProjection *Projection = Info ? Info->Projection : nullptr) {
       if (Projection->getKind() == MatchProjection::DecompositionProjection) {
         const DecompositionDecl *D = Projection->getDecomposedDecl();
         assert(D && "expected declaration decomposition projection");
@@ -2657,7 +2674,7 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     return;
   }
   for (const MatchPattern *Child : Pattern->children())
-    EmitSharedDeclarationProjections(Child);
+    EmitSharedDeclarationProjections(Child, Instantiation);
 }
 
 static bool hasPatternDeclarations(const MatchPattern *Pattern) {
@@ -2701,61 +2718,145 @@ RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
   return RValue::get(Builder.CreateLoad(GuardResultAddr));
 }
 
-RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
-  // FIXME: all constant folding already implemented during Sema?
-  assert(!S.getType()->isVoidType() && "is this possible?");
+void CodeGenFunction::EmitMatchTestDispatch(
+    const MatchTestExpr &S, JumpDest SuccessDest,
+    llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
+    JumpDest FailureDest, llvm::function_ref<void()> EmitFailure) {
+  RunCleanupsScope MatchScope(*this);
+  if (const VarDecl *HoldingVar = S.getHoldingVar())
+    EmitVarDecl(*HoldingVar);
+  else if (S.getSubject()->getType()->isVoidType())
+    EmitIgnoredExpr(S.getSubject());
 
-  // Presence of holding var means the subject and the bindings have the
-  // lifetime of a hypothetical condition variable and do not need to
-  // cleanup temporaries created by the suject.
-  bool needsCleanup = !S.getHoldingVar();
-  auto emitMatchTest = [&]() {
-    if (S.getHoldingVar())
-      EmitVarDecl(*S.getHoldingVar());
-    else if (S.getSubject()->getType()->isVoidType())
-      EmitIgnoredExpr(S.getSubject());
+  ArrayRef<MatchTestInstantiation> Instantiations = S.getInstantiations();
+  assert(!Instantiations.empty() && "semantic match-test dispatch required");
 
-    const Expr *Subject = S.getSubject();
-    assert(Subject);
+  for (auto [Index, Instantiation] : llvm::enumerate(Instantiations)) {
+    llvm::BasicBlock *InitializePatternBB = createBasicBlock("match.test.init");
+    llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.test.action");
+    llvm::BasicBlock *GuardFailedBB =
+        createBasicBlock("match.test.guard_failed");
+    llvm::BasicBlock *CleanupBB = createBasicBlock("match.test.cleanup");
+    llvm::BasicBlock *CaseSucceededBB =
+        createBasicBlock("match.test.succeeded");
+    llvm::BasicBlock *NextPatternBB =
+        Index + 1 == Instantiations.size()
+            ? createBasicBlock("match.test.no_match")
+            : createBasicBlock("match.test.next_pattern");
 
-    if (!hasPatternDeclarations(S.getPattern())) {
-      RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
-      if (hasMatchGuard(S.getGuard()))
-        MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
-      return MatchResult;
+    RValue PatternResult =
+        EmitMatchPattern(Instantiation.Pattern,
+                         Instantiation.PatternInstantiation, S.getSubject());
+    Builder.CreateCondBr(PatternResult.getScalarVal(), InitializePatternBB,
+                         NextPatternBB);
+
+    EmitBlock(InitializePatternBB);
+    EmitSharedDeclarationProjections(Instantiation.Pattern,
+                                     Instantiation.PatternInstantiation);
+    RawAddress CaseSelected = CreateTempAlloca(
+        Builder.getInt1Ty(), getPointerAlign(), "match.test.selected");
+    RunCleanupsScope CaseScope(*this);
+    emitPatternDeclarations(*this, Instantiation.Pattern,
+                            Instantiation.PatternInstantiation);
+    RValue GuardResult = RValue::get(Builder.getTrue());
+    if (hasMatchGuard(Instantiation.Guard))
+      GuardResult =
+          EmitMatchGuard(Instantiation.Guard, GuardResult.getScalarVal());
+    Builder.CreateCondBr(GuardResult.getScalarVal(), ExecuteActionBB,
+                         GuardFailedBB);
+
+    EmitBlock(ExecuteActionBB);
+    EmitSuccess(Instantiation);
+    if (HaveInsertPoint()) {
+      Builder.CreateStore(Builder.getTrue(), CaseSelected);
+      EmitBranch(CleanupBB);
     }
 
-    RValue PatternResult = EmitMatchPattern(S.getPattern(), Subject);
-    RawAddress FinalResult = CreateTempAlloca(
-        Builder.getInt1Ty(), getPointerAlign(), "match.test.result");
-    llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
-    llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
-    llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
-    Builder.CreateCondBr(PatternResult.getScalarVal(), InitBB, FailBB);
+    EmitBlock(GuardFailedBB);
+    Builder.CreateStore(Builder.getFalse(), CaseSelected);
+    EmitBranch(CleanupBB);
 
-    EmitBlock(InitBB);
-    EmitSharedDeclarationProjections(S.getPattern());
-    emitPatternDeclarations(*this, S.getPattern());
-    RValue MatchResult = RValue::get(Builder.getTrue());
-    if (hasMatchGuard(S.getGuard()))
-      MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
-    Builder.CreateStore(MatchResult.getScalarVal(), FinalResult);
-    EmitBranch(EndBB);
+    EmitBlock(CleanupBB);
+    CaseScope.ForceCleanup();
+    Builder.CreateCondBr(Builder.CreateLoad(CaseSelected), CaseSucceededBB,
+                         NextPatternBB);
 
-    EmitBlock(FailBB);
-    Builder.CreateStore(Builder.getFalse(), FinalResult);
-    EmitBranch(EndBB);
-
-    EmitBlock(EndBB);
-    return RValue::get(Builder.CreateLoad(FinalResult));
-  };
-
-  if (needsCleanup) {
-    RunCleanupsScope MatchScope(*this);
-    return emitMatchTest();
+    EmitBlock(CaseSucceededBB);
+    EmitBranchThroughCleanup(SuccessDest);
+    EmitBlock(NextPatternBB);
   }
 
-  return emitMatchTest();
+  EmitFailure();
+  if (HaveInsertPoint())
+    EmitBranchThroughCleanup(FailureDest);
+}
+
+RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
+  assert(!S.getType()->isVoidType() && "match test must produce bool");
+  if (S.getInstantiations().empty()) {
+    bool NeedsCleanup = !S.getHoldingVar();
+    auto EmitTest = [&]() {
+      if (S.getHoldingVar())
+        EmitVarDecl(*S.getHoldingVar());
+      else if (S.getSubject()->getType()->isVoidType())
+        EmitIgnoredExpr(S.getSubject());
+
+      const Expr *Subject = S.getSubject();
+      if (!hasPatternDeclarations(S.getPattern())) {
+        RValue MatchResult = EmitMatchPattern(
+            S.getPattern(), S.getPatternInstantiation(), Subject);
+        if (hasMatchGuard(S.getGuard()))
+          MatchResult =
+              EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+        return MatchResult;
+      }
+
+      RValue PatternResult = EmitMatchPattern(
+          S.getPattern(), S.getPatternInstantiation(), Subject);
+      RawAddress FinalResult = CreateTempAlloca(
+          Builder.getInt1Ty(), getPointerAlign(), "match.test.result");
+      llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
+      llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
+      llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
+      Builder.CreateCondBr(PatternResult.getScalarVal(), InitBB, FailBB);
+
+      EmitBlock(InitBB);
+      EmitSharedDeclarationProjections(S.getPattern(),
+                                       S.getPatternInstantiation());
+      emitPatternDeclarations(*this, S.getPattern(),
+                              S.getPatternInstantiation());
+      RValue MatchResult = RValue::get(Builder.getTrue());
+      if (hasMatchGuard(S.getGuard()))
+        MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+      Builder.CreateStore(MatchResult.getScalarVal(), FinalResult);
+      EmitBranch(EndBB);
+
+      EmitBlock(FailBB);
+      Builder.CreateStore(Builder.getFalse(), FinalResult);
+      EmitBranch(EndBB);
+
+      EmitBlock(EndBB);
+      return RValue::get(Builder.CreateLoad(FinalResult));
+    };
+
+    if (NeedsCleanup) {
+      RunCleanupsScope MatchScope(*this);
+      return EmitTest();
+    }
+    return EmitTest();
+  }
+
+  RawAddress Result = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
+                                       "match.test.result");
+  JumpDest End = getJumpDestInCurrentScope("match.test.end");
+  EmitMatchTestDispatch(
+      S, End,
+      [&](const MatchTestInstantiation &) {
+        Builder.CreateStore(Builder.getTrue(), Result);
+      },
+      End, [&] { Builder.CreateStore(Builder.getFalse(), Result); });
+  EmitBlock(End.getBlock());
+  return RValue::get(Builder.CreateLoad(Result));
 }
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
@@ -2818,7 +2919,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   for (MatchCaseInstantiation MatchC : Cases) {
     if (!hasPatternDeclarations(MatchC.Pattern) && !MatchC.Guard.Init &&
         !MatchC.Guard.ConditionVariable) {
-      RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+      RValue MatchResult = EmitMatchPattern(
+          MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
       if (hasMatchGuard(MatchC.Guard))
         MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
 
@@ -2849,7 +2951,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       continue;
     }
 
-    RValue PatternResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+    RValue PatternResult = EmitMatchPattern(
+        MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
     RawAddress CaseSelected = CreateTempAlloca(
         Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
     llvm::BasicBlock *InitializePatternBB =
@@ -2866,9 +2969,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
                          NextPatternBB);
 
     EmitBlock(InitializePatternBB);
-    EmitSharedDeclarationProjections(MatchC.Pattern);
+    EmitSharedDeclarationProjections(MatchC.Pattern,
+                                     MatchC.PatternInstantiation);
     RunCleanupsScope CaseScope(*this);
-    emitPatternDeclarations(*this, MatchC.Pattern);
+    emitPatternDeclarations(*this, MatchC.Pattern, MatchC.PatternInstantiation);
     RValue GuardResult = RValue::get(Builder.getTrue());
     if (hasMatchGuard(MatchC.Guard))
       GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());

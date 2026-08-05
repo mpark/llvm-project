@@ -28,9 +28,9 @@ struct std::alternative_traits<MaybeInt> {
 
 // CHECK-LABEL: define{{.*}} i32 @_Z17match_alternativeR8MaybeInt
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0EEERiRS0_
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0EEERiRS0_
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK: ret i32
 int match_alternative(MaybeInt& value) {
@@ -39,4 +39,82 @@ int match_alternative(MaybeInt& value) {
     case { int& number } => number;
     case {} => -1;
   };
+}
+
+// A projection with only one projectable state uses the same semantic
+// instantiation model, including when its binding is injected into a loop body.
+// CHECK-LABEL: define{{.*}} i32 @_Z23match_alternative_whileR8MaybeInt
+int match_alternative_while(MaybeInt& value) {
+  int result = -1;
+  while (value match case { int& number }) {
+    result = number;
+    value.engaged = false;
+  }
+  return result;
+}
+
+struct Choice {
+  unsigned state;
+  int first;
+  double second;
+};
+
+template<__SIZE_TYPE__ I>
+struct ChoiceAlternative;
+
+template<>
+struct ChoiceAlternative<0> {
+  using type = int;
+};
+
+template<>
+struct ChoiceAlternative<1> {
+  using type = double;
+};
+
+template<>
+struct std::alternative_traits<Choice> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using projection_type = typename ChoiceAlternative<I>::type;
+
+  static __SIZE_TYPE__ index(const Choice&) noexcept;
+
+  template<__SIZE_TYPE__ I>
+  static projection_type<I>& get(Choice&);
+};
+
+template<class T>
+int match_dependent_alternative(T& value, int& guards) {
+  return value match {
+    case { auto&& alternative } if (++guards == 2) =>
+        static_cast<int>(alternative);
+    case _ => 0;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z41instantiate_dependent_alternative_patternR6ChoiceRi
+// CHECK: call{{.*}} @_Z27match_dependent_alternativeI6ChoiceEiRT_Ri
+int instantiate_dependent_alternative_pattern(Choice& value, int& guards) {
+  return match_dependent_alternative(value, guards);
+}
+
+template<class Outer>
+int match_nested_dependent_alternative(Choice& value, int& guards) {
+  return [&]<class Inner>(Inner) {
+    return value match {
+      case { auto&& alternative }
+          if (++guards == 2 && sizeof(Outer) == sizeof(Inner)) =>
+              static_cast<int>(alternative);
+      case _ => 0;
+    };
+  }(Outer{});
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z48instantiate_nested_dependent_alternative_patternR6ChoiceRi
+// CHECK: call{{.*}} @_Z34match_nested_dependent_alternativeIiEiR6ChoiceRi
+int instantiate_nested_dependent_alternative_pattern(Choice& value,
+                                                       int& guards) {
+  return match_nested_dependent_alternative<int>(value, guards);
 }

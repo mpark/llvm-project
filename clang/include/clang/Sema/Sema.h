@@ -11084,14 +11084,19 @@ public:
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
 
-  ExprResult ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
-                                SourceLocation MatchLoc, MatchPattern *Pattern,
-                                SourceLocation IfLoc, MatchGuard Guard);
+  ExprResult ActOnMatchTestExpr(
+      VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
+      MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
+      SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
+      bool NeedsCaseInstantiation,
+      ArrayRef<MatchTestInstantiation> Instantiations = {});
+  ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
+  StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
   ExprResult ActOnMatchSelectExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
       bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
       SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
-      bool ExpandDeferredCases = false,
+      bool ExpandDeferredCases = false, bool RequireFirstCaseViable = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =
           std::nullopt);
   ExprResult ExpandDeferredMatchSelectExpr(MatchSelectExpr *E);
@@ -11136,22 +11141,72 @@ public:
       MatchProjection *Projection;
       QualType Discriminator;
       unsigned Arity;
+      SmallVector<unsigned, 4> Path;
     };
 
-    SmallVector<Entry, 8> Entries;
     struct AlternativeChoice {
       SmallVector<unsigned, 4> Alternatives;
       unsigned Selected;
     };
+
+    SmallVector<Entry, 8> Entries;
     SmallVector<AlternativeChoice, 4> AlternativeChoices;
     SmallVector<unsigned, 4> ForcedAlternativeSelections;
     unsigned NextForcedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
+    SmallVector<unsigned, 4> CurrentProjectionPath;
   };
+  struct MatchPatternState {
+    SmallVector<MatchPatternInfo, 8> Infos;
+
+    MatchPatternInfo &get(MatchPattern *Pattern) {
+      for (MatchPatternInfo &Info : Infos)
+        if (Info.Pattern == Pattern)
+          return Info;
+      Infos.push_back({Pattern});
+      return Infos.back();
+    }
+
+    const MatchPatternInfo *find(const MatchPattern *Pattern) const {
+      for (const MatchPatternInfo &Info : Infos)
+        if (Info.Pattern == Pattern)
+          return &Info;
+      return nullptr;
+    }
+  };
+  enum class MatchPatternRefutability { Impossible, Refutable, Irrefutable };
+
+  /// A closed-choice state restriction under which a semantic match arm is
+  /// instantiated. An empty set of constraints denotes the whole subject.
+  struct MatchSemanticDomainConstraint {
+    const Expr *Subject = nullptr;
+    QualType ProviderType;
+    SmallVector<unsigned, 2> Alternatives;
+  };
+
+  /// Classifies one fully checked pattern without consulting prior arms or the
+  /// usefulness matrix.
+  struct MatchPatternSemanticAnalysis {
+    MatchPatternRefutability Refutability = MatchPatternRefutability::Refutable;
+    SmallVector<MatchSemanticDomainConstraint, 4> Domain;
+
+    bool isUnconditionallyMatched() const {
+      return Domain.empty() &&
+             Refutability == MatchPatternRefutability::Irrefutable;
+    }
+  };
+
+  MatchPatternSemanticAnalysis
+  AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
+                               const MatchPatternState &State);
   bool
   CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
-                             MatchProjectionCache *ProjectionCache = nullptr);
+                            MatchPatternState &State,
+                            MatchProjectionCache *ProjectionCache = nullptr);
+  bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
+                                     MatchPatternState &State,
+                                     MatchProjectionCache *ProjectionCache);
 
   ///@}
 

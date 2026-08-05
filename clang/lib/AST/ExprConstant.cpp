@@ -1928,16 +1928,21 @@ static bool EvaluateFixedPoint(const Expr *E, APFixedPoint &Result,
 struct MatchProjectionEvaluationCache {
   llvm::SmallPtrSet<const MatchProjection *, 8> Conditions;
   llvm::SmallPtrSet<const MatchProjection *, 8> Values;
+  llvm::SmallPtrSet<const VarDecl *, 16> Declarations;
 };
 
 static bool
-EvaluateMatchPattern(const MatchPattern *E, bool &Result, EvalInfo &Info,
+EvaluateMatchPattern(const MatchPattern *E,
+                     const MatchPatternInstantiation *Instantiation,
+                     bool &Result, EvalInfo &Info,
                      MatchProjectionEvaluationCache *ProjectionCache = nullptr);
-static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
-                                        EvalInfo &Info);
+static bool
+EvaluatePatternDeclarations(const MatchPattern *Pattern,
+                            const MatchPatternInstantiation *Instantiation,
+                            EvalInfo &Info);
 static bool EvaluateSharedDeclarationProjections(
-    const MatchPattern *Pattern, EvalInfo &Info,
-    MatchProjectionEvaluationCache &ProjectionCache);
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    EvalInfo &Info, MatchProjectionEvaluationCache &ProjectionCache);
 
 //===----------------------------------------------------------------------===//
 // Misc utilities
@@ -5971,6 +5976,87 @@ static EvalStmtResult EvaluateLoopBody(StmtResult &Result, EvalInfo &Info,
   return ESR;
 }
 
+/// Select and evaluate one semantic instantiation of a match-test condition.
+/// Pattern declarations remain alive through the selected controlled statement
+/// and, for a for-loop, its increment.
+static EvalStmtResult
+EvaluateMatchTestCondition(StmtResult &Result, EvalInfo &Info,
+                           const MatchTestExpr *Match, bool IsLoop,
+                           bool EvaluateIncrement, bool &Matched) {
+  Matched = false;
+  FullExpressionRAII ConditionScope(Info);
+  if (const VarDecl *HoldingVar = Match->getHoldingVar()) {
+    if (!EvaluateDecl(Info, HoldingVar))
+      return ESR_Failed;
+  } else if (Match->getSubject()->getType()->isVoidType() &&
+             !EvaluateIgnoredValue(Info, Match->getSubject())) {
+    return ESR_Failed;
+  }
+
+  MatchProjectionEvaluationCache ProjectionCache;
+  auto EvaluateInstantiation =
+      [&](const MatchPattern *Pattern,
+          const MatchPatternInstantiation *PatternInstantiation,
+          const MatchGuard &Guard, const Stmt *Handler,
+          const Expr *Increment) -> std::optional<EvalStmtResult> {
+    bool PatternMatched;
+    if (!EvaluateMatchPattern(Pattern, PatternInstantiation, PatternMatched,
+                              Info, &ProjectionCache))
+      return ESR_Failed;
+    if (PatternMatched &&
+        !EvaluateSharedDeclarationProjections(Pattern, PatternInstantiation,
+                                              Info, ProjectionCache))
+      return ESR_Failed;
+
+    BlockScopeRAII CaseScope(Info);
+    if (PatternMatched &&
+        !EvaluatePatternDeclarations(Pattern, PatternInstantiation, Info))
+      return ESR_Failed;
+    if (PatternMatched && Guard.Init) {
+      APValue InitValue;
+      StmtResult InitResult = {InitValue, nullptr};
+      if (EvaluateStmt(InitResult, Info, Guard.Init) != ESR_Succeeded)
+        return ESR_Failed;
+    }
+    if (PatternMatched && Guard.Condition &&
+        !EvaluateCond(Info, Guard.ConditionVariable, Guard.Condition,
+                      PatternMatched))
+      return ESR_Failed;
+
+    if (!PatternMatched) {
+      if (!CaseScope.destroy())
+        return ESR_Failed;
+      return std::nullopt;
+    }
+
+    Matched = true;
+    if (!ConditionScope.destroy())
+      return ESR_Failed;
+    assert(Handler && "condition instantiation requires a handler");
+    EvalStmtResult ESR = IsLoop ? EvaluateLoopBody(Result, Info, Handler)
+                                : EvaluateStmt(Result, Info, Handler);
+    if (EvaluateIncrement && (ESR == ESR_Succeeded || ESR == ESR_Continue) &&
+        Increment) {
+      FullExpressionRAII IncScope(Info);
+      if (!EvaluateIgnoredValue(Info, Increment) || !IncScope.destroy())
+        ESR = ESR_Failed;
+    }
+    if (ESR != ESR_Failed && !CaseScope.destroy())
+      ESR = ESR_Failed;
+    return ESR;
+  };
+
+  for (const MatchTestInstantiation &Instantiation :
+       Match->getInstantiations()) {
+    std::optional<EvalStmtResult> ESR = EvaluateInstantiation(
+        Instantiation.Pattern, Instantiation.PatternInstantiation,
+        Instantiation.Guard, Instantiation.Handler, Instantiation.Increment);
+    if (ESR)
+      return *ESR;
+  }
+  return ConditionScope.destroy() ? ESR_Succeeded : ESR_Failed;
+}
+
 /// Evaluate a switch statement.
 static EvalStmtResult EvaluateSwitch(StmtResult &Result, EvalInfo &Info,
                                      const SwitchStmt *SS) {
@@ -6299,6 +6385,29 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
         return ESR;
       }
     }
+    if (const auto *Match = dyn_cast_if_present<MatchTestExpr>(
+            IS->getCond() ? IS->getCond()->IgnoreParens() : nullptr);
+        Match && Match->hasConditionInstantiations()) {
+      bool Matched;
+      EvalStmtResult ESR =
+          EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/false,
+                                     /*EvaluateIncrement=*/false, Matched);
+      if (ESR != ESR_Succeeded) {
+        if (ESR != ESR_Failed && !Scope.destroy())
+          return ESR_Failed;
+        return ESR;
+      }
+      if (!Matched && IS->getElse()) {
+        ESR = EvaluateStmt(Result, Info, IS->getElse());
+        if (ESR != ESR_Succeeded) {
+          if (ESR != ESR_Failed && !Scope.destroy())
+            return ESR_Failed;
+          return ESR;
+        }
+      }
+      return Scope.destroy() ? ESR_Succeeded : ESR_Failed;
+    }
+
     bool Cond;
     if (IS->isConsteval()) {
       Cond = IS->isNonNegatedConsteval();
@@ -6325,6 +6434,30 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
     const WhileStmt *WS = cast<WhileStmt>(S);
     while (true) {
       BlockScopeRAII Scope(Info);
+      if (const auto *Match =
+              dyn_cast<MatchTestExpr>(WS->getCond()->IgnoreParens());
+          Match && Match->hasConditionInstantiations()) {
+        bool Matched;
+        EvalStmtResult ESR =
+            EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/true,
+                                       /*EvaluateIncrement=*/false, Matched);
+        if (!Matched) {
+          if (!Scope.destroy())
+            return ESR_Failed;
+          break;
+        }
+        if (ShouldPropagateBreakContinue(Info, WS, &Scope, ESR))
+          return ESR;
+        if (ESR != ESR_Continue) {
+          if (ESR != ESR_Failed && !Scope.destroy())
+            return ESR_Failed;
+          return ESR;
+        }
+        if (!Scope.destroy())
+          return ESR_Failed;
+        continue;
+      }
+
       bool Continue;
       if (!EvaluateCond(Info, WS->getConditionVariable(), WS->getCond(),
                         Continue))
@@ -6384,6 +6517,32 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
     }
     while (true) {
       BlockScopeRAII IterScope(Info);
+      if (const auto *Match = dyn_cast_if_present<MatchTestExpr>(
+              FS->getCond() ? FS->getCond()->IgnoreParens() : nullptr);
+          Match && Match->hasConditionInstantiations()) {
+        bool Matched;
+        EvalStmtResult ESR =
+            EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/true,
+                                       /*EvaluateIncrement=*/true, Matched);
+        if (!Matched) {
+          if (!IterScope.destroy())
+            return ESR_Failed;
+          break;
+        }
+        if (ShouldPropagateBreakContinue(Info, FS, {&IterScope, &ForScope},
+                                         ESR))
+          return ESR;
+        if (ESR != ESR_Continue) {
+          if (ESR != ESR_Failed &&
+              (!IterScope.destroy() || !ForScope.destroy()))
+            return ESR_Failed;
+          return ESR;
+        }
+        if (!IterScope.destroy())
+          return ESR_Failed;
+        continue;
+      }
+
       bool Continue = true;
       if (FS->getCond() && !EvaluateCond(Info, FS->getConditionVariable(),
                                          FS->getCond(), Continue))
@@ -9475,13 +9634,16 @@ public:
 
     bool Result;
     for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
-      if (!EvaluateMatchPattern(Case.Pattern, Result, Info, &ProjectionCache))
+      if (!EvaluateMatchPattern(Case.Pattern, Case.PatternInstantiation, Result,
+                                Info, &ProjectionCache))
         return false;
-      if (Result && !EvaluateSharedDeclarationProjections(Case.Pattern, Info,
-                                                          ProjectionCache))
+      if (Result &&
+          !EvaluateSharedDeclarationProjections(
+              Case.Pattern, Case.PatternInstantiation, Info, ProjectionCache))
         return false;
       BlockScopeRAII Scope(Info);
-      if (Result && !EvaluatePatternDeclarations(Case.Pattern, Info))
+      if (Result && !EvaluatePatternDeclarations(
+                        Case.Pattern, Case.PatternInstantiation, Info))
         return false;
       if (Result && Case.Guard.Init) {
         APValue InitValue;
@@ -20615,16 +20777,19 @@ bool IntExprEvaluator::VisitRequiresExpr(const RequiresExpr *E) {
 static bool
 EvaluateProjectionCondition(const MatchProjection *Projection, EvalInfo &Info,
                             MatchProjectionEvaluationCache *ProjectionCache) {
+  if (!Projection)
+    return false;
   if (ProjectionCache && !ProjectionCache->Conditions.insert(Projection).second)
     return true;
-  if (const VarDecl *D = Projection->getHoldingVar();
-      D && !EvaluateDecl(Info, D))
-    return false;
-  if (const VarDecl *D = Projection->getIntermediateVar();
-      D && !EvaluateDecl(Info, D))
-    return false;
-  if (const VarDecl *D = Projection->getConditionVar();
-      D && !EvaluateDecl(Info, D))
+  auto EvaluateOnce = [&](const VarDecl *D) {
+    return !D ||
+           (ProjectionCache &&
+            !ProjectionCache->Declarations.insert(D).second) ||
+           EvaluateDecl(Info, D);
+  };
+  if (!EvaluateOnce(Projection->getHoldingVar()) ||
+      !EvaluateOnce(Projection->getIntermediateVar()) ||
+      !EvaluateOnce(Projection->getConditionVar()))
     return false;
   return true;
 }
@@ -20635,7 +20800,9 @@ EvaluateProjectionValue(const MatchProjection *Projection, EvalInfo &Info,
   if (ProjectionCache && !ProjectionCache->Values.insert(Projection).second)
     return true;
   if (const VarDecl *D = Projection->getProjectedVar();
-      D && !EvaluateDecl(Info, D))
+      D &&
+      (!ProjectionCache || ProjectionCache->Declarations.insert(D).second) &&
+      !EvaluateDecl(Info, D))
     return false;
   if (!Projection->getProjectedVar() && Projection->getProjectedExpr() &&
       Projection->getProjectedExpr()->getType()->isVoidType() &&
@@ -20648,7 +20815,9 @@ EvaluateProjectionValue(const MatchProjection *Projection, EvalInfo &Info,
 }
 
 static bool
-EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
+EvaluateMatchPattern(const MatchPattern *Pattern,
+                     const MatchPatternInstantiation *Instantiation,
+                     bool &Result, EvalInfo &Info,
                      MatchProjectionEvaluationCache *ProjectionCache) {
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
@@ -20664,7 +20833,9 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
   }
   case MatchPattern::DeclarationPatternClass: {
     const auto *P = static_cast<const DeclarationPattern *>(Pattern);
-    const MatchProjection *Projection = P->getProjection();
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    const MatchProjection *Projection =
+        PatternInfo ? PatternInfo->Projection : nullptr;
     if (!Projection || Projection->getKind() != MatchProjection::CastProjection)
       return Result = true;
     return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
@@ -20673,57 +20844,74 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
   }
   case MatchPattern::TypePatternClass: {
     const auto *P = static_cast<const TypePattern *>(Pattern);
-    if (const MatchProjection *Projection = P->getProjection())
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    assert(PatternInfo && "expected type pattern state");
+    if (const MatchProjection *Projection = PatternInfo->Projection)
       return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
              EvaluateAsBooleanCondition(Projection->getConditionExpr(), Result,
                                         Info);
-    Result = P->matches();
+    Result = PatternInfo->TypePatternMatches;
     return true;
   }
   case MatchPattern::ExpressionPatternClass: {
     const auto *P = static_cast<const ExpressionPattern *>(Pattern);
-    return EvaluateAsBooleanCondition(P->getCond(), Result, Info);
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    assert(PatternInfo && PatternInfo->Condition &&
+           "expected expression pattern state");
+    return EvaluateAsBooleanCondition(PatternInfo->Condition, Result, Info);
   }
   case MatchPattern::ParenPatternClass: {
     const auto *P = static_cast<const ParenPattern *>(Pattern);
-    return EvaluateMatchPattern(P->getSubPattern(), Result, Info,
+    return EvaluateMatchPattern(P->getSubPattern(), Instantiation, Result, Info,
                                 ProjectionCache);
   }
   case MatchPattern::OptionalPatternClass: {
     const auto *P = static_cast<const OptionalPattern *>(Pattern);
-    return EvaluateProjectionCondition(P->getProjection(), Info,
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    assert(PatternInfo && PatternInfo->Projection &&
+           "expected optional pattern state");
+    return EvaluateProjectionCondition(PatternInfo->Projection, Info,
                                        ProjectionCache) &&
-           EvaluateAsBooleanCondition(P->getProjection()->getConditionExpr(),
-                                      Result, Info) &&
-           (!Result || (EvaluateProjectionValue(P->getProjection(), Info,
-                                                ProjectionCache) &&
-                        EvaluateMatchPattern(P->getSubPattern(), Result, Info,
-                                             ProjectionCache)));
+           EvaluateAsBooleanCondition(
+               PatternInfo->Projection->getConditionExpr(), Result, Info) &&
+           (!Result ||
+            (EvaluateProjectionValue(PatternInfo->Projection, Info,
+                                     ProjectionCache) &&
+             EvaluateMatchPattern(P->getSubPattern(), Instantiation, Result,
+                                  Info, ProjectionCache)));
   }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
-    return EvaluateProjectionCondition(P->getProjection(), Info,
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    assert(PatternInfo && PatternInfo->Projection &&
+           "expected alternative pattern state");
+    return EvaluateProjectionCondition(PatternInfo->Projection, Info,
                                        ProjectionCache) &&
-           EvaluateAsBooleanCondition(P->getProjection()->getConditionExpr(),
-                                      Result, Info) &&
-           (!Result ||
-            (EvaluateProjectionValue(P->getProjection(), Info,
-                                     ProjectionCache) &&
-             (P->isEmpty() || EvaluateMatchPattern(P->getSubPattern(), Result,
-                                                   Info, ProjectionCache))));
+           EvaluateAsBooleanCondition(
+               PatternInfo->Projection->getConditionExpr(), Result, Info) &&
+           (!Result || (EvaluateProjectionValue(PatternInfo->Projection, Info,
+                                                ProjectionCache) &&
+                        (P->isEmpty() ||
+                         EvaluateMatchPattern(P->getSubPattern(), Instantiation,
+                                              Result, Info, ProjectionCache))));
   }
-  case MatchPattern::DecompositionPatternClass:
+  case MatchPattern::DecompositionPatternClass: {
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);
-    if (!EvaluateProjectionValue(P->getProjection(), Info, ProjectionCache))
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    assert(PatternInfo && PatternInfo->Projection &&
+           "expected decomposition pattern state");
+    if (!EvaluateProjectionValue(PatternInfo->Projection, Info,
+                                 ProjectionCache))
       return false;
     Result = true;
     for (const MatchPattern *C : P->children()) {
       if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass)
         if (const auto *Binding = static_cast<const BindingPattern *>(C);
             Binding->getBinding()->getDecomposedDecl() ==
-            P->getDecomposedDecl())
+            PatternInfo->Projection->getDecomposedDecl())
           continue;
-      if (!EvaluateMatchPattern(C, Result, Info, ProjectionCache)) {
+      if (!EvaluateMatchPattern(C, Instantiation, Result, Info,
+                                ProjectionCache)) {
         return false;
       }
       if (!Result) {
@@ -20732,14 +20920,19 @@ EvaluateMatchPattern(const MatchPattern *Pattern, bool &Result, EvalInfo &Info,
     }
     return true;
   }
+  }
   llvm_unreachable("unknown match pattern kind");
 }
 
-static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
-                                        EvalInfo &Info) {
+static bool
+EvaluatePatternDeclarations(const MatchPattern *Pattern,
+                            const MatchPatternInstantiation *Instantiation,
+                            EvalInfo &Info) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    if (P->getProjection() && P->getProjection()->getKind() ==
-                                  MatchProjection::DecompositionProjection)
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    if (PatternInfo && PatternInfo->Projection &&
+        PatternInfo->Projection->getKind() ==
+            MatchProjection::DecompositionProjection)
       return true;
     const VarDecl *Declaration = P->getDeclaration();
     if (!EvaluateDecl(Info, Declaration))
@@ -20752,26 +20945,74 @@ static bool EvaluatePatternDeclarations(const MatchPattern *Pattern,
     return true;
   }
   for (const MatchPattern *Child : Pattern->children())
-    if (!EvaluatePatternDeclarations(Child, Info))
+    if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
       return false;
   return true;
 }
 
 static bool EvaluateSharedDeclarationProjections(
-    const MatchPattern *Pattern, EvalInfo &Info,
-    MatchProjectionEvaluationCache &ProjectionCache) {
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    EvalInfo &Info, MatchProjectionEvaluationCache &ProjectionCache) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    const MatchProjection *Projection = P->getProjection();
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    const MatchProjection *Projection =
+        PatternInfo ? PatternInfo->Projection : nullptr;
     return !Projection ||
            EvaluateProjectionValue(Projection, Info, &ProjectionCache);
   }
   for (const MatchPattern *Child : Pattern->children())
-    if (!EvaluateSharedDeclarationProjections(Child, Info, ProjectionCache))
+    if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
+                                              ProjectionCache))
       return false;
   return true;
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
+  if (!E->getInstantiations().empty()) {
+    if (const VarDecl *VD = E->getHoldingVar()) {
+      if (!EvaluateDecl(Info, VD))
+        return false;
+    } else if (E->getSubject()->getType()->isVoidType() &&
+               !EvaluateIgnoredValue(Info, E->getSubject())) {
+      return false;
+    }
+
+    MatchProjectionEvaluationCache ProjectionCache;
+    for (const MatchTestInstantiation &Instantiation : E->getInstantiations()) {
+      bool Result;
+      if (!EvaluateMatchPattern(Instantiation.Pattern,
+                                Instantiation.PatternInstantiation, Result,
+                                Info, &ProjectionCache))
+        return false;
+      if (Result &&
+          !EvaluateSharedDeclarationProjections(
+              Instantiation.Pattern, Instantiation.PatternInstantiation, Info,
+              ProjectionCache))
+        return false;
+      BlockScopeRAII Scope(Info);
+      if (Result &&
+          !EvaluatePatternDeclarations(
+              Instantiation.Pattern, Instantiation.PatternInstantiation, Info))
+        return false;
+      if (Result && Instantiation.Guard.Init) {
+        APValue InitValue;
+        StmtResult InitResult = {InitValue, nullptr};
+        if (EvaluateStmt(InitResult, Info, Instantiation.Guard.Init) !=
+            ESR_Succeeded)
+          return false;
+      }
+      if (Result && Instantiation.Guard.Condition &&
+          !EvaluateCond(Info, Instantiation.Guard.ConditionVariable,
+                        Instantiation.Guard.Condition, Result))
+        return false;
+      if (!Scope.destroy())
+        return false;
+      if (Result)
+        return Success(true, E);
+    }
+    return Success(false, E);
+  }
+
   bool Result;
   MatchProjectionEvaluationCache ProjectionCache;
   if (!E->getHoldingVar() && E->getSubject()->getType()->isVoidType() &&
@@ -20792,12 +21033,15 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
     // if (f(g()) match ...) // f(g()) is not extended properly currently.
     if (!EvaluateDecl(Info, VD))
       return false;
-    if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
+    if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
+                              Result, Info, &ProjectionCache))
       return false;
-    if (Result && !EvaluateSharedDeclarationProjections(E->getPattern(), Info,
-                                                        ProjectionCache))
+    if (Result && !EvaluateSharedDeclarationProjections(
+                      E->getPattern(), E->getPatternInstantiation(), Info,
+                      ProjectionCache))
       return false;
-    if (Result && !EvaluatePatternDeclarations(E->getPattern(), Info))
+    if (Result && !EvaluatePatternDeclarations(
+                      E->getPattern(), E->getPatternInstantiation(), Info))
       return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;
@@ -20813,12 +21057,15 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
     return Success(Result, E);
   } else {
     BlockScopeRAII Scope(Info);
-    if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
+    if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
+                              Result, Info, &ProjectionCache))
       return false;
-    if (Result && !EvaluateSharedDeclarationProjections(E->getPattern(), Info,
-                                                        ProjectionCache))
+    if (Result && !EvaluateSharedDeclarationProjections(
+                      E->getPattern(), E->getPatternInstantiation(), Info,
+                      ProjectionCache))
       return false;
-    if (Result && !EvaluatePatternDeclarations(E->getPattern(), Info))
+    if (Result && !EvaluatePatternDeclarations(
+                      E->getPattern(), E->getPatternInstantiation(), Info))
       return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;

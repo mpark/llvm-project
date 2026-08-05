@@ -14479,8 +14479,6 @@ def err_alternative_traits_index_not_noexcept : Error<
   "must be noexcept">;
 def err_alternative_name_not_found : Error<
   "alternative name %0 is not defined by 'std::alternative_traits<%1>::names'">;
-def err_braced_alternative_not_unique : Error<
-  "braced alternative pattern does not select a unique projectable state of %0">;
 def err_braced_alternative_no_viable_state : Error<
   "braced alternative pattern does not match any projectable state of %0">;
 def err_empty_alternative_not_found : Error<

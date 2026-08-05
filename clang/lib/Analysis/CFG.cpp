@@ -592,6 +592,14 @@ private:
   CFGBlock *VisitCompoundStmt(CompoundStmt *C, bool ExternallyDestructed);
   CFGBlock *VisitConditionalOperator(AbstractConditionalOperator *C,
                                      AddStmtChoice asc);
+  CFGBlock *VisitMatchTestExpr(MatchTestExpr *E, AddStmtChoice asc);
+  std::pair<CFGBlock *, CFGBlock *> VisitMatchTestExpr(MatchTestExpr *E,
+                                                       Stmt *Term,
+                                                       CFGBlock *TrueBlock,
+                                                       CFGBlock *FalseBlock);
+  std::pair<CFGBlock *, CFGBlock *>
+  VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
+                     ArrayRef<CFGBlock *> TrueBlocks, CFGBlock *FalseBlock);
   CFGBlock *VisitMatchSelectExpr(MatchSelectExpr *E, AddStmtChoice asc);
   CFGBlock *VisitContinueStmt(ContinueStmt *C);
   CFGBlock *VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E,
@@ -3092,6 +3100,109 @@ CFGBlock *CFGBuilder::VisitConditionalOperator(AbstractConditionalOperator *C,
   return addStmt(condExpr);
 }
 
+static SmallVector<VarDecl *, 4>
+collectMatchPatternDecls(MatchPattern *Pattern) {
+  SmallVector<VarDecl *, 4> Decls;
+  auto Collect = [&](MatchPattern *P, auto &Recurse) -> void {
+    if (auto *Declaration = dyn_cast<DeclarationPattern>(P))
+      Decls.push_back(Declaration->getDeclaration());
+    for (MatchPattern *Child : P->children())
+      Recurse(Child, Recurse);
+  };
+  Collect(Pattern, Collect);
+  return Decls;
+}
+
+std::pair<CFGBlock *, CFGBlock *>
+CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
+                               CFGBlock *TrueBlock, CFGBlock *FalseBlock) {
+  CFGBlock *TrueBlocks[] = {TrueBlock};
+  return VisitMatchTestExpr(E, Term, TrueBlocks, FalseBlock);
+}
+
+std::pair<CFGBlock *, CFGBlock *>
+CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
+                               ArrayRef<CFGBlock *> TrueBlocks,
+                               CFGBlock *FalseBlock) {
+  auto BuildCandidate = [&](MatchPattern *Pattern, const MatchGuard &Guard,
+                            bool PatternIsIrrefutable,
+                            CFGBlock *TrueBlock,
+                            CFGBlock *CandidateFalseBlock) {
+    CFGBlock *SuccessBlock = TrueBlock;
+    if (Guard.hasGuard()) {
+      Block = createBlock(false);
+      Block->setTerminator(Term ? Term : E);
+      addSuccessor(Block, TrueBlock);
+      addSuccessor(Block, CandidateFalseBlock);
+      if (Expr *Condition = Guard.Condition)
+        addStmt(Condition);
+      if (VarDecl *ConditionVariable = Guard.ConditionVariable) {
+        DeclStmt *DS = new (Context) DeclStmt(DeclGroupRef(ConditionVariable),
+                                              ConditionVariable->getBeginLoc(),
+                                              ConditionVariable->getEndLoc());
+        addStmt(DS);
+      }
+      if (Stmt *Init = Guard.Init)
+        addStmt(Init);
+      SuccessBlock = Block;
+    }
+
+    Succ = SuccessBlock;
+    CFGBlock *PatternBodyBlock = SuccessBlock;
+    for (VarDecl *D : llvm::reverse(collectMatchPatternDecls(Pattern))) {
+      DeclStmt *DS = new (Context)
+          DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
+      Block = nullptr;
+      PatternBodyBlock = addStmt(DS);
+      Succ = PatternBodyBlock;
+    }
+
+    CFGBlock *PatternBlock = createBlock(false);
+    PatternBlock->setTerminator(Term ? Term : E);
+    addSuccessor(PatternBlock, PatternBodyBlock);
+    if (!PatternIsIrrefutable)
+      addSuccessor(PatternBlock, CandidateFalseBlock);
+    return PatternBlock;
+  };
+
+  CFGBlock *PatternBlock = nullptr;
+  CFGBlock *CandidateEntry = FalseBlock;
+  if (!E->getInstantiations().empty()) {
+    assert((TrueBlocks.size() == 1 ||
+            TrueBlocks.size() == E->getInstantiations().size()) &&
+           "expected either a shared or per-instantiation successor");
+    for (unsigned I = E->getInstantiations().size(); I-- > 0;) {
+      const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
+      CFGBlock *TrueBlock =
+          TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
+      CandidateEntry = PatternBlock =
+          BuildCandidate(Instantiation.Pattern, Instantiation.Guard,
+                         Instantiation.PatternIsIrrefutable, TrueBlock,
+                         CandidateEntry);
+    }
+  } else {
+    assert(TrueBlocks.size() == 1);
+    CandidateEntry = PatternBlock = BuildCandidate(
+        E->getPattern(), E->getGuard(), E->isPatternIrrefutable(),
+        TrueBlocks.front(), FalseBlock);
+  }
+
+  Succ = CandidateEntry;
+  Block = nullptr;
+  CFGBlock *EntryBlock;
+  if (VarDecl *HoldingVar = E->getHoldingVar())
+    EntryBlock = addStmt(HoldingVar->getInit());
+  else
+    EntryBlock = addStmt(E->getSubject());
+  return {EntryBlock ? EntryBlock : CandidateEntry, PatternBlock};
+}
+
+CFGBlock *CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, AddStmtChoice asc) {
+  CFGBlock *ConfluenceBlock = Block ? Block : createBlock();
+  if (asc.alwaysAdd(*this, E))
+    appendStmt(ConfluenceBlock, E);
+  return VisitMatchTestExpr(E, nullptr, ConfluenceBlock, ConfluenceBlock).first;
+}
 CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
                                            AddStmtChoice asc) {
   CFGBlock *ConfluenceBlock = Block ? Block : createBlock();
@@ -3408,9 +3519,32 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
     }
   }
 
+  Expr *Condition = I->isConsteval() ? nullptr : I->getCond()->IgnoreParens();
+  MatchTestExpr *MatchCondition =
+      I->getConditionVariable() ? nullptr
+                                : dyn_cast_or_null<MatchTestExpr>(Condition);
+
   // Process the true branch.
   CFGBlock *ThenBlock;
-  {
+  SmallVector<CFGBlock *, 4> MatchThenBlocks;
+  if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+    for (const MatchTestInstantiation &Instantiation :
+         MatchCondition->getInstantiations()) {
+      SaveAndRestore sv(Succ);
+      Block = nullptr;
+      if (!isa<CompoundStmt>(Instantiation.Handler))
+        addLocalScopeAndDtors(Instantiation.Handler);
+      CFGBlock *CandidateThen = addStmt(Instantiation.Handler);
+      if (!CandidateThen) {
+        CandidateThen = createBlock(false);
+        addSuccessor(CandidateThen, sv.get());
+      } else if (Block && badCFG) {
+        return nullptr;
+      }
+      MatchThenBlocks.push_back(CandidateThen);
+    }
+    ThenBlock = MatchThenBlocks.front();
+  } else {
     Stmt *Then = I->getThen();
     assert(Then);
     SaveAndRestore sv(Succ);
@@ -3442,12 +3576,19 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   // removes infeasible paths from the control-flow graph by having the
   // control-flow transfer of '&&' or '||' go directly into the then/else
   // blocks directly.
-  BinaryOperator *Cond =
-      (I->isConsteval() || I->getConditionVariable())
-          ? nullptr
-          : dyn_cast<BinaryOperator>(I->getCond()->IgnoreParens());
+  BinaryOperator *Cond = I->isConsteval() || I->getConditionVariable() ||
+                                 MatchCondition
+                             ? nullptr
+                             : dyn_cast_or_null<BinaryOperator>(Condition);
   CFGBlock *LastBlock;
-  if (Cond && Cond->isLogicalOp())
+  if (MatchCondition)
+    LastBlock =
+        (MatchThenBlocks.empty()
+             ? VisitMatchTestExpr(MatchCondition, I, ThenBlock, ElseBlock)
+             : VisitMatchTestExpr(MatchCondition, I, MatchThenBlocks,
+                                  ElseBlock))
+            .first;
+  else if (Cond && Cond->isLogicalOp())
     LastBlock = VisitLogicalOperator(Cond, I, ThenBlock, ElseBlock).first;
   else {
     // Now create a new block containing the if statement.
@@ -3783,6 +3924,9 @@ CFGBlock *CFGBuilder::VisitGCCAsmStmt(GCCAsmStmt *G, AddStmtChoice asc) {
 
 CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
   CFGBlock *LoopSuccessor = nullptr;
+  auto *MatchCondition = dyn_cast_or_null<MatchTestExpr>(
+      F->getCond() ? F->getCond()->IgnoreParens() : nullptr);
+  SmallVector<CFGBlock *, 4> MatchBodyBlocks;
 
   // Save local scope position because in case of condition variable ScopePos
   // won't be restored when traversing AST.
@@ -3838,42 +3982,55 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
     // variable (if any).
     addAutomaticObjHandling(ScopePos, LoopBeginScopePos, F);
 
-    if (Stmt *I = F->getInc()) {
-      // Generate increment code in its own basic block.  This is the target of
-      // continue statements.
-      Succ = addStmt(I);
-    }
+    if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+      for (const MatchTestInstantiation &Instantiation :
+           MatchCondition->getInstantiations()) {
+        Block = nullptr;
+        Succ = TransitionBlock;
+        CFGBlock *IncrementBlock = Instantiation.Increment
+                                       ? addStmt(Instantiation.Increment)
+                                       : TransitionBlock;
+        ContinueJumpTarget = JumpTarget(IncrementBlock, ContinueScopePos);
+        ContinueJumpTarget.block->setLoopTarget(F);
 
-    // Finish up the increment (or empty) block if it hasn't been already.
-    if (Block) {
-      assert(Block == Succ);
-      if (badCFG)
+        Block = nullptr;
+        Succ = IncrementBlock;
+        if (!isa<CompoundStmt>(Instantiation.Handler))
+          addLocalScopeAndDtors(Instantiation.Handler);
+        CFGBlock *CandidateBody = addStmt(Instantiation.Handler);
+        if (!CandidateBody)
+          CandidateBody = IncrementBlock;
+        else if (Block && badCFG)
+          return nullptr;
+        MatchBodyBlocks.push_back(CandidateBody);
+      }
+      BodyBlock = MatchBodyBlocks.front();
+    } else {
+      if (Stmt *I = F->getInc()) {
+        // Generate increment code in its own basic block. This is the target
+        // of continue statements.
+        Succ = addStmt(I);
+      }
+
+      if (Block) {
+        assert(Block == Succ);
+        if (badCFG)
+          return nullptr;
+        Block = nullptr;
+      }
+
+      ContinueJumpTarget = JumpTarget(Succ, ContinueScopePos);
+      ContinueJumpTarget.block->setLoopTarget(F);
+
+      if (!isa<CompoundStmt>(F->getBody()))
+        addLocalScopeAndDtors(F->getBody());
+      BodyBlock = addStmt(F->getBody());
+
+      if (!BodyBlock)
+        BodyBlock = ContinueJumpTarget.block; // for (...);
+      else if (badCFG)
         return nullptr;
-      Block = nullptr;
     }
-
-   // The starting block for the loop increment is the block that should
-   // represent the 'loop target' for looping back to the start of the loop.
-   ContinueJumpTarget = JumpTarget(Succ, ContinueScopePos);
-   ContinueJumpTarget.block->setLoopTarget(F);
-
-
-    // If body is not a compound statement create implicit scope
-    // and add destructors.
-    if (!isa<CompoundStmt>(F->getBody()))
-      addLocalScopeAndDtors(F->getBody());
-
-    // Now populate the body block, and in the process create new blocks as we
-    // walk the body of the loop.
-    BodyBlock = addStmt(F->getBody());
-
-    if (!BodyBlock) {
-      // In the case of "for (...;...;...);" we can have a null BodyBlock.
-      // Use the continue jump target as the proxy for the body.
-      BodyBlock = ContinueJumpTarget.block;
-    }
-    else if (badCFG)
-      return nullptr;
   }
 
   // Because of short-circuit evaluation, the condition of the loop can span
@@ -3885,6 +4042,14 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
     Expr *C = F->getCond();
     SaveAndRestore save_scope_pos(ScopePos);
 
+    if (auto *Match =
+            dyn_cast_or_null<MatchTestExpr>(C ? C->IgnoreParens() : nullptr)) {
+      std::tie(EntryConditionBlock, ExitConditionBlock) =
+          MatchBodyBlocks.empty()
+              ? VisitMatchTestExpr(Match, F, BodyBlock, LoopSuccessor)
+              : VisitMatchTestExpr(Match, F, MatchBodyBlocks, LoopSuccessor);
+      break;
+    }
     // Specially handle logical operators, which have a slightly
     // more optimal CFG representation.
     if (BinaryOperator *Cond =
@@ -4145,6 +4310,8 @@ CFGBlock *CFGBuilder::VisitPseudoObjectExpr(PseudoObjectExpr *E) {
 
 CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
   CFGBlock *LoopSuccessor = nullptr;
+  auto *MatchCondition = dyn_cast<MatchTestExpr>(W->getCond()->IgnoreParens());
+  SmallVector<CFGBlock *, 4> MatchBodyBlocks;
 
   // Save local scope position because in case of condition variable ScopePos
   // won't be restored when traversing AST.
@@ -4193,18 +4360,35 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
     // Loop body should end with destructor of Condition variable (if any).
     addAutomaticObjHandling(ScopePos, LoopBeginScopePos, W);
 
-    // If body is not a compound statement create implicit scope
-    // and add destructors.
-    if (!isa<CompoundStmt>(W->getBody()))
-      addLocalScopeAndDtors(W->getBody());
+    if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+      for (const MatchTestInstantiation &Instantiation :
+           MatchCondition->getInstantiations()) {
+        Succ = ContinueJumpTarget.block;
+        Block = nullptr;
+        if (!isa<CompoundStmt>(Instantiation.Handler))
+          addLocalScopeAndDtors(Instantiation.Handler);
+        CFGBlock *CandidateBody = addStmt(Instantiation.Handler);
+        if (!CandidateBody)
+          CandidateBody = ContinueJumpTarget.block;
+        else if (Block && badCFG)
+          return nullptr;
+        MatchBodyBlocks.push_back(CandidateBody);
+      }
+      BodyBlock = MatchBodyBlocks.front();
+    } else {
+      // If body is not a compound statement create implicit scope
+      // and add destructors.
+      if (!isa<CompoundStmt>(W->getBody()))
+        addLocalScopeAndDtors(W->getBody());
 
-    // Create the body.  The returned block is the entry to the loop body.
-    BodyBlock = addStmt(W->getBody());
+      // Create the body. The returned block is the entry to the loop body.
+      BodyBlock = addStmt(W->getBody());
 
-    if (!BodyBlock)
-      BodyBlock = ContinueJumpTarget.block; // can happen for "while(...) ;"
-    else if (Block && badCFG)
-      return nullptr;
+      if (!BodyBlock)
+        BodyBlock = ContinueJumpTarget.block; // while (...) ;
+      else if (Block && badCFG)
+        return nullptr;
+    }
   }
 
   // Because of short-circuit evaluation, the condition of the loop can span
@@ -4215,6 +4399,13 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
   do {
     Expr *C = W->getCond();
 
+    if (auto *Match = dyn_cast<MatchTestExpr>(C->IgnoreParens())) {
+      std::tie(EntryConditionBlock, ExitConditionBlock) =
+          MatchBodyBlocks.empty()
+              ? VisitMatchTestExpr(Match, W, BodyBlock, LoopSuccessor)
+              : VisitMatchTestExpr(Match, W, MatchBodyBlocks, LoopSuccessor);
+      break;
+    }
     // Specially handle logical operators, which have a slightly
     // more optimal CFG representation.
     if (BinaryOperator *Cond = dyn_cast<BinaryOperator>(C->IgnoreParens()))

@@ -5278,12 +5278,23 @@ public:
 
   void EmitFakeUse(Address Addr);
   RValue EmitMatchTestExpr(const MatchTestExpr &S);
+  void EmitMatchTestDispatch(
+      const MatchTestExpr &S, JumpDest SuccessDest,
+      llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
+      JumpDest FailureDest, llvm::function_ref<void()> EmitFailure);
   RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   LValue EmitMatchSelectExprLValue(const MatchSelectExpr *E);
-  RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
-  RValue EmitDecompositionPattern(const DecompositionPattern *Pattern);
-  RValue EmitAlternativePattern(const AlternativePattern *Pattern);
-  void EmitSharedDeclarationProjections(const MatchPattern *Pattern);
+  RValue EmitMatchPattern(const MatchPattern *Pattern,
+                          const MatchPatternInstantiation *Instantiation,
+                          const Expr *Subject);
+  RValue
+  EmitDecompositionPattern(const DecompositionPattern *Pattern,
+                           const MatchPatternInstantiation *Instantiation);
+  RValue EmitAlternativePattern(const AlternativePattern *Pattern,
+                                const MatchPatternInstantiation *Instantiation);
+  void EmitSharedDeclarationProjections(
+      const MatchPattern *Pattern,
+      const MatchPatternInstantiation *Instantiation);
   RValue EmitMatchGuard(const MatchGuard &MG, llvm::Value *PatBoolRes);
 
   //===--------------------------------------------------------------------===//

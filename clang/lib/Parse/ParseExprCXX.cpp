@@ -3901,6 +3901,19 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
+static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
+  if (Pattern->getMatchPatternClass() ==
+      MatchPattern::AlternativePatternClass) {
+    auto *Alternative = static_cast<AlternativePattern *>(Pattern);
+    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+        Alternative->getAlternativeKind() == AlternativePattern::Auto ||
+        Alternative->getAlternativeKind() == AlternativePattern::Concept)
+      return true;
+  }
+  return llvm::any_of(Pattern->children(),
+                      needsAlternativeCandidateSpecialization);
+}
+
 ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                        InjectedDeclSet *InjectedDecls) {
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
@@ -3945,9 +3958,29 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     }
     ParseScope MatchTestScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
+    bool PatternNeedsAlternativeSpecialization =
+        Pattern.isUsable() &&
+        needsAlternativeCandidateSpecialization(Pattern.get());
+    Sema::MatchProjectionCache ProjectionCache;
+    Sema::MatchPatternState PatternState;
+    ProjectionCache.DeferAlternativeChoices = true;
     if (LHS.isInvalid() || Pattern.isInvalid() ||
-        Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get()))
+        Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(),
+                                          PatternState, &ProjectionCache))
       return ExprError();
+    if (!InjectedDecls && PatternNeedsAlternativeSpecialization &&
+        (ProjectionCache.HasDeferredAlternativeChoices ||
+         LHS.get()->isTypeDependent())) {
+      LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
+      if (LHS.isInvalid())
+        return ExprError();
+      ProjectionCache = {};
+      PatternState = {};
+      ProjectionCache.DeferAlternativeChoices = true;
+      if (Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(),
+                                            PatternState, &ProjectionCache))
+        return ExprError();
+    }
     SourceLocation IfLoc;
     StmtResult GuardInit;
     Sema::ConditionResult Guard =
@@ -3960,10 +3993,22 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
       Scope::decl_range DR = getCurScope()->decls();
       *InjectedDecls = {DR.begin(), DR.end()};
     }
-    return Actions.ActOnMatchTestExpr(HoldingVar, LHS.get(), MatchLoc,
-                                      Pattern.get(), IfLoc,
-                                      {GuardInit.get(), Guard.get().first,
-                                       Guard.get().second});
+    bool NeedsCaseInstantiation =
+        ProjectionCache.HasDeferredAlternativeChoices ||
+        (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
+    Sema::MatchPatternSemanticAnalysis Semantic =
+        Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
+    bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+    ExprResult Result = Actions.ActOnMatchTestExpr(
+        HoldingVar, LHS.get(), MatchLoc, Pattern.get(),
+        MatchPatternInstantiation::Create(Actions.Context, Pattern.get(),
+                                          PatternState.Infos),
+        IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
+        PatternIsIrrefutable, NeedsCaseInstantiation);
+    if (Result.isInvalid() || InjectedDecls || !NeedsCaseInstantiation ||
+        Actions.CurContext->isDependentContext())
+      return Result;
+    return Actions.ExpandDeferredMatchTestExpr(cast<MatchTestExpr>(Result.get()));
   }
 }
 
@@ -4012,6 +4057,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
     return true;
 
   ParseScope MatchCaseScope(this, Scope::DeclScope);
+  Sema::MatchPatternState PatternState;
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();
   if (Pattern.isInvalid()) {
@@ -4020,8 +4066,11 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
     if (Tok.isOneOf(tok::semi, tok::r_brace))
       return true;
   } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get(),
-                                               &ProjectionCache))
+                                               PatternState, &ProjectionCache))
     return true;
+  if (ProjectionCache.HasDeferredAlternativeChoices &&
+      OrigResultType.getType()->getContainedAutoType())
+    RetTy = Actions.Context.DependentTy;
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard =
@@ -4040,6 +4089,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   Case = {Pattern.get(), IfLoc,
           {GuardInit.get(), Guard.get().first, Guard.get().second},
           Handler.get()};
+  Case.PatternInstantiation = MatchPatternInstantiation::Create(
+      Actions.Context, Pattern.get(), PatternState.Infos);
   return false;
 }
 
