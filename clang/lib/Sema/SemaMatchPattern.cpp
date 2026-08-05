@@ -11,6 +11,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "CheckExprLifetime.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Lex/Preprocessor.h"
