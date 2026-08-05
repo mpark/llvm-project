@@ -15,7 +15,7 @@ struct DerivedB : Base {
 
 auto alternative_pattern_const(const Base &base) {
   return base match {
-    case DerivedA: let a => a.x * 2;
+    case DerivedA: auto&& a => a.x * 2;
   };
 }
 
@@ -55,8 +55,6 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:       match.alt.type.check.pass:
 // CHECK:         %[[VAL_20:.*]] = load ptr, ptr %[[VAL_3]], align 8
 // CHECK:         store ptr %[[VAL_20]], ptr %[[PROJECTED]], align 8
-// CHECK:         %[[PROJECTED_VALUE:.*]] = load ptr, ptr %[[PROJECTED]], align 8
-// CHECK:         store ptr %[[PROJECTED_VALUE]], ptr %[[BINDING]], align 8
 // CHECK:         store i1 true, ptr %[[ALT_RESULT]], align 8
 // CHECK:         br label %[[VAL_21:.*]]
 // CHECK:       match.alt.type.check.fail:
@@ -65,15 +63,18 @@ auto alternative_pattern_const(const Base &base) {
 // CHECK:       match.alt.end:
 // CHECK:         %[[VAL_22:.*]] = load i1, ptr %[[ALT_RESULT]], align 8
 // CHECK:         br i1 %[[VAL_22]], label %[[VAL_23:.*]], label %[[VAL_24:.*]]
+// CHECK:       match.select.init:
+// CHECK:         %[[PROJECTED_VALUE:.*]] = load ptr, ptr %[[PROJECTED]], align 8
+// CHECK:         store ptr %[[PROJECTED_VALUE]], ptr %[[BINDING]], align 8
 // CHECK:       match.select.action:
 // CHECK:         %[[VAL_25:.*]] = load ptr, ptr %[[BINDING]], align 8
 // CHECK:         %[[VAL_26:.*]] = getelementptr inbounds nuw %[[VAL_27:.*]], ptr %[[VAL_25]], i32 0, i32 1
 // CHECK:         %[[VAL_28:.*]] = load i32, ptr %[[VAL_26]], align 8
 // CHECK:         %[[VAL_29:.*]] = mul nsw i32 %[[VAL_28]], 2
 // CHECK:         store i32 %[[VAL_29]], ptr %[[VAL_1]], align 4
-// CHECK:         br label %[[SELECT_END:.*]]
+// CHECK:         br label %[[SELECT_CLEANUP:.*]]
 // CHECK:       match.select.next_pattern:
-// CHECK:         br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
+// CHECK:         br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END:.*]]
 // CHECK:       [[THROW_ACTION]]:
 // CHECK:         call ptr @__cxa_allocate_exception
 // CHECK:         call void @__cxa_throw

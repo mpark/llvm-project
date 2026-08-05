@@ -84,7 +84,6 @@ public:
   enum MatchPatternClass {
     WildcardPatternClass,
     ExpressionPatternClass,
-    BindingPatternClass,
     DeclarationPatternClass,
     TypePatternClass,
     OptionalPatternClass,
@@ -204,32 +203,6 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<ExpressionPattern *>(this)->children();
-  }
-};
-
-class BindingPattern final : public MatchPattern {
-  SourceLocation LetLoc;
-  BindingDecl *Binding;
-
-public:
-  explicit BindingPattern(SourceLocation LetLoc, BindingDecl *Binding)
-      : MatchPattern(BindingPatternClass), LetLoc(LetLoc), Binding(Binding) {
-    setDependence(ExprDependence::None);
-  }
-
-  SourceLocation getLetLoc() const { return LetLoc; }
-  SourceLocation getBeginLoc() const { return getLetLoc(); }
-  SourceLocation getEndLoc() const;
-
-  const BindingDecl *getBinding() const { return Binding; }
-  BindingDecl *getBinding() { return Binding; }
-
-  llvm::iterator_range<MatchPattern **> children() {
-    return {nullptr, nullptr};
-  }
-
-  llvm::iterator_range<const MatchPattern *const *> children() const {
-    return const_cast<BindingPattern *>(this)->children();
   }
 };
 
@@ -431,10 +404,8 @@ class DecompositionPattern final
 
   unsigned NumPatterns;
   SourceRange Squares;
-  bool BindingOnly;
-
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                                SourceRange Squares, bool BindingOnly);
+                                SourceRange Squares);
 
   explicit DecompositionPattern(unsigned NumPatterns)
       : MatchPattern(DecompositionPatternClass), NumPatterns(NumPatterns) {}
@@ -452,7 +423,7 @@ public:
 
   static DecompositionPattern *Create(const ASTContext &Ctx,
                                       ArrayRef<MatchPattern *> Patterns,
-                                      SourceRange Squares, bool BindingOnly);
+                                      SourceRange Squares);
 
   static DecompositionPattern *CreateEmpty(const ASTContext &Ctx,
                                            unsigned NumPatterns);
@@ -462,7 +433,6 @@ public:
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
   SourceRange getSquares() const { return Squares; }
-  bool isBindingOnly() const { return BindingOnly; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {getPatterns(), getPatterns() + NumPatterns};
