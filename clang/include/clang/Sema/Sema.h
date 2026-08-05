@@ -11104,9 +11104,6 @@ public:
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
                                                       bool IsPackExpansion = false);
-  ActionResult<MatchPattern *> ActOnBindingPattern(SourceLocation LetLoc,
-                                                   SourceLocation NameLoc,
-                                                   IdentifierInfo *Name);
   ActionResult<MatchPattern *>
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
@@ -11131,7 +11128,7 @@ public:
                                                     MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                            SourceRange Squares, bool BindingOnly);
+                            SourceRange Squares);
 
   struct MatchProjectionCache {
     struct Entry {

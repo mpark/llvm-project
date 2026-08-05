@@ -1100,9 +1100,6 @@ public:
       case MatchPattern::ExpressionPatternClass:
         Visit(static_cast<const ExpressionPattern *>(Node)->getExpr());
         break;
-      case MatchPattern::BindingPatternClass:
-        Visit(static_cast<const BindingPattern *>(Node)->getBinding());
-        break;
       case MatchPattern::DeclarationPatternClass:
         Visit(static_cast<const DeclarationPattern *>(Node)->getDeclaration());
         break;
