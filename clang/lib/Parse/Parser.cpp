@@ -551,7 +551,6 @@ void Parser::Initialize() {
   Ident_override = nullptr;
   Ident_GNU_final = nullptr;
   Ident_match = nullptr;
-  Ident_let = nullptr;
   Ident_wildcard = nullptr;
 
   Ident_super = &PP.getIdentifierTable().get("super");
@@ -611,7 +610,6 @@ void Parser::Initialize() {
 
   if (getLangOpts().PatternMatching) {
     Ident_match = PP.getIdentifierInfo("match");
-    Ident_let = PP.getIdentifierInfo("let");
     Ident_wildcard = PP.getIdentifierInfo("_");
   }
 
