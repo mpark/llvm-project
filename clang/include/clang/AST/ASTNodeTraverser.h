@@ -1081,6 +1081,9 @@ public:
       case MatchPattern::BindingPatternClass:
         Visit(static_cast<const BindingPattern *>(Node)->getBinding());
         break;
+      case MatchPattern::DeclarationPatternClass:
+        Visit(static_cast<const DeclarationPattern *>(Node)->getDeclaration());
+        break;
       case MatchPattern::AlternativePatternClass: {
         auto *P = static_cast<const AlternativePattern *>(Node);
         Visit(P->getTypeSourceInfo()->getType());
