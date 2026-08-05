@@ -3109,7 +3109,10 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
   if (LastCase != Cases.end())
     Cases = Cases.take_front(std::distance(Cases.begin(), LastCase) + 1);
 
-  CFGBlock *NextCaseBlock = ConfluenceBlock;
+  // Falling through a void match does nothing. Falling through a non-void
+  // match terminates, so represent that edge as unreachable.
+  CFGBlock *NextCaseBlock =
+      E->getType()->isVoidType() ? ConfluenceBlock : nullptr;
   for (const MatchCaseInstantiation &Case : llvm::reverse(Cases)) {
     Succ = ConfluenceBlock;
     Block = nullptr;

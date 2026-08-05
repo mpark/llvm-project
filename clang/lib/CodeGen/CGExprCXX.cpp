@@ -2705,13 +2705,12 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     }
   };
 
-  llvm::BasicBlock *SelectEndBB = nullptr;
+  llvm::BasicBlock *SelectEndBB = createBasicBlock("match.select.end");
+  llvm::BasicBlock *NoMatchBB =
+      IgnoreResult ? SelectEndBB : createBasicBlock("match.select.no_match");
 
   unsigned CasePatternIdx = 0;
   for (MatchCaseInstantiation MatchC : Cases) {
-    if (!SelectEndBB)
-      SelectEndBB = createBasicBlock("match.select.end");
-
     RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
     if (hasMatchGuard(MatchC.Guard))
       MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
@@ -2719,18 +2718,17 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
     llvm::BasicBlock *NextPatternBB =
         (CasePatternIdx == (Cases.size() - 1))
-            ? SelectEndBB
+            ? NoMatchBB
             : createBasicBlock("match.select.next_pattern");
     Builder.CreateCondBr(MatchResult.getScalarVal(), ExecuteActionBB,
                          NextPatternBB);
 
-    // Handle all code for executing the action.
     EmitBlock(ExecuteActionBB);
 
     const Expr *E = dyn_cast<Expr>(MatchC.Handler);
     if (!E) {
       EmitStmt(MatchC.Handler);
-      // Move on to next match pattern
+      EmitBranch(SelectEndBB);
       EmitBlock(NextPatternBB);
       CasePatternIdx++;
       continue;
@@ -2739,12 +2737,16 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     EmitHandler(E);
     EmitBranch(SelectEndBB);
 
-    // If match failed, try next one.
     EmitBlock(NextPatternBB);
     CasePatternIdx++;
   }
 
-  assert(SelectEndBB && "expected at least one pattern");
+  assert(!Cases.empty() && "expected at least one pattern");
+
+  if (!IgnoreResult) {
+    EmitNoreturnRuntimeCallOrInvoke(CGM.getTerminateFn(), {});
+    EmitBlock(SelectEndBB);
+  }
 
   if (IgnoreResult)
     return RValue::getIgnored();
