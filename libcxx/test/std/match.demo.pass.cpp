@@ -48,17 +48,17 @@ using Number = std::variant<std::int32_t, std::int64_t, float, double>;
 
 int matching_variants(Number v) {
   return v match {
-    case std::int32_t: auto&& i32 => 100 + i32;
-    case std::int64_t: auto&& i64 => 200 + static_cast<int>(i64);
-    case float: auto&& f => 300 + static_cast<int>(f);
-    case double: auto&& d => 400 + static_cast<int>(d);
+    case { std::int32_t i32 } => 100 + i32;
+    case { std::int64_t i64 } => 200 + static_cast<int>(i64);
+    case { float f } => 300 + static_cast<int>(f);
+    case { double d } => 400 + static_cast<int>(d);
   };
 }
 
 int matching_variant_concepts(Number v) {
   return v match {
-    case std::integral: auto&& i => 500 + static_cast<int>(i);
-    case std::floating_point: auto&& f => 600 + static_cast<int>(f);
+    case { std::integral auto i } => 500 + static_cast<int>(i);
+    case { std::floating_point auto f } => 600 + static_cast<int>(f);
   };
 }
 
@@ -76,8 +76,8 @@ int get_area(const Shape& shape) {
   // R5 omits the trailing return type, but its handlers deduce different
   // types. Its specified -> auto deduction therefore requires -> int here.
   return shape match -> int {
-    case Circle: auto&& [r] => 3.14 * r * r;
-    case Rectangle: auto&& [w, h] => w * h;
+    case const Circle& circle => 3.14 * circle.radius * circle.radius;
+    case const Rectangle& rectangle => rectangle.width * rectangle.height;
   };
 }
 
@@ -105,11 +105,12 @@ using Command = std::variant<Quit, Move, Write, ChangeColor>;
 
 int matching_nested_structures(Command cmd) {
   return cmd match {
-    case Quit: _ => 0;
-    case Move: auto&& [x, y] => 100 + x + y;
-    case Write: auto&& [text] => 200 + static_cast<int>(text.size());
-    case ChangeColor: [Rgb: auto&& [r, g, b]] => 300 + r + g + b;
-    case ChangeColor: [Hsv: auto&& [h, s, v]] => 400 + h + s + v;
+    case { const Quit& } => 0;
+    case { const Move& move } => 100 + move.x + move.y;
+    case { const Write& write } =>
+        200 + static_cast<int>(write.s.size());
+    case { [{ const Rgb& rgb }] } => 300 + rgb.r + rgb.g + rgb.b;
+    case { [{ const Hsv& hsv }] } => 400 + hsv.h + hsv.s + hsv.v;
   };
 }
 
