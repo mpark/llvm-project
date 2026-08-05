@@ -153,7 +153,6 @@ enum class TentativeCXXTypeIdContext {
   InTrailingReturnType,
   AsGenericSelectionArgument,
   AsReflectionOperand,
-  InAlternativePattern,
   InMatchPattern
 };
 
@@ -4530,8 +4529,6 @@ private:
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
-  ActionResult<MatchPattern *>
-  TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();
 
