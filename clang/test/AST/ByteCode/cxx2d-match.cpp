@@ -736,3 +736,17 @@ constexpr int instantiate_shared_match_projection() {
 }
 
 static_assert(instantiate_shared_match_projection() == 113);
+
+constexpr bool reference_match_result_selects_referent(bool first) {
+  int x = 1;
+  int y = 2;
+  int &selected = first match -> int & {
+    true => static_cast<int &>(x);
+    false => static_cast<int &>(y);
+  };
+  selected = 3;
+  return x == (first ? 3 : 1) && y == (first ? 2 : 3);
+}
+
+static_assert(reference_match_result_selects_referent(true));
+static_assert(reference_match_result_selects_referent(false));
