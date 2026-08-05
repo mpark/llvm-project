@@ -78,6 +78,7 @@ int get_area(const Shape& shape) {
   return shape match -> int {
     case const Circle& circle => 3.14 * circle.radius * circle.radius;
     case const Rectangle& rectangle => rectangle.width * rectangle.height;
+    case _ => 0;
   };
 }
 
