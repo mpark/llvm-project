@@ -5560,26 +5560,61 @@ struct MatchGuard {
   bool hasGuard() const { return Condition != nullptr; }
 };
 
+/// A semantically checked form of a single-pattern test. A source test can
+/// have multiple instantiations when a generic projection selects differently
+/// typed alternatives. Direct control-statement conditions also retain the
+/// successful statement, and a for condition retains its increment, in the
+/// same implicit template region as the pattern bindings.
+struct MatchTestInstantiation {
+  MatchPattern *Pattern;
+  SourceLocation IfLoc;
+  MatchGuard Guard;
+  MatchPatternInstantiation *PatternInstantiation;
+  bool PatternIsIrrefutable = false;
+  Stmt *Handler = nullptr;
+  Expr *Increment = nullptr;
+};
+
 class MatchTestExpr final : public Expr {
   VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
   MatchPattern *Pattern;
+  MatchPatternInstantiation *PatternInstantiation;
   SourceLocation IfLoc;
   MatchGuard Guard;
+  ArrayRef<MatchTestInstantiation> Instantiations;
+  bool PatternIsIrrefutable;
+  bool NeedsCaseInstantiation;
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
                          Expr *Subject, SourceLocation MatchLoc,
-                         MatchPattern *Pattern, SourceLocation IfLoc,
-                         MatchGuard Guard)
+                         MatchPattern *Pattern,
+                         MatchPatternInstantiation *PatternInstantiation,
+                         SourceLocation IfLoc, MatchGuard Guard,
+                         bool PatternIsIrrefutable,
+                         bool NeedsCaseInstantiation,
+                         ArrayRef<MatchTestInstantiation> Instantiations = {})
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
         HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
-        Pattern(Pattern), IfLoc(IfLoc), Guard(Guard) {
+        Pattern(Pattern), PatternInstantiation(PatternInstantiation),
+        IfLoc(IfLoc), Guard(Guard),
+        PatternIsIrrefutable(PatternIsIrrefutable),
+        NeedsCaseInstantiation(NeedsCaseInstantiation) {
+    if (!Instantiations.empty()) {
+      auto *Storage =
+          Ctx.Allocate<MatchTestInstantiation>(Instantiations.size());
+      std::uninitialized_copy(Instantiations.begin(), Instantiations.end(),
+                              Storage);
+      this->Instantiations = ArrayRef(Storage, Instantiations.size());
+    }
     setDependence(computeDependence(this));
   }
 
-  explicit MatchTestExpr(EmptyShell Empty) : Expr(MatchTestExprClass, Empty) {}
+  explicit MatchTestExpr(EmptyShell Empty)
+      : Expr(MatchTestExprClass, Empty), PatternInstantiation(nullptr),
+        PatternIsIrrefutable(false), NeedsCaseInstantiation(false) {}
 
   const VarDecl* getHoldingVar() const { return HoldingVar; }
   VarDecl* getHoldingVar() { return HoldingVar; }
@@ -5594,12 +5629,33 @@ public:
   const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
 
+  const MatchPatternInstantiation *getPatternInstantiation() const {
+    return PatternInstantiation;
+  }
+  MatchPatternInstantiation *getPatternInstantiation() {
+    return PatternInstantiation;
+  }
+
   SourceLocation getIfLoc() const LLVM_READONLY {
     return IfLoc;
   }
 
   const MatchGuard &getGuard() const { return Guard; }
   MatchGuard &getGuard() { return Guard; }
+
+  ArrayRef<MatchTestInstantiation> getInstantiations() const {
+    return Instantiations;
+  }
+
+  bool hasConditionInstantiations() const {
+    return llvm::any_of(Instantiations, [](const auto &Instantiation) {
+      return Instantiation.Handler != nullptr;
+    });
+  }
+
+  bool isPatternIrrefutable() const { return PatternIsIrrefutable; }
+
+  bool needsCaseInstantiation() const { return NeedsCaseInstantiation; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return getSubject()->getBeginLoc();
@@ -5629,6 +5685,7 @@ struct MatchCase {
   MatchGuard Guard;
   Stmt *Handler;
   bool MaybeUseful = false;
+  MatchPatternInstantiation *PatternInstantiation = nullptr;
 };
 
 /// A semantically checked form of a source match case. A source case can have
@@ -5639,6 +5696,7 @@ struct MatchCaseInstantiation {
   MatchGuard Guard;
   Stmt *Handler;
   unsigned CaseIndex;
+  MatchPatternInstantiation *PatternInstantiation = nullptr;
 };
 
 class MatchSelectExpr final
@@ -5651,22 +5709,23 @@ class MatchSelectExpr final
   Expr *Subject;
   SourceLocation MatchLoc;
   bool IsConstexpr;
+  bool RequireFirstCaseViable;
   TypeLoc OrigResultType;
   unsigned NumCases;
   unsigned NumCaseInstantiations;
   SourceRange Braces;
 
   explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
-                           SourceLocation MatchLoc,
-                           bool IsConstexpr, TypeLoc OrigResultType,
+                           SourceLocation MatchLoc, bool IsConstexpr,
+                           bool RequireFirstCaseViable, TypeLoc OrigResultType,
                            QualType Ty, ArrayRef<MatchCase> Cases,
                            ArrayRef<MatchCaseInstantiation> Instantiations,
                            SourceRange Braces);
 
   explicit MatchSelectExpr(unsigned NumCases, unsigned NumCaseInstantiations,
                            EmptyShell Empty)
-      : Expr(MatchSelectExprClass, Empty), NumCases(NumCases),
-        NumCaseInstantiations(NumCaseInstantiations) {}
+      : Expr(MatchSelectExprClass, Empty), RequireFirstCaseViable(false),
+        NumCases(NumCases), NumCaseInstantiations(NumCaseInstantiations) {}
 
 public:
   unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
@@ -5679,8 +5738,8 @@ public:
 
   static MatchSelectExpr *
   Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
-         SourceLocation MatchLoc, bool IsConstexpr, TypeLoc OrigResultType,
-         QualType Ty, ArrayRef<MatchCase> Cases,
+         SourceLocation MatchLoc, bool IsConstexpr, bool RequireFirstCaseViable,
+         TypeLoc OrigResultType, QualType Ty, ArrayRef<MatchCase> Cases,
          ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases,
@@ -5699,6 +5758,8 @@ public:
   TypeLoc getOrigResultType() const { return OrigResultType; }
 
   bool isConstexpr() const { return IsConstexpr; }
+
+  bool requiresFirstCaseViable() const { return RequireFirstCaseViable; }
 
   ArrayRef<MatchCase> getCases() const {
     return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
