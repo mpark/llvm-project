@@ -192,6 +192,7 @@ public:
   }
   ComplexPairTy VisitCallExpr(const CallExpr *E);
   ComplexPairTy VisitStmtExpr(const StmtExpr *E);
+  ComplexPairTy VisitMatchSelectExpr(const MatchSelectExpr *E);
 
   // Operators.
   ComplexPairTy VisitPrePostIncDec(const UnaryOperator *E, bool isInc,
@@ -501,6 +502,12 @@ ComplexPairTy ComplexExprEmitter::VisitStmtExpr(const StmtExpr *E) {
                           E->getExprLoc());
 }
 
+ComplexPairTy ComplexExprEmitter::VisitMatchSelectExpr(
+    const MatchSelectExpr *E) {
+  if (E->isGLValue())
+    return EmitLoadOfLValue(CGF.EmitMatchSelectExprLValue(E), E->getExprLoc());
+  return CGF.EmitMatchSelectExpr(*E).getComplexVal();
+}
 /// Emit a cast from complex value Val to DestType.
 ComplexPairTy ComplexExprEmitter::EmitComplexToComplexCast(ComplexPairTy Val,
                                                            QualType SrcType,

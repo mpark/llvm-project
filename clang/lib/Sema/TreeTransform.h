@@ -19026,9 +19026,15 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                                    CK_NoOp, LHS.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
 
-  QualType RetTy = E->getType()->isDependentType()
-                       ? E->getOrigResultType().getType()
-                       : E->getType();
+  QualType RetTy;
+  if (E->getType()->isDependentType())
+    RetTy = E->getOrigResultType().getType();
+  else if (E->isLValue())
+    RetTy = getSema().Context.getLValueReferenceType(E->getType());
+  else if (E->isXValue())
+    RetTy = getSema().Context.getRValueReferenceType(E->getType());
+  else
+    RetTy = E->getType();
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchProjectionCache ProjectionCache;
