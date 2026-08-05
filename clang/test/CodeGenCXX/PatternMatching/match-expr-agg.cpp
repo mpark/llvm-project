@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -Wno-c++20-extensions -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -Wno-c++20-extensions -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 enum Color { Red, Blue };
@@ -81,14 +81,9 @@ auto nested_decomposition_pattern(const S& s) {
 // CHECK:         %[[VAL_40:.*]] = getelementptr inbounds nuw %[[VAL_1]], ptr %[[VAL_3]], i32 0, i32 1
 // CHECK:         store i32 -1, ptr %[[VAL_40]], align 4
 // CHECK:         br label %[[SELECT_END:.*]]
-// CHECK:       match.select.next_pattern:
-// CHECK:         br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
-// CHECK:       [[THROW_ACTION]]:
-// CHECK:         call ptr @__cxa_allocate_exception
-// CHECK:         call void @__cxa_throw
+// CHECK:       match.select.no_match:
+// CHECK:         call void @_ZSt9terminatev
 // CHECK:         unreachable
-// CHECK:       throw.cont:
-// CHECK:         br label %[[SELECT_END]]
 // CHECK:       match.select.end:
 // CHECK:         call void @llvm.memcpy.p0.p0.i64(ptr align 4 %[[VAL_0]], ptr align 4 %[[VAL_3]], i64 8, i1 false)
 // CHECK:         %[[RET:.*]] = load i64, ptr %[[VAL_0]], align 4

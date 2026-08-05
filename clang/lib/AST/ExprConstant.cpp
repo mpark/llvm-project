@@ -9797,6 +9797,8 @@ public:
       if (!Scope.destroy())
         return false;
     }
+    if (E->getType()->isVoidType())
+      return MatchScope.destroy();
     return Error(E);
   }
 
