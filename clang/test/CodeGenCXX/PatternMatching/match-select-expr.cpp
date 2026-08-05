@@ -67,6 +67,26 @@ void test_void_returning_match() {
 // CHECK-NEXT:   call void @"_ZZ25test_void_returning_matchvENK3$_0clEv"
 // CHECK-NEXT:   br label %match.select.end
 
+struct GuardInit {
+  GuardInit();
+  ~GuardInit();
+  bool accept() const;
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z20guard_init_statementi
+// CHECK: match.select.guard_init:
+// CHECK: call void @_ZN9GuardInitC1Ev
+// CHECK: call noundef zeroext i1 @_ZNK9GuardInit6acceptEv
+// CHECK: match.select.action:
+// CHECK: call void @_ZN9GuardInitD1Ev
+// CHECK: ret i32
+int guard_init_statement(int value) {
+  return value match {
+    let copy if (GuardInit init; init.accept()) => copy;
+    _ => 0;
+  };
+}
+
 int &select_lvalue_reference(bool first, int &x, int &y) {
   return first match -> int & {
     true => x;
