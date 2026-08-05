@@ -147,6 +147,7 @@ struct AlternativeTraitsInfo {
   QualType Type;
   CXXRecordDecl *Record = nullptr;
   unsigned Size = 0;
+  bool IsExhaustive = true;
   bool IsBuiltinPointer = false;
   llvm::SmallVector<QualType, 4> Alternatives;
   llvm::SmallVector<bool, 4> Projectable;
@@ -199,6 +200,22 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
           .isInvalid())
     return true;
   Info.Size = SizeValue.getLimitedValue(UINT_MAX);
+
+  LookupResult ExhaustiveLookup(S, S.PP.getIdentifierInfo("is_exhaustive"), Loc,
+                                Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(ExhaustiveLookup, Info.Record);
+  if (!ExhaustiveLookup.empty()) {
+    ExprResult ExhaustiveExpr =
+        S.BuildDeclarationNameExpr(CXXScopeSpec(), ExhaustiveLookup, false);
+    if (ExhaustiveExpr.isInvalid())
+      return true;
+    llvm::APSInt ExhaustiveValue(1);
+    if (S.VerifyIntegerConstantExpression(ExhaustiveExpr.get(),
+                                          &ExhaustiveValue)
+            .isInvalid())
+      return true;
+    Info.IsExhaustive = !ExhaustiveValue.isZero();
+  }
 
   LookupResult ProjectionTypeLookup(
       S, S.PP.getIdentifierInfo("projection_type"), Loc,
@@ -488,6 +505,7 @@ ExprResult Sema::ActOnMatchSelectExpr(
                                     Case.PatternInstantiation});
   }
 
+  CheckMatchSelectExhaustiveness(Subject, SourceCases, CaseInstantiations);
   return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
                                  IsConstexpr, RequireFirstCaseViable,
                                  OrigResultType, RetTy, SourceCases,
@@ -888,6 +906,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       ArrayRef(Projectable, Traits.Projectable.size());
   PatternInfo.SelectedAlternatives =
       ArrayRef(SelectedAlternatives, Selected.size());
+  PatternInfo.IsExhaustive = Traits.IsExhaustive;
 
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
   if (MatchProjection *Projection = findMatchProjection(
