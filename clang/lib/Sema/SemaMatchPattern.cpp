@@ -861,15 +861,6 @@ Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
   return new (Context) ExpressionPattern(E, IsPackExpansion);
 }
 
-ActionResult<MatchPattern *> Sema::ActOnBindingPattern(SourceLocation LetLoc,
-                                                       SourceLocation NameLoc,
-                                                       IdentifierInfo *Name) {
-  BindingDecl *BD =
-      BindingDecl::Create(Context, CurContext, NameLoc, Name, QualType());
-  PushOnScopeChains(BD, getCurScope(), /*AddToContext=*/false);
-  return new (Context) BindingPattern(LetLoc, BD);
-}
-
 ActionResult<MatchPattern *>
 Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange) {
   return new (Context) DeclarationPattern(Declaration, WrittenRange);
@@ -928,8 +919,8 @@ Sema::ActOnEmptyAlternativePattern(SourceRange Braces) {
 
 ActionResult<MatchPattern *>
 Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
-                                SourceRange Squares, bool BindingOnly) {
-  return DecompositionPattern::Create(Context, Patterns, Squares, BindingOnly);
+                                SourceRange Squares) {
+  return DecompositionPattern::Create(Context, Patterns, Squares);
 }
 
 static MatchProjection *
@@ -1433,25 +1424,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
     State.get(P).Condition = Cond.get();
     break;
   }
-  case MatchPattern::BindingPatternClass: {
-    BindingPattern *P = static_cast<BindingPattern *>(Pattern);
-    // If the type of the subject is dependent, then so is the binding.
-    QualType Type = Subject ? Subject->getType() : Context.DependentTy;
-    if (Subject && !Subject->refersToBitField()) {
-      QualType Deduced = Context.getAutoRRefDeductType();
-      VarDecl *HoldingVar = BuildVarDecl(*this, Loc, Deduced, Subject);
-      if (HoldingVar->isInvalidDecl()) {
-        return true;
-      }
-      Subject = BuildDeclRefExpr(HoldingVar,
-                                 HoldingVar->getType().getNonReferenceType(),
-                                 VK_LValue, HoldingVar->getLocation());
-    }
-    BindingDecl *BD = P->getBinding();
-    BD->setBinding(Type, Subject);
-    BD->setDecomposedDecl(nullptr);
-    break;
-  }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
     if (!Subject) {
@@ -1801,14 +1773,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
       State.get(P).Projection = Projection;
       for (auto [Binding, Child] :
            llvm::zip(Decomposed->bindings(), P->children())) {
-        if (Child->getMatchPatternClass() ==
-            MatchPattern::BindingPatternClass) {
-          BindingDecl *Alias =
-              static_cast<BindingPattern *>(Child)->getBinding();
-          Alias->setBinding(Binding->getType(), Binding->getBinding());
-          Alias->setDecomposedDecl(Decomposed);
-          continue;
-        }
         if (CheckCompleteMatchPattern(Binding->getBinding(), Child,
                                       State, ProjectionCache))
           return true;
@@ -1828,14 +1792,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
     SmallVector<BindingDecl *, 8> Bindings;
     Bindings.reserve(P->getNumPatterns());
     for (MatchPattern *C : P->children()) {
-      BindingDecl *BD = nullptr;
-      if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass) {
-        BD = static_cast<BindingPattern *>(C)->getBinding();
-      } else {
-        BD = BindingDecl::Create(Context, CurContext, C->getBeginLoc(), nullptr,
-                                 QualType());
-        BD->setImplicit();
-      }
+      BindingDecl *BD = BindingDecl::Create(
+          Context, CurContext, C->getBeginLoc(), nullptr, QualType());
+      BD->setImplicit();
       Bindings.push_back(BD);
     }
     DecompositionDecl *Decomposed = DecompositionDecl::Create(
@@ -1850,8 +1809,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
     unsigned I = 0;
     for (MatchPattern *C : P->children()) {
       BindingDecl *BD = Bindings[I];
-      if (C->getMatchPatternClass() != MatchPattern::BindingPatternClass &&
-          CheckCompleteMatchPattern(BD->getBinding(), C, State,
+      if (CheckCompleteMatchPattern(BD->getBinding(), C, State,
                                     ProjectionCache)) {
         return true;
       }
@@ -1882,7 +1840,6 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
     const MatchPatternInfo *Info = State.find(P);
     switch (P->getMatchPatternClass()) {
     case MatchPattern::WildcardPatternClass:
-    case MatchPattern::BindingPatternClass:
       return MatchPatternRefutability::Irrefutable;
     case MatchPattern::ExpressionPatternClass:
     case MatchPattern::OptionalPatternClass:

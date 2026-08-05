@@ -4400,14 +4400,6 @@ public:
         return Pattern;
       return getSema().ActOnExpressionPattern(E.get());
     }
-    case MatchPattern::BindingPatternClass: {
-      BindingPattern *P = static_cast<BindingPattern *>(Pattern);
-      BindingDecl* BD = cast<BindingDecl>(
-          getDerived().TransformDefinition(P->getBeginLoc(), P->getBinding()));
-      if (!Rebuild && BD == P->getBinding())
-        return Pattern;
-      return new (getSema().Context) BindingPattern(P->getLetLoc(), BD);
-    }
     case MatchPattern::DeclarationPatternClass: {
       auto *P = static_cast<DeclarationPattern *>(Pattern);
       auto *VD = dyn_cast_or_null<VarDecl>(getDerived().TransformDefinition(
@@ -4505,8 +4497,7 @@ public:
                      Patterns.end())) {
         return Pattern;
       }
-      return getSema().ActOnDecompositionPattern(Patterns, P->getSquares(),
-                                                 P->isBindingOnly());
+      return getSema().ActOnDecompositionPattern(Patterns, P->getSquares());
     }
     }
     llvm_unreachable("unknown match pattern kind");

@@ -20822,15 +20822,6 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
     return Result = true;
-  case MatchPattern::BindingPatternClass: {
-    const auto *P = static_cast<const BindingPattern *>(Pattern);
-    const BindingDecl *BD = P->getBinding();
-    assert(BD && "missing a binding decl in the binding pattern");
-    if (const VarDecl *VD = BD->getHoldingVar())
-      if (!EvaluateDecl(Info, VD))
-        return false;
-    return Result = true;
-  }
   case MatchPattern::DeclarationPatternClass: {
     const auto *P = static_cast<const DeclarationPattern *>(Pattern);
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);
@@ -20900,11 +20891,6 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
       return false;
     Result = true;
     for (const MatchPattern *C : P->children()) {
-      if (C->getMatchPatternClass() == MatchPattern::BindingPatternClass)
-        if (const auto *Binding = static_cast<const BindingPattern *>(C);
-            Binding->getBinding()->getDecomposedDecl() ==
-            PatternInfo->Projection->getDecomposedDecl())
-          continue;
       if (!EvaluateMatchPattern(C, Instantiation, Result, Info,
                                 ProjectionCache)) {
         return false;

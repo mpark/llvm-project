@@ -202,8 +202,7 @@ void test_expression_pattern(int x, int y) {
   };
 }
 
-void test_binding_pattern(int i) {
-  i match { case let => 0; case _ => 0; }; // expected-error {{expected identifier or '['}}
+void test_declaration_pattern(int i) {
   i match case auto&& x;
   x; // expected-error {{use of undeclared identifier 'x'}}
   i match { case auto&& x => 0; };

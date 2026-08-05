@@ -2523,22 +2523,6 @@ RValue CodeGenFunction::EmitMatchPattern(
     auto *AltExpr = static_cast<const AlternativePattern *>(Pattern);
     return EmitAlternativePattern(AltExpr, Instantiation);
   }
-  case MatchPattern::MatchPatternClass::BindingPatternClass: {
-    auto *BinPat = static_cast<const BindingPattern *>(Pattern);
-    const BindingDecl *D = BinPat->getBinding();
-    assert(D && "expected binding declaration");
-    const VarDecl *Var = D->getHoldingVar();
-
-    // SelectPattern might have already emitted it, be conservative.
-    if (Var && !LocalDeclMap.count(Var))
-      EmitVarDecl(*Var);
-    else {
-      // Var Decl was already emitted elsewhere.
-    }
-
-    // Binding declared, match is always true.
-    return RValue::get(Builder.getTrue());
-  }
   case MatchPattern::MatchPatternClass::DeclarationPatternClass: {
     const auto *Declaration = static_cast<const DeclarationPattern *>(Pattern);
     const MatchPatternInfo *Info = Instantiation->find(Declaration);
