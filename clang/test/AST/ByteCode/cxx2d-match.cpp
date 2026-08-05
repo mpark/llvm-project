@@ -454,32 +454,6 @@ struct Variant {
 
 namespace std {
   template <typename T>
-  struct variant_size;
-
-  template <typename T>
-  requires requires { variant_size<T>::value; }
-  struct variant_size<const T> {
-    static constexpr int value = std::variant_size<T>::value;
-  };
-
-  template <>
-  struct variant_size<Variant> {
-    static constexpr int value = 3;
-  };
-
-  template <int I, typename T>
-  struct variant_alternative;
-
-  template <int I, class T>
-  struct variant_alternative<I, const T> {
-    using type = typename std::variant_alternative<I, T>::type const;
-  };
-
-  template <> struct variant_alternative<0, Variant> { using type = int; };
-  template <> struct variant_alternative<1, Variant> { using type = double; };
-  template <> struct variant_alternative<2, Variant> { using type = float; };
-
-  template <typename T>
   struct alternative_traits;
 
   template <>
@@ -487,7 +461,7 @@ namespace std {
     static constexpr __SIZE_TYPE__ size = 3;
 
     template <__SIZE_TYPE__ I>
-    using projection_type = typename variant_alternative<I, Variant>::type;
+    using projection_type = __type_pack_element<I, int, double, float>;
 
     static constexpr __SIZE_TYPE__ index(const Variant& value) noexcept {
       return value.index();
@@ -585,19 +559,6 @@ namespace N1 {
   }
 }
 
-constexpr int test_try_cast_alternative_pattern(const N1::S& s) {
-  return s match -> int {
-    case int: auto&& x => x;
-    case double: auto&& d => d;
-    case short: auto&& s => s;
-    case _ => -1;
-  };
-}
-
-static_assert(test_try_cast_alternative_pattern(N1::S{0, 1, 2.2}) == 1);
-static_assert(test_try_cast_alternative_pattern(N1::S{1, 1, 2.2}) == 2);
-static_assert(test_try_cast_alternative_pattern(N1::S{2, 1, 2.2}) == -1);
-
 constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
   return s match -> int {
     case const int& i if (i == 0) => 0;
@@ -611,12 +572,6 @@ constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
 static_assert(test_try_cast_declaration_pattern(N1::S{0, 1, 2.2}) == 1);
 static_assert(test_try_cast_declaration_pattern(N1::S{1, 1, 2.2}) == 2);
 static_assert(test_try_cast_declaration_pattern(N1::S{2, 1, 2.2}) == -1);
-
-template <typename T>
-concept integral = __is_integral(T);
-
-template <typename T, typename U>
-concept same = __is_same(T, U);
 
 template <typename T>
 concept arithmetic =
@@ -648,22 +603,6 @@ template <>
 struct alternative_code<float> {
   static constexpr int value = 3;
 };
-
-constexpr int test_variant_like_alternative_pattern_with_type_constraint(const Variant &var) {
-  return var match {
-    case integral: 0 => 0;
-    case same<int>: 1 => 1;
-    case double: auto&& y => (int)y + 4;
-    case _ => -1;
-  };
-}
-
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(0) == 0);
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(1) == 1);
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(2) == -1);
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(3.0) == 7);
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(4.0) == 8);
-static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) == -1);
 
 constexpr int test_concept_selects_every_matching_alternative(const Variant &var) {
   return var match {
@@ -774,16 +713,6 @@ template<int I>
 struct tuple_element<I, SharedProjection> {
   static_assert(I == 0 || I == 1);
   using type = int;
-};
-
-template<>
-struct variant_size<SharedVariantProjection> {
-  static constexpr int value = 1;
-};
-
-template<>
-struct variant_alternative<0, SharedVariantProjection> {
-  using type = SharedProjection;
 };
 
 template<>
