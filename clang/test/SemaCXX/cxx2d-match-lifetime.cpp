@@ -64,6 +64,36 @@ ReferenceMember aggregate_reference(Object object) {
   };
 }
 
+namespace std {
+template <class T> struct alternative_traits;
+}
+
+struct Choice {
+  unsigned active;
+  Object alternatives[2];
+};
+
+template <> struct std::alternative_traits<Choice> {
+  static constexpr unsigned size = 2;
+
+  template <unsigned> using projection_type = Object;
+
+  static constexpr unsigned index(const Choice &choice) noexcept {
+    return choice.active;
+  }
+
+  template <unsigned I, class Self>
+  static constexpr decltype(auto) get(Self &&self) {
+    return static_cast<Self &&>(self).alternatives[I];
+  }
+};
+
+const Object &specialized_case_lifetime(Choice choice) {
+  return choice match -> const Object & {
+    case { Object copy } => copy; // expected-warning {{reference to stack memory associated with local variable 'copy' returned}}
+  };
+}
+
 auto ordinary_if_init_statement() {
   if (Object object{}; true)
     return [&object] { return object.value; }; // expected-warning {{address of stack memory associated with local variable 'object' returned}} expected-note {{captured by reference here}}

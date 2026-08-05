@@ -2001,7 +2001,8 @@ Decl *TemplateInstantiator::TransformDecl(SourceLocation Loc, Decl *D) {
 
 bool TemplateInstantiator::instantiateMissingDeclsToScopeForConcepts(Decl *D) {
   if (!(D && (SemaRef.inConstraintSubstitution() ||
-              SemaRef.inParameterMappingSubstitution())))
+              SemaRef.inParameterMappingSubstitution() ||
+              isa<RequiresExprBodyDecl>(D->getDeclContext()))))
     return false;
 
   auto *Current = SemaRef.CurrentInstantiationScope;
@@ -4530,6 +4531,33 @@ ExprResult Sema::ExpandDeferredMatchSelectExpr(MatchSelectExpr *E) {
   TemplateInstantiator Instantiator(*this, TemplateArgs, E->getMatchLoc(),
                                     DeclarationName());
   return Instantiator.TransformExpr(E);
+}
+
+ExprResult Sema::ExpandDeferredMatchTestExpr(MatchTestExpr *E) {
+  CodeSynthesisContext Ctx;
+  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
+  Ctx.PointOfInstantiation = E->getMatchLoc();
+  Ctx.Entity = cast<Decl>(CurContext);
+  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
+  LocalInstantiationScope Scope(*this);
+  MultiLevelTemplateArgumentList TemplateArgs;
+  TemplateInstantiator Instantiator(*this, TemplateArgs, E->getMatchLoc(),
+                                    DeclarationName());
+  return Instantiator.TransformExpr(E);
+}
+
+StmtResult Sema::ExpandDeferredMatchConditionStmt(Stmt *S,
+                                                  SourceLocation MatchLoc) {
+  CodeSynthesisContext Ctx;
+  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
+  Ctx.PointOfInstantiation = MatchLoc;
+  Ctx.Entity = cast<Decl>(CurContext);
+  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
+  LocalInstantiationScope Scope(*this);
+  MultiLevelTemplateArgumentList TemplateArgs;
+  TemplateInstantiator Instantiator(*this, TemplateArgs, MatchLoc,
+                                    DeclarationName());
+  return Instantiator.TransformStmt(S);
 }
 
 bool Sema::SubstTemplateArgument(
