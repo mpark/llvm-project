@@ -245,6 +245,11 @@ public:
   }
 
   void VisitMatchSelectExpr(MatchSelectExpr *IE) {
+    if (IE->isGLValue()) {
+      LValue LV = CGF.EmitMatchSelectExprLValue(IE);
+      EmitFinalDestCopy(IE->getType(), LV);
+      return;
+    }
     RValue Res = CGF.EmitMatchSelectExpr(*IE);
     // TODO: handle dtors
     EmitFinalDestCopy(IE->getType(), Res);

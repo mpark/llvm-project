@@ -2664,14 +2664,50 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     EmitVarDecl(*HoldingVar);
 
   bool IgnoreResult = S.getType()->isVoidType();
+  bool IsReference = S.isGLValue();
   Address MatchResAddr = Address::invalid();
-  if (!IgnoreResult)
+  if (IsReference) {
+    QualType PtrTy = getContext().getPointerType(S.getType());
+    MatchResAddr = CreateMemTemp(PtrTy, "match.select.refresult");
+  } else if (!IgnoreResult) {
     MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+  }
+
+  auto EmitHandler = [&](const Expr *E) {
+    if (E->getType()->isVoidType()) {
+      EmitAnyExpr(E);
+      return;
+    }
+
+    assert(MatchResAddr.isValid() && "expected valid address");
+    if (IsReference) {
+      assert(E->isGLValue() && "reference result requires a glvalue handler");
+      Builder.CreateStore(EmitLValue(E).getPointer(*this), MatchResAddr);
+      return;
+    }
+
+    switch (getEvaluationKind(E->getType())) {
+    case TEK_Scalar:
+      Builder.CreateStore(EmitScalarExpr(E), MatchResAddr);
+      break;
+    case TEK_Complex: {
+      LValue Result = MakeAddrLValue(MatchResAddr, S.getType());
+      EmitStoreOfComplex(EmitComplexExpr(E), Result, /*isInit=*/true);
+      break;
+    }
+    case TEK_Aggregate:
+      EmitAggExpr(
+          E, AggValueSlot::forAddr(
+                 MatchResAddr, Qualifiers(), AggValueSlot::IsDestructed,
+                 AggValueSlot::DoesNotNeedGCBarriers,
+                 AggValueSlot::IsNotAliased, getOverlapForReturnValue()));
+      break;
+    }
+  };
 
   llvm::BasicBlock *SelectEndBB = nullptr;
 
   unsigned CasePatternIdx = 0;
-  bool isAggregate = false;
   for (MatchCaseInstantiation MatchC : Cases) {
     if (!SelectEndBB)
       SelectEndBB = createBasicBlock("match.select.end");
@@ -2700,33 +2736,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       continue;
     }
 
-    if (E->getType()->isVoidType()) {
-      // No result to store, but evaluate the expression for side effects.
-      EmitAnyExpr(E);
-    } else if (E->getType()->isReferenceType()) {
-      // If the expr is a reference, take the address of the expression
-      // rather than the value.
-      llvm_unreachable(
-          "MatchSelectExpr for isReferenceType not yet implemented");
-    } else {
-      assert(MatchResAddr.isValid() && "expected valid address");
-      switch (getEvaluationKind(E->getType())) {
-      case TEK_Scalar:
-        Builder.CreateStore(EmitScalarExpr(E), MatchResAddr);
-        break;
-      case TEK_Complex:
-        llvm_unreachable("MatchSelectExpr for TEK_Complex not yet implemented");
-        break;
-      case TEK_Aggregate:
-        isAggregate = true;
-        EmitAggExpr(
-            E, AggValueSlot::forAddr(
-                   MatchResAddr, Qualifiers(), AggValueSlot::IsDestructed,
-                   AggValueSlot::DoesNotNeedGCBarriers,
-                   AggValueSlot::IsNotAliased, getOverlapForReturnValue()));
-        break;
-      }
-    }
+    EmitHandler(E);
     EmitBranch(SelectEndBB);
 
     // If match failed, try next one.
@@ -2739,6 +2749,24 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   if (IgnoreResult)
     return RValue::getIgnored();
 
-  return isAggregate ? RValue::getAggregate(MatchResAddr)
-                     : RValue::get(Builder.CreateLoad(MatchResAddr));
+  if (IsReference)
+    return RValue::get(Builder.CreateLoad(MatchResAddr));
+
+  switch (getEvaluationKind(S.getType())) {
+  case TEK_Scalar:
+    return RValue::get(Builder.CreateLoad(MatchResAddr));
+  case TEK_Complex:
+    return RValue::getComplex(
+        EmitLoadOfComplex(MakeAddrLValue(MatchResAddr, S.getType()),
+                          S.getExprLoc()));
+  case TEK_Aggregate:
+    return RValue::getAggregate(MatchResAddr);
+  }
+  llvm_unreachable("invalid match select result kind");
+}
+
+LValue CodeGenFunction::EmitMatchSelectExprLValue(const MatchSelectExpr *E) {
+  assert(E->isGLValue() && "expected a glvalue match select expression");
+  RValue Result = EmitMatchSelectExpr(*E);
+  return MakeAddrLValue(Result.getScalarVal(), E->getType(), CharUnits::One());
 }

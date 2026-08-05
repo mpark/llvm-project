@@ -73,3 +73,68 @@ void test_void_returning_match() {
 // CHECK: match.select.action:
 // CHECK-NEXT:   call void @"_ZZ25test_void_returning_matchvENK3$_0clEv"
 // CHECK-NEXT:   br label %match.select.end
+
+int &select_lvalue_reference(bool first, int &x, int &y) {
+  return first match -> int & {
+    true => x;
+    false => y;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} ptr @_Z23select_lvalue_referencebRiS_(
+// CHECK:         %match.select.refresult = alloca ptr, align 8
+// CHECK:         store ptr {{.*}}, ptr %match.select.refresult, align 8
+// CHECK:         br label %[[REF_END:match.select.end]]
+// CHECK:       [[REF_END]]:
+// CHECK:         %[[REF:.*]] = load ptr, ptr %match.select.refresult, align 8
+// CHECK:         ret ptr %[[REF]]
+
+int &&select_rvalue_reference(bool first, int &&x, int &&y) {
+  return first match -> int && {
+    true => static_cast<int &&>(x);
+    false => static_cast<int &&>(y);
+  };
+}
+
+// CHECK-LABEL: define{{.*}} ptr @_Z23select_rvalue_referencebOiS_(
+// CHECK:         %match.select.refresult = alloca ptr, align 8
+// CHECK:         store ptr {{.*}}, ptr %match.select.refresult, align 8
+// CHECK:       match.select.end:
+// CHECK:         %[[RREF:.*]] = load ptr, ptr %match.select.refresult, align 8
+// CHECK:         ret ptr %[[RREF]]
+
+template <class T>
+T &select_reference_template(bool first, T &x, T &y) {
+  return first match -> decltype(auto) {
+    true => (x);
+    false => (y);
+  };
+}
+
+template int &select_reference_template(bool, int &, int &);
+
+// CHECK-LABEL: define{{.*}} ptr @_Z25select_reference_templateIiERT_bS1_S1_(
+// CHECK:         %match.select.refresult = alloca ptr, align 8
+// CHECK:         store ptr {{.*}}, ptr %match.select.refresult, align 8
+// CHECK:       match.select.end:
+// CHECK:         %[[TREF:.*]] = load ptr, ptr %match.select.refresult, align 8
+// CHECK:         ret ptr %[[TREF]]
+
+_Complex double select_complex(bool first, _Complex double x,
+                               _Complex double y) {
+  return first match -> _Complex double {
+    true => x;
+    false => y;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} { double, double } @_Z14select_complexbCdS_(
+// CHECK:         %match.select.result = alloca { double, double }, align 8
+// CHECK:         %[[COMPLEX_REAL_ADDR:.*]] = getelementptr inbounds nuw { double, double }, ptr %match.select.result, i32 0, i32 0
+// CHECK:         %[[COMPLEX_IMAG_ADDR:.*]] = getelementptr inbounds nuw { double, double }, ptr %match.select.result, i32 0, i32 1
+// CHECK:         store double {{.*}}, ptr %[[COMPLEX_REAL_ADDR]], align 8
+// CHECK:         store double {{.*}}, ptr %[[COMPLEX_IMAG_ADDR]], align 8
+// CHECK:       match.select.end:
+// CHECK:         %[[COMPLEX_REAL:.*]] = load double, ptr {{.*}}, align 8
+// CHECK:         %[[COMPLEX_IMAG:.*]] = load double, ptr {{.*}}, align 8
+// CHECK:         ret { double, double } {{.*}}

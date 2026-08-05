@@ -480,6 +480,8 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
     return Cl::CL_ClassTemporary;
 
   case Expr::MatchSelectExprClass:
+    return ClassifyExprValueKind(Lang, E, E->getValueKind());
+
   case Expr::VAArgExprClass:
     return ClassifyUnnamed(Ctx, E->getType());
 
