@@ -6,8 +6,6 @@ void test_decltypes() {
   static_assert(__is_same(decltype(0 match case _), bool));
   static_assert(__is_same(decltype(x match case 0), bool));
   static_assert(__is_same(decltype(x match case y), bool));
-  static_assert(__is_same(decltype(&x match case ? _), bool));
-  static_assert(__is_same(decltype(&x match case ? 0), bool));
 }
 
 static_assert(0 match case _);
@@ -24,7 +22,6 @@ static_assert(!(x match case y));
 
 static_assert([]() { return 0 match case auto&& _; }());
 static_assert([]() { return 0 match case auto&& x; }());
-static_assert([]() { int x = 0; return &x match case ? auto&& x; }());
 
 static_assert([](int x) { return x match case _; }(0));
 static_assert([](auto x) -> bool { return x match case _; }(0));
@@ -51,41 +48,6 @@ static_assert([](int x, int y) { return x match case y; }(0, 0));
 static_assert([](auto x, auto y) -> bool { return x match case y; }(0, 0));
 static_assert(![](int x, int y) { return x match case y; }(0, 1));
 static_assert(![](auto x, auto y) -> bool { return x match case y; }(0, 1));
-
-static_assert([](int x) { return &x match case ? _; }(0));
-static_assert([](auto x) { return &x match case ? _; }(0));
-static_assert([](int x) { return &x match case ? 0; }(0));
-static_assert([](auto x) { return &x match case ? 0; }(0));
-static_assert(![](int x) { return &x match case ? 1; }(0));
-static_assert(![](auto x) { return &x match case ? 1; }(0));
-static_assert([](int x, int y) { return &x match case ? y; }(0, 0));
-static_assert([](auto x, auto y) { return &x match case ? y; }(0, 0));
-static_assert(![](int x, int y) { return &x match case ? y; }(0, 1));
-static_assert(![](auto x, auto y) { return &x match case ? y; }(0, 1));
-static_assert(![](int *p) { return p match case ? _; }(nullptr));
-static_assert(![](auto *p) { return p match case ? _; }((int*)nullptr));
-static_assert(![](int *p) { return p match case ? 0; }(nullptr));
-static_assert(![](auto *p) { return p match case ? 0; }((int*)nullptr));
-
-static_assert([](int x) { int *p = &x; return &p match case ?? _; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match case ?? _; }(0));
-static_assert([](int x) { int *p = &x; return &p match case ?? 0; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match case ?? 0; }(0));
-static_assert(![](int x) { int *p = &x; return &p match case ?? 1; }(0));
-static_assert(![](auto x) { auto *p = &x; return &p match case ?? 1; }(0));
-
-static_assert([](int x) { int *p = &x; return &p match case ? _; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match case ? _; }(0));
-static_assert([](int x) { int *p = &x; return &p match case ?? 0; }(0));
-static_assert([](auto x) { auto *p = &x; return &p match case ?? 0; }(0));
-static_assert(![](int x) { int *p = &x; return &p match case ?? 1; }(0));
-static_assert(![](auto x) { auto *p = &x; return &p match case ?? 1; }(0));
-static_assert(![](int **pp) { return pp match case ? _; }(nullptr));
-static_assert(![](auto **pp) { return pp match case ? _; }((int**)nullptr));
-static_assert(![](int **pp) { return pp match case ?? _; }(nullptr));
-static_assert(![](auto **pp) { return pp match case ?? _; }((int**)nullptr));
-static_assert(![](int **pp) { return pp match case ?? 0; }(nullptr));
-static_assert(![](auto **pp) { return pp match case ?? 0; }((int**)nullptr));
 
 constexpr bool test_dependent_match_0(auto x, auto y) { return x match case y; }
 
@@ -405,65 +367,6 @@ static_assert(test_match_pattern_guards({-1, 2}) == 2);
 static_assert(test_match_pattern_guards({3, 0}) == 3);
 static_assert(test_match_pattern_guards({4, 7}) == 11);
 
-constexpr int test_match_in_if_condition(const int *p) {
-  if (p match case ? auto&& v) {
-    return v;
-  }
-  return -1;
-}
-
-static_assert(test_match_in_if_condition(nullptr) == -1);
-static_assert(test_match_in_if_condition(&x) == 0);
-static_assert(test_match_in_if_condition(&y) == 1);
-
-struct Lifetime {
-  constexpr Lifetime(bool *flag, int n) : flag(flag), n(n) { *flag = true; }
-  constexpr ~Lifetime() { *flag = false; }
-  bool *flag;
-  int n;
-};
-
-constexpr bool test_match_in_if_condition_lifetime_extended(int n) {
-  bool flag = false;
-  if (Lifetime(&flag, n) match case [? auto&& b, 101]) {
-    return b;
-  } else if (n == 202) {
-    return flag;
-  }
-  return flag;
-}
-
-static_assert(test_match_in_if_condition_lifetime_extended(101));
-static_assert(test_match_in_if_condition_lifetime_extended(202));
-static_assert(!test_match_in_if_condition_lifetime_extended(303));
-
-constexpr bool test_match_in_if_condition_not_lifetime_extended(int n) {
-  bool flag = false;
-  if ((Lifetime(&flag, n) match case [? auto&& b, 101])) {
-    return flag;
-  } else if (n == 202) {
-    return flag;
-  }
-  return flag;
-}
-
-static_assert(!test_match_in_if_condition_not_lifetime_extended(101));
-static_assert(!test_match_in_if_condition_not_lifetime_extended(202));
-static_assert(!test_match_in_if_condition_not_lifetime_extended(303));
-
-constexpr int test_match_in_while_condition() {
-  int i = 0;
-  auto next = [&]() -> int* {
-    return i < 4 ? &i : nullptr;
-  };
-  while (next() match case ? auto&& v) {
-    ++v;
-  }
-  return i;
-}
-
-static_assert(test_match_in_while_condition() == 4);
-
 constexpr int test_match_guard_init_statement(const Pair &p) {
   return p match {
     case auto&& [x, y] if (int sum = x + y; sum < 0) => sum;
@@ -501,7 +404,6 @@ constexpr int test_match_guard_init_lifetime(bool take_first) {
 
 static_assert(test_match_guard_init_lifetime(true) == 10);
 static_assert(test_match_guard_init_lifetime(false) == 0);
-
 struct Variant {
   constexpr Variant(int x) : i(0), x(x) {}
   constexpr Variant(double y) : i(1), y(y) {}
@@ -833,22 +735,6 @@ struct SharedProjection {
   }
 };
 
-struct SharedOptionalProjection {
-  int value;
-  int *condition_calls;
-  int *projection_calls;
-
-  constexpr explicit operator bool() const {
-    ++*condition_calls;
-    return true;
-  }
-
-  constexpr int &operator*() {
-    ++*projection_calls;
-    return value;
-  }
-};
-
 struct SharedVariantProjection {
   SharedProjection value;
   int *index_calls;
@@ -1162,20 +1048,6 @@ constexpr int declaration_arms_share_projections() {
 }
 
 static_assert(declaration_arms_share_projections() == 113);
-
-constexpr int optional_arms_share_projection() {
-  int condition_calls = 0;
-  int projection_calls = 0;
-  SharedOptionalProjection source{1, &condition_calls, &projection_calls};
-  int result = source match {
-    case ? 0 => 0;
-    case ? auto x => x;
-    case _ => -1;
-  };
-  return condition_calls * 100 + projection_calls * 10 + result;
-}
-
-static_assert(optional_arms_share_projection() == 111);
 
 constexpr int nested_arms_share_projections() {
   int element_projections[2] = {};

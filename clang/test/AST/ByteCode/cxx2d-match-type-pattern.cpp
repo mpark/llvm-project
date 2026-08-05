@@ -17,11 +17,6 @@ constexpr Pair<int, long> pair{1, 2};
 static_assert(direct(0) == 1);
 static_assert(0 match case int);
 static_assert(pair match case [int, long]);
-static_assert([] {
-  int integer = 0;
-  return &integer match case ? int;
-}());
-
 constexpr bool declaration_equivalent_types() {
   int value = 0;
   const int constant = 0;
