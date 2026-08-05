@@ -2957,7 +2957,6 @@ private:
 
   /// C++2c contextual keywords.
   mutable IdentifierInfo *Ident_match;
-  mutable IdentifierInfo *Ident_let;
   mutable IdentifierInfo *Ident_wildcard;
 
   /// Representation of a class that has been parsed, including
@@ -4554,9 +4553,7 @@ private:
   ActionResult<MatchPattern *>
   TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
-  ActionResult<MatchPattern *> ParseBindingPattern(SourceLocation LetLoc);
-  ActionResult<MatchPattern *>
-  ParseDecompositionPattern(SourceLocation *LetLoc = nullptr);
+  ActionResult<MatchPattern *> ParseDecompositionPattern();
 
   ///@}
 
