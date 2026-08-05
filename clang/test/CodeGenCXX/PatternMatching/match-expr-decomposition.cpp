@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++2d -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++2d -fpattern-matching -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 auto decomposition_pattern(const int (&xs)[2]) {
@@ -43,14 +43,9 @@ auto decomposition_pattern(const int (&xs)[2]) {
 // CHECK:         %[[VAL_22:.*]] = mul nsw i32 %[[VAL_21]], 2
 // CHECK:         store i32 %[[VAL_22]], ptr %[[VAL_1]], align 4
 // CHECK:         br label %[[SELECT_END:.*]]
-// CHECK:       match.select.next_pattern:
-// CHECK:         br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
-// CHECK:       [[THROW_ACTION]]:
-// CHECK:         call ptr @__cxa_allocate_exception
-// CHECK:         call void @__cxa_throw
+// CHECK:       match.select.no_match:
+// CHECK:         call void @_ZSt9terminatev
 // CHECK:         unreachable
-// CHECK:       throw.cont:
-// CHECK:         br label %[[SELECT_END]]
 // CHECK:       match.select.end:
 // CHECK:         %[[RET:.*]] = load i32, ptr %[[VAL_1]], align 4
 // CHECK:         ret i32 %[[RET]]
