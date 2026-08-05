@@ -248,14 +248,14 @@ struct DerivedB : Base {
 
 constexpr auto test_alternative_pattern_const(const Base &base) {
   return base match {
-    case DerivedA: auto&& a => ({
+    case const DerivedA& a => ({
       static_assert(__is_same(decltype(a), const DerivedA&));
       static_assert(__is_same(decltype((a)), const DerivedA &));
       static_assert(__is_same(decltype(a.x), int));
       static_assert(__is_same(decltype((a.x)), const int&));
       a.x * 2;
     });
-    case const DerivedB: auto&& b => ({
+    case const DerivedB& b => ({
       static_assert(__is_same(decltype(b), const DerivedB&));
       static_assert(__is_same(decltype((b)), const DerivedB &));
       static_assert(__is_same(decltype(b.c), char));
@@ -272,15 +272,15 @@ static_assert(test_alternative_pattern_const(DerivedB{'a'}) == 97);
 constexpr auto test_alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
-    case DerivedA: [auto&& x] => ({
-      static_assert(__is_same(decltype(x), int&));
-      static_assert(__is_same(decltype((x)), int&));
-      x * 2;
+    case DerivedA& a => ({
+      static_assert(__is_same(decltype(a), DerivedA&));
+      static_assert(__is_same(decltype((a)), DerivedA&));
+      a.x * 2;
     });
-    case DerivedB: [auto&& c] => ({
-      static_assert(__is_same(decltype(c), char&));
-      static_assert(__is_same(decltype((c)), char&));
-      (int)c;
+    case DerivedB& b => ({
+      static_assert(__is_same(decltype(b), DerivedB&));
+      static_assert(__is_same(decltype((b)), DerivedB&));
+      (int)b.c;
     });
     case _ => 0;
   };
@@ -576,13 +576,36 @@ namespace std {
   template <> struct variant_alternative<0, Variant> { using type = int; };
   template <> struct variant_alternative<1, Variant> { using type = double; };
   template <> struct variant_alternative<2, Variant> { using type = float; };
+
+  template <typename T>
+  struct alternative_traits;
+
+  template <>
+  struct alternative_traits<Variant> {
+    static constexpr __SIZE_TYPE__ size = 3;
+
+    template <__SIZE_TYPE__ I>
+    using projection_type = typename variant_alternative<I, Variant>::type;
+
+    static constexpr __SIZE_TYPE__ index(const Variant& value) noexcept {
+      return value.index();
+    }
+
+    template <__SIZE_TYPE__ I, class Self>
+    static constexpr decltype(auto) get(Self&& value) {
+      return static_cast<Self&&>(value).template get<I>();
+    }
+  };
 }
 
 constexpr int test_variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    case int: 0 => 0;
-    case int: 1 => 1;
-    case double: auto&& y => (int)y + 4;
+    case { int integer } => integer match {
+      case 0 => 0;
+      case 1 => 1;
+      case _ => -1;
+    };
+    case { double real } => (int)real + 4;
     case _ => -1;
   };
 }
@@ -599,8 +622,10 @@ constexpr int variant_arms_share_projection() {
   int get_calls = 0;
   Variant var(1, index_calls, get_calls);
   int result = var match {
-    case int: 0 => 0;
-    case int: auto x => x;
+    case { int integer } => integer match {
+      case 0 => 0;
+      case _ => integer;
+    };
     case _ => -1;
   };
   return index_calls * 100 + get_calls * 10 + result;
@@ -611,9 +636,12 @@ static_assert(variant_arms_share_projection() == 111);
 template <typename T, typename U>
 constexpr int test_variant_like_alternative_pattern_dependent(const auto &var) {
   return var match {
-    case T: 0 => 0;
-    case T: 1 => 1;
-    case U: auto&& y => (int)y + 4;
+    case { T first } => first match {
+      case 0 => 0;
+      case 1 => 1;
+      case _ => -1;
+    };
+    case { U second } => (int)second + 4;
     case _ => -1;
   };
 }
@@ -737,7 +765,7 @@ static_assert(test_variant_like_alternative_pattern_with_type_constraint(0.f) ==
 
 constexpr int test_concept_selects_every_matching_alternative(const Variant &var) {
   return var match {
-    case arithmetic: auto&& value =>
+    case { arithmetic auto value } =>
         alternative_code<decltype(value)>::value * 10 +
         static_cast<int>(value);
   };
@@ -749,7 +777,7 @@ static_assert(test_concept_selects_every_matching_alternative(3.0f) == 33);
 
 constexpr int test_auto_selects_every_alternative(const Variant &var) {
   return var match {
-    case auto: auto&& value => alternative_code<decltype(value)>::value;
+    case { auto&& value } => alternative_code<decltype(value)>::value;
   };
 }
 
@@ -870,6 +898,26 @@ struct variant_size<SharedVariantProjection> {
 template<>
 struct variant_alternative<0, SharedVariantProjection> {
   using type = SharedProjection;
+};
+
+template<>
+struct alternative_traits<SharedVariantProjection> {
+  static constexpr __SIZE_TYPE__ size = 1;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using projection_type = SharedProjection;
+
+  static constexpr __SIZE_TYPE__
+  index(const SharedVariantProjection& value) noexcept {
+    return value.index();
+  }
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  static constexpr SharedProjection& get(SharedVariantProjection& value) {
+    return value.template get<I>();
+  }
 };
 } // namespace std
 
@@ -1136,8 +1184,8 @@ constexpr int nested_arms_share_projections() {
   SharedVariantProjection source{
       {1, 2, element_projections}, &index_calls, &alternative_projections};
   int result = source match {
-    case SharedProjection: [0, 0] => 0;
-    case SharedProjection: [auto &&x, auto &&y] => x + y;
+    case { [0, 0] } => 0;
+    case { [auto &&x, auto &&y] } => x + y;
   };
   return index_calls * 1000 + alternative_projections * 100 +
          element_projections[0] * 10 + element_projections[1] + result;
