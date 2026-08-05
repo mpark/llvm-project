@@ -4512,7 +4512,8 @@ private:
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case,
                       Sema::MatchProjectionCache &ProjectionCache);
-  Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc);
+  Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
+                                        StmtResult &InitStmt);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy);
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,

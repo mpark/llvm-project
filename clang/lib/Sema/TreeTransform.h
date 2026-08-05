@@ -18997,9 +18997,23 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
   if (getSema().CheckCompleteMatchPattern(LHS.get(), P.get()))
     return ExprError();
 
-  return getSema().ActOnMatchTestExpr(HoldingVar, LHS.get(),
-                                      E->getMatchLoc(), P.get(),
-                                      E->getIfLoc(), E->getGuard());
+  StmtResult GuardInit;
+  if (E->getGuard().Init) {
+    GuardInit = getDerived().TransformStmt(E->getGuard().Init);
+    if (GuardInit.isInvalid())
+      return ExprError();
+  }
+  Sema::ConditionResult Guard = getDerived().TransformCondition(
+      E->getIfLoc(), E->getGuard().ConditionVariable,
+      E->getGuard().Condition,
+      Sema::ConditionKind::Boolean);
+  if (Guard.isInvalid())
+    return ExprError();
+
+  return getSema().ActOnMatchTestExpr(HoldingVar, LHS.get(), E->getMatchLoc(),
+                                      P.get(), E->getIfLoc(),
+                                      {GuardInit.get(), Guard.get().first,
+                                       Guard.get().second});
 }
 
 template <typename Derived>
@@ -19048,8 +19062,14 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                                    LHS.get(), Pattern.get(), &ProjectionCache))
       return true;
 
+    StmtResult GuardInit;
+    if (Case.Guard.Init) {
+      GuardInit = getDerived().TransformStmt(Case.Guard.Init);
+      if (GuardInit.isInvalid())
+        return true;
+    }
     Sema::ConditionResult Guard = getDerived().TransformCondition(
-        Case.IfLoc, Case.Guard.first, Case.Guard.second,
+        Case.IfLoc, Case.Guard.ConditionVariable, Case.Guard.Condition,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf
                          : Sema::ConditionKind::Boolean);
     if (Guard.isInvalid())
@@ -19067,7 +19087,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Handler.isInvalid())
       return true;
 
-    Transformed = {Pattern.get(), Case.IfLoc, Guard.get(), Handler.get(),
+    Transformed = {Pattern.get(),
+                   Case.IfLoc,
+                   {GuardInit.get(), Guard.get().first, Guard.get().second},
+                   Handler.get(),
                    CaseIndex};
     return false;
   };
