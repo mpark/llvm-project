@@ -56,11 +56,11 @@ void test_match_test_expr() {
   check(![]() { int** pp = nullptr; return pp match case ?? _; }());
   check(![]() { int** pp = nullptr; return pp match case ?? 0; }());
 
-  check([]() { return 0 match case let _; }());
-  check([]() { return 0 match case let x; }());
+  check([]() { return 0 match case auto&& _; }());
+  check([]() { return 0 match case [[maybe_unused]] auto&& x; }());
   check([]() {
     int x = 0;
-    return &x match case ? let x;
+    return &x match case ? [[maybe_unused]] auto&& bound;
   }());
 }
 
@@ -68,7 +68,7 @@ auto char_pattern(char c) {
   return c match {
     case 'a'   => 1;
     case 'b'   => 2;
-    case let x => int(x);
+    case auto&& x => int(x);
   };
 }
 
@@ -81,9 +81,9 @@ void test_char_pattern() {
 auto decomposition_pattern(const int (&xs)[2]) {
   return xs match {
     case [ 0, 0 ]     => -1;
-    case [ let x, 0 ] => x * 2;
-    case [ 0, let y ] => y * 4;
-    case let[x, y]    => x * y;
+    case [ auto&& x, 0 ] => x * 2;
+    case [ 0, auto&& y ] => y * 4;
+    case auto&& [x, y]    => x * y;
   };
 }
 
@@ -114,10 +114,10 @@ struct Result {
 
 auto nested_decomposition_pattern(const S& s) {
   return s match -> Result {
-    case [let c, [0, 0]] => {c, -1};
-    case [let c, [let x, 0]] => {c, x * 2};
-    case [let c, [0, let y]] => {c, y * 4};
-    case let [c, [x, y]] => {c, x * y};
+    case [auto&& c, [0, 0]] => {c, -1};
+    case [auto&& c, [auto&& x, 0]] => {c, x * 2};
+    case [auto&& c, [0, auto&& y]] => {c, y * 4};
+    case [auto&& c, [auto&& x, auto&& y]] => {c, x * y};
   };
 }
 
@@ -144,9 +144,9 @@ bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
     int n = elems[i - 1];
     result &= (int[2]){i % 3, i % 5} match {
       case [0, 0] => s == FizzBuzz && n == 0;
-      case [0, let y] => s == Fizz && n == y;
-      case [let x, 0] => s == Buzz && n == x;
-      case let [x, y] => s == N && n == x + y;
+      case [0, auto&& y] => s == Fizz && n == y;
+      case [auto&& x, 0] => s == Buzz && n == x;
+      case auto&& [x, y] => s == N && n == x + y;
     };
   }
   return result;
@@ -193,8 +193,8 @@ struct DerivedB : Base {
 
 auto alternative_pattern_const(const Base &base) {
   return base match {
-    case DerivedA: let a => a.x * 2;
-    case const DerivedB: let b => (int)b.c;
+    case DerivedA: auto&& a => a.x * 2;
+    case const DerivedB: auto&& b => (int)b.c;
     case _ => 0;
   };
 }
@@ -207,8 +207,8 @@ void test_alternative_pattern_const() {
 auto alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
-    case DerivedA: [let x] => x * 2;
-    case DerivedB: [let c] => (int)c;
+    case DerivedA: [auto&& x] => x * 2;
+    case DerivedB: [auto&& c] => (int)c;
     case _ => 0;
   };
 }
@@ -222,7 +222,7 @@ auto bitfields(int x) {
   struct S { int i : 6; } s{x};
   return s.i match {
     case 8 => 0;
-    case let n => n;
+    case auto&& n => n;
   };
 }
 
@@ -259,18 +259,18 @@ namespace std {
 int tuple_decomposition_pattern(const std::tuple<int, int> &tup) {
   return tup match {
     case [0, 0] => -1;
-    case [0, let y] => y * 2;
-    case [let x, 0] => x * 4;
-    case let [x, y] => x * y;
+    case [0, auto&& y] => y * 2;
+    case [auto&& x, 0] => x * 4;
+    case auto&& [x, y] => x * y;
   };
 }
 
 int tuple_like_decomposition_pattern(const Pair &tup) {
   return tup match {
     case [0, 0] => -1;
-    case [0, let y] => y * 2;
-    case [let x, 0] => x * 4;
-    case let [x, y] => x * y;
+    case [0, auto&& y] => y * 2;
+    case [auto&& x, 0] => x * 4;
+    case auto&& [x, y] => x * y;
   };
 }
 
@@ -286,7 +286,7 @@ void test_tuple_like_decomposition_pattern() {
 }
 
 bool match_test_with_guard(const int (&xs)[2]) {
-  return xs match case let [x, y] if (x == y);
+  return xs match case auto&& [x, y] if (x == y);
 }
 
 void test_match_test_with_guard() {
@@ -298,10 +298,10 @@ void test_match_test_with_guard() {
 
 auto match_pattern_guards(const Pair& p) {
   return p match {
-    case let [x, y] if (x < 0 && y < 0) => 0;
-    case let [x, y] if (x < 0) => y;
-    case let [x, y] if (y < 0) => x;
-    case let [x, y] => x + y;
+    case auto&& [x, y] if (x < 0 && y < 0) => 0;
+    case auto&& [x, y] if (x < 0) => y;
+    case auto&& [x, y] if (y < 0) => x;
+    case auto&& [x, y] => x + y;
   };
 }
 
@@ -314,7 +314,7 @@ void test_match_pattern_guards() {
 }
 
 int match_in_if_condition(const int *p) {
-  if (p match case ? let v) {
+  if (p match case ? [[maybe_unused]] auto&& v) {
     return v;
   }
   return -1;
@@ -337,7 +337,7 @@ struct Lifetime {
 
 bool match_in_if_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match case [? let b, 101]) {
+  if (Lifetime(&flag, n) match case [? [[maybe_unused]] auto&& b, 101]) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -353,7 +353,7 @@ void test_match_in_if_condition_lifetime_extended() {
 
 bool match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match case [? let b, 101])) {
+  if ((Lifetime(&flag, n) match case [? _ , 101])) {
     return flag;
   } else if (n == 202) {
     return flag;
@@ -372,7 +372,7 @@ int match_in_while_condition() {
   auto next = [&]() -> int* {
     return i < 4 ? &i : nullptr;
   };
-  while (next() match case ? let v) {
+  while (next() match case ? [[maybe_unused]] auto&& v) {
     ++v;
   }
   return i;
@@ -419,7 +419,7 @@ int variant_alternative_pattern(const std::variant<int, double, float> &var) {
   return var match {
     case int: 0 => 0;
     case int: 1 => 1;
-    case double: let y => (int)y + 4;
+    case double: auto&& y => (int)y + 4;
     case _ => -1;
   };
 }
@@ -428,7 +428,7 @@ int variant_like_alternative_pattern(const Variant &var) {
   return var match {
     case int: 0 => 0;
     case int: 1 => 1;
-    case double: let y => (int)y + 4;
+    case double: auto&& y => (int)y + 4;
     case _ => -1;
   };
 }
@@ -439,14 +439,14 @@ int classify(const float&) { return 30; }
 
 int auto_alternative_pattern(const std::variant<int, double, float>& var) {
   return var match {
-    case auto: let value => classify(value);
+    case auto: auto&& value => classify(value);
   };
 }
 
 template<class T>
 int dependent_auto_alternative_pattern(const T& var) {
   return var match {
-    case auto: let value => classify(value);
+    case auto: auto&& value => classify(value);
   };
 }
 
@@ -478,7 +478,7 @@ int match_stmt_action(int limit) {
   int r = 0;
   for (int i = limit; i >= 0; i--) {
     r += i match {
-      case let x if (x < 5) => 1;
+      case auto&& x if (x < 5) => 1;
       case 5 => continue;
       case 6 => break;
       case 7 => return 99;
@@ -498,7 +498,7 @@ int try_cast_alternative_pattern(const std::any& a) {
   return a match {
     case int: 0 => 0;
     case int: 1 => 1;
-    case double: let y => (int)y + 4;
+    case double: auto&& y => (int)y + 4;
     case _ => -1;
   };
 }
