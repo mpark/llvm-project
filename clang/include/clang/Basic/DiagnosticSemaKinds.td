@@ -14457,15 +14457,6 @@ def err_type_pattern_not_exact_match : Error<
   "type pattern of type %0 is not an exact match for subject of type %1">;
 def err_guarded_declaration_pattern_move : Error<
   "guarded declaration pattern of type %0 would move from the match subject">;
-def err_no_viable_alternative : Error<
-  "no viable alternative; target type %0 does not match any "
-  "'std::variant_alternative<I, %1>::type' for I in [0, 'std::variant_size<%1>::value')">;
-def err_alternative_pattern_std_variant_alternative_not_specialized : Error<
- "invalid variant-like protocol; 'std::variant_alternative<%0>::type' "
- "does not name a type">;
-def err_alternative_pattern_std_variant_size_not_constant : Error<
-  "invalid variant-like protocol; 'std::variant_size<%0>::value' "
-  "is not a valid integral constant expression">;
 def err_alternative_traits_missing : Error<
   "type %0 does not provide a usable 'std::alternative_traits' specialization">;
 def err_alternative_traits_size_not_constant : Error<

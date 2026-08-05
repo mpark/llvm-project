@@ -3905,9 +3905,7 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
   if (Pattern->getMatchPatternClass() ==
       MatchPattern::AlternativePatternClass) {
     auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-        Alternative->getAlternativeKind() == AlternativePattern::Auto ||
-        Alternative->getAlternativeKind() == AlternativePattern::Concept)
+    if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
       return true;
   }
   return llvm::any_of(Pattern->children(),
@@ -4225,51 +4223,6 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     [[fallthrough]];
   }
   default: {
-    auto HasAlternativeColon = [&] {
-      unsigned ParenDepth = 0;
-      unsigned SquareDepth = 0;
-      unsigned BraceDepth = 0;
-      for (unsigned I = 0; I != 256; ++I) {
-        const Token &T = GetLookAheadToken(I);
-        if (T.isOneOf(tok::eof, tok::equalgreater, tok::kw_if, tok::semi))
-          return false;
-        if (Decomp && T.is(tok::comma) && ParenDepth == 0 &&
-            SquareDepth == 0 && BraceDepth == 0)
-          return false;
-        if (T.is(tok::colon) && ParenDepth == 0 && SquareDepth == 0 &&
-            BraceDepth == 0)
-          return true;
-        if (T.is(tok::l_paren))
-          ++ParenDepth;
-        else if (T.is(tok::r_paren)) {
-          if (ParenDepth == 0)
-            return false;
-          --ParenDepth;
-        } else if (T.is(tok::l_square))
-          ++SquareDepth;
-        else if (T.is(tok::r_square)) {
-          if (SquareDepth == 0)
-            return false;
-          --SquareDepth;
-        } else if (T.is(tok::l_brace))
-          ++BraceDepth;
-        else if (T.is(tok::r_brace)) {
-          if (BraceDepth == 0)
-            return false;
-          --BraceDepth;
-        }
-      }
-      return false;
-    };
-
-    if (HasAlternativeColon()) {
-      ColonProtectionRAIIObject ColonRAII(*this);
-      ActionResult<MatchPattern *> Pattern =
-          TryParseAlternativePattern(LHSOfMatchTestExpr);
-      if (Pattern.isInvalid() || Pattern.isUsable()) {
-        return Pattern;
-      }
-    }
     if (StartsConstrainedPlaceholderDeclarationPattern())
       return ParseDeclarationPattern();
     if (StartsTypePattern())
@@ -4352,88 +4305,6 @@ Parser::ParseExpressionPattern(
       return true;
   }
   return Actions.ActOnExpressionPattern(Expr.get(), IsPackExpansion);
-}
-
-ActionResult<MatchPattern *>
-Parser::TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr) {
-  if (Tok.is(tok::kw_auto)) {
-    SourceRange DiscriminatorRange = ConsumeToken();
-    assert(Tok.is(tok::colon) && "not an auto alternative pattern");
-    SourceLocation ColonLoc = ConsumeToken();
-    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
-    if (Pattern.isInvalid())
-      return true;
-    return Actions.ActOnAutoAlternativePattern(
-        DiscriminatorRange, ColonLoc, Pattern.get());
-  }
-
-  if (TryAnnotateTypeConstraint())
-    return true;
-
-  SourceRange DiscriminatorRange;
-  if (isTypeConstraintAnnotation()) {
-    CXXScopeSpec TypeConstraintSS;
-    ParseOptionalCXXScopeSpecifier(TypeConstraintSS, /*ObjectType=*/nullptr,
-                                   /*ObjectHasErrors=*/false,
-                                   /*EnteringContext*/ false);
-    // Consume the 'type-constraint'.
-    TemplateIdAnnotation *TypeConstraint =
-        static_cast<TemplateIdAnnotation *>(Tok.getAnnotationValue());
-    assert(TypeConstraint->Kind == TNK_Concept_template &&
-           "stray non-concept template-id annotation");
-    DiscriminatorRange = ConsumeAnnotationToken();
-    if (Actions.CheckTypeConstraint(TypeConstraint))
-      return true;
-
-    // Similar code in SemaType.cpp `ConvertDeclSpecToType`
-    ConceptDecl *TypeConstraintConcept =
-        cast<ConceptDecl>(TypeConstraint->Template.get().getAsTemplateDecl());
-
-    const ASTTemplateArgumentListInfo *ArgsAsWritten =
-        [&]() -> const ASTTemplateArgumentListInfo * {
-      if (TypeConstraint->LAngleLoc.isInvalid())
-        return nullptr;
-      TemplateArgumentListInfo TemplateArgs(TypeConstraint->LAngleLoc,
-                                            TypeConstraint->RAngleLoc);
-      ASTTemplateArgsPtr TemplateArgsPtr(TypeConstraint->getTemplateArgs(),
-                                         TypeConstraint->NumArgs);
-      Actions.translateTemplateArguments(TemplateArgsPtr, TemplateArgs);
-      return ASTTemplateArgumentListInfo::Create(Actions.getASTContext(),
-                                                 TemplateArgs);
-    }();
-    ConceptReference *CR = ConceptReference::Create(
-        Actions.getASTContext(),
-        TypeConstraintSS.isSet()
-            ? TypeConstraintSS.getWithLocInContext(Actions.getASTContext())
-            : NestedNameSpecifierLoc{},
-        TypeConstraint->TemplateKWLoc,
-        DeclarationNameInfo(TypeConstraint->Name,
-                            TypeConstraint->TemplateNameLoc),
-        nullptr, TypeConstraintConcept, ArgsAsWritten);
-
-    // Match the ':'.
-    assert(Tok.is(tok::colon) && "Not an alternative pattern");
-    SourceLocation ColonLoc = ConsumeToken();
-    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
-    if (!CR || Pattern.isInvalid())
-      return true;
-    return Actions.ActOnAlternativePattern(DiscriminatorRange, CR, ColonLoc,
-                                           Pattern.get());
-  }
-  if (isCXXTypeId(TentativeCXXTypeIdContext::InAlternativePattern)) {
-    TypeSourceInfo *TSI = nullptr;
-    TypeResult Ty = ParseTypeName(&DiscriminatorRange);
-    Actions.GetTypeFromParser(Ty.get(), &TSI);
-    // Match the ':'.
-    assert(Tok.is(tok::colon) && "Not an alternative pattern");
-    SourceLocation ColonLoc = ConsumeToken();
-    ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
-    if (!TSI || Pattern.isInvalid())
-      return true;
-    return Actions.ActOnAlternativePattern(DiscriminatorRange, TSI, ColonLoc,
-                                           Pattern.get());
-  }
-  return false;
 }
 
 ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
