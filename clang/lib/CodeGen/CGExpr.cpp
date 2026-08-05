@@ -1850,6 +1850,8 @@ LValue CodeGenFunction::EmitLValueHelper(const Expr *E,
     return EmitStmtExprLValue(cast<StmtExpr>(E));
   case Expr::DoExprClass:
     return EmitDoExprLValue(cast<DoExpr>(E));
+  case Expr::MatchSelectExprClass:
+    return EmitMatchSelectExprLValue(cast<MatchSelectExpr>(E));
   case Expr::UnaryOperatorClass:
     return EmitUnaryOpLValue(cast<UnaryOperator>(E));
   case Expr::ArraySubscriptExprClass:

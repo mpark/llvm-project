@@ -1038,6 +1038,9 @@ public:
     return CGF.EmitMatchTestExpr(*IE).getScalarVal();
   }
   Value *VisitMatchSelectExpr(MatchSelectExpr *IE) {
+    if (IE->isGLValue())
+      return CGF.EmitLoadOfScalar(CGF.EmitMatchSelectExprLValue(IE),
+                                  IE->getExprLoc());
     return CGF.EmitMatchSelectExpr(*IE).getScalarVal();
   }
 };

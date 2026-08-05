@@ -2265,7 +2265,11 @@ MatchSelectExpr::MatchSelectExpr(
     bool IsConstexpr, TypeLoc OrigResultType, QualType Ty,
     ArrayRef<MatchCase> Cases, ArrayRef<MatchCaseInstantiation> Instantiations,
     SourceRange Braces)
-    : Expr(MatchSelectExprClass, Ty, VK_PRValue, OK_Ordinary),
+    : Expr(MatchSelectExprClass, Ty.getNonReferenceType(),
+           Ty->isLValueReferenceType()
+               ? VK_LValue
+               : Ty->isRValueReferenceType() ? VK_XValue : VK_PRValue,
+           OK_Ordinary),
       HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
       IsConstexpr(IsConstexpr), OrigResultType(OrigResultType),
       NumCases(Cases.size()), NumCaseInstantiations(Instantiations.size()),
