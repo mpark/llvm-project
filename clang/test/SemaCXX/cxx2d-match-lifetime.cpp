@@ -107,7 +107,7 @@ auto statement_handler(Object object) {
 }
 
 const Object *condition_init_lifetime(Object object) {
-  if (Object init{}; object match case let copy)
+  if (Object init{}; object match case Object copy)
     return &init; // expected-warning {{address of stack memory associated with local variable 'init' returned}}
   __builtin_unreachable();
 }
