@@ -263,48 +263,19 @@ public:
 
 class AlternativePattern final : public MatchPattern {
 public:
-  enum AlternativeKind { Type, Concept, Auto, Generic, Named, Empty };
+  enum AlternativeKind { Generic, Named, Empty };
 
 private:
   AlternativeKind Kind;
   SourceRange DiscriminatorRange;
   SourceRange Braces;
 
-  // Discriminator is either a type or a type-constraint.
-  TypeSourceInfo* TInfo = nullptr;
-  ConceptReference* CR = nullptr;
   IdentifierInfo *Name = nullptr;
 
   SourceLocation ColonLoc;
   MatchPattern *Pattern = nullptr;
 
 public:
-  explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
-                              SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), Kind(Concept),
-        DiscriminatorRange(ConceptRange), CR(CR), ColonLoc(ColonLoc),
-        Pattern(Pattern) {
-    // FIXME(mpark): Account for ConceptReference.
-    setDependence(computeDependence());
-  }
-
-  explicit AlternativePattern(SourceRange TypeRange, TypeSourceInfo *TInfo,
-                              SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), Kind(Type),
-        DiscriminatorRange(TypeRange), TInfo(TInfo), ColonLoc(ColonLoc),
-        Pattern(Pattern) {
-    setDependence(
-        toExprDependenceForImpliedType(TInfo->getType()->getDependence()) |
-        computeDependence());
-  }
-
-  explicit AlternativePattern(SourceRange AutoRange, SourceLocation ColonLoc,
-                              MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass), Kind(Auto),
-        DiscriminatorRange(AutoRange), ColonLoc(ColonLoc), Pattern(Pattern) {
-    setDependence(computeDependence());
-  }
-
   explicit AlternativePattern(SourceRange Braces, MatchPattern *Pattern)
       : MatchPattern(AlternativePatternClass), Kind(Generic), Braces(Braces),
         Pattern(Pattern) {
@@ -326,9 +297,6 @@ public:
   }
 
   AlternativeKind getAlternativeKind() const { return Kind; }
-  bool isBraced() const {
-    return Kind == Generic || Kind == Named || Kind == Empty;
-  }
   bool isNamed() const { return Kind == Named; }
   bool isEmpty() const { return Kind == Empty; }
 
@@ -336,22 +304,8 @@ public:
   SourceRange getBraces() const { return Braces; }
   IdentifierInfo *getName() const { return Name; }
   SourceLocation getColonLoc() const { return ColonLoc; }
-  SourceLocation getBeginLoc() const {
-    return isBraced() ? Braces.getBegin() : DiscriminatorRange.getBegin();
-  }
-  SourceLocation getEndLoc() const {
-    return isBraced() ? Braces.getEnd() : Pattern->getEndLoc();
-  }
-
-  ConceptReference *getConceptReference() const {
-    return CR;
-  }
-
-  TypeSourceInfo *getTypeSourceInfo() const {
-    return TInfo;
-  }
-
-  bool isAuto() const { return Kind == Auto; }
+  SourceLocation getBeginLoc() const { return Braces.getBegin(); }
+  SourceLocation getEndLoc() const { return Braces.getEnd(); }
 
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
