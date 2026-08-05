@@ -193,8 +193,8 @@ struct DerivedB : Base {
 
 auto alternative_pattern_const(const Base &base) {
   return base match {
-    case DerivedA: auto&& a => a.x * 2;
-    case const DerivedB: auto&& b => (int)b.c;
+    case const DerivedA& a => a.x * 2;
+    case const DerivedB& b => (int)b.c;
     case _ => 0;
   };
 }
@@ -207,8 +207,8 @@ void test_alternative_pattern_const() {
 auto alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
   return base match {
-    case DerivedA: [auto&& x] => x * 2;
-    case DerivedB: [auto&& c] => (int)c;
+    case DerivedA& a => a.x * 2;
+    case DerivedB& b => (int)b.c;
     case _ => 0;
   };
 }
@@ -413,22 +413,45 @@ namespace std {
   template <> struct variant_alternative<0, Variant> { using type = int; };
   template <> struct variant_alternative<1, Variant> { using type = double; };
   template <> struct variant_alternative<2, Variant> { using type = float; };
+
+  template <>
+  struct alternative_traits<Variant> {
+    static constexpr size_t size = 3;
+
+    template <size_t I>
+    using projection_type = typename variant_alternative<I, Variant>::type;
+
+    static constexpr size_t index(const Variant& value) noexcept {
+      return value.index();
+    }
+
+    template <size_t I, class Self>
+    static constexpr decltype(auto) get(Self&& value) {
+      return static_cast<Self&&>(value).template get<I>();
+    }
+  };
 }
 
 int variant_alternative_pattern(const std::variant<int, double, float> &var) {
   return var match {
-    case int: 0 => 0;
-    case int: 1 => 1;
-    case double: auto&& y => (int)y + 4;
+    case { int x } => x match {
+      case 0 => 0;
+      case 1 => 1;
+      case _ => -1;
+    };
+    case { double y } => (int)y + 4;
     case _ => -1;
   };
 }
 
 int variant_like_alternative_pattern(const Variant &var) {
   return var match {
-    case int: 0 => 0;
-    case int: 1 => 1;
-    case double: auto&& y => (int)y + 4;
+    case { int x } => x match {
+      case 0 => 0;
+      case 1 => 1;
+      case _ => -1;
+    };
+    case { double y } => (int)y + 4;
     case _ => -1;
   };
 }
@@ -439,14 +462,14 @@ int classify(const float&) { return 30; }
 
 int auto_alternative_pattern(const std::variant<int, double, float>& var) {
   return var match {
-    case auto: auto&& value => classify(value);
+    case { auto&& value } => classify(value);
   };
 }
 
 template<class T>
 int dependent_auto_alternative_pattern(const T& var) {
   return var match {
-    case auto: auto&& value => classify(value);
+    case { auto&& value } => classify(value);
   };
 }
 
@@ -496,9 +519,9 @@ void test_match_stmt_action() {
 
 int try_cast_alternative_pattern(const std::any& a) {
   return a match {
-    case int: 0 => 0;
-    case int: 1 => 1;
-    case double: auto&& y => (int)y + 4;
+    case const int& x if (x == 0) => 0;
+    case const int& x if (x == 1) => 1;
+    case const double& y => (int)y + 4;
     case _ => -1;
   };
 }
