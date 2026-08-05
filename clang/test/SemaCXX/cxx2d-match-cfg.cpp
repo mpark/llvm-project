@@ -30,3 +30,63 @@ int guarded_init_statement(int value) {
     case _ => 0;
   };
 }
+
+namespace std {
+template<class T>
+struct alternative_traits;
+}
+
+struct Choice {
+  unsigned active;
+  int integer;
+  double real;
+};
+
+template<__SIZE_TYPE__ I>
+struct ChoiceAlternative;
+
+template<>
+struct ChoiceAlternative<0> {
+  using type = int;
+};
+
+template<>
+struct ChoiceAlternative<1> {
+  using type = double;
+};
+
+template<>
+struct std::alternative_traits<Choice> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using projection_type = typename ChoiceAlternative<I>::type;
+
+  static constexpr __SIZE_TYPE__ index(const Choice& value) noexcept {
+    return value.active;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& value) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(value).integer);
+    else
+      return (static_cast<Self&&>(value).real);
+  }
+};
+
+int classify(int&);
+int classify(double&);
+
+int projected_if(Choice& choice) {
+  if (choice match case { auto&& value })
+    return classify(value);
+  else
+    return 0;
+}
+
+int projected_guard(Choice& choice) {
+  if (choice match case { auto&& value } if (classify(value) != 0))
+    return classify(value);
+  return 0;
+}

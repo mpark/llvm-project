@@ -49,6 +49,31 @@ struct std::alternative_traits<Choice> {
   }
 };
 
+struct ProjectedNonCopyable {
+  ProjectedNonCopyable();
+  ProjectedNonCopyable(const ProjectedNonCopyable&) = delete; // expected-note 2{{has been explicitly marked deleted here}}
+};
+
+struct CopyChoice {
+  bool engaged;
+  ProjectedNonCopyable value;
+};
+
+template<>
+struct std::alternative_traits<CopyChoice> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  static constexpr __SIZE_TYPE__ index(const CopyChoice& choice) noexcept {
+    return choice.engaged ? 0 : 1;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
 struct MaybeInt {
   bool engaged;
   int value;
@@ -108,10 +133,24 @@ int named(Choice choice) {
   };
 }
 
-int generic(Choice choice) {
+int generic_binding(Choice choice) {
   return choice match {
     case { int value } => value;
     case { double value } => static_cast<int>(value);
+  };
+}
+
+int projected_deleted_copy_does_not_fall_back(const CopyChoice& choice) {
+  return choice match {
+    case { auto copy } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
+    case _ => 0;
+  };
+}
+
+int projected_deleted_hypothetical_copy_is_invalid(const CopyChoice& choice) {
+  return choice match {
+    case { ProjectedNonCopyable } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
+    case _ => 0;
   };
 }
 
@@ -136,10 +175,12 @@ int bad_empty(Choice choice) {
   };
 }
 
-int ambiguous(Choice choice) {
+int classify(int&);
+int classify(double&);
+
+int generic(Choice choice) {
   return choice match {
-    case { auto&& value } => 0; // expected-error {{braced alternative pattern does not select a unique projectable state}}
-    case _ => 1;
+    case { auto&& value } => classify(value);
   };
 }
 
@@ -148,6 +189,46 @@ int no_viable_alternative(Choice choice) {
     case { char value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case _ => 0;
   };
+}
+
+int no_structural_alternative(Choice choice) {
+  return choice match {
+    case { auto&& [first, second] } => first; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+    case _ => 0;
+  };
+}
+
+struct ChoicePair {
+  Choice first;
+  int second;
+};
+
+int direct_generic_alternative(ChoicePair pair) {
+  if (pair match case [{ auto&& value }, _])
+    return classify(value);
+  return 0;
+}
+
+int direct_generic_guard(ChoicePair pair) {
+  if (pair match case [{ auto&& value }, _] if (classify(value) != 0))
+    return classify(value);
+  else
+    return 0;
+}
+
+bool nested_match_subject(ChoicePair pair) {
+  return (pair match case [{ auto&& value }, _]) match case true;
+}
+
+template<class T>
+concept CanDirectlyMatchChar = requires(T value) {
+  value match case [{ char c }, _];
+};
+
+static_assert(!CanDirectlyMatchChar<ChoicePair>);
+
+bool invalid_direct_alternative(ChoicePair pair) {
+  return pair match case [{ char c }, _]; // expected-error {{braced alternative pattern does not match any projectable state of 'ChoicePair'}}
 }
 
 struct NoTraits {};
