@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 auto char_pattern(char c) {
@@ -40,7 +40,7 @@ auto char_pattern(char c) {
 // CHECK: [[MATCH_LET_X]]:
 // CHECK:   %[[SUBJECT_X:.*]] = load ptr, ptr %[[SUBJECT_HOLDER]], align 8
 // CHECK:   store ptr %[[SUBJECT_X]], ptr %[[LET_X_ADDR]], align 8
-// CHECK:   br i1 true, label %[[ACTION_LET_X:.*]], label %[[THROW_PATH:.*]]
+// CHECK:   br i1 true, label %[[ACTION_LET_X:.*]], label %[[NO_MATCH:.*]]
 
 // CHECK: [[ACTION_LET_X]]:
 // CHECK:   %[[X_ADDR:.*]] = load ptr, ptr %[[LET_X_ADDR]], align 8
@@ -49,16 +49,9 @@ auto char_pattern(char c) {
 // CHECK:   store i32 %[[SEXT_LET_X]], ptr %[[SELECT_RES]], align 4
 // CHECK:   br label %[[SELECT_END:.*]]
 
-// CHECK: [[THROW_PATH]]:
-// CHECK:   br i1 true, label %[[THROW_ACTION:.*]], label %[[SELECT_END]]
-
-// CHECK: [[THROW_ACTION]]:
-// CHECK:   call ptr @__cxa_allocate_exception
-// CHECK:   call void @__cxa_throw
+// CHECK: [[NO_MATCH]]:
+// CHECK:   call void @_ZSt9terminatev
 // CHECK:   unreachable
-
-// CHECK: throw.cont:
-// CHECK:   br label %[[SELECT_END]]
 
 // CHECK: [[SELECT_END]]:
 // CHECK:   %[[RESULT:.*]] = load i32, ptr %[[SELECT_RES]], align 4

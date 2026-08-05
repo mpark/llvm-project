@@ -5626,13 +5626,11 @@ struct MatchCase {
 /// A semantically checked form of a source match case. A source case can have
 /// multiple instantiations when its pattern matches more than one alternative.
 struct MatchCaseInstantiation {
-  static constexpr unsigned ImplicitCase = ~0U;
-
   MatchPattern *Pattern;
   SourceLocation IfLoc;
   MatchGuard Guard;
   Stmt *Handler;
-  unsigned CaseIndex = ImplicitCase;
+  unsigned CaseIndex;
 };
 
 class MatchSelectExpr final

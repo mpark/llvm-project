@@ -572,50 +572,13 @@ ExprResult Sema::ActOnMatchSelectExpr(
   if (Instantiations) {
     CaseInstantiations.append(Instantiations->begin(), Instantiations->end());
   } else {
-    CaseInstantiations.reserve(SourceCases.size() + 1);
+    CaseInstantiations.reserve(SourceCases.size());
     for (auto [Index, Case] : llvm::enumerate(SourceCases))
       CaseInstantiations.push_back({Case.Pattern, Case.IfLoc, Case.Guard,
                                     Case.Handler,
                                     static_cast<unsigned>(Index)});
   }
 
-  // Inject a fake '_ => throw (std::terminate(), 0);'
-  SourceLocation Loc = Braces.getEnd();
-  ActionResult<MatchPattern *> P = ActOnWildcardPattern(Loc);
-  if (P.isInvalid())
-    return ExprError();
-
-  QualType FnType = Context.getFunctionType(
-      Context.VoidTy, {},
-      FunctionProtoType::ExtProtoInfo().withExceptionSpec(
-          FunctionProtoType::ExceptionSpecInfo(EST_BasicNoexcept)));
-  NamespaceDecl *Std = getOrCreateStdNamespace();
-  FunctionDecl *StdTerminate = FunctionDecl::Create(
-      Context, Std, Loc, SourceLocation(),
-      PP.getIdentifierInfo("terminate"), FnType,
-      Context.getTrivialTypeSourceInfo(FnType), SC_Extern,
-      /*UsesFPIntrin=*/false, /*isInlineSpecified=*/false,
-      /*hasWrittenPrototype=*/false);
-
-  ExprResult E =
-      BuildDeclRefExpr(StdTerminate, StdTerminate->getType(), VK_LValue, Loc);
-  if (E.isInvalid())
-    return ExprError();
-  E = BuildCallExpr(/*Scope=*/nullptr, E.get(), Loc, {}, Loc);
-  if (E.isInvalid())
-    return ExprError();
-  ExprResult Dummy = ActOnIntegerConstant(Braces.getEnd(), 0);
-  if (Dummy.isInvalid())
-    return ExprError();
-
-  E = BuildBinOp(/*Scope=*/nullptr, Loc, BinaryOperatorKind::BO_Comma, E.get(),
-                 Dummy.get());
-  E = ActOnCXXThrow(getCurScope(), Braces.getEnd(), E.get());
-  CaseInstantiations.push_back({P.get(),
-                                Braces.getEnd(),
-                                {},
-                                E.get(),
-                                MatchCaseInstantiation::ImplicitCase});
   return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
                                  IsConstexpr, OrigResultType, RetTy,
                                  SourceCases, CaseInstantiations, Braces);
