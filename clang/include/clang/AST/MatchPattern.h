@@ -182,7 +182,6 @@ public:
 
 class ExpressionPattern final : public MatchPattern {
   Expr *E;
-  Expr *Cond = nullptr;
   bool IsPackExpansion;
 
 public:
@@ -199,11 +198,6 @@ public:
 
   const Expr *getExpr() const { return E; }
   Expr *getExpr() { return E; }
-
-  const Expr *getCond() const { return Cond; }
-  Expr *getCond() { return Cond; }
-
-  void setCond(Expr *Cond) { this->Cond = Cond; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {nullptr, nullptr};
@@ -269,7 +263,6 @@ public:
 class DeclarationPattern final : public MatchPattern {
   VarDecl *Declaration;
   SourceRange DeclarationRange;
-  MatchProjection *Projection = nullptr;
 
 public:
   explicit DeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
@@ -280,9 +273,6 @@ public:
 
   const VarDecl *getDeclaration() const { return Declaration; }
   VarDecl *getDeclaration() { return Declaration; }
-
-  MatchProjection *getProjection() const { return Projection; }
-  void setProjection(MatchProjection *P) { Projection = P; }
 
   SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
@@ -298,10 +288,6 @@ public:
 
 class TypePattern final : public MatchPattern {
   TypeSourceInfo *TInfo;
-  MatchProjection *Projection = nullptr;
-  QualType SubjectType;
-  bool Resolved = false;
-  bool Matches = false;
 
 public:
   explicit TypePattern(TypeSourceInfo *TInfo)
@@ -316,24 +302,6 @@ public:
 
   TypeSourceInfo *getTypeSourceInfo() const { return TInfo; }
   QualType getType() const { return TInfo->getType(); }
-
-  MatchProjection *getProjection() const { return Projection; }
-  void setProjection(MatchProjection *P) { Projection = P; }
-
-  bool isResolved() const { return Resolved; }
-  bool matches() const {
-    assert(Resolved && "unresolved type pattern");
-    return Matches;
-  }
-  QualType getSubjectType() const {
-    assert(Resolved && "unresolved type pattern");
-    return SubjectType;
-  }
-  void setMatches(bool Value, QualType CheckedSubjectType) {
-    Resolved = true;
-    Matches = Value;
-    SubjectType = CheckedSubjectType;
-  }
 
   SourceLocation getBeginLoc() const {
     return TInfo->getTypeLoc().getBeginLoc();
@@ -395,7 +363,6 @@ private:
 
   SourceLocation ColonLoc;
   MatchPattern *Pattern = nullptr;
-  MatchProjection *Projection = nullptr;
 
 public:
   explicit AlternativePattern(SourceRange ConceptRange, ConceptReference *CR,
@@ -475,9 +442,6 @@ public:
   const MatchPattern *getSubPattern() const { return Pattern; }
   MatchPattern *getSubPattern() { return Pattern; }
 
-  MatchProjection *getProjection() const { return Projection; }
-  void setProjection(MatchProjection *P) { Projection = P; }
-
   llvm::iterator_range<MatchPattern **> children() {
     return {&Pattern, &Pattern + (Pattern != nullptr)};
   }
@@ -495,7 +459,6 @@ class DecompositionPattern final
   unsigned NumPatterns;
   SourceRange Squares;
   bool BindingOnly;
-  MatchProjection *Projection = nullptr;
 
   explicit DecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares, bool BindingOnly);
@@ -523,17 +486,6 @@ public:
 
   unsigned getNumPatterns() const { return NumPatterns; }
 
-  MatchProjection *getProjection() const { return Projection; }
-  void setProjection(MatchProjection *P) { Projection = P; }
-
-  DecompositionDecl *getDecomposedDecl() const {
-    return Projection ? Projection->getDecomposedDecl() : nullptr;
-  }
-
-  void setDecomposedDecl(DecompositionDecl *Decomposed) {
-    Projection->setDecomposedDecl(Decomposed);
-  }
-
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
   SourceRange getSquares() const { return Squares; }
@@ -546,6 +498,51 @@ public:
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<DecompositionPattern *>(this)->children();
   }
+};
+
+/// Semantic state produced while checking one instantiation of a pattern.
+///
+/// MatchPattern nodes describe source syntax and can be shared by multiple
+/// template or alternative instantiations. The expressions and declarations
+/// used to execute a particular instantiation belong here instead.
+struct MatchPatternInfo {
+  MatchPattern *Pattern = nullptr;
+  Expr *Condition = nullptr;
+  MatchProjection *Projection = nullptr;
+  QualType CheckedSubjectType;
+  ArrayRef<QualType> AlternativeTypes;
+  ArrayRef<unsigned char> ProjectableAlternatives;
+  ArrayRef<unsigned> SelectedAlternatives;
+  bool TypePatternResolved = false;
+  bool TypePatternMatches = false;
+};
+
+class MatchPatternInstantiation final
+    : private llvm::TrailingObjects<MatchPatternInstantiation,
+                                    MatchPatternInfo> {
+  friend class llvm::TrailingObjects<MatchPatternInstantiation,
+                                     MatchPatternInfo>;
+
+  MatchPattern *Pattern;
+  unsigned NumInfos;
+
+  MatchPatternInstantiation(MatchPattern *Pattern, unsigned NumInfos)
+      : Pattern(Pattern), NumInfos(NumInfos) {}
+
+public:
+  unsigned numTrailingObjects(OverloadToken<MatchPatternInfo>) const {
+    return NumInfos;
+  }
+
+  static MatchPatternInstantiation *Create(const ASTContext &Ctx,
+                                           MatchPattern *Pattern,
+                                           ArrayRef<MatchPatternInfo> Infos);
+
+  MatchPattern *getPattern() const { return Pattern; }
+  ArrayRef<MatchPatternInfo> infos() const {
+    return ArrayRef(getTrailingObjects(), NumInfos);
+  }
+  const MatchPatternInfo *find(const MatchPattern *P) const;
 };
 
 } // end namespace clang
