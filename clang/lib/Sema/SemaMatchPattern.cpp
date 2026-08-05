@@ -497,6 +497,55 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
                                   FPOptionsOverride());
 }
 
+namespace {
+
+static void forEachDeclarationPattern(
+    MatchPattern *Pattern,
+    llvm::function_ref<void(DeclarationPattern *)> Callback) {
+  if (!Pattern)
+    return;
+  if (auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
+    Callback(P);
+    return;
+  }
+  for (MatchPattern *Child : Pattern->children())
+    forEachDeclarationPattern(Child, Callback);
+}
+
+static bool isMoveInitialized(const VarDecl *Declaration) {
+  if (Declaration->isInvalidDecl() || !Declaration->hasInit())
+    return false;
+
+  const Expr *Init = Declaration->getInit();
+  while (true) {
+    Init = Init->IgnoreParens();
+    if (const auto *E = dyn_cast<ExprWithCleanups>(Init))
+      Init = E->getSubExpr();
+    else if (const auto *E = dyn_cast<CXXBindTemporaryExpr>(Init))
+      Init = E->getSubExpr();
+    else if (const auto *E = dyn_cast<MaterializeTemporaryExpr>(Init))
+      Init = E->getSubExpr();
+    else if (const auto *E = dyn_cast<ArrayInitLoopExpr>(Init))
+      Init = E->getSubExpr();
+    else
+      break;
+  }
+
+  const auto *Construct = dyn_cast<CXXConstructExpr>(Init);
+  return Construct && Construct->getConstructor()->isMoveConstructor();
+}
+
+} // namespace
+
+void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
+  forEachDeclarationPattern(Pattern, [&](DeclarationPattern *P) {
+    VarDecl *Declaration = P->getDeclaration();
+    if (isMoveInitialized(Declaration))
+      Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
+          << Declaration->getType();
+  });
+}
+
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                        ExprResult ER) {
   if (ER.isInvalid()) {
@@ -612,6 +661,11 @@ ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
 }
 
 ActionResult<MatchPattern *>
+Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange) {
+  return new (Context) DeclarationPattern(Declaration, WrittenRange);
+}
+
+ActionResult<MatchPattern *>
 Sema::ActOnOptionalPattern(SourceLocation QuestionLoc,
                            MatchPattern *SubPattern) {
   return new (Context) OptionalPattern(QuestionLoc, SubPattern);
@@ -688,9 +742,18 @@ static ExprResult buildMatchProjectionCondition(Sema &S,
   return Condition;
 }
 
+static bool isReusableDecompositionDeclaration(const VarDecl *Declaration) {
+  const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration);
+  return Decomposition && Declaration->getType()->isRValueReferenceType() &&
+         Declaration->getType().getNonReferenceType().getQualifiers().empty() &&
+         Declaration->getType()->getContainedAutoType();
+}
+
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                      MatchProjectionCache *ProjectionCache) {
-  if (Subject && Subject->isTypeDependent())
+  if (Subject && Subject->isTypeDependent() &&
+      Pattern->getMatchPatternClass() !=
+          MatchPattern::DeclarationPatternClass)
     return CheckCompleteMatchPattern(nullptr, Pattern);
   // TODO(mpark): Skip if Pattern is type-dependent as well.
   SourceLocation Loc = Pattern->getBeginLoc();
@@ -734,6 +797,62 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
     ParenPattern *P = static_cast<ParenPattern *>(Pattern);
     return CheckCompleteMatchPattern(Subject, P->getSubPattern(),
                                      ProjectionCache);
+  }
+  case MatchPattern::DeclarationPatternClass: {
+    auto *P = static_cast<DeclarationPattern *>(Pattern);
+    if (!Subject) {
+      ParsingInitForAutoVars.erase(P->getDeclaration());
+      return false;
+    }
+
+    VarDecl *VD = P->getDeclaration();
+    auto *Decomposition = dyn_cast<DecompositionDecl>(VD);
+    if (isReusableDecompositionDeclaration(VD)) {
+      unsigned Arity = Decomposition->bindings().size();
+      if (MatchProjection *Projection = findMatchProjection(
+              *this, ProjectionCache, Subject,
+              MatchProjection::DecompositionProjection, QualType(), Arity)) {
+        P->setProjection(Projection);
+        DecompositionDecl *Canonical = Projection->getDecomposedDecl();
+        for (auto [Alias, Binding] :
+             llvm::zip(Decomposition->bindings(), Canonical->bindings())) {
+          Expr *CanonicalRef = BuildDeclRefExpr(
+              Binding, Binding->getType(), VK_LValue, Alias->getLocation());
+          Alias->setBinding(Binding->getType(), CanonicalRef);
+          Alias->setDecomposedDecl(Canonical);
+        }
+        FinalizeDeclaration(Decomposition);
+        return false;
+      }
+
+      MatchProjection *Projection = createMatchProjection(
+          *this, ProjectionCache, Subject,
+          MatchProjection::DecompositionProjection, QualType(), Arity);
+      P->setProjection(Projection);
+    }
+
+    QualType PatternType = VD->getType();
+    if (!Subject->isTypeDependent() && !PatternType->getContainedAutoType()) {
+      ImplicitConversionSequence ICS = TryCopyInitializationConversion(
+          Subject, PatternType, /*SuppressUserConversions=*/false,
+          /*InOverloadResolution=*/true,
+          /*AllowObjCWritebackConversion=*/false);
+      if (!ICS.isStandard() ||
+          ICS.Standard.getRank() != ICR_Exact_Match) {
+        Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_exact_match)
+            << PatternType << Subject->getType();
+        VD->setInvalidDecl();
+        return true;
+      }
+    }
+
+    AddInitializerToDecl(VD, Subject, /*DirectInit=*/false);
+    FinalizeDeclaration(VD);
+    if (VD->isInvalidDecl())
+      return true;
+    if (P->getProjection())
+      P->getProjection()->setDecomposedDecl(Decomposition);
+    break;
   }
   case MatchPattern::OptionalPatternClass: {
     OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
