@@ -466,6 +466,15 @@ int auto_alternative_pattern(const std::variant<int, double, float>& var) {
   };
 }
 
+int variant_residual_pattern(const std::variant<int, double, float>& var) {
+  return var match {
+    case { int } => 10;
+    case { double } => 20;
+    case { float } => 30;
+    case _ => -1;
+  };
+}
+
 template<class T>
 int dependent_auto_alternative_pattern(const T& var) {
   return var match {
@@ -489,6 +498,9 @@ void test_variant_like_alternative_pattern() {
   check(auto_alternative_pattern(1) == 10);
   check(auto_alternative_pattern(2.0) == 20);
   check(auto_alternative_pattern(3.0f) == 30);
+  check(variant_residual_pattern(1) == 10);
+  check(variant_residual_pattern(2.0) == 20);
+  check(variant_residual_pattern(3.0f) == 30);
   check(dependent_auto_alternative_pattern(
             std::variant<int, double, float>(1)) == 10);
   check(dependent_auto_alternative_pattern(
