@@ -1108,12 +1108,6 @@ public:
                   ->getTypeSourceInfo()
                   ->getType());
         break;
-      case MatchPattern::AlternativePatternClass: {
-        auto *P = static_cast<const AlternativePattern *>(Node);
-        if (TypeSourceInfo *TSI = P->getTypeSourceInfo())
-          Visit(TSI->getType());
-        break;
-      }
       default:
         break;
       }

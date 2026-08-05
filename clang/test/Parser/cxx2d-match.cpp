@@ -226,19 +226,6 @@ void test_constrained_declaration_pattern(int i) {
   i match { case Integral auto value => value; };
 }
 
-void test_alternative_pattern() {
-  struct Base { virtual ~Base() = default; };
-  struct Derived : Base {};
-
-  Derived d;
-  Base &b = d;
-  b match case Derived: _;
-  b match {
-    case Derived: auto&& x => 0;
-    case _ => 0;
-  };
-}
-
 void test_decomposition_pattern() {
   int nested_single[1][1] = { { 1 } };
   nested_single match case [[_]];
