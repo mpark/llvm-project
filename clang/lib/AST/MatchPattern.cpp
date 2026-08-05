@@ -23,6 +23,25 @@ void *MatchProjection::operator new(size_t Bytes, const ASTContext &C,
   return ::operator new(Bytes, C, Alignment);
 }
 
+MatchPatternInstantiation *
+MatchPatternInstantiation::Create(const ASTContext &Ctx, MatchPattern *Pattern,
+                                  ArrayRef<MatchPatternInfo> Infos) {
+  void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchPatternInfo>(Infos.size()),
+                           alignof(MatchPatternInstantiation));
+  auto *Result = new (Mem) MatchPatternInstantiation(Pattern, Infos.size());
+  std::uninitialized_copy(Infos.begin(), Infos.end(),
+                          Result->getTrailingObjects());
+  return Result;
+}
+
+const MatchPatternInfo *
+MatchPatternInstantiation::find(const MatchPattern *P) const {
+  for (const MatchPatternInfo &Info : infos())
+    if (Info.Pattern == P)
+      return &Info;
+  return nullptr;
+}
+
 void *MatchPattern::operator new(size_t bytes, const ASTContext &C,
                                  unsigned alignment) {
   return ::operator new(bytes, C, alignment);

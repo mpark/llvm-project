@@ -2262,18 +2262,18 @@ CXXExpansionSelectExpr::CXXExpansionSelectExpr(const ASTContext &C,
 
 MatchSelectExpr::MatchSelectExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-    bool IsConstexpr, TypeLoc OrigResultType, QualType Ty,
-    ArrayRef<MatchCase> Cases, ArrayRef<MatchCaseInstantiation> Instantiations,
-    SourceRange Braces)
+    bool IsConstexpr, bool RequireFirstCaseViable, TypeLoc OrigResultType,
+    QualType Ty, ArrayRef<MatchCase> Cases,
+    ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces)
     : Expr(MatchSelectExprClass, Ty.getNonReferenceType(),
            Ty->isLValueReferenceType()
                ? VK_LValue
                : Ty->isRValueReferenceType() ? VK_XValue : VK_PRValue,
            OK_Ordinary),
       HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
-      IsConstexpr(IsConstexpr), OrigResultType(OrigResultType),
-      NumCases(Cases.size()), NumCaseInstantiations(Instantiations.size()),
-      Braces(Braces) {
+      IsConstexpr(IsConstexpr), RequireFirstCaseViable(RequireFirstCaseViable),
+      OrigResultType(OrigResultType), NumCases(Cases.size()),
+      NumCaseInstantiations(Instantiations.size()), Braces(Braces) {
   std::uninitialized_copy(Cases.begin(), Cases.end(),
                           getTrailingObjects<MatchCase>());
   std::uninitialized_copy(Instantiations.begin(), Instantiations.end(),
@@ -2283,14 +2283,14 @@ MatchSelectExpr::MatchSelectExpr(
 
 MatchSelectExpr *MatchSelectExpr::Create(
     const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
-    SourceLocation MatchLoc, bool IsConstexpr, TypeLoc OrigResultType,
-    QualType Ty, ArrayRef<MatchCase> Cases,
+    SourceLocation MatchLoc, bool IsConstexpr, bool RequireFirstCaseViable,
+    TypeLoc OrigResultType, QualType Ty, ArrayRef<MatchCase> Cases,
     ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces) {
   void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase, MatchCaseInstantiation>(
       Cases.size(), Instantiations.size()));
-  return new (Mem)
-      MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr,
-                      OrigResultType, Ty, Cases, Instantiations, Braces);
+  return new (Mem) MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr,
+                                   RequireFirstCaseViable, OrigResultType, Ty,
+                                   Cases, Instantiations, Braces);
 }
 
 MatchSelectExpr *MatchSelectExpr::CreateEmpty(const ASTContext &Ctx,

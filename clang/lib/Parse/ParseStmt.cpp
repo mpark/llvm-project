@@ -1692,8 +1692,17 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     Kind = NotLocation.isValid() ? IfStatementKind::ConstevalNegated
                                  : IfStatementKind::ConstevalNonNegated;
 
-  return Actions.ActOnIfStmt(IfLoc, Kind, LParen, InitStmt.get(), Cond, RParen,
-                             ThenStmt.get(), ElseLoc, ElseStmt.get());
+  StmtResult Result =
+      Actions.ActOnIfStmt(IfLoc, Kind, LParen, InitStmt.get(), Cond, RParen,
+                          ThenStmt.get(), ElseLoc, ElseStmt.get());
+  if (Result.isInvalid() || Kind != IfStatementKind::Ordinary)
+    return Result;
+  if (auto *Match = dyn_cast<MatchTestExpr>(Cond.get().second);
+      Match && Match->needsCaseInstantiation() &&
+      !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
+  return Result;
 }
 
 StmtResult Parser::ParseSwitchStatement(SourceLocation *TrailingElseLoc,
@@ -1851,7 +1860,16 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   if (Cond.isInvalid() || Body.isInvalid())
     return StmtError();
 
-  return Actions.ActOnWhileStmt(WhileLoc, LParen, Cond, RParen, Body.get());
+  StmtResult Result =
+      Actions.ActOnWhileStmt(WhileLoc, LParen, Cond, RParen, Body.get());
+  if (Result.isInvalid())
+    return Result;
+  if (auto *Match = dyn_cast<MatchTestExpr>(Cond.get().second);
+      Match && Match->needsCaseInstantiation() &&
+      !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
+  return Result;
 }
 
 StmtResult Parser::ParseDoStatement(LabelDecl *PrecedingLabel) {
@@ -2421,9 +2439,19 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   if (ForRangeInfo.ParsedForRangeDecl())
     return Actions.FinishCXXForRangeStmt(ForRangeStmt.get(), Body.get());
 
-  return Actions.ActOnForStmt(ForLoc, T.getOpenLocation(), FirstPart.get(),
-                              SecondPart, ThirdPart, T.getCloseLocation(),
-                              Body.get());
+  StmtResult Result = Actions.ActOnForStmt(
+      ForLoc, T.getOpenLocation(), FirstPart.get(), SecondPart, ThirdPart,
+      T.getCloseLocation(), Body.get());
+  if (Result.isInvalid())
+    return Result;
+  Expr *Condition = SecondPart.get().second;
+  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
+          Condition ? Condition->IgnoreParens() : nullptr);
+      Match && Match->needsCaseInstantiation() &&
+      !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
+  return Result;
 }
 
 StmtResult Parser::ParseGotoStatement() {
