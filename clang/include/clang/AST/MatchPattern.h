@@ -85,6 +85,7 @@ public:
     ExpressionPatternClass,
     BindingPatternClass,
     ParenPatternClass,
+    DeclarationPatternClass,
     OptionalPatternClass,
     AlternativePatternClass,
     DecompositionPatternClass,
@@ -260,6 +261,36 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<ParenPattern *>(this)->children();
+  }
+};
+
+class DeclarationPattern final : public MatchPattern {
+  VarDecl *Declaration;
+  SourceRange DeclarationRange;
+  MatchProjection *Projection = nullptr;
+
+public:
+  explicit DeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
+
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == DeclarationPatternClass;
+  }
+
+  const VarDecl *getDeclaration() const { return Declaration; }
+  VarDecl *getDeclaration() { return Declaration; }
+
+  MatchProjection *getProjection() const { return Projection; }
+  void setProjection(MatchProjection *P) { Projection = P; }
+
+  SourceLocation getBeginLoc() const;
+  SourceLocation getEndLoc() const;
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {nullptr, nullptr};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<DeclarationPattern *>(this)->children();
   }
 };
 
