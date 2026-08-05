@@ -4427,6 +4427,16 @@ public:
       }
       return getSema().ActOnParenPattern(P->getParens(), Sub.get());
     }
+    case MatchPattern::DeclarationPatternClass: {
+      auto *P = static_cast<DeclarationPattern *>(Pattern);
+      auto *VD = dyn_cast_or_null<VarDecl>(getDerived().TransformDefinition(
+          P->getBeginLoc(), P->getDeclaration()));
+      if (!VD)
+        return true;
+      if (!Rebuild && VD == P->getDeclaration())
+        return Pattern;
+      return getSema().ActOnDeclarationPattern(VD, P->getSourceRange());
+    }
     case MatchPattern::OptionalPatternClass: {
       OptionalPattern *P = static_cast<OptionalPattern *>(Pattern);
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
@@ -19003,6 +19013,8 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
     if (GuardInit.isInvalid())
       return ExprError();
   }
+  if (E->getGuard().hasGuard())
+    getSema().CheckGuardedMatchPattern(P.get());
   Sema::ConditionResult Guard = getDerived().TransformCondition(
       E->getIfLoc(), E->getGuard().ConditionVariable,
       E->getGuard().Condition,
@@ -19068,6 +19080,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       if (GuardInit.isInvalid())
         return true;
     }
+    if (Case.Guard.hasGuard())
+      getSema().CheckGuardedMatchPattern(Pattern.get());
     Sema::ConditionResult Guard = getDerived().TransformCondition(
         Case.IfLoc, Case.Guard.ConditionVariable, Case.Guard.Condition,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf

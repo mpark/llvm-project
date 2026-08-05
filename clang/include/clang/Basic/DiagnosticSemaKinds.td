@@ -14451,6 +14451,10 @@ def err_cuda_device_kernel_launch_require_rdc
             "relocatable device code (i.e. requires -fgpu-rdc)">;
 
 // Pattern Matching
+def err_declaration_pattern_not_exact_match : Error<
+  "declaration pattern of type %0 is not an exact match for subject of type %1">;
+def err_guarded_declaration_pattern_move : Error<
+  "guarded declaration pattern of type %0 would move from the match subject">;
 def err_no_viable_alternative : Error<
   "no viable alternative; target type %0 does not match any "
   "'std::variant_alternative<I, %1>::type' for I in [0, 'std::variant_size<%1>::value')">;

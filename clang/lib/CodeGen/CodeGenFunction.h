@@ -5283,6 +5283,7 @@ public:
   RValue EmitMatchPattern(const MatchPattern *Pattern, const Expr *Subject);
   RValue EmitDecompositionPattern(const DecompositionPattern *Pattern);
   RValue EmitAlternativePattern(const AlternativePattern *Pattern);
+  void EmitSharedDeclarationProjections(const MatchPattern *Pattern);
   RValue EmitMatchGuard(const MatchGuard &MG, llvm::Value *PatBoolRes);
 
   //===--------------------------------------------------------------------===//

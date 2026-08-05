@@ -2526,11 +2526,12 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
     // Binding declared, match is always true.
     return RValue::get(Builder.getTrue());
   }
-  case MatchPattern::MatchPatternClass::ParenPatternClass: {
+  case MatchPattern::MatchPatternClass::DeclarationPatternClass: {
+    return RValue::get(Builder.getTrue());
+  }
+  case MatchPattern::MatchPatternClass::ParenPatternClass:
     llvm_unreachable("Pattern Matching: codegen not implemented for "
                      "ParenPatternClass");
-    break;
-  }
   case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
     auto *DecompExpr = static_cast<const DecompositionPattern *>(Pattern);
     return EmitDecompositionPattern(DecompExpr);
@@ -2591,6 +2592,40 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
 
 bool hasMatchGuard(const MatchGuard &MG) { return MG.hasGuard(); }
 
+static void emitPatternDeclarations(CodeGenFunction &CGF,
+                                    const MatchPattern *Pattern) {
+  if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
+    if (P->getProjection())
+      return;
+    CGF.EmitVarDecl(*P->getDeclaration());
+    CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
+    return;
+  }
+  for (const MatchPattern *Child : Pattern->children())
+    emitPatternDeclarations(CGF, Child);
+}
+
+void CodeGenFunction::EmitSharedDeclarationProjections(
+    const MatchPattern *Pattern) {
+  if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
+    if (const MatchProjection *Projection = P->getProjection()) {
+      const DecompositionDecl *D = Projection->getDecomposedDecl();
+      assert(D && "expected declaration decomposition projection");
+      if (!LocalDeclMap.count(D))
+        EmitDecl(*D, /*EvaluateConditionDecl=*/true);
+    }
+    return;
+  }
+  for (const MatchPattern *Child : Pattern->children())
+    EmitSharedDeclarationProjections(Child);
+}
+
+static bool hasPatternDeclarations(const MatchPattern *Pattern) {
+  if (isa<DeclarationPattern>(Pattern))
+    return true;
+  return llvm::any_of(Pattern->children(), hasPatternDeclarations);
+}
+
 RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
                                        llvm::Value *PatBoolRes) {
   const VarDecl *VD = MG.ConditionVariable;
@@ -2641,12 +2676,36 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     const Expr *Subject = S.getSubject();
     assert(Subject);
 
-    RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
+    if (!hasPatternDeclarations(S.getPattern())) {
+      RValue MatchResult = EmitMatchPattern(S.getPattern(), Subject);
+      if (hasMatchGuard(S.getGuard()))
+        MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+      return MatchResult;
+    }
 
+    RValue PatternResult = EmitMatchPattern(S.getPattern(), Subject);
+    RawAddress FinalResult = CreateTempAlloca(
+        Builder.getInt1Ty(), getPointerAlign(), "match.test.result");
+    llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
+    llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
+    llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
+    Builder.CreateCondBr(PatternResult.getScalarVal(), InitBB, FailBB);
+
+    EmitBlock(InitBB);
+    EmitSharedDeclarationProjections(S.getPattern());
+    emitPatternDeclarations(*this, S.getPattern());
+    RValue MatchResult = RValue::get(Builder.getTrue());
     if (hasMatchGuard(S.getGuard()))
       MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+    Builder.CreateStore(MatchResult.getScalarVal(), FinalResult);
+    EmitBranch(EndBB);
 
-    return MatchResult;
+    EmitBlock(FailBB);
+    Builder.CreateStore(Builder.getFalse(), FinalResult);
+    EmitBranch(EndBB);
+
+    EmitBlock(EndBB);
+    return RValue::get(Builder.CreateLoad(FinalResult));
   };
 
   if (needsCleanup) {
@@ -2713,7 +2772,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   unsigned CasePatternIdx = 0;
   for (MatchCaseInstantiation MatchC : Cases) {
-    if (!MatchC.Guard.Init && !MatchC.Guard.ConditionVariable) {
+    if (!hasPatternDeclarations(MatchC.Pattern) && !MatchC.Guard.Init &&
+        !MatchC.Guard.ConditionVariable) {
       RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
       if (hasMatchGuard(MatchC.Guard))
         MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
@@ -2748,8 +2808,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     RValue PatternResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
     RawAddress CaseSelected = CreateTempAlloca(
         Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
-    llvm::BasicBlock *InitializeGuardBB =
-        createBasicBlock("match.select.guard_init");
+    llvm::BasicBlock *InitializePatternBB =
+        createBasicBlock("match.select.init");
     llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
     llvm::BasicBlock *GuardFailedBB =
         createBasicBlock("match.select.guard_failed");
@@ -2758,12 +2818,16 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
         (CasePatternIdx == (Cases.size() - 1))
             ? NoMatchBB
             : createBasicBlock("match.select.next_pattern");
-    Builder.CreateCondBr(PatternResult.getScalarVal(), InitializeGuardBB,
+    Builder.CreateCondBr(PatternResult.getScalarVal(), InitializePatternBB,
                          NextPatternBB);
 
-    EmitBlock(InitializeGuardBB);
+    EmitBlock(InitializePatternBB);
+    EmitSharedDeclarationProjections(MatchC.Pattern);
     RunCleanupsScope CaseScope(*this);
-    RValue GuardResult = EmitMatchGuard(MatchC.Guard, Builder.getTrue());
+    emitPatternDeclarations(*this, MatchC.Pattern);
+    RValue GuardResult = RValue::get(Builder.getTrue());
+    if (hasMatchGuard(MatchC.Guard))
+      GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());
     Builder.CreateCondBr(GuardResult.getScalarVal(), ExecuteActionBB,
                          GuardFailedBB);
 

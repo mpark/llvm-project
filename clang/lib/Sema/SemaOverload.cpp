@@ -6098,6 +6098,14 @@ TryCopyInitialization(Sema &S, Expr *From, QualType ToType,
                                /*AllowObjCConversionOnExplicit=*/false);
 }
 
+ImplicitConversionSequence Sema::TryCopyInitializationConversion(
+    Expr *From, QualType ToType, bool SuppressUserConversions,
+    bool InOverloadResolution, bool AllowObjCWritebackConversion) {
+  return TryCopyInitialization(*this, From, ToType, SuppressUserConversions,
+                               InOverloadResolution,
+                               AllowObjCWritebackConversion);
+}
+
 static bool TryCopyInitialization(const CanQualType FromQTy,
                                   const CanQualType ToQTy,
                                   Sema &S,

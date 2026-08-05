@@ -97,7 +97,7 @@ struct OptionalProjection {
 int reuse_optional_projection(OptionalProjection &subject) {
   return subject match {
     case ? 0 => 0;
-    case ? let x => x;
+    case ? auto x => x;
     case _ => -1;
   };
 }

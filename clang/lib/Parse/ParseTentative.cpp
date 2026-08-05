@@ -119,7 +119,8 @@ bool Parser::isCXXDeclarationStatement(
   }
 }
 
-bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl) {
+bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl,
+                                    bool AllowPatternDecl) {
   // C++ 6.8p1:
   // There is an ambiguity in the grammar involving expression-statements and
   // declarations: An expression-statement with a function-style explicit type
@@ -147,16 +148,21 @@ bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl) {
   bool InvalidAsDeclaration = false;
   TPResult TPR = isCXXDeclarationSpecifier(
       ImplicitTypenameContext::No, TPResult::False, &InvalidAsDeclaration);
-  if (TPR != TPResult::Ambiguous)
+  if (TPR != TPResult::Ambiguous && !AllowPatternDecl)
     return TPR != TPResult::False; // Returns true for TPResult::True or
                                    // TPResult::Error.
+
+  if (TPR == TPResult::False)
+    return false;
+  if (TPR == TPResult::Error)
+    return true;
 
   // FIXME: TryParseSimpleDeclaration doesn't look past the first initializer,
   // and so gets some cases wrong. We can't carry on if we've already seen
   // something which makes this statement invalid as a declaration in this case,
   // since it can cause us to misparse valid code. Revisit this once
   // TryParseInitDeclaratorList is fixed.
-  if (InvalidAsDeclaration)
+  if (TPR == TPResult::Ambiguous && InvalidAsDeclaration)
     return false;
 
   // FIXME: Add statistics about the number of ambiguous statements encountered
@@ -168,7 +174,7 @@ bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl) {
 
   {
     RevertingTentativeParsingAction PA(*this);
-    TPR = TryParseSimpleDeclaration(AllowForRangeDecl);
+    TPR = TryParseSimpleDeclaration(AllowForRangeDecl, AllowPatternDecl);
   }
 
   // In case of an error, let the declaration parsing code handle it.
@@ -250,7 +256,8 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
   return TPResult::Ambiguous;
 }
 
-Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl) {
+Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
+                                                   bool AllowPatternDecl) {
   bool DeclSpecifierIsAuto = Tok.is(tok::kw_auto);
   if (TryConsumeDeclarationSpecifier() == TPResult::Error)
     return TPResult::Error;
@@ -272,7 +279,10 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl) {
   if (TPR != TPResult::Ambiguous)
     return TPR;
 
-  if (Tok.isNot(tok::semi) && (!AllowForRangeDecl || Tok.isNot(tok::colon)))
+  if (Tok.isNot(tok::semi) && (!AllowForRangeDecl || Tok.isNot(tok::colon)) &&
+      (!AllowPatternDecl ||
+       !Tok.isOneOf(tok::kw_if, tok::equalgreater, tok::comma, tok::r_square,
+                    tok::r_brace)))
     return TPResult::False;
 
   return TPResult::Ambiguous;

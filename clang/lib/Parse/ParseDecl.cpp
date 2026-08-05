@@ -1971,7 +1971,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(DeclaratorContext Context,
 Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
     DeclaratorContext Context, SourceLocation &DeclEnd,
     ParsedAttributes &DeclAttrs, ParsedAttributes &DeclSpecAttrs,
-    bool RequireSemi, ForRangeInit *FRI, SourceLocation *DeclSpecStart) {
+    bool RequireSemi, ForRangeInit *FRI, SourceLocation *DeclSpecStart,
+    bool IsPatternDecl) {
   // Need to retain these for diagnostics before we add them to the DeclSepc.
   ParsedAttributesView OriginalDeclSpecAttrs;
   OriginalDeclSpecAttrs.prepend(DeclSpecAttrs.begin(), DeclSpecAttrs.end());
@@ -2015,7 +2016,8 @@ Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
   if (DeclSpecStart)
     DS.SetRangeStart(*DeclSpecStart);
 
-  return ParseDeclGroup(DS, Context, DeclAttrs, TemplateInfo, &DeclEnd, FRI);
+  return ParseDeclGroup(DS, Context, DeclAttrs, TemplateInfo, &DeclEnd, FRI,
+                        IsPatternDecl);
 }
 
 bool Parser::MightBeDeclarator(DeclaratorContext Context) {
@@ -2169,7 +2171,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
                                               ParsedAttributes &Attrs,
                                               ParsedTemplateInfo &TemplateInfo,
                                               SourceLocation *DeclEnd,
-                                              ForRangeInit *FRI) {
+                                              ForRangeInit *FRI,
+                                              bool IsPatternDecl) {
   // Parse the first declarator.
   // Consume all of the attributes from `Attrs` by moving them to our own local
   // list. This ensures that we will not attempt to interpret them as statement
@@ -2342,6 +2345,13 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
 
   if (ParseAsmAttributesAfterDeclarator(D))
     return nullptr;
+
+  if (IsPatternDecl) {
+    Decl *ThisDecl = Actions.ActOnDeclarator(getCurScope(), D);
+    Actions.ActOnCXXForRangeDecl(ThisDecl, /*InExpansionStmt=*/false);
+    D.complete(ThisDecl);
+    return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, ThisDecl);
+  }
 
   // C++0x [stmt.iter]p1: Check if we have a for-range-declarator. If so, we
   // must parse and analyze the for-range-initializer before the declaration is

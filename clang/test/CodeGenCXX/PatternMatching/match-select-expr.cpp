@@ -74,7 +74,7 @@ struct GuardInit {
 };
 
 // CHECK-LABEL: define{{.*}} i32 @_Z20guard_init_statementi
-// CHECK: match.select.guard_init:
+// CHECK: match.select.init:
 // CHECK: call void @_ZN9GuardInitC1Ev
 // CHECK: call noundef zeroext i1 @_ZNK9GuardInit6acceptEv
 // CHECK: match.select.action:

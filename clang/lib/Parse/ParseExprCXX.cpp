@@ -3950,7 +3950,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
       return ExprError();
     SourceLocation IfLoc;
     StmtResult GuardInit;
-    Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);
+    Sema::ConditionResult Guard =
+        ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
     if (Guard.isInvalid()) {
       SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
       return true;
@@ -4023,7 +4024,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
     return true;
   SourceLocation IfLoc;
   StmtResult GuardInit;
-  Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);
+  Sema::ConditionResult Guard =
+      ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
   if (Guard.isInvalid()) {
     SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
     if (Tok.isOneOf(tok::semi, tok::r_brace))
@@ -4042,8 +4044,10 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
 }
 
 Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
+                                              MatchPattern *Pattern,
                                               StmtResult &InitStmt) {
   if (TryConsumeToken(tok::kw_if, IfLoc)) {
+    Actions.CheckGuardedMatchPattern(Pattern);
     BalancedDelimiterTracker T(*this, tok::l_paren);
     if (T.expectAndConsume(diag::err_expected_after, "if"))
       return Sema::ConditionError();
@@ -4103,6 +4107,38 @@ ActionResult<MatchPattern *>
 Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
+  auto StartsPlaceholderDeclarationPattern = [&] {
+    return (Tok.is(tok::kw_auto) && NextToken().isNot(tok::colon)) ||
+           (Tok.isOneOf(tok::kw_const, tok::kw_volatile) &&
+            NextToken().is(tok::kw_auto));
+  };
+
+  auto StartsAttributedDeclarationPattern = [&] {
+    if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) !=
+        CXX11AttributeKind::AttributeSpecifier)
+      return false;
+
+    RevertingTentativeParsingAction TPA(*this);
+    if (!TrySkipAttributes())
+      return false;
+    return StartsPlaceholderDeclarationPattern() ||
+           isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
+                                  /*AllowPatternDecl=*/true);
+  };
+
+  auto StartsConstrainedPlaceholderDeclarationPattern = [&] {
+    if (TryAnnotateTypeConstraint() || !isTypeConstraintAnnotation())
+      return false;
+    return Tok.is(tok::annot_cxxscope)
+                ? GetLookAheadToken(2).is(tok::kw_auto)
+                : NextToken().is(tok::kw_auto);
+  };
+  if (StartsAttributedDeclarationPattern())
+    return ParseDeclarationPattern();
+
+  if (StartsPlaceholderDeclarationPattern())
+    return ParseDeclarationPattern();
+
   switch (Tok.getKind()) {
   case tok::l_paren:
     return ParseParenPattern();
@@ -4120,7 +4156,44 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     [[fallthrough]];
   }
   default: {
-    {
+    auto HasAlternativeColon = [&] {
+      unsigned ParenDepth = 0;
+      unsigned SquareDepth = 0;
+      unsigned BraceDepth = 0;
+      for (unsigned I = 0; I != 256; ++I) {
+        const Token &T = GetLookAheadToken(I);
+        if (T.isOneOf(tok::eof, tok::equalgreater, tok::kw_if, tok::semi))
+          return false;
+        if (Decomp && T.is(tok::comma) && ParenDepth == 0 &&
+            SquareDepth == 0 && BraceDepth == 0)
+          return false;
+        if (T.is(tok::colon) && ParenDepth == 0 && SquareDepth == 0 &&
+            BraceDepth == 0)
+          return true;
+        if (T.is(tok::l_paren))
+          ++ParenDepth;
+        else if (T.is(tok::r_paren)) {
+          if (ParenDepth == 0)
+            return false;
+          --ParenDepth;
+        } else if (T.is(tok::l_square))
+          ++SquareDepth;
+        else if (T.is(tok::r_square)) {
+          if (SquareDepth == 0)
+            return false;
+          --SquareDepth;
+        } else if (T.is(tok::l_brace))
+          ++BraceDepth;
+        else if (T.is(tok::r_brace)) {
+          if (BraceDepth == 0)
+            return false;
+          --BraceDepth;
+        }
+      }
+      return false;
+    };
+
+    if (HasAlternativeColon()) {
       ColonProtectionRAIIObject ColonRAII(*this);
       ActionResult<MatchPattern *> Pattern =
           TryParseAlternativePattern(LHSOfMatchTestExpr);
@@ -4128,6 +4201,11 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
         return Pattern;
       }
     }
+    if (StartsConstrainedPlaceholderDeclarationPattern())
+      return ParseDeclarationPattern();
+    if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
+                               /*AllowPatternDecl=*/true))
+      return ParseDeclarationPattern();
     return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
                                   CorrectionBehavior);
   }
@@ -4136,6 +4214,31 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
 
 ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
+}
+
+ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
+  ParsedAttributes DeclAttrs(AttrFactory);
+  ParsedAttributes DeclSpecAttrs(AttrFactory);
+  MaybeParseCXX11Attributes(DeclAttrs, /*MightBeObjCMessageSend=*/true);
+
+  SourceLocation DeclEnd;
+  DeclGroupPtrTy Group = ParseSimpleDeclaration(
+      DeclaratorContext::ForInit, DeclEnd, DeclAttrs, DeclSpecAttrs,
+      /*RequireSemi=*/false, /*FRI=*/nullptr, /*DeclSpecStart=*/nullptr,
+      /*IsPatternDecl=*/true);
+  if (!Group)
+    return true;
+
+  DeclGroupRef Decls = Group.get();
+  if (!Decls.isSingleDecl()) {
+    Diag(DeclEnd, diag::err_for_range_decl_must_be_var) << false;
+    return true;
+  }
+
+  auto *VD = dyn_cast<VarDecl>(Decls.getSingleDecl());
+  if (!VD)
+    return true;
+  return Actions.ActOnDeclarationPattern(VD, VD->getSourceRange());
 }
 
 ActionResult<MatchPattern *>

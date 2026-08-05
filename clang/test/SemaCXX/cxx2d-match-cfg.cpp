@@ -6,15 +6,21 @@
 
 int exhaustive(bool value) {
   value match {
-    true => return 1;
-    false => return 0;
+    case true => return 1;
+    case false => return 0;
   };
 }
 
 int guarded(int value) {
   return value match {
-    let copy if (copy > 0) => copy;
-    _ => 0;
+    case let copy if (copy > 0) => copy;
+    case _ => 0;
+  };
+}
+
+int declaration(int value) {
+  value match {
+    case int copy => return copy;
   };
 }
 

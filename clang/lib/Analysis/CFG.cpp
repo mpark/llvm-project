@@ -3146,9 +3146,30 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
       CaseBodyBlock = Block;
     }
 
+    SmallVector<VarDecl *, 4> PatternDecls;
+    auto CollectPatternDecls = [&](MatchPattern *Pattern,
+                                   auto &Recurse) -> void {
+      if (Pattern->getMatchPatternClass() ==
+          MatchPattern::DeclarationPatternClass)
+        PatternDecls.push_back(
+            static_cast<DeclarationPattern *>(Pattern)->getDeclaration());
+      for (MatchPattern *Child : Pattern->children())
+        Recurse(Child, Recurse);
+    };
+    CollectPatternDecls(Case.Pattern, CollectPatternDecls);
+    Succ = CaseBodyBlock;
+    CFGBlock *PatternBodyBlock = CaseBodyBlock;
+    for (VarDecl *D : llvm::reverse(PatternDecls)) {
+      DeclStmt *DS = new (Context)
+          DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
+      Block = nullptr;
+      PatternBodyBlock = addStmt(DS);
+      Succ = PatternBodyBlock;
+    }
+
     Block = createBlock(false);
     Block->setTerminator(E);
-    addSuccessor(Block, CaseBodyBlock);
+    addSuccessor(Block, PatternBodyBlock);
 
     if (!IsWildcard(Case))
       addSuccessor(Block, NextCaseBlock);
