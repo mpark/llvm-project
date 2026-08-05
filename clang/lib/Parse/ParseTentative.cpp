@@ -602,10 +602,6 @@ bool Parser::isCXXTypeId(TentativeCXXTypeIdContext Context, bool &isAmbiguous) {
                Tok.is(tok::comma)) {
       TPR = TPResult::True;
       isAmbiguous = true;
-    } else if (Context == TentativeCXXTypeIdContext::InAlternativePattern &&
-               Tok.is(tok::colon)) {
-      TPR = TPResult::True;
-      isAmbiguous = true;
     } else if (Context == TentativeCXXTypeIdContext::InMatchPattern &&
                Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi,
                            tok::comma, tok::r_paren, tok::r_square,
