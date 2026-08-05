@@ -19096,8 +19096,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
     Stmt *HS = Handler.get();
     if (Expr *HE = dyn_cast<Expr>(HS))
-      Handler =
-          getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy, HE);
+      Handler = getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy,
+                                                HE);
     if (Handler.isInvalid())
       return true;
 
