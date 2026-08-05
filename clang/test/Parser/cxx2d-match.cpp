@@ -297,9 +297,19 @@ void test_trailing_return_type(int x) {
 
 bool test_match_test_with_guard(const int (&xs)[2]) {
   bool result = xs match let [x, y] if (x == y);
+  bool init_result =
+      xs match let [x, y] if (int sum = x + y; sum == 0);
   x; // expected-error {{use of undeclared identifier 'x'}}
   y; // expected-error {{use of undeclared identifier 'y'}}
-  return result;
+  sum; // expected-error {{use of undeclared identifier 'sum'}}
+  if (xs match let [x, y] if (int sum = x + y; sum == 0)) {
+    x;
+    y;
+    sum;
+  } else {
+    sum; // expected-error {{use of undeclared identifier 'sum'}}
+  }
+  return result && init_result;
 }
 
 int test_match_select_with_guards(const int (&p)[2]) {
@@ -311,6 +321,7 @@ int test_match_select_with_guards(const int (&p)[2]) {
       b;
       return x;
     }();
+    let [x, y] if (int sum = x + y; sum < 0) => sum;
     let [x, y] => x + y;
   };
 }
