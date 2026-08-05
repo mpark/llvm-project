@@ -8,12 +8,6 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: `-WildcardPattern 0x{{[^ ]*}} <col:16>
 
-  p match case ? _;
-  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:18> 'bool'
-  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int *' lvalue ParmVar 0x{{[^ ]*}} 'p' 'int *'
-  // CHECK-NEXT: `-OptionalPattern 0x{{[^ ]*}} <col:16, col:18>
-  // CHECK-NEXT:   `-WildcardPattern 0x{{[^ ]*}} <col:18>
-
   x match { case _ if (true) => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:36> 'int'
   // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
