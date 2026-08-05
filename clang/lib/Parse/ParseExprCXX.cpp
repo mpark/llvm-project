@@ -4281,11 +4281,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     return ParseDecompositionPattern();
   case tok::identifier: {
     IdentifierInfo *II = Tok.getIdentifierInfo();
-    if (II == Ident_wildcard) {
+    if (II == Ident_wildcard)
       return ParseWildcardPattern();
-    } else if (II == Ident_let) {
-      return ParseBindingPattern(ConsumeToken());
-    }
     [[fallthrough]];
   }
   default: {
@@ -4555,22 +4552,7 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
   return Actions.ActOnBracedAlternativePattern(T.getRange(), Pattern.get());
 }
 
-ActionResult<MatchPattern *> Parser::ParseBindingPattern(SourceLocation LetLoc) {
-  switch (Tok.getKind()) {
-  case tok::identifier: {
-    IdentifierInfo* II = Tok.getIdentifierInfo();
-    return Actions.ActOnBindingPattern(LetLoc, ConsumeToken(), II);
-  }
-  case tok::l_square:
-    return ParseDecompositionPattern(&LetLoc);
-  default:
-    Diag(Tok, diag::err_expected_either) << tok::identifier << tok::l_square;
-    return true;
-  }
-}
-
-ActionResult<MatchPattern *>
-Parser::ParseDecompositionPattern(SourceLocation *LetLoc) {
+ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
   assert(Tok.is(tok::l_square) && "Not a decomposition pattern");
   BalancedDelimiterTracker T(*this, tok::l_square);
   if (T.expectAndConsume())
@@ -4579,8 +4561,7 @@ Parser::ParseDecompositionPattern(SourceLocation *LetLoc) {
   SmallVector<MatchPattern *, 4> Patterns;
   do {
     ActionResult<MatchPattern *> Pattern =
-        LetLoc ? ParseBindingPattern(*LetLoc)
-               : ParsePattern(nullptr, /*Decomp=*/true);
+        ParsePattern(nullptr, /*Decomp=*/true);
     if (Pattern.isInvalid()) {
       T.skipToEnd();
       return true;
@@ -4589,5 +4570,5 @@ Parser::ParseDecompositionPattern(SourceLocation *LetLoc) {
   } while (TryConsumeToken(tok::comma));
   T.consumeClose();
 
-  return Actions.ActOnDecompositionPattern(Patterns, T.getRange(), LetLoc);
+  return Actions.ActOnDecompositionPattern(Patterns, T.getRange());
 }
