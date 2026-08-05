@@ -3101,7 +3101,11 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
   auto IsUnguardedWildcard = [](const MatchCaseInstantiation &Case) {
     return Case.Pattern->getMatchPatternClass() ==
                MatchPattern::WildcardPatternClass &&
-           !Case.Guard.first && !Case.Guard.second;
+           !Case.Guard.hasGuard();
+  };
+  auto IsWildcard = [](const MatchCaseInstantiation &Case) {
+    return Case.Pattern->getMatchPatternClass() ==
+           MatchPattern::WildcardPatternClass;
   };
 
   auto Cases = E->getCaseInstantiations();
@@ -3122,15 +3126,32 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
     if (badCFG)
       return nullptr;
 
+    CFGBlock *CaseBodyBlock = HandlerBlock;
+    if (Case.Guard.hasGuard()) {
+      Block = createBlock(false);
+      Block->setTerminator(E);
+      addSuccessor(Block, HandlerBlock);
+      addSuccessor(Block, NextCaseBlock);
+      if (Expr *Guard = Case.Guard.Condition)
+        addStmt(Guard);
+      if (VarDecl *ConditionVariable = Case.Guard.ConditionVariable) {
+        DeclStmt *DS = new (Context)
+            DeclStmt(DeclGroupRef(ConditionVariable),
+                     ConditionVariable->getBeginLoc(),
+                     ConditionVariable->getEndLoc());
+        addStmt(DS);
+      }
+      if (Stmt *Init = Case.Guard.Init)
+        addStmt(Init);
+      CaseBodyBlock = Block;
+    }
+
     Block = createBlock(false);
     Block->setTerminator(E);
-    addSuccessor(Block, HandlerBlock);
+    addSuccessor(Block, CaseBodyBlock);
 
-    if (!IsUnguardedWildcard(Case))
+    if (!IsWildcard(Case))
       addSuccessor(Block, NextCaseBlock);
-
-    if (Expr *Guard = Case.Guard.second)
-      addStmt(Guard);
     NextCaseBlock = Block;
   }
 

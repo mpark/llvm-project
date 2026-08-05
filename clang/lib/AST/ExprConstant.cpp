@@ -9470,9 +9470,17 @@ public:
       if (!EvaluateMatchPattern(Case.Pattern, Result, Info, &ProjectionCache))
         return false;
       BlockScopeRAII Scope(Info);
-      if (const auto &[CondVar, Cond] = Case.Guard; Result && Cond)
-        if (!EvaluateCond(Info, CondVar, Cond, Result))
+      if (Result && Case.Guard.Init) {
+        APValue InitValue;
+        StmtResult InitResult = {InitValue, nullptr};
+        if (EvaluateStmt(InitResult, Info, Case.Guard.Init) != ESR_Succeeded)
           return false;
+      }
+      if (Result && Case.Guard.Condition) {
+        if (!EvaluateCond(Info, Case.Guard.ConditionVariable,
+                          Case.Guard.Condition, Result))
+          return false;
+      }
       if (Result) {
         if (!this->Visit(Case.Handler))
           return false;
@@ -20711,17 +20719,33 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
       return false;
     if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
       return false;
-    if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
-      if (!EvaluateCond(Info, CondVar, Cond, Result))
+    if (Result && E->getGuard().Init) {
+      APValue InitValue;
+      StmtResult InitResult = {InitValue, nullptr};
+      if (EvaluateStmt(InitResult, Info, E->getGuard().Init) != ESR_Succeeded)
         return false;
+    }
+    if (Result && E->getGuard().Condition) {
+      if (!EvaluateCond(Info, E->getGuard().ConditionVariable,
+                        E->getGuard().Condition, Result))
+        return false;
+    }
     return Success(Result, E);
   } else {
     BlockScopeRAII Scope(Info);
     if (!EvaluateMatchPattern(E->getPattern(), Result, Info, &ProjectionCache))
       return false;
-    if (const auto &[CondVar, Cond] = E->getGuard(); Result && Cond)
-      if (!EvaluateCond(Info, CondVar, Cond, Result))
+    if (Result && E->getGuard().Init) {
+      APValue InitValue;
+      StmtResult InitResult = {InitValue, nullptr};
+      if (EvaluateStmt(InitResult, Info, E->getGuard().Init) != ESR_Succeeded)
         return false;
+    }
+    if (Result && E->getGuard().Condition) {
+      if (!EvaluateCond(Info, E->getGuard().ConditionVariable,
+                        E->getGuard().Condition, Result))
+        return false;
+    }
     if (!Scope.destroy())
       return false;
     return Success(Result, E);

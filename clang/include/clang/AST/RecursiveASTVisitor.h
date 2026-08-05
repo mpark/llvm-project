@@ -3282,18 +3282,21 @@ DEF_TRAVERSE_STMT(CXXExpansionSelectExpr, {})
 DEF_TRAVERSE_STMT(MatchTestExpr, {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
   // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getPattern());
-  if (const auto &[CondVar, Cond] = S->getGuard(); Cond) {
-    TRY_TO(TraverseDecl(CondVar));
-    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Cond);
+  const MatchGuard &Guard = S->getGuard();
+  if (Guard.hasGuard()) {
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Init);
+    TRY_TO(TraverseDecl(Guard.ConditionVariable));
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Condition);
   }
 })
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
   for (const MatchCase &Case : S->getCases()) {
     // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Pattern);
-    if (const auto &[CondVar, Cond] = Case.Guard; Cond) {
-      TRY_TO(TraverseDecl(CondVar));
-      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Cond);
+    if (Case.Guard.hasGuard()) {
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Init);
+      TRY_TO(TraverseDecl(Case.Guard.ConditionVariable));
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Condition);
     }
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Handler);
   }

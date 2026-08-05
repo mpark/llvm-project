@@ -3947,7 +3947,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get()))
       return ExprError();
     SourceLocation IfLoc;
-    Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);
+    StmtResult GuardInit;
+    Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);
     if (Guard.isInvalid()) {
       SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
       return true;
@@ -3957,7 +3958,9 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
       *InjectedDecls = {DR.begin(), DR.end()};
     }
     return Actions.ActOnMatchTestExpr(HoldingVar, LHS.get(), MatchLoc,
-                                      Pattern.get(), IfLoc, Guard.get());
+                                      Pattern.get(), IfLoc,
+                                      {GuardInit.get(), Guard.get().first,
+                                       Guard.get().second});
   }
 }
 
@@ -4014,7 +4017,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
                                                &ProjectionCache))
     return true;
   SourceLocation IfLoc;
-  Sema::ConditionResult Guard = ParseMatchGuard(IfLoc);
+  StmtResult GuardInit;
+  Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);
   if (Guard.isInvalid()) {
     SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
     if (Tok.isOneOf(tok::semi, tok::r_brace))
@@ -4026,20 +4030,23 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy);
   if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
-  Case = {Pattern.get(), IfLoc, Guard.get(), Handler.get()};
+  Case = {Pattern.get(), IfLoc,
+          {GuardInit.get(), Guard.get().first, Guard.get().second},
+          Handler.get()};
   return false;
 }
 
-Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc) {
+Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
+                                              StmtResult &InitStmt) {
   if (TryConsumeToken(tok::kw_if, IfLoc)) {
     BalancedDelimiterTracker T(*this, tok::l_paren);
     if (T.expectAndConsume(diag::err_expected_after, "if"))
       return Sema::ConditionError();
-    Sema::ConditionResult Cond =
-        ParseCondition(nullptr, IfLoc, Sema::ConditionKind::Boolean,
+    Sema::ConditionResult Condition =
+        ParseCondition(&InitStmt, IfLoc, Sema::ConditionKind::Boolean,
                        /*MissingOK=*/false, /*InjectedDecls=*/nullptr);
     T.consumeClose();
-    return Cond;
+    return Condition;
   }
   return {};
 }

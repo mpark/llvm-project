@@ -1576,15 +1576,17 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
       ParseScope CompoundScope(this,
                                Scope::DeclScope | Scope::CompoundStmtScope);
       for (Decl *D : InjectedDecls)
-        Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), getCurScope(),
-                                  /*AddToContext=*/false);
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.PushOnScopeChains(ND, getCurScope(),
+                                    /*AddToContext=*/false);
       StackHandler.runWithSufficientStackSpace(Tok.getLocation(), [&, this]() {
         ThenStmt = ParseCompoundStatementBody();
       });
     } else {
       for (Decl *D : InjectedDecls)
-        Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), getCurScope(),
-                                  /*AddToContext=*/false);
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.PushOnScopeChains(ND, getCurScope(),
+                                    /*AddToContext=*/false);
       ThenStmt = ParseStatement(&InnerStatementTrailingElseLoc);
     }
   }

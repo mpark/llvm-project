@@ -5552,7 +5552,13 @@ public:
   }
 };
 
-using MatchGuard = std::pair<VarDecl*, Expr*>;
+struct MatchGuard {
+  Stmt *Init = nullptr;
+  VarDecl *ConditionVariable = nullptr;
+  Expr *Condition = nullptr;
+
+  bool hasGuard() const { return Condition != nullptr; }
+};
 
 class MatchTestExpr final : public Expr {
   VarDecl *HoldingVar;
@@ -5600,7 +5606,8 @@ public:
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
-    return Guard.second ? Guard.second->getEndLoc() : Pattern->getEndLoc();
+    return Guard.Condition ? Guard.Condition->getEndLoc()
+                           : Pattern->getEndLoc();
   }
 
   child_range children() {

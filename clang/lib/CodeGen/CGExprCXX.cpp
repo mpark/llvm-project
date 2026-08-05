@@ -2589,12 +2589,12 @@ RValue CodeGenFunction::EmitMatchPattern(const MatchPattern *Pattern,
   llvm_unreachable("Unknown match-pattern");
 }
 
-bool hasMatchGuard(const MatchGuard &MG) { return (MG.first || MG.second); }
+bool hasMatchGuard(const MatchGuard &MG) { return MG.hasGuard(); }
 
 RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
                                        llvm::Value *PatBoolRes) {
-  const VarDecl *VD = MG.first;
-  const Expr *Cond = MG.second;
+  const VarDecl *VD = MG.ConditionVariable;
+  const Expr *Cond = MG.Condition;
 
   RawAddress GuardResultAddr = CreateTempAlloca(
       Builder.getInt1Ty(), getPointerAlign(), "match.guard.result");
@@ -2608,6 +2608,8 @@ RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
 
   EmitBlock(GuardCheckBB);
   assert(Cond && "condition expression required");
+  if (MG.Init)
+    EmitStmt(MG.Init);
   if (VD)
     EmitVarDecl(*VD);
   EmitBranchOnBoolExpr(Cond, GuardPassBB, GuardFailBB, getProfileCount(Cond));
@@ -2711,31 +2713,78 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   unsigned CasePatternIdx = 0;
   for (MatchCaseInstantiation MatchC : Cases) {
-    RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
-    if (hasMatchGuard(MatchC.Guard))
-      MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
+    if (!MatchC.Guard.Init && !MatchC.Guard.ConditionVariable) {
+      RValue MatchResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+      if (hasMatchGuard(MatchC.Guard))
+        MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
 
-    llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
-    llvm::BasicBlock *NextPatternBB =
-        (CasePatternIdx == (Cases.size() - 1))
-            ? NoMatchBB
-            : createBasicBlock("match.select.next_pattern");
-    Builder.CreateCondBr(MatchResult.getScalarVal(), ExecuteActionBB,
-                         NextPatternBB);
+      llvm::BasicBlock *ExecuteActionBB =
+          createBasicBlock("match.select.action");
+      llvm::BasicBlock *NextPatternBB =
+          (CasePatternIdx == (Cases.size() - 1))
+              ? NoMatchBB
+              : createBasicBlock("match.select.next_pattern");
+      Builder.CreateCondBr(MatchResult.getScalarVal(), ExecuteActionBB,
+                           NextPatternBB);
 
-    EmitBlock(ExecuteActionBB);
+      EmitBlock(ExecuteActionBB);
 
-    const Expr *E = dyn_cast<Expr>(MatchC.Handler);
-    if (!E) {
-      EmitStmt(MatchC.Handler);
+      const Expr *E = dyn_cast<Expr>(MatchC.Handler);
+      if (!E) {
+        EmitStmt(MatchC.Handler);
+        EmitBranch(SelectEndBB);
+        EmitBlock(NextPatternBB);
+        CasePatternIdx++;
+        continue;
+      }
+
+      EmitHandler(E);
       EmitBranch(SelectEndBB);
       EmitBlock(NextPatternBB);
       CasePatternIdx++;
       continue;
     }
 
-    EmitHandler(E);
-    EmitBranch(SelectEndBB);
+    RValue PatternResult = EmitMatchPattern(MatchC.Pattern, S.getSubject());
+    RawAddress CaseSelected = CreateTempAlloca(
+        Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
+    llvm::BasicBlock *InitializeGuardBB =
+        createBasicBlock("match.select.guard_init");
+    llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
+    llvm::BasicBlock *GuardFailedBB =
+        createBasicBlock("match.select.guard_failed");
+    llvm::BasicBlock *CleanupBB = createBasicBlock("match.select.cleanup");
+    llvm::BasicBlock *NextPatternBB =
+        (CasePatternIdx == (Cases.size() - 1))
+            ? NoMatchBB
+            : createBasicBlock("match.select.next_pattern");
+    Builder.CreateCondBr(PatternResult.getScalarVal(), InitializeGuardBB,
+                         NextPatternBB);
+
+    EmitBlock(InitializeGuardBB);
+    RunCleanupsScope CaseScope(*this);
+    RValue GuardResult = EmitMatchGuard(MatchC.Guard, Builder.getTrue());
+    Builder.CreateCondBr(GuardResult.getScalarVal(), ExecuteActionBB,
+                         GuardFailedBB);
+
+    EmitBlock(ExecuteActionBB);
+    if (const Expr *E = dyn_cast<Expr>(MatchC.Handler))
+      EmitHandler(E);
+    else
+      EmitStmt(MatchC.Handler);
+    if (HaveInsertPoint()) {
+      Builder.CreateStore(Builder.getTrue(), CaseSelected);
+      EmitBranch(CleanupBB);
+    }
+
+    EmitBlock(GuardFailedBB);
+    Builder.CreateStore(Builder.getFalse(), CaseSelected);
+    EmitBranch(CleanupBB);
+
+    EmitBlock(CleanupBB);
+    CaseScope.ForceCleanup();
+    llvm::Value *Selected = Builder.CreateLoad(CaseSelected);
+    Builder.CreateCondBr(Selected, SelectEndBB, NextPatternBB);
 
     EmitBlock(NextPatternBB);
     CasePatternIdx++;
