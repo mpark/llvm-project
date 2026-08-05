@@ -17,3 +17,10 @@ int guarded(int value) {
     _ => 0;
   };
 }
+
+int guarded_init_statement(int value) {
+  return value match {
+    let copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
+    _ => 0;
+  };
+}

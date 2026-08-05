@@ -1041,9 +1041,12 @@ public:
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
     Visit(Node->getSubject());
     VisitMatchPattern(Node->getPattern());
-    if (const auto &[CondVar, Cond] = Node->getGuard(); Cond) {
-      Visit(CondVar);
-      Visit(Cond);
+    const MatchGuard &Guard = Node->getGuard();
+    if (Guard.hasGuard()) {
+      if (Guard.Init)
+        Visit(Guard.Init);
+      Visit(Guard.ConditionVariable);
+      Visit(Guard.Condition);
     }
   }
 
@@ -1054,9 +1057,11 @@ public:
     for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
       getNodeDelegate().AddChild([&] {
         VisitMatchPattern(Case.Pattern);
-        if (const auto &[CondVar, Cond] = Case.Guard; Cond) {
-          Visit(CondVar);
-          Visit(Cond);
+        if (Case.Guard.hasGuard()) {
+          if (Case.Guard.Init)
+            Visit(Case.Guard.Init);
+          Visit(Case.Guard.ConditionVariable);
+          Visit(Case.Guard.Condition);
         }
         Visit(Case.Handler);
       });
