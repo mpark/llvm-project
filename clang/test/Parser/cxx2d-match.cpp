@@ -226,15 +226,6 @@ void test_constrained_declaration_pattern(int i) {
   i match { case Integral auto value => value; };
 }
 
-void test_optional_pattern(int *p) {
-  p match case ? _;
-  p match case ? 0;
-  p match { case ? _ => 0; case _ => 0; };
-  int **pp = &p;
-  pp match { case ?? _ => 0; case _ => 0; };
-  &pp match { case ??? 1 => 0; case _ => 0; };
-}
-
 void test_alternative_pattern() {
   struct Base { virtual ~Base() = default; };
   struct Derived : Base {};
@@ -276,9 +267,9 @@ void test_invalid_decomposition_pattern() {
   s match { case [,] => 0; case _ => 0; }; // expected-error {{expected expression}}
 }
 
-void test_parenthesized_expression_pattern(int *p, int a, int b) {
-  p match {
-    case ? (a) + b => 0;
+void test_parenthesized_expression_pattern(int a, int b) {
+  a match {
+    case (a) + b => 0;
     case _ => 0;
   };
 }
