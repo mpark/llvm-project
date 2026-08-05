@@ -2565,48 +2565,6 @@ RValue CodeGenFunction::EmitMatchPattern(
     assert(Info && Info->Condition && "expected available cond-expr");
     return RValue::get(EmitScalarExpr(Info->Condition));
   }
-  case MatchPattern::MatchPatternClass::OptionalPatternClass: {
-    auto *OptExpr = static_cast<const OptionalPattern *>(Pattern);
-    const MatchPatternInfo *Info = Instantiation->find(OptExpr);
-    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
-    assert(Projection && Projection->getHoldingVar() &&
-           Projection->getConditionVar() && "expected optional projection");
-    if (!LocalDeclMap.count(Projection->getHoldingVar()))
-      EmitVarDecl(*Projection->getHoldingVar());
-    if (!LocalDeclMap.count(Projection->getConditionVar()))
-      EmitVarDecl(*Projection->getConditionVar());
-    const Expr *Cond = Projection->getConditionExpr();
-    assert(Cond && "expected available cond-expr");
-
-    // Address to track the final match boolean result.
-    RawAddress finalMatchResultAddr = CreateTempAlloca(
-        Builder.getInt1Ty(), getPointerAlign(), "match.result.addr");
-
-    llvm::BasicBlock *TestSubPatternBB = createBasicBlock("match.pat.test");
-    llvm::BasicBlock *IsNull = createBasicBlock("match.subject.fail");
-    llvm::BasicBlock *ResultBB = createBasicBlock("match.result");
-    EmitBranchOnBoolExpr(Cond, TestSubPatternBB, IsNull, getProfileCount(Cond));
-
-    // Now that null ptr check is performed, run the sub patter test and
-    // deal with the result.
-    EmitBlock(TestSubPatternBB);
-    if (const VarDecl *Projected = Projection->getProjectedVar();
-        Projected && !LocalDeclMap.count(Projected))
-      EmitVarDecl(*Projected);
-    RValue matchResult =
-        EmitMatchPattern(OptExpr->getSubPattern(), Instantiation, Subject);
-    Builder.CreateStore(matchResult.getScalarVal(), finalMatchResultAddr);
-    EmitBranch(ResultBB);
-
-    // If the subject check failed, bail.
-    EmitBlock(IsNull);
-    Builder.CreateStore(Builder.getFalse(), finalMatchResultAddr);
-    EmitBranch(ResultBB);
-
-    // Load the result value and return the associated rvalue.
-    EmitBlock(ResultBB);
-    return RValue::get(Builder.CreateLoad(finalMatchResultAddr));
-  }
   case MatchPattern::MatchPatternClass::WildcardPatternClass: {
     // Regardless of what's in Subject, this always yields a boolean true.
     return RValue::get(Builder.getTrue());

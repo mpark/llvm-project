@@ -20851,21 +20851,6 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
            "expected expression pattern state");
     return EvaluateAsBooleanCondition(PatternInfo->Condition, Result, Info);
   }
-  case MatchPattern::OptionalPatternClass: {
-    const auto *P = static_cast<const OptionalPattern *>(Pattern);
-    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
-    assert(PatternInfo && PatternInfo->Projection &&
-           "expected optional pattern state");
-    return EvaluateProjectionCondition(PatternInfo->Projection, Info,
-                                       ProjectionCache) &&
-           EvaluateAsBooleanCondition(
-               PatternInfo->Projection->getConditionExpr(), Result, Info) &&
-           (!Result ||
-            (EvaluateProjectionValue(PatternInfo->Projection, Info,
-                                     ProjectionCache) &&
-             EvaluateMatchPattern(P->getSubPattern(), Instantiation, Result,
-                                  Info, ProjectionCache)));
-  }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);

@@ -4214,8 +4214,6 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   case tok::l_paren:
     return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
                                   CorrectionBehavior);
-  case tok::question:
-    return ParseOptionalPattern(LHSOfMatchTestExpr);
   case tok::l_brace:
     return ParseBracedAlternativePattern();
   case tok::l_square:
@@ -4354,17 +4352,6 @@ Parser::ParseExpressionPattern(
       return true;
   }
   return Actions.ActOnExpressionPattern(Expr.get(), IsPackExpansion);
-}
-
-ActionResult<MatchPattern *>
-Parser::ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr) {
-  assert(Tok.is(tok::question) && "Not an optional pattern");
-  SourceLocation QuestionLoc = ConsumeToken();
-  ActionResult<MatchPattern *> Pattern = ParsePattern(LHSOfMatchTestExpr);
-  if (Pattern.isInvalid()) {
-    return true;
-  }
-  return Actions.ActOnOptionalPattern(QuestionLoc, Pattern.get());
 }
 
 ActionResult<MatchPattern *>

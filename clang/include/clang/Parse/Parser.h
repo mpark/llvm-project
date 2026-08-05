@@ -4530,8 +4530,6 @@ private:
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *>
-  ParseOptionalPattern(ExprResult *LHSOfMatchTestExpr = nullptr);
-  ActionResult<MatchPattern *>
   TryParseAlternativePattern(ExprResult *LHSOfMatchTestExpr = nullptr);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();

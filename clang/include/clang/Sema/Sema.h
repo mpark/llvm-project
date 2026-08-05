@@ -11124,8 +11124,6 @@ public:
                                IdentifierInfo *Name, SourceLocation ColonLoc,
                                MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnEmptyAlternativePattern(SourceRange Braces);
-  ActionResult<MatchPattern *> ActOnOptionalPattern(SourceLocation QuestionLoc,
-                                                    MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                             SourceRange Squares);
