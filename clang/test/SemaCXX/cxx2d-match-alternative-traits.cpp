@@ -32,8 +32,7 @@ struct std::alternative_traits<Choice> {
   using projection_type = typename ChoiceAlternative<I>::type;
 
   struct names {
-    static constexpr __SIZE_TYPE__ integer = 0;
-    static constexpr __SIZE_TYPE__ real = 1;
+    enum { integer, real };
   };
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
