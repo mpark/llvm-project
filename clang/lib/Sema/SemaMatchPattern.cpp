@@ -280,24 +280,25 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
     return std::nullopt;
   NamesRecord = NamesType->getAsCXXRecordDecl()->getDefinition();
 
+  LookupResult NameLookup(S, Name, Loc, Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(NameLookup, NamesRecord);
   ValueDecl *NameDecl = nullptr;
-  for (Decl *Decl : NamesRecord->decls()) {
-    auto *Named = dyn_cast<NamedDecl>(Decl);
-    if (Named && Named->getIdentifier() == Name) {
-      NameDecl = dyn_cast<ValueDecl>(Named);
-      if (NameDecl)
-        break;
-    }
-  }
+  for (NamedDecl *Decl : NameLookup)
+    if ((NameDecl = dyn_cast<ValueDecl>(Decl->getUnderlyingDecl())))
+      break;
   if (!NameDecl) {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
   }
-  Expr *NameExpr =
-      S.BuildDeclRefExpr(NameDecl, NameDecl->getType(), VK_LValue, Loc);
   llvm::APSInt Value(32);
-  if (S.VerifyIntegerConstantExpression(NameExpr, &Value).isInvalid())
-    return std::nullopt;
+  if (auto *Enumerator = dyn_cast<EnumConstantDecl>(NameDecl)) {
+    Value = Enumerator->getInitVal();
+  } else {
+    Expr *NameExpr =
+        S.BuildDeclRefExpr(NameDecl, NameDecl->getType(), VK_LValue, Loc);
+    if (S.VerifyIntegerConstantExpression(NameExpr, &Value).isInvalid())
+      return std::nullopt;
+  }
   unsigned Index = Value.getLimitedValue(UINT_MAX);
   if (Index >= Info.Size) {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
