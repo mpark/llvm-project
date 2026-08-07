@@ -3,6 +3,11 @@
 // RUN:   | FileCheck %s
 
 namespace std {
+class type_info {
+public:
+  bool operator==(const type_info&) const;
+};
+
 template<class T>
 struct alternative_traits;
 }
@@ -117,4 +122,30 @@ int match_nested_dependent_alternative(Choice& value, int& guards) {
 int instantiate_nested_dependent_alternative_pattern(Choice& value,
                                                        int& guards) {
   return match_nested_dependent_alternative<int>(value, guards);
+}
+
+struct OpenChoice {};
+
+template<>
+struct std::alternative_traits<OpenChoice> {
+  static const std::type_info* type(const OpenChoice&);
+
+  template<class T, class Self>
+  static T get(Self&&);
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z22match_open_alternativeR10OpenChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE3getIRiRS0_EET_OT0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE3getIRiRS0_EET_OT0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
+// CHECK: ret i32
+int match_open_alternative(OpenChoice& value) {
+  return value match {
+    case { int& number } if (number == 0) => 0;
+    case { int& number } => number;
+    case { _ } => -2;
+    case {} => -1;
+  };
 }

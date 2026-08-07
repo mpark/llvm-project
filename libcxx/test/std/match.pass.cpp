@@ -529,22 +529,22 @@ void test_match_stmt_action() {
   check(match_stmt_action(7) == 99);
 }
 
-int try_cast_alternative_pattern(const std::any& a) {
+int any_alternative_pattern(const std::any& a) {
   return a match {
-    case const int& x if (x == 0) => 0;
-    case const int& x if (x == 1) => 1;
-    case const double& y => (int)y + 4;
+    case { const int& x } if (x == 0) => 0;
+    case { const int& x } if (x == 1) => 1;
+    case { const double& y } => (int)y + 4;
     case _ => -1;
   };
 }
 
-void test_try_cast_alternative_pattern() {
-  check(try_cast_alternative_pattern(0) == 0);
-  check(try_cast_alternative_pattern(1) == 1);
-  check(try_cast_alternative_pattern(2) == -1);
-  check(try_cast_alternative_pattern(3.0) == 7);
-  check(try_cast_alternative_pattern(4.0) == 8);
-  check(try_cast_alternative_pattern(0.f) == -1);
+void test_any_alternative_pattern() {
+  check(any_alternative_pattern(0) == 0);
+  check(any_alternative_pattern(1) == 1);
+  check(any_alternative_pattern(2) == -1);
+  check(any_alternative_pattern(3.0) == 7);
+  check(any_alternative_pattern(4.0) == 8);
+  check(any_alternative_pattern(0.f) == -1);
 }
 
 void test_void_returning_match() {
@@ -603,7 +603,7 @@ int main() {
   test_match_in_while_condition();
   test_variant_like_alternative_pattern();
   test_match_stmt_action();
-  test_try_cast_alternative_pattern();
+  test_any_alternative_pattern();
   test_void_returning_match();
   test_throw_action();
   test_pack_expansion_in_decomposition_pattern();
