@@ -9085,7 +9085,8 @@ public:
   ///         '{' '}'
   /// \endverbatim
   ///
-  TPResult TryParseInitDeclaratorList(bool MayHaveTrailingReturnType = false);
+  TPResult TryParseInitDeclaratorList(bool MayHaveTrailingReturnType = false,
+                                      bool StopAfterFirstDeclarator = false);
 
   /// \verbatim
   ///         declarator:
