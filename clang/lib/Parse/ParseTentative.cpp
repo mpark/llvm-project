@@ -275,7 +275,8 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
   }
 
   TPResult TPR = TryParseInitDeclaratorList(
-      /*mayHaveTrailingReturnType=*/DeclSpecifierIsAuto);
+      /*MayHaveTrailingReturnType=*/DeclSpecifierIsAuto,
+      /*StopAfterFirstDeclarator=*/AllowPatternDecl);
   if (TPR != TPResult::Ambiguous)
     return TPR;
 
@@ -289,7 +290,8 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
 }
 
 Parser::TPResult
-Parser::TryParseInitDeclaratorList(bool MayHaveTrailingReturnType) {
+Parser::TryParseInitDeclaratorList(bool MayHaveTrailingReturnType,
+                                   bool StopAfterFirstDeclarator) {
   while (true) {
     // declarator
     TPResult TPR = TryParseDeclarator(
@@ -334,7 +336,7 @@ Parser::TryParseInitDeclaratorList(bool MayHaveTrailingReturnType) {
       return TPResult::True;
     }
 
-    if (!TryConsumeToken(tok::comma))
+    if (StopAfterFirstDeclarator || !TryConsumeToken(tok::comma))
       break;
   }
 
