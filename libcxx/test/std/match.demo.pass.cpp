@@ -44,6 +44,21 @@ int matching_tuples(std::pair<int, int> p) {
   };
 }
 
+constexpr int matching_tuples_with_declaration_patterns(
+    const std::pair<int, int>& p) {
+  return p match {
+    case [0, 0] => 0;
+    case [0, int y] => y + 2;
+    case [int x, 0] => x + 4;
+    case auto [x, y] => x * y;
+  };
+}
+
+static_assert(matching_tuples_with_declaration_patterns({0, 0}) == 0);
+static_assert(matching_tuples_with_declaration_patterns({0, 3}) == 5);
+static_assert(matching_tuples_with_declaration_patterns({3, 0}) == 7);
+static_assert(matching_tuples_with_declaration_patterns({3, 4}) == 12);
+
 using Number = std::variant<std::int32_t, std::int64_t, float, double>;
 
 int matching_variants(Number v) {
