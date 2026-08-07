@@ -426,6 +426,11 @@ int exhaustive_decomposition(Pair p) {
 }
 
 namespace std {
+class type_info {
+public:
+  bool operator==(const type_info&) const;
+};
+
 template<class T>
 struct alternative_traits;
 }
@@ -640,5 +645,98 @@ int exhaustive_nested_projection(ChoiceAndBool value) {
     case [{ .flag: _ }, _] => 0;
     case [{ .number: _ }, _] => 1;
     case [{}, _] => 2;
+  };
+}
+
+struct OpenChoice {};
+
+template<>
+struct std::alternative_traits<OpenChoice> {
+  static const std::type_info* type(const OpenChoice&);
+
+  template<class T, class Self>
+  static T get(Self&&);
+};
+
+int exhaustive_open_alternatives(OpenChoice choice) {
+  return choice match {
+    case { int value } => value;
+    case { _ } => 1;
+    case {} => 0;
+  };
+}
+
+int missing_open_alternative(OpenChoice choice) {
+  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: { _ }}}
+    case { int value } => value;
+    case {} => 0;
+  };
+}
+
+int missing_open_empty_state(OpenChoice choice) {
+  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
+    case { _ } => 1;
+  };
+}
+
+int projectable_wildcard_shadows_open_type(OpenChoice choice) {
+  return choice match {
+    case { _ } => 1;
+    case { int value } => value; // expected-error {{match case is redundant}}
+    case {} => 0;
+  };
+}
+
+int open_type_coverage_ignores_cvref(OpenChoice choice) {
+  return choice match {
+    case { const int& value } => value;
+    case { int value } => value; // expected-error {{match case is redundant}}
+    case { _ } => 1;
+    case {} => 0;
+  };
+}
+
+struct OpenChoiceAndBool {
+  OpenChoice choice;
+  bool flag;
+};
+
+int exhaustive_nested_open_alternative(OpenChoiceAndBool value) {
+  return value match {
+    case [{ int number }, _] => number;
+    case [{ _ }, true] => 1;
+    case [{ _ }, false] => 2;
+    case [{}, _] => 0;
+  };
+}
+
+int missing_nested_open_empty_state(OpenChoiceAndBool value) {
+  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: [{}, false]}}
+    case [{ _ }, _] => 1;
+    case [{}, true] => 0;
+  };
+}
+
+int whole_wildcard_shadows_open_states(OpenChoice choice) {
+  return choice match {
+    case _ => 0;
+    case { _ } => 1; // expected-error {{match case is redundant}}
+    case {} => 2; // expected-error {{match case is redundant}}
+  };
+}
+
+struct AlwaysOpen {};
+
+template<>
+struct std::alternative_traits<AlwaysOpen> {
+  static const std::type_info& type(const AlwaysOpen&);
+
+  template<class T, class Self>
+  static T get(Self&&);
+};
+
+int projectable_wildcard_exhausts_nonnullable_open_choice(AlwaysOpen choice) {
+  return choice match {
+    case { _ } => 1;
   };
 }

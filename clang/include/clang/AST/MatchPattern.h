@@ -378,7 +378,11 @@ struct MatchPatternInfo {
   ArrayRef<QualType> AlternativeTypes;
   ArrayRef<unsigned char> ProjectableAlternatives;
   ArrayRef<unsigned> SelectedAlternatives;
+  QualType OpenAlternativeType;
   bool IsExhaustive = true;
+  bool IsOpenAlternative = false;
+  bool OpenAlternativeHasEmpty = false;
+  bool OpenAlternativeProjectableWildcard = false;
   bool TypePatternResolved = false;
   bool TypePatternMatches = false;
 };

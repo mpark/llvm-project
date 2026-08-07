@@ -1,6 +1,11 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -verify %s
 
 namespace std {
+class type_info {
+public:
+  bool operator==(const type_info&) const;
+};
+
 template<class T>
 struct alternative_traits; // expected-note {{template is declared here}}
 }
@@ -236,5 +241,83 @@ int missing_traits(NoTraits value) {
   return value match {
     case { NoTraits copy } => 0; // expected-error {{implicit instantiation of undefined template 'std::alternative_traits<NoTraits>'}}
     case _ => 1;
+  };
+}
+
+struct OpenChoice {};
+
+template<>
+struct std::alternative_traits<OpenChoice> {
+  static const std::type_info* type(const OpenChoice&);
+
+  template<class T, class Self>
+  static T get(Self&&);
+};
+
+int open_alternatives(OpenChoice choice) {
+  return choice match {
+    case { int value } => value;
+    case { double } => 2;
+    case { _ } => 1;
+    case {} => 0;
+  };
+}
+
+bool open_empty(OpenChoice choice) {
+  return choice match case {};
+}
+
+template<class T>
+int dependent_open_type(OpenChoice choice) {
+  return choice match {
+    case { T value } => static_cast<int>(value);
+    case _ => 0;
+  };
+}
+
+int instantiate_dependent_open_type(OpenChoice choice) {
+  return dependent_open_type<int>(choice);
+}
+
+int open_requires_type_direction(OpenChoice choice) {
+  return choice match {
+    case { auto&& value } => 1; // expected-error {{open alternative protocol for type 'OpenChoice' requires a declaration or type pattern with a non-placeholder, non-void type}}
+    case _ => 0;
+  };
+}
+
+struct AlwaysOpen {};
+
+template<>
+struct std::alternative_traits<AlwaysOpen> {
+  static const std::type_info& type(const AlwaysOpen&);
+
+  template<class T, class Self>
+  static T get(Self&&);
+};
+
+int always_open(AlwaysOpen choice) {
+  return choice match {
+    case { _ } => 1;
+  };
+}
+
+int always_open_has_no_empty_state(AlwaysOpen choice) {
+  return choice match {
+    case {} => 0; // expected-error {{type 'AlwaysOpen' has no non-projectable alternative state}}
+    case { _ } => 1;
+  };
+}
+
+struct InvalidOpen {};
+
+template<>
+struct std::alternative_traits<InvalidOpen> {
+  static int type(const InvalidOpen&);
+};
+
+int invalid_open_protocol(InvalidOpen choice) {
+  return choice match {
+    case { _ } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'type' must return a pointer or reference}}
   };
 }
