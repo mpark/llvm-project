@@ -106,6 +106,20 @@ void test_match_structures(int x) {
   &x match { case { _ } => 0; case _ => 1; };
 }
 
+struct PatternPair {
+  int first;
+  int second;
+};
+
+int test_declaration_pattern_before_comma(PatternPair pair) {
+  return pair match {
+    case [0, 0] => 0;
+    case [0, int y] => y;
+    case [int x, 0] => x;
+    case auto [x, y] => x + y;
+  };
+}
+
 void test_match_precedence(int* p) {
   /* MatchTestExpr */ {
     // unary is tighter than match
