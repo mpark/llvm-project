@@ -111,15 +111,16 @@ namespace std {
 #  include <__verbose_abort>
 #  include <version>
 
+#  if _LIBCPP_STD_VER >= 26
+#    include <__memory/addressof.h>
+#    include <__type_traits/alternative_traits.h>
+#  endif
+
 // standard-mandated includes
 
 // [any.synop]
 #  include <initializer_list>
 #  include <typeinfo>
-
-#  if _LIBCPP_STD_VER >= 26
-#    include <__concepts/same_as.h>
-#  endif
 
 #  if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #    pragma GCC system_header
@@ -558,29 +559,17 @@ template <class _ValueType>
 
 #    if _LIBCPP_STD_VER >= 26
 
-template <class _Tp, same_as<any> _Any>
-_LIBCPP_HIDE_FROM_ABI const _Tp* try_cast(const _Any& __any) _NOEXCEPT {
-  if constexpr (is_void_v<_Tp>)
-    return __any.has_value() ? nullptr : static_cast<const void*>(&__any);
-  else
-    return any_cast<_Tp>(&__any);
-}
+template <>
+struct alternative_traits<any> {
+  _LIBCPP_HIDE_FROM_ABI static const type_info* type(const any& __value) noexcept {
+    return __value.has_value() ? std::addressof(__value.type()) : nullptr;
+  }
 
-template <class _Tp, same_as<any> _Any>
-_LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any& __any) _NOEXCEPT {
-  if constexpr (is_void_v<_Tp>)
-    return __any.has_value() ? nullptr : static_cast<void*>(&__any);
-  else
-    return any_cast<_Tp>(&__any);
-}
-
-template <class _Tp, same_as<any> _Any>
-_LIBCPP_HIDE_FROM_ABI _Tp* try_cast(_Any&& __any) _NOEXCEPT {
-  if constexpr (is_void_v<_Tp>)
-    return __any.has_value() ? nullptr : static_cast<void*>(&__any);
-  else
-    return any_cast<_Tp>(&__any);
-}
+  template <class _Tp, class _Self>
+  _LIBCPP_HIDE_FROM_ABI static _Tp get(_Self&& __self) {
+    return std::any_cast<_Tp>(std::forward<_Self>(__self));
+  }
+};
 
 #    endif // _LIBCPP_STD_VER >= 26
 
