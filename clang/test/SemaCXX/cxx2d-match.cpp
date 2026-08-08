@@ -131,6 +131,25 @@ int decomposition(Pair pair) {
   };
 }
 
+int pattern_binding_cannot_be_used_in_its_pattern(Pair pair) {
+  return pair match {
+    case [int first, first] => 1; // expected-error {{pattern binding 'first' cannot be used within the pattern that introduces it}}
+    case _ => 0;
+  };
+}
+
+struct NestedPair {
+  int first;
+  Pair second;
+};
+
+int nested_pattern_binding_cannot_be_used_in_its_pattern(NestedPair pair) {
+  return pair match {
+    case [int first, [first, _]] => 1; // expected-error {{pattern binding 'first' cannot be used within the pattern that introduces it}}
+    case _ => 0;
+  };
+}
+
 int attributed(int value) {
   return value match {
     case [[maybe_unused]] int copy => copy;
