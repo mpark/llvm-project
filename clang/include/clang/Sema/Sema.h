@@ -11253,6 +11253,7 @@ public:
   };
   struct MatchPatternState {
     SmallVector<MatchPatternInfo, 8> Infos;
+    bool CheckedBindingReferences = false;
 
     MatchPatternInfo &get(MatchPattern *Pattern) {
       for (MatchPatternInfo &Info : Infos)
