@@ -1042,8 +1042,6 @@ void Sema::CheckMatchSelectExhaustiveness(
           *this, Case.Pattern, Case.PatternInstantiation, SubjectType);
       CheckedPattern = true;
       AnyPattern |= !Patterns.empty();
-      if (hasGuard(Case))
-        continue;
       CheckedUsefulness = true;
       for (const CoveragePattern &Pattern : Patterns) {
         PatternRow Row;
@@ -1054,6 +1052,8 @@ void Sema::CheckMatchSelectExhaustiveness(
         AnyUseful |= Result == Usefulness::Useful;
         AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
       }
+      if (hasGuard(Case))
+        continue;
       for (CoveragePattern &Pattern : Patterns) {
         if (Pattern.K != CoveragePattern::Opaque) {
           PatternRow Row;

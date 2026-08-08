@@ -27,6 +27,30 @@ int redundant_bool(bool b) {
   };
 }
 
+int guarded_case_after_wildcard_is_redundant(bool b) {
+  return b match {
+    case _ => 0;
+    case true if (b) => 1; // expected-error {{match case is redundant}}
+  };
+}
+
+int guarded_case_after_same_value_is_redundant(bool b) {
+  return b match {
+    case true => 0;
+    case true if (b) => 1; // expected-error {{match case is redundant}}
+    case false => 2;
+  };
+}
+
+int guarded_cases_do_not_make_later_cases_redundant(bool b) {
+  return b match {
+    case true if (b) => 0;
+    case true if (!b) => 1;
+    case true => 2;
+    case false => 3;
+  };
+}
+
 int missing_integer(int value) {
   return value match { // expected-error {{match expression is not exhaustive; example of a missing case: 1}}
     case 0 => 0;
