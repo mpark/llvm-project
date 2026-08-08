@@ -20,10 +20,59 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/TemplateDeduction.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/ScopeExit.h"
 
 using namespace clang;
 using namespace sema;
+
+static void
+collectPatternBindings(MatchPattern *Pattern,
+                       llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
+    VarDecl *Variable = Declaration->getDeclaration();
+    Bindings.insert(Variable);
+    if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable))
+      for (BindingDecl *Binding : Decomposition->bindings())
+        Bindings.insert(Binding);
+  }
+
+  for (MatchPattern *Child : Pattern->children())
+    collectPatternBindings(Child, Bindings);
+}
+
+static bool checkPatternBindingReferences(
+    Sema &S, MatchPattern *Pattern,
+    const llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
+  bool Invalid = false;
+  if (auto *Expression = dyn_cast<ExpressionPattern>(Pattern)) {
+    SmallVector<Stmt *, 16> Worklist{Expression->getExpr()};
+    while (!Worklist.empty()) {
+      Stmt *Node = Worklist.pop_back_val();
+      if (auto *Reference = dyn_cast<DeclRefExpr>(Node)) {
+        if (Bindings.contains(Reference->getDecl())) {
+          S.Diag(Reference->getExprLoc(),
+                 diag::err_pattern_binding_used_in_pattern)
+              << Reference->getDecl();
+          Invalid = true;
+        }
+      }
+      for (Stmt *Child : Node->children())
+        if (Child)
+          Worklist.push_back(Child);
+    }
+  }
+
+  for (MatchPattern *Child : Pattern->children())
+    Invalid |= checkPatternBindingReferences(S, Child, Bindings);
+  return Invalid;
+}
+
+static bool checkPatternBindingReferences(Sema &S, MatchPattern *Pattern) {
+  llvm::SmallPtrSet<const ValueDecl *, 8> Bindings;
+  collectPatternBindings(Pattern, Bindings);
+  return checkPatternBindingReferences(S, Pattern, Bindings);
+}
 
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
                              Expr *Init, bool IsConstexpr = false) {
@@ -1504,6 +1553,11 @@ bool Sema::CheckCompleteMatchPatternImpl(
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache) {
+  if (!State.CheckedBindingReferences) {
+    State.CheckedBindingReferences = true;
+    if (checkPatternBindingReferences(*this, Pattern))
+      return true;
+  }
   State.get(Pattern);
   return CheckCompleteMatchPatternImpl(Subject, Pattern, State,
                                        ProjectionCache);
