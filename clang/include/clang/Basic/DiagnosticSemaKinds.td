@@ -14451,6 +14451,8 @@ def err_cuda_device_kernel_launch_require_rdc
             "relocatable device code (i.e. requires -fgpu-rdc)">;
 
 // Pattern Matching
+def err_pattern_binding_used_in_pattern : Error<
+  "pattern binding %0 cannot be used within the pattern that introduces it">;
 def err_match_case_redundant : Error<"match case is redundant">;
 def err_match_case_impossible : Error<
   "match case can never match a subject of type %0">;
