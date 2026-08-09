@@ -129,7 +129,7 @@ const Object &enclosing_local(bool condition) {
 template <class T>
 const Object &dependent_reference_to_copy(T object) {
   return object match -> const Object & {
-    case Object copy => copy; // expected-warning {{reference to stack memory associated with local variable 'copy' returned}}
+    case Object copy => copy; // expected-warning 2{{reference to stack memory associated with local variable 'copy' returned}}
   };
 }
 
