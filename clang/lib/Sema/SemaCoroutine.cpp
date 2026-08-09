@@ -186,8 +186,8 @@ static bool isValidCoroutineContext(Sema &S, SourceLocation Loc,
   // appear in a default argument." But the diagnostic QoI here could be
   // improved to inform the user that default arguments specifically are not
   // allowed.
-  auto FD = S.CurContext->getEnclosingFunction();
-  if (!FD) {
+  auto *FD = S.CurContext->getEnclosingFunction();
+  if (!FD || S.isInSyntheticDoExprFunctionScope()) {
     S.Diag(Loc, isa<ObjCMethodDecl>(S.CurContext)
                     ? diag::err_coroutine_objc_method
                     : diag::err_coroutine_outside_function) << Keyword;
