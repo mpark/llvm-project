@@ -192,6 +192,7 @@ public:
   }
   ComplexPairTy VisitCallExpr(const CallExpr *E);
   ComplexPairTy VisitStmtExpr(const StmtExpr *E);
+  ComplexPairTy VisitDoExpr(const DoExpr *E);
   ComplexPairTy VisitMatchSelectExpr(const MatchSelectExpr *E);
 
   // Operators.
@@ -502,12 +503,25 @@ ComplexPairTy ComplexExprEmitter::VisitStmtExpr(const StmtExpr *E) {
                           E->getExprLoc());
 }
 
+ComplexPairTy ComplexExprEmitter::VisitDoExpr(const DoExpr *E) {
+  CodeGenFunction::StmtExprEvaluation eval(CGF);
+  // A glvalue do-expression yields a reference: EmitDoExpr returns a slot
+  // holding a `T*`, so go through the lvalue path to load the referent.
+  if (E->isGLValue())
+    return EmitLoadOfLValue(CGF.EmitDoExprLValue(E), E->getExprLoc());
+  Address Slot = CGF.EmitDoExpr(*E, AggValueSlot::ignored());
+  assert(Slot.isValid() && "Expected complex result");
+  return EmitLoadOfLValue(CGF.MakeAddrLValue(Slot, E->getType()),
+                          E->getExprLoc());
+}
+
 ComplexPairTy ComplexExprEmitter::VisitMatchSelectExpr(
     const MatchSelectExpr *E) {
   if (E->isGLValue())
     return EmitLoadOfLValue(CGF.EmitMatchSelectExprLValue(E), E->getExprLoc());
   return CGF.EmitMatchSelectExpr(*E).getComplexVal();
 }
+
 /// Emit a cast from complex value Val to DestType.
 ComplexPairTy ComplexExprEmitter::EmitComplexToComplexCast(ComplexPairTy Val,
                                                            QualType SrcType,

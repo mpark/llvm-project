@@ -2085,6 +2085,9 @@ enum StmtCode {
   EXPR_EXPL_DEPENDENT_CALL,
 
   // C++2c expansion statements (P1306)
+  // Do-expressions
+  EXPR_DO,
+  STMT_DO_RETURN,
 
   // FixedPointLiteral
   EXPR_FIXEDPOINT_LITERAL,
