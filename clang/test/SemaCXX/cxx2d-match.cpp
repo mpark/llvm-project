@@ -52,6 +52,10 @@ struct MovePair {
   Movable second;
 };
 
+struct TriviallyMovable {
+  int value;
+};
+
 struct Shape {
   virtual ~Shape();
 };
@@ -248,28 +252,42 @@ int guard_can_mutate_pointee(PointerMember member) {
 
 int guarded_move(Movable &&value) {
   return static_cast<Movable &&>(value) match {
-    case Movable moved if (true) => moved.value; // expected-error {{guarded declaration pattern of type 'Movable' would move from the match subject}}
+    case Movable moved if (true) => moved.value; // expected-error {{guarded declaration pattern of type 'Movable' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
     case _ => 0;
+  };
+}
+
+int guarded_trivial_move(TriviallyMovable &&value) {
+  return static_cast<TriviallyMovable &&>(value) match {
+    case TriviallyMovable moved if (moved.value > 0) => moved.value;
+    case _ => 0;
+  };
+}
+
+int guarded_scalar_move(int &&value) {
+  return static_cast<int &&>(value) match {
+    case int moved if (moved < 0) => -moved;
+    case int moved => moved;
   };
 }
 
 int guarded_structured_binding_move(MovePair &&value) {
   return static_cast<MovePair &&>(value) match {
-    case auto [first, second] if (true) => first.value + second.value; // expected-error {{guarded declaration pattern of type 'MovePair' would move from the match subject}}
+    case auto [first, second] if (true) => first.value + second.value; // expected-error {{guarded declaration pattern of type 'MovePair' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
     case _ => 0;
   };
 }
 
 int guarded_array_structured_binding_move(Movable (&&value)[1]) {
   return static_cast<Movable (&&)[1]>(value) match {
-    case auto [element] if (true) => element.value; // expected-error {{guarded declaration pattern of type 'Movable[1]' would move from the match subject}}
+    case auto [element] if (true) => element.value; // expected-error {{guarded declaration pattern of type 'Movable[1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
     case _ => 0;
   };
 }
 
 int guarded_nested_array_structured_binding_move(Movable (&&value)[1][1]) {
   return static_cast<Movable (&&)[1][1]>(value) match {
-    case auto [row] if (true) => row[0].value; // expected-error {{guarded declaration pattern of type 'Movable[1][1]' would move from the match subject}}
+    case auto [row] if (true) => row[0].value; // expected-error {{guarded declaration pattern of type 'Movable[1][1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
     case _ => 0;
   };
 }
@@ -303,7 +321,7 @@ int guarded_rvalue_reference(Movable &&value) {
 template<class T>
 int forwarding_guard(T &&value) {
   return static_cast<T &&>(value) match {
-    case T copy if (true) => 1; // expected-error {{guarded declaration pattern of type 'declaration_patterns::Movable' would move from the match subject}}
+    case T copy if (true) => 1; // expected-error {{guarded declaration pattern of type 'declaration_patterns::Movable' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
     case _ => 0;
   };
 }
