@@ -389,6 +389,7 @@ FEATURE(annotation_attributes, LangOpts.AnnotationAttributes)
 FEATURE(entity_proxy_reflection, LangOpts.EntityProxyReflection)
 FEATURE(reflection_latest, LangOpts.ReflectionLatest)
 
+FEATURE(do_expressions, LangOpts.DoExpressions)
 // CUDA/HIP Features
 FEATURE(cuda_noinline_keyword, LangOpts.CUDA)
 EXTENSION(cuda_implicit_host_device_templates, LangOpts.CUDA && LangOpts.OffloadImplicitHostDeviceTemplates)

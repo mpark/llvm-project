@@ -60,6 +60,9 @@ def CXXForRangeStmt : StmtNode<Stmt>;
 def CoroutineBodyStmt : StmtNode<Stmt>;
 def CoreturnStmt : StmtNode<Stmt>;
 
+// do-expressions (block-expression with explicit do_return)
+def DoReturnStmt : StmtNode<Stmt>;
+
 // C++ expansion statements (P1306)
 def CXXExpansionStmtPattern : StmtNode<Stmt>;
 def CXXExpansionStmtInstantiation
@@ -123,6 +126,7 @@ def AtomicExpr : StmtNode<Expr>;
 // GNU Extensions.
 def AddrLabelExpr : StmtNode<Expr>;
 def StmtExpr : StmtNode<Expr>;
+def DoExpr : StmtNode<Expr>;
 def ChooseExpr : StmtNode<Expr>;
 def GNUNullExpr : StmtNode<Expr>;
 
