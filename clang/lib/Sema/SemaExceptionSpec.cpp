@@ -1303,6 +1303,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::ParenListExprClass:
   case Expr::ShuffleVectorExprClass:
   case Expr::StmtExprClass:
+  case Expr::DoExprClass:
   case Expr::ConvertVectorExprClass:
   case Expr::VAArgExprClass:
   case Expr::CXXParenListInitExprClass:
@@ -1561,6 +1562,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Stmt::OMPTargetTeamsGenericLoopDirectiveClass:
   case Stmt::OMPParallelGenericLoopDirectiveClass:
   case Stmt::OMPTargetParallelGenericLoopDirectiveClass:
+  case Stmt::DoReturnStmtClass:
   case Stmt::ReturnStmtClass:
   case Stmt::SEHExceptStmtClass:
   case Stmt::SEHFinallyStmtClass:

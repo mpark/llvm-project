@@ -1646,6 +1646,7 @@ RedeclarableResult ASTDeclReader::VisitVarDeclImpl(VarDecl *VD) {
 
     VD->NonParmVarDeclBits.ObjCForDecl = VarDeclBits.getNextBit();
     VD->NonParmVarDeclBits.IsCXXForRangeImplicitVar = VarDeclBits.getNextBit();
+    VD->NonParmVarDeclBits.IsDoExprInitCapture = VarDeclBits.getNextBit();
   }
 
   // If this variable has a deduced type, defer reading that type until we are

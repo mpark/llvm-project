@@ -6526,6 +6526,7 @@ void Sema::BuildVariableInstantiation(
   NewVar->setObjCForDecl(OldVar->isObjCForDecl());
   NewVar->setConstexpr(OldVar->isConstexpr());
   NewVar->setInitCapture(OldVar->isInitCapture());
+  NewVar->setDoExprInitCapture(OldVar->isDoExprInitCapture());
   NewVar->setPreviousDeclInSameBlockScope(
       OldVar->isPreviousDeclInSameBlockScope());
   NewVar->setAccess(OldVar->getAccess());
