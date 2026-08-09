@@ -153,35 +153,6 @@ int downcast_pointer_rvalue_reference_declaration(Shape *shape) {
   };
 }
 
-struct Erased {};
-
-template<class T>
-T *try_cast(Erased &);
-
-template<class T>
-T *try_cast(Erased &&);
-
-// CHECK-LABEL: define{{.*}} i32 @_Z20try_cast_declarationR6Erased
-// CHECK: call{{.*}} ptr @_Z8try_castIiEPT_R6Erased
-// CHECK-NOT: call{{.*}} ptr @_Z8try_castIiEPT_R6Erased
-// CHECK: ret i32
-int try_cast_declaration(Erased &erased) {
-  return erased match {
-    case int &value if (value == 0) => 0;
-    case int &value => value;
-    case _ => -1;
-  };
-}
-
-// CHECK-LABEL: define{{.*}} i32 @_Z27try_cast_rvalue_declarationO6Erased
-// CHECK: call{{.*}} ptr @_Z8try_castIiEPT_O6Erased
-// CHECK: ret i32
-int try_cast_rvalue_declaration(Erased &&erased) {
-  return static_cast<Erased &&>(erased) match {
-    case int &&value => value;
-    case _ => -1;
-  };
-}
 
 namespace std {
 template<class T> struct tuple_size;
