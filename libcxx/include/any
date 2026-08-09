@@ -561,14 +561,12 @@ template <class _ValueType>
 
 template <>
 struct alternative_traits<any> {
-  _LIBCPP_HIDE_FROM_ABI static const type_info* type(const any& __value) noexcept {
-    return __value.has_value() ? std::addressof(__value.type()) : nullptr;
+  template <class _Tp, class _Self>
+  _LIBCPP_HIDE_FROM_ABI static auto try_cast(_Self&& __self) noexcept {
+    return std::any_cast<_Tp>(std::addressof(__self));
   }
 
-  template <class _Tp, class _Self>
-  _LIBCPP_HIDE_FROM_ABI static _Tp get(_Self&& __self) {
-    return std::any_cast<_Tp>(std::forward<_Self>(__self));
-  }
+  _LIBCPP_HIDE_FROM_ABI static bool has_value(const any& __value) noexcept { return __value.has_value(); }
 };
 
 #    endif // _LIBCPP_STD_VER >= 26
