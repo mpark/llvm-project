@@ -119,6 +119,34 @@ int polymorphic_pointer(Shape *shape) {
   };
 }
 
+int polymorphic_pointer_const_reference(Shape *shape) {
+  return shape match {
+    case Circle *const &circle => circle->radius;
+    case _ => -1;
+  };
+}
+
+int polymorphic_pointer_rvalue_reference(Shape *shape) {
+  return shape match {
+    case Circle *&&circle => circle->radius;
+    case _ => -1;
+  };
+}
+
+int polymorphic_pointer_lvalue_reference(Shape *shape) {
+  return shape match {
+    // expected-error@+1 {{non-const lvalue reference to type 'Circle *' cannot bind to a temporary of type 'Circle *'}}
+    case Circle *&circle => circle->radius;
+    case _ => -1;
+  };
+}
+
+int static_pointer_lvalue_reference(Circle *circle) {
+  return circle match {
+    case Circle *&ref => ref->radius;
+  };
+}
+
 int forwarding(int &&value) {
   return static_cast<int &&>(value) match {
     case auto &&ref => ref;
