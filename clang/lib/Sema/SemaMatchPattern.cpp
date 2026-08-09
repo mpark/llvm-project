@@ -897,7 +897,8 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
     if (Projected.isInvalid())
       return CastProjectionResult::Error;
   }
-  ExprValueKind ProjectedValueKind = SubjectValueKind;
+  ExprValueKind ProjectedValueKind =
+      DereferenceResult ? SubjectValueKind : CastExpr.get()->getValueKind();
   Expr *ProjectedExpr =
       asValueKind(S, Projected.get(), ProjectedValueKind);
   QualType ProjectedType = ProjectedExpr->refersToBitField()
