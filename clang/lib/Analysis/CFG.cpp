@@ -18,6 +18,7 @@
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclGroup.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/OperationKinds.h"
@@ -620,6 +621,10 @@ private:
   CFGBlock *VisitDeclSubExpr(DeclStmt *DS);
   CFGBlock *VisitDefaultStmt(DefaultStmt *D);
   CFGBlock *VisitDoStmt(DoStmt *D);
+  CFGBlock *VisitDoExpr(DoExpr *E, AddStmtChoice asc);
+  CFGBlock *VisitDoReturnStmt(DoReturnStmt *S);
+  CFGBlock *VisitCXXExpansionStmtInstantiation(
+      CXXExpansionStmtInstantiation *E);
   CFGBlock *VisitExprWithCleanups(ExprWithCleanups *E,
                                   AddStmtChoice asc, bool ExternallyDestructed);
   CFGBlock *VisitForStmt(ForStmt *F);
@@ -1702,6 +1707,19 @@ std::unique_ptr<CFG> CFGBuilder::buildCFG(const Decl *D, Stmt *Statement) {
         addAutomaticObjHandling(ScopePos, LocalScope::const_iterator(),
                                 Statement);
   }
+  // In a do-expression body, a top-level `break`/`continue` transfers to an
+  // enclosing loop that lives *outside* the body, thereby leaving the
+  // do-expression. Model that as an edge to a dedicated sink block with no
+  // successor (it does NOT reach the normal exit), so such escapes are kept
+  // distinct from an inner-loop `break` that exits its loop and then falls off
+  // the end of the do-expression body. (Loops/switches nested within the body
+  // override these targets locally as usual.)
+  if (BuildOpts.DoExpressionBody) {
+    CFGBlock *EscapeBlock = createBlock(/*add_successor=*/false);
+    BreakJumpTarget = JumpTarget(EscapeBlock, ScopePos);
+    ContinueJumpTarget = JumpTarget(EscapeBlock, ScopePos);
+  }
+
   if (BuildOpts.AddImplicitDtors)
     if (const CXXDestructorDecl *DD = dyn_cast_or_null<CXXDestructorDecl>(D))
       addImplicitDtorsForDestructor(DD);
@@ -2466,6 +2484,16 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
 
     case Stmt::DoStmtClass:
       return VisitDoStmt(cast<DoStmt>(S));
+
+    case Stmt::DoExprClass:
+      return VisitDoExpr(cast<DoExpr>(S), asc);
+
+    case Stmt::DoReturnStmtClass:
+      return VisitDoReturnStmt(cast<DoReturnStmt>(S));
+
+    case Stmt::CXXExpansionStmtInstantiationClass:
+      return VisitCXXExpansionStmtInstantiation(
+          cast<CXXExpansionStmtInstantiation>(S));
 
     case Stmt::ForStmtClass:
       return VisitForStmt(cast<ForStmt>(S));
@@ -3330,6 +3358,16 @@ CFGBlock *CFGBuilder::VisitDeclStmt(DeclStmt *DS) {
 CFGBlock *CFGBuilder::VisitDeclSubExpr(DeclStmt *DS) {
   assert(DS->isSingleDecl() && "Can handle single declarations only.");
 
+  // An expansion statement (`template for`) is represented as a DeclStmt
+  // wrapping a CXXExpansionStmtDecl. When analyzing a do-expression body,
+  // model its instantiations so control flow within them is visible.
+  if (auto *ESD = dyn_cast<CXXExpansionStmtDecl>(DS->getSingleDecl())) {
+    if (BuildOpts.DoExpressionBody)
+      if (CXXExpansionStmtInstantiation *Exp = ESD->getInstantiations())
+        return VisitCXXExpansionStmtInstantiation(Exp);
+    return Block;
+  }
+
   if (const auto *TND = dyn_cast<TypedefNameDecl>(DS->getSingleDecl())) {
     // If we encounter a VLA, process its size expressions.
     const Type *T = TND->getUnderlyingType().getTypePtr();
@@ -3601,6 +3639,16 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
     TryResult KnownVal;
     if (!I->isConsteval())
       KnownVal = tryEvaluateBool(I->getCond());
+    else if (BuildOpts.ConstevalCondition !=
+             CFG::BuildOptions::CCK_Unknown) {
+      // The surrounding context's constant-evaluatedness fixes which branch of
+      // an `if consteval` is live. The then-branch is the consteval branch for
+      // a non-negated `if consteval`, and the non-consteval branch for an
+      // `if !consteval`.
+      bool IsConstantContext =
+          BuildOpts.ConstevalCondition == CFG::BuildOptions::CCK_AlwaysConstant;
+      KnownVal = TryResult(I->isNonNegatedConsteval() == IsConstantContext);
+    }
 
     // Add the successors. If we know that specific branches are
     // unreachable, inform addSuccessor() of that knowledge.
@@ -4646,6 +4694,67 @@ CFGBlock *CFGBuilder::VisitCXXTypeidExpr(CXXTypeidExpr *S, AddStmtChoice asc) {
   return Block;
 }
 
+CFGBlock *CFGBuilder::VisitDoExpr(DoExpr *E, AddStmtChoice asc) {
+  // A nested do-expression is opaque to the reachability of the enclosing
+  // do-expression body: for fall-off-the-end analysis it is a value-producing
+  // expression that completes normally. Its own do_return/return/break/continue
+  // and init statements belong to it, so we do not descend into its body.
+  // Outside do-expression-body analysis we keep the default behavior of walking
+  // the children.
+  if (!BuildOpts.DoExpressionBody)
+    return VisitStmt(E, asc);
+
+  if (asc.alwaysAdd(*this, E)) {
+    autoCreateBlock();
+    appendStmt(Block, E);
+  }
+  return Block;
+}
+
+CFGBlock *CFGBuilder::VisitDoReturnStmt(DoReturnStmt *S) {
+  // Outside do-expression-body analysis, do_return is treated as an ordinary
+  // statement (its transfer to the do-expression's end is not modeled here).
+  if (!BuildOpts.DoExpressionBody)
+    return VisitStmt(S, AddStmtChoice::AlwaysAdd);
+
+  // Within a do-expression body, `do_return` yields the do-expression's value
+  // and leaves the body, transferring control to the do-expression's end.
+  // Model it like a return: the current block ends here and flows to the exit
+  // block.
+  if (badCFG)
+    return nullptr;
+
+  Block = createBlock(false);
+  addAutomaticObjHandling(ScopePos, LocalScope::const_iterator(), S);
+  if (!Block->hasNoReturnElement())
+    addSuccessor(Block, &cfg->getExit());
+  appendStmt(Block, S);
+
+  if (Expr *O = S->getOperand())
+    return Visit(O, AddStmtChoice::AlwaysAdd, /*ExternallyDestructed=*/true);
+  return Block;
+}
+
+CFGBlock *CFGBuilder::VisitCXXExpansionStmtInstantiation(
+    CXXExpansionStmtInstantiation *E) {
+  // An expansion statement (`template for`) is a compile-time-unrolled sequence
+  // of its instantiations. Model it like a compound statement of those
+  // instantiation bodies, in order, so control flow within them is visible.
+
+  CFGBlock *LastBlock = Block;
+  ArrayRef<Stmt *> Instantiations = E->getInstantiations();
+  for (unsigned I = Instantiations.size(); I-- > 0;) {
+    Stmt *Inst = Instantiations[I];
+    if (!Inst)
+      continue;
+    if (CFGBlock *NewBlock = Visit(Inst, AddStmtChoice::AlwaysAdd))
+      LastBlock = NewBlock;
+    if (badCFG)
+      return nullptr;
+  }
+  return LastBlock;
+}
+
 CFGBlock *CFGBuilder::VisitDoStmt(DoStmt *D) {
   CFGBlock *LoopSuccessor = nullptr;
 
@@ -4953,6 +5062,24 @@ static bool shouldAddCase(bool &switchExclusivelyCovered,
 }
 
 CFGBlock *CFGBuilder::VisitCaseStmt(CaseStmt *CS) {
+  // A `case` with no enclosing switch can occur when analyzing a do-expression
+  // body that lexically contains a label of an outer switch (an ill-formed
+  // jump-into-do-expression that is diagnosed elsewhere). Rather than crash,
+  // model it like a plain label so a CFG can still be built.
+  if (BuildOpts.DoExpressionBody && !SwitchTerminatedBlock) {
+    if (Stmt *Sub = CS->getSubStmt())
+      addStmt(Sub);
+    CFGBlock *CaseBlock = Block;
+    if (!CaseBlock)
+      CaseBlock = createBlock();
+    CaseBlock->setLabel(CS);
+    if (badCFG)
+      return nullptr;
+    Block = nullptr;
+    Succ = CaseBlock;
+    return CaseBlock;
+  }
+
   // CaseStmts are essentially labels, so they are the first statement in a
   // block.
   CFGBlock *TopBlock = nullptr, *LastBlock = nullptr;

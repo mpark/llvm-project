@@ -1660,6 +1660,14 @@ void StmtProfiler::VisitStmtExpr(const StmtExpr *S) {
   VisitExpr(S);
 }
 
+void StmtProfiler::VisitDoExpr(const DoExpr *S) {
+  VisitExpr(S);
+  ID.AddBoolean(S->hasInitStmt());
+  ID.AddBoolean(S->hasExplicitType());
+  if (S->hasExplicitType())
+    VisitType(S->getExplicitType()->getType());
+}
+
 void StmtProfiler::VisitShuffleVectorExpr(const ShuffleVectorExpr *S) {
   VisitExpr(S);
 }
@@ -2483,6 +2491,10 @@ void StmtProfiler::VisitCoroutineBodyStmt(const CoroutineBodyStmt *S) {
 }
 
 void StmtProfiler::VisitCoreturnStmt(const CoreturnStmt *S) {
+  VisitStmt(S);
+}
+
+void StmtProfiler::VisitDoReturnStmt(const DoReturnStmt *S) {
   VisitStmt(S);
 }
 

@@ -288,6 +288,11 @@ def err_c2y_first_condition_clause_is_not_declaration : Error<
   "first clause in condition must be a declaration">;
 def err_c2y_multiple_declarations : Error<"multiple declarations are not allowed">;
 
+// P2806 ext: do-expressions.
+def err_do_expr_requires_cxx29 : Error<
+  "do-expressions are only available in C++29; "
+  "use '-std=c++2d' to enable them">;
+
 // Generic errors.
 def err_expected_expression : Error<"expected expression">;
 def err_expected_type : Error<"expected a type">;

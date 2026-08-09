@@ -61,6 +61,7 @@
 #include "llvm/ADT/APFixedPoint.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -701,6 +702,9 @@ namespace {
     bool isDestroyedAtEndOf(ScopeKind K) const {
       return (int)Value.getInt() >= (int)K;
     }
+    APValue::LValueBase getBase() const { return Base; }
+    const APValue *getValuePtr() const { return Value.getPointer(); }
+    void setDestroyedAtEndOf(ScopeKind K) { Value.setInt(K); }
     bool endLifetime(EvalInfo &Info, bool RunDestructors) {
       if (RunDestructors) {
         SourceLocation Loc;
@@ -866,6 +870,31 @@ namespace {
 
     /// The number of heap allocations performed so far in this evaluation.
     unsigned NumHeapAllocs = 0;
+
+    /// When a do-expression body terminates via `return`/`break`/`continue`
+    /// (i.e., outer-scope control flow), VisitDoExpr stashes the resulting
+    /// EvalStmtResult here so the enclosing EvaluateStmt can propagate it up
+    /// the statement-evaluation chain. Stored as unsigned since
+    /// EvalStmtResult is declared later in this translation unit. 0
+    /// (ESR_Failed) means "no pending flow".
+    unsigned PendingDoExprControlFlow = 0;
+
+    /// Value returned by an outer-scope `return` seen while evaluating a
+    /// do-expression body. This is consumed when the pending control-flow is
+    /// translated back to ESR_Returned.
+    std::optional<APValue> PendingDoExprReturnValue;
+
+    /// Namespace-scope do-expression bodies are parsed without a real function
+    /// DeclContext, so declarations inside their compound statement don't have
+    /// local storage according to the VarDecl. During constant evaluation we
+    /// still need to model them as block locals of the synthetic expression
+    /// frame.
+    llvm::SmallPtrSet<const VarDecl *, 8> DoExprLocalVarDecls;
+
+    /// Declarations from a do-expression init statement. Their lifetime is the
+    /// enclosing full-expression, not the do-expression body scope.
+    llvm::SmallPtrSet<const VarDecl *, 8> DoExprInitVarDecls;
+    bool EvaluatingSyntheticDoExprFrame = false;
 
     struct EvaluatingConstructorRAII {
       EvalInfo &EI;
@@ -1174,6 +1203,10 @@ namespace {
     /// Note that we have had a side-effect, and determine whether we should
     /// keep evaluating.
     bool noteSideEffect() {
+      // An abandoned operand does not become a side effect while outer-scope
+      // control flow is escaping a do-expression.
+      if (PendingDoExprControlFlow != 0)
+        return false;
       EvalStatus.HasSideEffects = true;
       return keepEvaluatingAfterSideEffect();
     }
@@ -1230,6 +1263,12 @@ namespace {
     /// (Foo() || true) // use noteSideEffect
     /// Foo() + 1       // use noteFailure
     [[nodiscard]] bool noteFailure() {
+      // See noteSideEffect(): a subexpression abandoned because outer-scope
+      // control flow is escaping a do-expression is not a real failure with a
+      // skipped side effect. Stop evaluating without marking side effects so
+      // the pending control flow is handled at the enclosing statement.
+      if (PendingDoExprControlFlow != 0)
+        return false;
       // Failure when evaluating some expression often means there is some
       // subexpression whose evaluation was skipped. Therefore, (because we
       // don't track whether we skipped an expression when unwinding after an
@@ -2026,6 +2065,12 @@ APValue *EvalInfo::createHeapAlloc(const Expr *E, QualType T, LValue &LV) {
 
 /// Produce a string describing the given constexpr call.
 void CallStackFrame::describe(raw_ostream &Out) const {
+  if (!Callee) {
+    // Synthetic frame (e.g. a namespace-scope do-expression body): no
+    // function to describe.
+    Out << "<expression body>";
+    return;
+  }
   bool IsMemberCall = false;
   bool ExplicitInstanceParam = false;
   clang::PrintingPolicy PrintingPolicy = Info.Ctx.getPrintingPolicy();
@@ -3558,6 +3603,13 @@ static bool HandleLValueVectorElement(EvalInfo &Info, const Expr *E,
   }
   LVal.addVectorElement(Info, E, EltTy, Size, Idx);
   return true;
+}
+
+static bool isSyntheticDoExprDeclContext(const DeclContext *DC) {
+  const auto *FD = dyn_cast<FunctionDecl>(DC);
+  return FD && FD->isImplicit() && !FD->getIdentifier() &&
+         FD->getLexicalDeclContext() &&
+         FD->getLexicalDeclContext()->isFileContext();
 }
 
 /// Try to evaluate the initializer for a variable declaration.
@@ -5787,7 +5839,10 @@ enum EvalStmtResult {
   /// Hit a 'break' statement.
   ESR_Break,
   /// Still scanning for 'case' or 'default' statement.
-  ESR_CaseNotFound
+  ESR_CaseNotFound,
+  /// Hit a 'do_return' statement, yielding a value to the enclosing
+  /// do-expression.
+  ESR_DoReturn
 };
 }
 /// Evaluates the initializer of a reference.
@@ -5817,13 +5872,21 @@ static bool EvaluateInitForDeclOfReferenceType(EvalInfo &Info,
 static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
   if (VD->isInvalidDecl())
     return false;
+  bool TreatAsDoExprLocal =
+      Info.DoExprLocalVarDecls.contains(VD) ||
+      (!VD->hasLocalStorage() && Info.EvaluatingSyntheticDoExprFrame &&
+       Info.CurrentCall && !Info.CurrentCall->Callee &&
+       isSyntheticDoExprDeclContext(VD->getDeclContext()));
   // We don't need to evaluate the initializer for a static local.
-  if (!VD->hasLocalStorage())
+  if (!VD->hasLocalStorage() && !TreatAsDoExprLocal)
     return true;
 
   LValue Result;
   APValue &Val = Info.CurrentCall->createTemporary(VD, VD->getType(),
                                                    ScopeKind::Block, Result);
+  // Note: DoExprLocalVarDecls may have already been set by caller
+  if (TreatAsDoExprLocal)
+    Info.DoExprLocalVarDecls.insert(VD);
 
   const Expr *InitE = VD->getInit();
   if (!InitE) {
@@ -5842,6 +5905,16 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
     // Wipe out any partially-computed value, to allow tracking that this
     // evaluation failed.
     Val = APValue();
+    // If the initializer was abandoned because outer-scope control flow
+    // (`break`/`continue`/`return`) escaped a do-expression, this variable's
+    // lifetime never began: it has no value and must not be destroyed when its
+    // enclosing block scope unwinds. Drop the cleanup createTemporary just
+    // registered for it (it references Val); any do-expression init-statement
+    // variables registered above it stay, since those are alive and destroyed
+    // by the enclosing full-expression.
+    if (Info.PendingDoExprControlFlow != 0)
+      llvm::erase_if(Info.CleanupStack,
+                     [&](const Cleanup &C) { return C.getValuePtr() == &Val; });
     return false;
   }
 
@@ -5931,9 +6004,31 @@ struct TempVersionRAII {
 
 }
 
+static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
+                                       const Stmt *S,
+                                       const SwitchCase *SC = nullptr);
+
+/// Evaluate a statement, then propagate any pending do-expression outer-flow
+/// (e.g. `break` inside a do-expression body) by translating the result to
+/// the stashed control-flow value. This wins over noteFailure-style recovery
+/// (which would otherwise swallow our break/continue and let execution
+/// fall through to the next statement using uninitialized state).
 static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
                                    const Stmt *S,
-                                   const SwitchCase *SC = nullptr);
+                                   const SwitchCase *SC = nullptr) {
+  EvalStmtResult ESR = EvaluateStmtImpl(Result, Info, S, SC);
+  if (Info.PendingDoExprControlFlow != 0) {
+    EvalStmtResult Pending =
+        static_cast<EvalStmtResult>(Info.PendingDoExprControlFlow);
+    Info.PendingDoExprControlFlow = 0;
+    if (Pending == ESR_Returned && Info.PendingDoExprReturnValue) {
+      Result.Value = std::move(*Info.PendingDoExprReturnValue);
+      Info.PendingDoExprReturnValue.reset();
+    }
+    return Pending;
+  }
+  return ESR;
+}
 
 /// Helper to implement named break/continue. Returns 'true' if the evaluation
 /// result should be propagated up. Otherwise, it sets the evaluation result
@@ -6143,6 +6238,7 @@ static EvalStmtResult EvaluateSwitch(StmtResult &Result, EvalInfo &Info,
   case ESR_Continue:
   case ESR_Failed:
   case ESR_Returned:
+  case ESR_DoReturn:
     return ESR;
   case ESR_CaseNotFound:
     // This can only happen if the switch case is nested within a statement
@@ -6169,8 +6265,8 @@ static bool CheckLocalVariableDeclaration(EvalInfo &Info, const VarDecl *VD) {
 }
 
 // Evaluate a statement.
-static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
-                                   const Stmt *S, const SwitchCase *Case) {
+static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
+                                       const Stmt *S, const SwitchCase *Case) {
   if (!Info.nextStep(S))
     return ESR_Failed;
 
@@ -6361,6 +6457,21 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
               : Evaluate(Result.Value, Info, RetExpr)))
       return ESR_Failed;
     return Scope.destroy() ? ESR_Returned : ESR_Failed;
+  }
+
+  case Stmt::DoReturnStmtClass: {
+    const Expr *RetExpr = cast<DoReturnStmt>(S)->getOperand();
+    FullExpressionRAII Scope(Info);
+    if (RetExpr && RetExpr->isValueDependent()) {
+      EvaluateDependentExpr(RetExpr, Info);
+      return ESR_Failed;
+    }
+    if (RetExpr &&
+        !(Result.Slot
+              ? EvaluateInPlace(Result.Value, Info, *Result.Slot, RetExpr)
+              : Evaluate(Result.Value, Info, RetExpr)))
+      return ESR_Failed;
+    return Scope.destroy() ? ESR_DoReturn : ESR_Failed;
   }
 
   case Stmt::CompoundStmtClass: {
@@ -6698,7 +6809,7 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
     EvalStmtResult ESR = ESR_Succeeded;
     for (const Stmt *Instantiation : Expansion->getInstantiations()) {
       ESR = EvaluateStmt(Result, Info, Instantiation);
-      if (ESR == ESR_Failed ||
+      if (ESR == ESR_Failed || ESR == ESR_DoReturn ||
           ShouldPropagateBreakContinue(Info, Expansion, &Scope, ESR))
         return ESR;
       if (ESR != ESR_Continue) {
@@ -9090,6 +9201,11 @@ public:
 
     case BO_Comma:
       VisitIgnoredValue(E->getLHS());
+      // If outer-scope control flow (`break`/`continue`/`return`) escaped a
+      // do-expression in the discarded left operand, abandon the comma without
+      // evaluating the right operand, exactly as at runtime.
+      if (Info.PendingDoExprControlFlow != 0)
+        return false;
       return StmtVisitorTy::Visit(E->getRHS());
 
     case BO_PtrMemD:
@@ -9628,6 +9744,135 @@ public:
     llvm_unreachable("Return from function from the loop above.");
   }
 
+  bool VisitDoExpr(const DoExpr *E) {
+    llvm::SaveAndRestore NotCheckingForUB(Info.CheckingForUndefinedBehavior,
+                                          false);
+
+    APValue YieldedValue;
+    StmtResult Body = {YieldedValue, nullptr};
+
+    // At namespace scope (e.g. evaluating a constexpr variable initializer),
+    // there is no real call frame on the stack — only the BottomFrame.
+    // Push a synthetic CallStackFrame so the body's evaluation has a valid
+    // call context (used by error diagnostics, the cleanup machinery, and so
+    // on). This does NOT yet enable declaring local variables inside such a
+    // body, since the parser still gives those variables a static-storage
+    // DeclContext at namespace scope.
+    std::optional<CallStackFrame> SyntheticFrame;
+    std::optional<llvm::SaveAndRestore<bool>> SyntheticDoExprFrame;
+    if (Info.CurrentCall == &Info.BottomFrame) {
+      SyntheticFrame.emplace(Info, E->getSourceRange(),
+                             /*Callee=*/nullptr, /*This=*/nullptr,
+                             /*CallExpr=*/E, CallRef());
+      SyntheticDoExprFrame.emplace(Info.EvaluatingSyntheticDoExprFrame, true);
+    }
+
+    if (const Stmt *Init = E->getInitStmt()) {
+      unsigned OldCleanupStackSize = Info.CleanupStack.size();
+      auto RegisterInitDecls = [&](const Stmt *S, auto &Self) -> void {
+        if (!S)
+          return;
+        if (const auto *DS = dyn_cast<DeclStmt>(S)) {
+          for (const Decl *D : DS->decls())
+            if (const auto *VD = dyn_cast<VarDecl>(D))
+              Info.DoExprInitVarDecls.insert(VD);
+          return;
+        }
+        for (const Stmt *Sub : S->children())
+          Self(Sub, Self);
+      };
+      RegisterInitDecls(Init, RegisterInitDecls);
+
+      auto EvaluateInitDeclStmt = [&](const DeclStmt *DS) -> bool {
+        for (const Decl *D : DS->decls()) {
+          const VarDecl *VD = dyn_cast_or_null<VarDecl>(D);
+          if (VD && !CheckLocalVariableDeclaration(Info, VD))
+            return false;
+
+          if (const auto *ESD = dyn_cast<CXXExpansionStmtDecl>(D)) {
+            const CXXExpansionStmtInstantiation *Instantiations =
+                ESD->getInstantiations();
+            return Instantiations &&
+                   EvaluateStmt(Body, Info, Instantiations) == ESR_Succeeded;
+          }
+
+          if (!EvaluateDecl(Info, D, /*EvaluateConditionDecl=*/true) &&
+              !Info.noteFailure())
+            return false;
+        }
+        return true;
+      };
+
+      if (const auto *CS = dyn_cast<CompoundStmt>(Init)) {
+        for (const Stmt *S : CS->body()) {
+          const auto *DS = dyn_cast<DeclStmt>(S);
+          if (!DS || !EvaluateInitDeclStmt(DS))
+            return false;
+        }
+      } else {
+        const auto *DS = dyn_cast<DeclStmt>(Init);
+        if (!DS || !EvaluateInitDeclStmt(DS))
+          return false;
+      }
+
+      for (unsigned I = OldCleanupStackSize, End = Info.CleanupStack.size();
+           I != End; ++I) {
+        APValue::LValueBase Base = Info.CleanupStack[I].getBase();
+        bool IsDoExprInitCleanup = false;
+        if (const auto *VD =
+                dyn_cast_or_null<VarDecl>(Base.dyn_cast<const ValueDecl *>())) {
+          IsDoExprInitCleanup = Info.DoExprInitVarDecls.contains(VD);
+        } else if (const auto *E = Base.dyn_cast<const Expr *>()) {
+          if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
+            if (const auto *VD =
+                    dyn_cast_or_null<VarDecl>(MTE->getExtendingDecl()))
+              IsDoExprInitCleanup = Info.DoExprInitVarDecls.contains(VD);
+        }
+
+        if (IsDoExprInitCleanup)
+          Info.CleanupStack[I].setDestroyedAtEndOf(ScopeKind::FullExpression);
+      }
+    }
+
+    BlockScopeRAII Scope(Info);
+    EvalStmtResult ESR = EvaluateStmt(Body, Info, E->getBody());
+
+    if (ESR == ESR_DoReturn) {
+      if (!Scope.destroy())
+        return false;
+      return DerivedSuccess(YieldedValue, E);
+    }
+    if (ESR == ESR_Failed)
+      return false;
+    if (ESR == ESR_Break || ESR == ESR_Continue || ESR == ESR_Returned) {
+      // Outer-scope control flow (`break`/`continue`/`return`) is escaping the
+      // do-expression body. Stash it so the enclosing EvaluateStmt translates
+      // it into the proper EvalStmtResult and propagates it to the enclosing
+      // loop/function, then return false (without a diagnostic) so evaluation
+      // of the rest of the enclosing full-expression is abandoned immediately.
+      // Returning a value here instead would let sibling subexpressions
+      // observably execute before the control transfer, diverging from runtime
+      // semantics. The pending flag is what distinguishes this from a real
+      // evaluation failure: EvaluateStmt checks it regardless of the returned
+      // EvalStmtResult.
+      if (!Scope.destroy())
+        return false;
+      Info.PendingDoExprControlFlow = static_cast<unsigned>(ESR);
+      if (ESR == ESR_Returned && YieldedValue.hasValue())
+        Info.PendingDoExprReturnValue = std::move(YieldedValue);
+      return false;
+    }
+    if (ESR == ESR_Succeeded && E->getType()->isVoidType()) {
+      // Void do-expression: falling off the end is a valid termination.
+      return Scope.destroy();
+    }
+    // ESR_Succeeded with a non-void result type (no do_return reached) and
+    // any other statement-evaluation result are not supported in constant
+    // evaluation through a do-expression.
+    Info.FFDiag(E->getBeginLoc(), diag::note_constexpr_stmt_expr_unsupported);
+    return false;
+  }
+
   bool VisitPackIndexingExpr(const PackIndexingExpr *E) {
     return StmtVisitorTy::Visit(E->getSelectedExpr());
   }
@@ -10107,7 +10352,12 @@ bool LValueExprEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
 bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
   CallStackFrame *Frame = nullptr;
   unsigned Version = 0;
-  if (VD->hasLocalStorage()) {
+  bool IsDoExprLocal =
+      Info.DoExprLocalVarDecls.contains(VD) ||
+      (VD->hasLocalStorage() && Info.EvaluatingSyntheticDoExprFrame &&
+       Info.CurrentCall && !Info.CurrentCall->Callee &&
+       isSyntheticDoExprDeclContext(VD->getDeclContext()));
+  if (VD->hasLocalStorage() || IsDoExprLocal) {
     // Only if a local variable was declared in the function currently being
     // evaluated, do we expect to be able to find its value in the current
     // frame. (Otherwise it was likely declared in an enclosing context and
@@ -10115,8 +10365,11 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
     // variable) or be ill-formed (and trigger an appropriate evaluation
     // diagnostic)).
     CallStackFrame *CurrFrame = Info.CurrentCall;
-    if (CurrFrame->Callee &&
-        CurrFrame->Callee->Equals(VD->getDeclContext())) {
+    if (IsDoExprLocal) {
+      Frame = CurrFrame;
+      Version = CurrFrame->getCurrentTemporaryVersion(VD);
+    } else if (CurrFrame->Callee &&
+               CurrFrame->Callee->Equals(VD->getDeclContext())) {
       // Function parameters are stored in some caller's frame. (Usually the
       // immediate caller, but for an inherited constructor they may be more
       // distant.)
@@ -23277,6 +23530,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::VAArgExprClass:
   case Expr::AddrLabelExprClass:
   case Expr::StmtExprClass:
+  case Expr::DoExprClass:
   case Expr::CXXMemberCallExprClass:
   case Expr::CUDAKernelCallExprClass:
   case Expr::CXXAddrspaceCastExprClass:
