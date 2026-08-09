@@ -1318,6 +1318,7 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
 
     VarDeclBits.addBit(D->isObjCForDecl());
     VarDeclBits.addBit(D->isCXXForRangeImplicitVar());
+    VarDeclBits.addBit(D->isDoExprInitCapture());
   }
 
   Record.push_back(VarDeclBits);
