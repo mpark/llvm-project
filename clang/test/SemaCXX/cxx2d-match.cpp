@@ -147,6 +147,18 @@ int static_pointer_lvalue_reference(Circle *circle) {
   };
 }
 
+struct Erased {};
+
+template<class T>
+T* try_cast(Erased&);
+
+int naked_declaration_does_not_use_adl_try_cast(Erased& erased) {
+  return erased match {
+    case int& value => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'Erased'}}
+    case _ => 0;
+  };
+}
+
 int forwarding(int &&value) {
   return static_cast<int &&>(value) match {
     case auto &&ref => ref;
