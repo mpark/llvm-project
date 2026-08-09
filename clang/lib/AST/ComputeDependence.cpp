@@ -1136,14 +1136,55 @@ ExprDependence clang::computeDependence(OpenACCAsteriskSizeExpr *E) {
   return ExprDependence::None;
 }
 
+static ExprDependence getMatchStmtDependence(const Stmt *S) {
+  if (!S)
+    return ExprDependence::None;
+  if (const auto *E = dyn_cast<Expr>(S))
+    return E->getDependence();
+
+  ExprDependence D = ExprDependence::None;
+  if (const auto *DS = dyn_cast<DeclStmt>(S)) {
+    for (const Decl *Declaration : DS->decls()) {
+      const auto *Value = dyn_cast<ValueDecl>(Declaration);
+      if (!Value)
+        continue;
+      D |= toExprDependenceForImpliedType(Value->getType()->getDependence());
+      if (const auto *Variable = dyn_cast<VarDecl>(Value))
+        if (const Expr *Init = Variable->getInit())
+          D |= Init->getDependence();
+    }
+  }
+  for (const Stmt *Child : S->children())
+    D |= getMatchStmtDependence(Child);
+  return D;
+}
+
+static ExprDependence getMatchGuardDependence(const MatchGuard &Guard) {
+  ExprDependence D = getMatchStmtDependence(Guard.Init);
+  if (const VarDecl *Variable = Guard.ConditionVariable) {
+    D |= toExprDependenceForImpliedType(Variable->getType()->getDependence());
+    if (const Expr *Init = Variable->getInit())
+      D |= Init->getDependence();
+  }
+  if (Guard.Condition)
+    D |= Guard.Condition->getDependence();
+  return D;
+}
+
 ExprDependence clang::computeDependence(MatchTestExpr *E) {
-  // Match test expressions are value-dependent either the subject or
-  // the pattern is value-dependent.
   return turnTypeToValueDependence(E->getSubject()->getDependence() |
-                                   E->getPattern()->getDependence());
+                                   E->getPattern()->getDependence() |
+                                   getMatchGuardDependence(E->getGuard()));
 }
 
 ExprDependence clang::computeDependence(MatchSelectExpr *E) {
-  // FIXME(mpark): Account for the patterns and handlers and such.
-  return E->getSubject()->getDependence();
+  ExprDependence D =
+      toExprDependenceForImpliedType(E->getType()->getDependence());
+  D |= turnTypeToValueDependence(E->getSubject()->getDependence());
+  for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
+    D |= turnTypeToValueDependence(Case.Pattern->getDependence());
+    D |= turnTypeToValueDependence(getMatchGuardDependence(Case.Guard));
+    D |= turnTypeToValueDependence(getMatchStmtDependence(Case.Handler));
+  }
+  return D;
 }
