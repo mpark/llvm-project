@@ -478,7 +478,7 @@ static void forEachDeclarationPattern(
     forEachDeclarationPattern(Child, Callback);
 }
 
-static bool isMoveInitialized(const VarDecl *Declaration) {
+static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
   if (Declaration->isInvalidDecl() || !Declaration->hasInit())
     return false;
 
@@ -498,7 +498,8 @@ static bool isMoveInitialized(const VarDecl *Declaration) {
   }
 
   const auto *Construct = dyn_cast<CXXConstructExpr>(Init);
-  return Construct && Construct->getConstructor()->isMoveConstructor();
+  return Construct && Construct->getConstructor()->isMoveConstructor() &&
+         !Construct->getConstructor()->isTrivial();
 }
 
 } // namespace
@@ -506,7 +507,7 @@ static bool isMoveInitialized(const VarDecl *Declaration) {
 void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
   forEachDeclarationPattern(Pattern, [&](DeclarationPattern *P) {
     VarDecl *Declaration = P->getDeclaration();
-    if (isMoveInitialized(Declaration))
+    if (isNonTriviallyMoveInitialized(Declaration))
       Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
           << Declaration->getType();
   });
