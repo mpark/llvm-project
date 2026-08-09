@@ -29,6 +29,13 @@ int match_rvalue_any(std::any&& a) {
   };
 }
 
+int match_prvalue_any() {
+  return std::any(43) match {
+    case { int&& i } => i;
+    case _ => -1;
+  };
+}
+
 int match_empty_any(const std::any& a) {
   return a match {
     case {} => 0;
@@ -81,6 +88,7 @@ int main(int, char**) {
   assert(match_any(0.0f) == -1);
   assert(match_any(std::any{}) == -1);
   assert(match_rvalue_any(std::any(42)) == 42);
+  assert(match_prvalue_any() == 43);
   assert(match_empty_any(std::any{}) == 0);
   assert(match_empty_any(std::any(42)) == 42);
   assert(test_empty_any(std::any{}));
