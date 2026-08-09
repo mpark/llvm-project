@@ -248,10 +248,10 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static const std::type_info* type(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
-  static T get(Self&&);
+  static T* try_cast(Self&&);
 };
 
 int open_alternatives(OpenChoice choice) {
@@ -290,10 +290,8 @@ struct AlwaysOpen {};
 
 template<>
 struct std::alternative_traits<AlwaysOpen> {
-  static const std::type_info& type(const AlwaysOpen&);
-
   template<class T, class Self>
-  static T get(Self&&);
+  static T* try_cast(Self&&);
 };
 
 int always_open(AlwaysOpen choice) {
@@ -309,15 +307,45 @@ int always_open_has_no_empty_state(AlwaysOpen choice) {
   };
 }
 
+struct ConstOpenChoice {};
+
+template<>
+struct std::alternative_traits<ConstOpenChoice> {
+  template<class T, class Self>
+  static const T* try_cast(Self&&);
+};
+
+int mutable_reference_does_not_bind_to_const_projection(
+    ConstOpenChoice choice) {
+  return choice match {
+    case { int& value } => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'const int'}}
+    case { _ } => 0;
+  };
+}
+
 struct InvalidOpen {};
 
 template<>
 struct std::alternative_traits<InvalidOpen> {
-  static int type(const InvalidOpen&);
+  template<class T, class Self>
+  static int try_cast(Self&&);
 };
 
 int invalid_open_protocol(InvalidOpen choice) {
   return choice match {
-    case { _ } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'type' must return a pointer or reference}}
+    case { int } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'try_cast' must return a pointer}}
+    case { _ } => 0;
+  };
+}
+
+struct IncompleteOpen {};
+
+template<>
+struct std::alternative_traits<IncompleteOpen> {};
+
+int incomplete_open_protocol(IncompleteOpen choice) {
+  return choice match {
+    case { int } => 1; // expected-error {{does not provide a usable either 'size' or 'try_cast' member}}
+    case _ => 0;
   };
 }

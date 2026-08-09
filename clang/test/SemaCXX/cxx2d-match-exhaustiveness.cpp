@@ -676,10 +676,10 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static const std::type_info* type(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
-  static T get(Self&&);
+  static T* try_cast(Self&&);
 };
 
 int exhaustive_open_alternatives(OpenChoice choice) {
@@ -753,10 +753,8 @@ struct AlwaysOpen {};
 
 template<>
 struct std::alternative_traits<AlwaysOpen> {
-  static const std::type_info& type(const AlwaysOpen&);
-
   template<class T, class Self>
-  static T get(Self&&);
+  static T* try_cast(Self&&);
 };
 
 int projectable_wildcard_exhausts_nonnullable_open_choice(AlwaysOpen choice) {

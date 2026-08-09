@@ -3,11 +3,6 @@
 // RUN:   | FileCheck %s
 
 namespace std {
-class type_info {
-public:
-  bool operator==(const type_info&) const;
-};
-
 template<class T>
 struct alternative_traits;
 }
@@ -128,18 +123,17 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static const std::type_info* type(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
-  static T get(Self&&);
+  static T* try_cast(Self&&);
 };
 
 // CHECK-LABEL: define{{.*}} i32 @_Z22match_open_alternativeR10OpenChoice
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE3getIRiRS0_EET_OT0_
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE3getIRiRS0_EET_OT0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE4typeERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_cast
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_cast
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
 // CHECK: ret i32
 int match_open_alternative(OpenChoice& value) {
   return value match {

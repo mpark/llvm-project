@@ -559,12 +559,20 @@ namespace N1 {
   }
 }
 
+template <>
+struct std::alternative_traits<N1::S> {
+  template <typename T, typename Self>
+  static constexpr auto try_cast(Self&& value) {
+    return N1::try_cast<T>(static_cast<Self&&>(value));
+  }
+};
+
 constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
   return s match -> int {
-    case const int& i if (i == 0) => 0;
-    case const int& i => i;
-    case const double& d => d;
-    case const short& value => value;
+    case { const int& i } if (i == 0) => 0;
+    case { const int& i } => i;
+    case { const double& d } => d;
+    case { const short& value } => value;
     case _ => -1;
   };
 }
