@@ -48,6 +48,19 @@ int declaration_lifetime_in_while() {
   return alive * 10 + iterations;
 }
 
+struct TrivialMoveState {
+  int value;
+};
+
+int failed_guard_preserves_trivially_moved_subject() {
+  TrivialMoveState subject{7};
+  return static_cast<TrivialMoveState&&>(subject) match {
+    case TrivialMoveState first if (false) => first.value;
+    case TrivialMoveState second if (second.value == 7) => 1;
+    case _ => 2;
+  };
+}
+
 int main(int, char**) {
   if (declaration_lifetime_in_if(0) != 2)
     return 1;
@@ -55,5 +68,7 @@ int main(int, char**) {
     return 2;
   if (declaration_lifetime_in_while() != 12)
     return 3;
+  if (failed_guard_preserves_trivially_moved_subject() != 1)
+    return 4;
   return 0;
 }

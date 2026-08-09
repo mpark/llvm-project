@@ -1046,6 +1046,21 @@ constexpr int failed_guard_does_not_reuse_binding_identity() {
 
 static_assert(failed_guard_does_not_reuse_binding_identity() == 3);
 
+struct TrivialMoveState {
+  int value;
+};
+
+constexpr int failed_guard_preserves_trivially_moved_subject() {
+  TrivialMoveState subject{7};
+  return static_cast<TrivialMoveState &&>(subject) match {
+    case TrivialMoveState first if (false) => first.value;
+    case TrivialMoveState second if (second.value == 7) => 1;
+    case _ => 2;
+  };
+}
+
+static_assert(failed_guard_preserves_trivially_moved_subject() == 1);
+
 constexpr int subject_is_evaluated_once() {
   int evaluations = 0;
   return (++evaluations, 5) match {
