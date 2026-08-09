@@ -133,6 +133,26 @@ int downcast_pointer_declaration(Shape *shape) {
   };
 }
 
+// CHECK-LABEL: define{{.*}} i32 @_Z44downcast_pointer_const_reference_declarationP5Shape
+// CHECK: call ptr @__dynamic_cast
+// CHECK: ret i32
+int downcast_pointer_const_reference_declaration(Shape *shape) {
+  return shape match {
+    case Circle *const &circle => circle->radius;
+    case _ => -1;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z45downcast_pointer_rvalue_reference_declarationP5Shape
+// CHECK: call ptr @__dynamic_cast
+// CHECK: ret i32
+int downcast_pointer_rvalue_reference_declaration(Shape *shape) {
+  return shape match {
+    case Circle *&&circle => circle->radius;
+    case _ => -1;
+  };
+}
+
 struct Erased {};
 
 template<class T>
