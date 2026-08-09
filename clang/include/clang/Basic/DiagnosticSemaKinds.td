@@ -14463,7 +14463,9 @@ def err_declaration_pattern_not_exact_match : Error<
 def err_type_pattern_not_exact_match : Error<
   "type pattern of type %0 is not an exact match for subject of type %1">;
 def err_guarded_declaration_pattern_move : Error<
-  "guarded declaration pattern of type %0 would move from the match subject">;
+  "guarded declaration pattern of type %0 invokes a non-trivial move "
+  "constructor before its guard; bind a reference and move in the handler "
+  "instead">;
 def err_alternative_traits_missing : Error<
   "type %0 does not provide a usable 'std::alternative_traits' specialization">;
 def err_alternative_traits_size_not_constant : Error<
