@@ -14484,8 +14484,8 @@ def err_empty_alternative_not_found : Error<
 def err_open_alternative_pattern_not_type_directed : Error<
   "open alternative protocol for type %0 requires a declaration or type "
   "pattern with a non-placeholder, non-void type">;
-def err_open_alternative_type_result : Error<
-  "invalid open alternative protocol for type %0; 'type' must return a "
-  "pointer or reference">;
+def err_open_alternative_try_cast_result : Error<
+  "invalid open alternative protocol for type %0; 'try_cast' must return a "
+  "pointer">;
 
 } // end of sema component.

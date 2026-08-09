@@ -28,18 +28,6 @@ bool matches_circle_pointer(Shape* shape) {
   return shape match case Circle*;
 }
 
-struct Erased {};
-
-template<class T>
-T* try_cast(Erased&);
-
-// CHECK-LABEL: define{{.*}} i1 @_Z18matches_erased_intR6Erased
-// CHECK: call{{.*}} ptr @_Z8try_castIiEPT_R6Erased
-// CHECK: icmp ne ptr
-bool matches_erased_int(Erased& erased) {
-  return erased match case int&;
-}
-
 int copies;
 
 struct Copyable {
