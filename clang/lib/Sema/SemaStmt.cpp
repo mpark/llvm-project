@@ -4069,6 +4069,9 @@ Sema::ActOnReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
   CheckInvalidBuiltinCountedByRef(RetVal.get(),
                                   BuiltinCountedByRefKind::ReturnArg);
 
+  if (isInSyntheticDoExprFunctionScope())
+    return StmtError(Diag(ReturnLoc, diag::err_return_outside_function));
+
   StmtResult R =
       BuildReturnStmt(ReturnLoc, RetVal.get(), /*AllowRecovery=*/true);
   if (R.isInvalid() || ExprEvalContexts.back().isDiscardedStatementContext()) {

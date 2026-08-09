@@ -1136,6 +1136,14 @@ protected:
     /// loop.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsCXXForRangeImplicitVar : 1;
+    /// Whether this variable is a do-expression init-capture. Unlike an
+    /// ordinary block-scoped local, such a variable's lifetime extends to the
+    /// end of the enclosing full-expression (it is not destroyed at the `}` of
+    /// the do-expression), so the lifetime analysis treats a reference into it
+    /// as valid for the rest of that full-expression but dangling if bound to
+    /// an entity that outlives it.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsDoExprInitCapture : 1;
   };
 
   union {
@@ -1621,6 +1629,18 @@ public:
   void setConstexpr(bool IC) {
     assert(!isa<ParmVarDecl>(this));
     NonParmVarDeclBits.IsConstexpr = IC;
+  }
+
+  /// Whether this variable is a do-expression init-capture, whose lifetime
+  /// extends to the end of the enclosing full-expression rather than ending at
+  /// the `}` of the do-expression.
+  bool isDoExprInitCapture() const {
+    return isa<ParmVarDecl>(this) ? false
+                                  : NonParmVarDeclBits.IsDoExprInitCapture;
+  }
+  void setDoExprInitCapture(bool IC) {
+    assert(!isa<ParmVarDecl>(this));
+    NonParmVarDeclBits.IsDoExprInitCapture = IC;
   }
 
   /// Whether this variable is the implicit variable for a lambda init-capture.
