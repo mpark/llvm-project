@@ -21187,7 +21187,7 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
                PatternInfo->Projection->getConditionExpr(), Result, Info) &&
            (!Result || (EvaluateProjectionValue(PatternInfo->Projection, Info,
                                                 ProjectionCache) &&
-                        (P->isEmpty() ||
+                        (!P->getSubPattern() ||
                          EvaluateMatchPattern(P->getSubPattern(), Instantiation,
                                               Result, Info, ProjectionCache))));
   }
