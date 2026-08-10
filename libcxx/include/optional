@@ -297,25 +297,7 @@ namespace std {
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp>
-struct alternative_traits<optional<_Tp>> {
-  static constexpr size_t size = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template <size_t _Ip>
-    requires(_Ip == 1)
-  using projection_type = _Tp;
-
-  _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const optional<_Tp>& __value) noexcept {
-    return __value.has_value() ? 1 : 0;
-  }
-
-  template <size_t _Ip, class _Self>
-    requires(_Ip == 1)
-  _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
-    return *std::forward<_Self>(__self);
-  }
-
-};
+struct alternative_traits<optional<_Tp>> : alternative_traits<_Tp*> {};
 
 _LIBCPP_END_NAMESPACE_STD
 

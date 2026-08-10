@@ -205,32 +205,18 @@ struct AlternativeTraitsInfo {
   llvm::SmallVector<QualType, 4> Alternatives;
   llvm::SmallVector<bool, 4> Projectable;
 };
+
+struct NamedAlternativeInfo {
+  unsigned Index;
+  AlternativeTraitsInfo Traits;
+};
 } // namespace
 
-static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
-                                    QualType SubjectType,
-                                    AlternativeTraitsInfo &Info) {
-  SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
-  if (const auto *Pointer = SubjectType->getAs<PointerType>();
-      Pointer && !Pointer->getPointeeType()->isVoidType()) {
-    Info.Size = 2;
-    Info.IsBuiltinPointer = true;
-    Info.Alternatives = {S.Context.VoidTy, Pointer->getPointeeType()};
-    Info.Projectable = {false, true};
-    return false;
-  }
-
-  TemplateArgumentListInfo TraitArgs(Loc, Loc);
-  TraitArgs.addArgument(getTrivialTypeTemplateArgument(S, Loc, SubjectType));
-
-  LookupResult SizeLookup(S, S.PP.getIdentifierInfo("size"), Loc,
-                          Sema::LookupOrdinaryName);
-  if (lookupStdTypeTraitMember(S, SizeLookup, Loc, "alternative_traits",
-                               TraitArgs, diag::err_alternative_traits_missing,
-                               &Info.Type))
-    return true;
-
-  Info.Record = Info.Type->getAsCXXRecordDecl();
+static bool initializeAlternativeTraitsInfo(
+    Sema &S, SourceLocation Loc, QualType SubjectType, QualType TraitType,
+    LookupResult &SizeLookup, bool AllowOpen, AlternativeTraitsInfo &Info) {
+  Info.Type = TraitType;
+  Info.Record = TraitType->getAsCXXRecordDecl();
   if (!Info.Record)
     return true;
 
@@ -238,9 +224,10 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
     LookupResult TryCastLookup(S, S.PP.getIdentifierInfo("try_cast"), Loc,
                                Sema::LookupOrdinaryName);
     S.LookupQualifiedName(TryCastLookup, Info.Record);
-    if (TryCastLookup.empty()) {
+    if (!AllowOpen || TryCastLookup.empty()) {
       S.Diag(Loc, diag::err_alternative_traits_member_missing)
-          << SubjectType << "either 'size' or 'try_cast'";
+          << SubjectType
+          << (AllowOpen ? "either 'size' or 'try_cast'" : "'size'");
       return true;
     }
     LookupResult HasValueLookup(S, S.PP.getIdentifierInfo("has_value"), Loc,
@@ -286,42 +273,53 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
       return true;
     Info.IsExhaustive = !ExhaustiveValue.isZero();
   }
-
-  LookupResult ProjectionTypeLookup(
-      S, S.PP.getIdentifierInfo("projection_type"), Loc,
-      Sema::LookupOrdinaryName);
-  S.LookupQualifiedName(ProjectionTypeLookup, Info.Record);
-  auto *ProjectionTypeTemplate =
-      ProjectionTypeLookup.getAsSingle<TypeAliasTemplateDecl>();
-
-  Info.Alternatives.reserve(Info.Size);
-  Info.Projectable.reserve(Info.Size);
-  for (unsigned I = 0; I < Info.Size; ++I) {
-    TemplateArgumentListInfo Args(Loc, Loc);
-    Args.addArgument(
-        getTrivialIntegralTemplateArgument(S, Loc, S.Context.getSizeType(), I));
-    QualType ProjectionType;
-    bool IsProjectable = false;
-    if (ProjectionTypeTemplate) {
-      Sema::SFINAETrap Trap(S, /*WithAccessChecking=*/true);
-      ProjectionType = S.CheckTemplateIdType(
-          ElaboratedTypeKeyword::None, TemplateName(ProjectionTypeTemplate),
-          Loc, Args, nullptr, false);
-      IsProjectable = !ProjectionType.isNull() && !Trap.hasErrorOccurred();
-    }
-    Info.Alternatives.push_back(IsProjectable ? ProjectionType
-                                              : S.Context.VoidTy);
-    Info.Projectable.push_back(IsProjectable);
-  }
   return false;
 }
 
-static std::optional<unsigned>
+static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
+                                    QualType SubjectType,
+                                    AlternativeTraitsInfo &Info) {
+  SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
+  if (const auto *Pointer = SubjectType->getAs<PointerType>()) {
+    if (Pointer->getPointeeType()->isVoidType()) {
+      S.Diag(Loc, diag::err_braced_alternative_void_pointer);
+      return true;
+    }
+    Info.Type = SubjectType;
+    Info.Size = 2;
+    Info.IsBuiltinPointer = true;
+    Info.Alternatives = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Info.Projectable = {false, true};
+    return false;
+  }
+
+  TemplateArgumentListInfo TraitArgs(Loc, Loc);
+  TraitArgs.addArgument(getTrivialTypeTemplateArgument(S, Loc, SubjectType));
+
+  LookupResult SizeLookup(S, S.PP.getIdentifierInfo("size"), Loc,
+                          Sema::LookupOrdinaryName);
+  if (lookupStdTypeTraitMember(S, SizeLookup, Loc, "alternative_traits",
+                               TraitArgs, diag::err_alternative_traits_missing,
+                               &Info.Type))
+    return true;
+  return initializeAlternativeTraitsInfo(S, Loc, SubjectType, Info.Type,
+                                         SizeLookup, /*AllowOpen=*/true, Info);
+}
+
+static std::optional<NamedAlternativeInfo>
 lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
                       const AlternativeTraitsInfo &Info, IdentifierInfo *Name) {
   if (Info.IsBuiltinPointer) {
-    S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
-    return std::nullopt;
+    unsigned Index;
+    if (Name->isStr("none"))
+      Index = 0;
+    else if (Name->isStr("some"))
+      Index = 1;
+    else {
+      S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
+      return std::nullopt;
+    }
+    return NamedAlternativeInfo{Index, Info};
   }
 
   LookupResult NamesLookup(S, S.PP.getIdentifierInfo("names"), Loc,
@@ -360,21 +358,58 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
   }
-  llvm::APSInt Value(32);
-  if (auto *Enumerator = dyn_cast<EnumConstantDecl>(NameDecl)) {
-    Value = Enumerator->getInitVal();
-  } else {
-    Expr *NameExpr =
-        S.BuildDeclRefExpr(NameDecl, NameDecl->getType(), VK_LValue, Loc);
-    if (S.VerifyIntegerConstantExpression(NameExpr, &Value).isInvalid())
-      return std::nullopt;
-  }
-  unsigned Index = Value.getLimitedValue(UINT_MAX);
-  if (Index >= Info.Size) {
+
+  QualType NameType =
+      NameDecl->getType().getNonReferenceType().getUnqualifiedType();
+  auto *NameSpecialization = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
+      NameType->getAsCXXRecordDecl());
+  if (!NameSpecialization || !NameSpecialization->isInStdNamespace() ||
+      !NameSpecialization->getIdentifier() ||
+      NameSpecialization->getName() != "alternative_name" ||
+      NameSpecialization->getTemplateArgs().size() != 1 ||
+      NameSpecialization->getTemplateArgs()[0].getKind() !=
+          TemplateArgument::Type) {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
   }
-  return Index;
+
+  Expr *NameExpr =
+      S.BuildDeclRefExpr(NameDecl, NameDecl->getType(), VK_LValue, Loc);
+  CXXScopeSpec SS;
+  DeclarationNameInfo IndexName(S.PP.getIdentifierInfo("index"), Loc);
+  ExprResult IndexExpr = S.BuildMemberReferenceExpr(
+      NameExpr, NameExpr->getType(), Loc, /*IsArrow=*/false, SS,
+      SourceLocation(), nullptr, IndexName, /*TemplateArgs=*/nullptr,
+      /*Scope=*/nullptr);
+  if (IndexExpr.isInvalid())
+    return std::nullopt;
+  llvm::APSInt Value(32);
+  if (S.VerifyIntegerConstantExpression(IndexExpr.get(), &Value).isInvalid())
+    return std::nullopt;
+
+  QualType ProviderType = NameSpecialization->getTemplateArgs()[0].getAsType();
+  if (S.RequireCompleteType(Loc, ProviderType,
+                            diag::err_alternative_traits_member_missing,
+                            SubjectType, "complete alternative provider"))
+    return std::nullopt;
+  CXXRecordDecl *ProviderRecord = ProviderType->getAsCXXRecordDecl();
+  if (!ProviderRecord)
+    return std::nullopt;
+  LookupResult SizeLookup(S, S.PP.getIdentifierInfo("size"), Loc,
+                          Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(SizeLookup, ProviderRecord);
+  AlternativeTraitsInfo ProviderInfo;
+  if (initializeAlternativeTraitsInfo(S, Loc, SubjectType, ProviderType,
+                                      SizeLookup, /*AllowOpen=*/false,
+                                      ProviderInfo))
+    return std::nullopt;
+
+  unsigned Index = Value.getLimitedValue(UINT_MAX);
+  if (Index >= ProviderInfo.Size) {
+    S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
+    return std::nullopt;
+  }
+  return NamedAlternativeInfo{Index, std::move(ProviderInfo)};
 }
 
 static ExprResult buildAlternativeTraitsCall(
@@ -410,6 +445,30 @@ static ExprResult buildAlternativeTraitsCall(
   if (Callee.isInvalid())
     return ExprError();
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
+}
+
+static void determineAlternativeProjections(Sema &S, SourceLocation Loc,
+                                            Expr *Subject,
+                                            AlternativeTraitsInfo &Info) {
+  if (Info.IsBuiltinPointer)
+    return;
+
+  Info.Alternatives.reserve(Info.Size);
+  Info.Projectable.reserve(Info.Size);
+  for (unsigned I = 0; I < Info.Size; ++I) {
+    auto *Probe = new (S.Context)
+        OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
+                        Subject->getObjectKind(), Subject);
+    EnterExpressionEvaluationContext Unevaluated(
+        S, Sema::ExpressionEvaluationContext::Unevaluated);
+    Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+    ExprResult GetCall =
+        buildAlternativeTraitsCall(S, Loc, Info, "get", Probe, I);
+    bool IsProjectable = GetCall.isUsable() && !Trap.hasErrorOccurred();
+    Info.Alternatives.push_back(IsProjectable ? GetCall.get()->getType()
+                                              : S.Context.VoidTy);
+    Info.Projectable.push_back(IsProjectable);
+  }
 }
 
 static ExprResult buildOpenAlternativeTraitsTryCastCall(
@@ -783,14 +842,30 @@ createMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
 }
 
 static MatchProjection *
-findAlternativeDiscriminatorProjection(Sema::MatchProjectionCache *Cache,
-                                       const Expr *Subject) {
+findAlternativeHoldingProjection(Sema::MatchProjectionCache *Cache,
+                                 const Expr *Subject) {
   if (!Cache)
     return nullptr;
   for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
     if (Entry.Subject == Subject &&
         Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
         Entry.Path == Cache->CurrentProjectionPath)
+      return Entry.Projection;
+  }
+  return nullptr;
+}
+
+static MatchProjection *findAlternativeDiscriminatorProjection(
+    Sema &S, Sema::MatchProjectionCache *Cache, const Expr *Subject,
+    QualType ProviderType) {
+  if (!Cache)
+    return nullptr;
+  for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
+    if (Entry.Subject == Subject &&
+        Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
+        Entry.Path == Cache->CurrentProjectionPath &&
+        !Entry.Discriminator.isNull() &&
+        S.Context.hasSameType(Entry.Discriminator, ProviderType))
       return Entry.Projection;
   }
   return nullptr;
@@ -1063,7 +1138,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   ExprValueKind SubjectValueKind = Subject->getValueKind();
   auto GetHoldingVar = [&]() -> VarDecl * {
     if (MatchProjection *Shared =
-            findAlternativeDiscriminatorProjection(ProjectionCache, Subject))
+            findAlternativeHoldingProjection(ProjectionCache, Subject))
       if (Shared->getHoldingVar())
         return Shared->getHoldingVar();
     return BuildVarDecl(S, Loc, S.Context.getAutoRRefDeductType(), Subject);
@@ -1078,11 +1153,11 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
     constexpr unsigned OpenStateCacheKey = ~0u;
     MatchProjection *StateProjection = findMatchProjection(
         S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
-        QualType(), OpenStateCacheKey);
+        Traits.Type, OpenStateCacheKey);
     if (!StateProjection) {
       StateProjection = createMatchProjection(
           S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
-          QualType(), OpenStateCacheKey);
+          Traits.Type, OpenStateCacheKey);
       VarDecl *HoldingVar = GetHoldingVar();
       if (HoldingVar->isInvalidDecl())
         return true;
@@ -1228,13 +1303,18 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   llvm::SmallVector<unsigned, 4> Selected;
   if (Pattern->isNamed()) {
-    std::optional<unsigned> Index =
+    std::optional<NamedAlternativeInfo> Named =
         lookupAlternativeName(S, Pattern->getDiscriminatorRange().getBegin(),
                               SubjectType, Traits, Pattern->getName());
-    if (!Index)
+    if (!Named)
       return true;
-    Selected.push_back(*Index);
-  } else if (Pattern->isEmpty()) {
+    Selected.push_back(Named->Index);
+    Traits = std::move(Named->Traits);
+  }
+
+  determineAlternativeProjections(S, Loc, Subject, Traits);
+
+  if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (!Traits.Projectable[I])
         Selected.push_back(I);
@@ -1242,7 +1322,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
       return true;
     }
-  } else {
+  } else if (!Pattern->isNamed()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (Traits.Projectable[I])
         Selected.push_back(I);
@@ -1274,7 +1354,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     Selected.assign(1, Chosen);
   }
 
-  if (!Pattern->isEmpty() && !Traits.Projectable[Selected.front()]) {
+  if (Pattern->getSubPattern() && !Traits.Projectable[Selected.front()]) {
     S.Diag(Loc, diag::err_alternative_traits_member_missing)
         << SubjectType << "projectable selected state";
     return true;
@@ -1293,6 +1373,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   std::uninitialized_copy(Selected.begin(), Selected.end(),
                           SelectedAlternatives);
   MatchPatternInfo &PatternInfo = State.get(Pattern);
+  PatternInfo.AlternativeProviderType = Traits.Type;
   PatternInfo.AlternativeTypes =
       ArrayRef(AlternativeTypes, Traits.Alternatives.size());
   PatternInfo.ProjectableAlternatives =
@@ -1304,9 +1385,9 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
   if (MatchProjection *Projection = findMatchProjection(
           S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
-          QualType(), CacheKey)) {
+          Traits.Type, CacheKey)) {
     PatternInfo.Projection = Projection;
-    if (Pattern->isEmpty())
+    if (!Pattern->getSubPattern())
       return false;
     return S.CheckCompleteMatchPattern(Projection->getProjectedExpr(),
                                        Pattern->getSubPattern(), State,
@@ -1315,17 +1396,18 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   MatchProjection *Projection = createMatchProjection(
       S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
-      QualType(), CacheKey);
+      Traits.Type, CacheKey);
   PatternInfo.Projection = Projection;
 
   ExprValueKind SubjectValueKind = Subject->getValueKind();
-  MatchProjection *SharedDiscriminator =
-      findAlternativeDiscriminatorProjection(ProjectionCache, Subject);
+  MatchProjection *SharedHolding =
+      findAlternativeHoldingProjection(ProjectionCache, Subject);
+  MatchProjection *SharedDiscriminator = findAlternativeDiscriminatorProjection(
+      S, ProjectionCache, Subject, Traits.Type);
   VarDecl *HoldingVar;
-  if (SharedDiscriminator && SharedDiscriminator != Projection) {
-    HoldingVar = SharedDiscriminator->getHoldingVar();
+  if (SharedHolding && SharedHolding != Projection) {
+    HoldingVar = SharedHolding->getHoldingVar();
     Projection->setHoldingVar(HoldingVar);
-    Projection->setIntermediateVar(SharedDiscriminator->getIntermediateVar());
   } else {
     HoldingVar =
         BuildVarDecl(S, Loc, S.Context.getAutoRRefDeductType(), Subject);
@@ -1333,6 +1415,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       return true;
     Projection->setHoldingVar(HoldingVar);
   }
+  if (SharedDiscriminator && SharedDiscriminator != Projection)
+    Projection->setIntermediateVar(SharedDiscriminator->getIntermediateVar());
   Expr *HoldingRef = S.BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue, Loc);
   Expr *ForwardedRef = asValueKind(S, HoldingRef, SubjectValueKind);
@@ -1385,7 +1469,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   if (buildMatchProjectionCondition(S, Projection, Loc).isInvalid())
     return true;
 
-  if (Pattern->isEmpty())
+  if (!Pattern->getSubPattern())
     return false;
 
   unsigned Index = Selected.front();
@@ -1610,7 +1694,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject) {
-      if (P->isEmpty())
+      if (!P->getSubPattern())
         return false;
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern(), State);
     }

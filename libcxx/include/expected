@@ -250,23 +250,23 @@ _LIBCPP_HIDE_FROM_ABI constexpr add_pointer_t<const _Up> get_if(const expected<_
 
 template <class _Tp, class _Ep>
 struct alternative_traits<expected<_Tp, _Ep>> {
+  using _AT = alternative_traits;
+
   static constexpr size_t size = 2;
   static constexpr bool is_exhaustive = true;
 
-  struct names {
-    enum { value, error };
+  struct names : alternative_traits<_Tp*>::names {
+    static constexpr alternative_name<_AT> value = 0, error = 1;
   };
 
-  template <size_t _Ip>
-  using projection_type = conditional_t<_Ip == names::value, _Tp, _Ep>;
-
   _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const expected<_Tp, _Ep>& __value) noexcept {
-    return __value.has_value() ? names::value : names::error;
+    return __value.has_value() ? 0 : 1;
   }
 
   template <size_t _Ip, class _Self>
+    requires(_Ip < 2)
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) {
-    if constexpr (_Ip == names::value)
+    if constexpr (_Ip == 0)
       return *std::forward<_Self>(__self);
     else
       return std::forward<_Self>(__self).error();
