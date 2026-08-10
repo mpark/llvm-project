@@ -14,6 +14,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include <algorithm>
 
 using namespace clang;
@@ -40,6 +41,52 @@ MatchPatternInstantiation::find(const MatchPattern *P) const {
     if (Info.Pattern == P)
       return &Info;
   return nullptr;
+}
+
+void clang::visitMatchPatternEvaluation(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<void(const Decl *)> VisitDecl,
+    llvm::function_ref<void(const Stmt *)> VisitStmt) {
+  llvm::SmallPtrSet<const Decl *, 8> VisitedDecls;
+  llvm::SmallPtrSet<const Stmt *, 16> VisitedStmts;
+
+  auto VisitStatement = [&](const Stmt *S) {
+    if (S && VisitedStmts.insert(S).second)
+      VisitStmt(S);
+  };
+  auto VisitDeclaration = [&](const Decl *D) {
+    if (!D || !VisitedDecls.insert(D).second)
+      return;
+    VisitDecl(D);
+    if (const auto *VD = dyn_cast<VarDecl>(D))
+      VisitStatement(VD->getInit());
+  };
+
+  auto VisitPattern = [&](const MatchPattern *P, auto &Recurse) -> void {
+    if (const auto *Expression = dyn_cast<ExpressionPattern>(P))
+      VisitStatement(Expression->getExpr());
+    else if (const auto *Declaration = dyn_cast<DeclarationPattern>(P))
+      VisitDeclaration(Declaration->getDeclaration());
+    for (const MatchPattern *Child : P->children())
+      Recurse(Child, Recurse);
+  };
+  VisitPattern(Pattern, VisitPattern);
+
+  if (!Instantiation)
+    return;
+  for (const MatchPatternInfo &Info : Instantiation->infos()) {
+    VisitStatement(Info.Condition);
+    const MatchProjection *Projection = Info.Projection;
+    if (!Projection)
+      continue;
+    VisitDeclaration(Projection->getHoldingVar());
+    VisitDeclaration(Projection->getIntermediateVar());
+    VisitDeclaration(Projection->getConditionVar());
+    VisitDeclaration(Projection->getProjectedVar());
+    VisitDeclaration(Projection->getDecomposedDecl());
+    VisitStatement(Projection->getConditionExpr());
+    VisitStatement(Projection->getProjectedExpr());
+  }
 }
 
 void *MatchPattern::operator new(size_t bytes, const ASTContext &C,
