@@ -326,6 +326,9 @@ public:
   /// \returns false if the visitation was terminated early, true otherwise.
   bool TraverseConceptReference(ConceptReference *CR);
 
+  /// Recursively visit the source components of a match pattern.
+  bool TraverseMatchPattern(MatchPattern *P);
+
   // Visit concept reference.
   bool VisitConceptReference(ConceptReference *CR) { return true; }
 
@@ -3284,9 +3287,38 @@ DEF_TRAVERSE_STMT(RequiresExpr, {
 DEF_TRAVERSE_STMT(CXXExpansionStmtPattern, {})
 DEF_TRAVERSE_STMT(CXXExpansionStmtInstantiation, {})
 DEF_TRAVERSE_STMT(CXXExpansionSelectExpr, {})
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::TraverseMatchPattern(MatchPattern *P) {
+  if (!P)
+    return true;
+  switch (P->getMatchPatternClass()) {
+  case MatchPattern::WildcardPatternClass:
+    return true;
+  case MatchPattern::ExpressionPatternClass:
+    return getDerived().TraverseStmt(
+        static_cast<ExpressionPattern *>(P)->getExpr());
+  case MatchPattern::DeclarationPatternClass:
+    return getDerived().TraverseDecl(
+        static_cast<DeclarationPattern *>(P)->getDeclaration());
+  case MatchPattern::TypePatternClass:
+    return getDerived().TraverseTypeLoc(
+        static_cast<TypePattern *>(P)->getTypeSourceInfo()->getTypeLoc());
+  case MatchPattern::AlternativePatternClass:
+  case MatchPattern::DecompositionPatternClass:
+    for (MatchPattern *Child : P->children())
+      TRY_TO(getDerived().TraverseMatchPattern(Child));
+    return true;
+  }
+  llvm_unreachable("unknown match pattern kind");
+}
+
 DEF_TRAVERSE_STMT(MatchTestExpr, {
-  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
-  // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getPattern());
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
+                                          S->getHoldingVar()->getInit()
+                                      ? S->getHoldingVar()->getInit()
+                                      : S->getSubject());
+  TRY_TO(TraverseMatchPattern(S->getPattern()));
   const MatchGuard &Guard = S->getGuard();
   if (Guard.hasGuard()) {
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Init);
@@ -3295,9 +3327,12 @@ DEF_TRAVERSE_STMT(MatchTestExpr, {
   }
 })
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
-  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSubject());
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
+                                          S->getHoldingVar()->getInit()
+                                      ? S->getHoldingVar()->getInit()
+                                      : S->getSubject());
   for (const MatchCase &Case : S->getCases()) {
-    // TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Pattern);
+    TRY_TO(TraverseMatchPattern(Case.Pattern));
     if (Case.Guard.hasGuard()) {
       TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Init);
       TRY_TO(TraverseDecl(Case.Guard.ConditionVariable));

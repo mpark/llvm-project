@@ -2958,6 +2958,16 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     R1 = getSourceRange();
     return true;
   }
+  case MatchTestExprClass:
+  case MatchSelectExprClass:
+    if (HasSideEffects(Ctx))
+      return false;
+    if (getType()->isVoidType())
+      return false;
+    WarnE = this;
+    Loc = getExprLoc();
+    R1 = getSourceRange();
+    return true;
   case CXXFunctionalCastExprClass:
   case CStyleCastExprClass: {
     // Ignore an explicit cast to void, except in C++98 if the operand is a
@@ -3875,6 +3885,54 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     if (DE->hasInitStmt())
       Finder.Visit(DE->getInitStmt());
     Finder.Visit(DE->getBody());
+    return Finder.hasSideEffects();
+  }
+
+  case MatchTestExprClass: {
+    const auto *ME = cast<MatchTestExpr>(this);
+    SideEffectFinder Finder(Ctx, IncludePossibleEffects);
+    Finder.Visit(ME->getHoldingVar() && ME->getHoldingVar()->getInit()
+                     ? ME->getHoldingVar()->getInit()
+                     : ME->getSubject());
+    visitMatchPatternEvaluation(
+        ME->getPattern(), ME->getPatternInstantiation(),
+        [&](const Decl *D) { Finder.VisitDecl(D); },
+        [&](const Stmt *S) { Finder.Visit(S); });
+    const MatchGuard &Guard = ME->getGuard();
+    if (Guard.Init)
+      Finder.Visit(Guard.Init);
+    if (Guard.ConditionVariable) {
+      Finder.VisitDecl(Guard.ConditionVariable);
+      if (Guard.ConditionVariable->getInit())
+        Finder.Visit(Guard.ConditionVariable->getInit());
+    }
+    if (Guard.Condition)
+      Finder.Visit(Guard.Condition);
+    return Finder.hasSideEffects();
+  }
+
+  case MatchSelectExprClass: {
+    const auto *ME = cast<MatchSelectExpr>(this);
+    SideEffectFinder Finder(Ctx, IncludePossibleEffects);
+    Finder.Visit(ME->getHoldingVar() && ME->getHoldingVar()->getInit()
+                     ? ME->getHoldingVar()->getInit()
+                     : ME->getSubject());
+    for (const MatchCaseInstantiation &Case : ME->getCaseInstantiations()) {
+      visitMatchPatternEvaluation(
+          Case.Pattern, Case.PatternInstantiation,
+          [&](const Decl *D) { Finder.VisitDecl(D); },
+          [&](const Stmt *S) { Finder.Visit(S); });
+      if (Case.Guard.Init)
+        Finder.Visit(Case.Guard.Init);
+      if (Case.Guard.ConditionVariable) {
+        Finder.VisitDecl(Case.Guard.ConditionVariable);
+        if (Case.Guard.ConditionVariable->getInit())
+          Finder.Visit(Case.Guard.ConditionVariable->getInit());
+      }
+      if (Case.Guard.Condition)
+        Finder.Visit(Case.Guard.Condition);
+      Finder.Visit(Case.Handler);
+    }
     return Finder.hasSideEffects();
   }
 

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Tooling/Tooling.h"
@@ -71,6 +72,38 @@ TEST(Profiling, DeducedTemplateSpecializationType_Name) {
           DeducedKind::Undeduced, /*DeducedAsType=*/QualType(),
           ElaboratedTypeKeyword::None, TemplateName(CTD2)));
   testTypeNode(T1, T2);
+}
+
+TEST(Profiling, MatchExpressionsIncludePatternsAndHandlers) {
+  auto AST =
+      tooling::buildASTFromCodeWithArgs(R"cpp(
+    int first(int value) {
+      return value match { case 0 => 1; case _ => 2; };
+    }
+    int second(int value) {
+      return value match { case 1 => 1; case _ => 2; };
+    }
+    int third(int value) {
+      return value match { case 0 => 3; case _ => 2; };
+    }
+  )cpp",
+                                        {"-std=c++2c", "-fpattern-matching"});
+  ASSERT_TRUE(AST);
+  ASTContext &Ctx = AST->getASTContext();
+
+  SmallVector<const MatchSelectExpr *, 3> Matches;
+  for (BoundNodes &Nodes : match(expr().bind("expr"), Ctx))
+    if (const auto *E =
+            dyn_cast_or_null<MatchSelectExpr>(Nodes.getNodeAs<Expr>("expr")))
+      Matches.push_back(E);
+  ASSERT_EQ(Matches.size(), 3u);
+
+  llvm::FoldingSetNodeID First, Second, Third;
+  Matches[0]->Profile(First, Ctx, /*Canonical=*/false);
+  Matches[1]->Profile(Second, Ctx, /*Canonical=*/false);
+  Matches[2]->Profile(Third, Ctx, /*Canonical=*/false);
+  EXPECT_NE(First, Second);
+  EXPECT_NE(First, Third);
 }
 
 } // namespace

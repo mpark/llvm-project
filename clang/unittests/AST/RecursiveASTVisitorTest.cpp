@@ -22,6 +22,7 @@
 
 using namespace clang;
 using ::testing::ElementsAre;
+using ::testing::UnorderedElementsAre;
 
 namespace {
 class ProcessASTAction : public clang::ASTFrontendAction {
@@ -195,4 +196,36 @@ TEST(RecursiveASTVisitorTest, InterfaceDeclWithProtocols) {
                           VisitEvent::StartTraverseObjCProtocolLoc,
                           VisitEvent::EndTraverseObjCProtocolLoc,
                           VisitEvent::EndTraverseObjCInterface));
+}
+
+TEST(RecursiveASTVisitorTest, MatchExpressionSourceComponents) {
+  class CallVisitor : public RecursiveASTVisitor<CallVisitor> {
+  public:
+    bool VisitCallExpr(CallExpr *E) {
+      if (const auto *Callee = E->getDirectCallee())
+        Calls.push_back(Callee->getNameAsString());
+      return true;
+    }
+
+    std::vector<std::string> Calls;
+  } Visitor;
+
+  auto AST =
+      tooling::buildASTFromCodeWithArgs(R"cpp(
+    int subject();
+    int pattern();
+    bool guard();
+    int handler();
+    int test() {
+      return subject() match {
+        case pattern() if (guard()) => handler();
+        case _ => 0;
+      };
+    }
+  )cpp",
+                                        {"-std=c++2c", "-fpattern-matching"});
+  ASSERT_TRUE(AST);
+  Visitor.TraverseAST(AST->getASTContext());
+  EXPECT_THAT(Visitor.Calls,
+              UnorderedElementsAre("subject", "pattern", "guard", "handler"));
 }
