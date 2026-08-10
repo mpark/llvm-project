@@ -996,6 +996,57 @@ static CanThrowResult canSubStmtsThrow(Sema &Self, const Stmt *S) {
   return R;
 }
 
+static CanThrowResult
+canMatchPatternThrow(Sema &Self, const MatchPattern *Pattern,
+                     const MatchPatternInstantiation *Instantiation) {
+  CanThrowResult R = CT_Cannot;
+  visitMatchPatternEvaluation(
+      Pattern, Instantiation, [](const Decl *) {},
+      [&](const Stmt *S) {
+        if (R != CT_Can)
+          R = mergeCanThrow(R, Self.canThrow(S));
+      });
+  return R;
+}
+
+static CanThrowResult canMatchGuardThrow(Sema &Self, const MatchGuard &Guard) {
+  CanThrowResult R = CT_Cannot;
+  if (Guard.Init)
+    R = mergeCanThrow(R, Self.canThrow(Guard.Init));
+  if (Guard.ConditionVariable && Guard.ConditionVariable->getInit())
+    R = mergeCanThrow(R, Self.canThrow(Guard.ConditionVariable->getInit()));
+  if (Guard.Condition)
+    R = mergeCanThrow(R, Self.canThrow(Guard.Condition));
+  return R;
+}
+
+static CanThrowResult canMatchTestThrow(Sema &Self, const MatchTestExpr *E) {
+  const Expr *Subject = E->getHoldingVar() && E->getHoldingVar()->getInit()
+                            ? E->getHoldingVar()->getInit()
+                            : E->getSubject();
+  CanThrowResult R = Self.canThrow(Subject);
+  R = mergeCanThrow(R, canMatchPatternThrow(Self, E->getPattern(),
+                                            E->getPatternInstantiation()));
+  return mergeCanThrow(R, canMatchGuardThrow(Self, E->getGuard()));
+}
+
+static CanThrowResult canMatchSelectThrow(Sema &Self,
+                                          const MatchSelectExpr *E) {
+  const Expr *Subject = E->getHoldingVar() && E->getHoldingVar()->getInit()
+                            ? E->getHoldingVar()->getInit()
+                            : E->getSubject();
+  CanThrowResult R = Self.canThrow(Subject);
+  for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
+    R = mergeCanThrow(
+        R, canMatchPatternThrow(Self, Case.Pattern, Case.PatternInstantiation));
+    R = mergeCanThrow(R, canMatchGuardThrow(Self, Case.Guard));
+    R = mergeCanThrow(R, Self.canThrow(Case.Handler));
+    if (R == CT_Can)
+      break;
+  }
+  return R;
+}
+
 CanThrowResult Sema::canCalleeThrow(Sema &S, const Expr *E, const Decl *D,
                                     SourceLocation Loc) {
   // As an extension, we assume that __attribute__((nothrow)) functions don't
@@ -1308,9 +1359,13 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::VAArgExprClass:
   case Expr::CXXParenListInitExprClass:
   case Expr::CXXExpansionSelectExprClass:
-  case Expr::MatchTestExprClass:
-  case Expr::MatchSelectExprClass:
     return canSubStmtsThrow(*this, S);
+
+  case Expr::MatchTestExprClass:
+    return canMatchTestThrow(*this, cast<MatchTestExpr>(S));
+
+  case Expr::MatchSelectExprClass:
+    return canMatchSelectThrow(*this, cast<MatchSelectExpr>(S));
 
   case Expr::CompoundLiteralExprClass:
   case Expr::CXXConstCastExprClass:
