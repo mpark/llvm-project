@@ -829,6 +829,15 @@ static Expr *asValueKind(Sema &S, Expr *E, ExprValueKind ValueKind) {
                                   ValueKind, FPOptionsOverride());
 }
 
+static Expr *getDecompositionElement(Sema &S, Expr *Subject,
+                                     BindingDecl *Binding) {
+  ExprValueKind ValueKind = Subject->isLValue() ? VK_LValue : VK_XValue;
+  if (VarDecl *HoldingVar = Binding->getHoldingVar())
+    ValueKind = HoldingVar->getType()->isLValueReferenceType() ? VK_LValue
+                                                               : VK_XValue;
+  return asValueKind(S, Binding->getBinding(), ValueKind);
+}
+
 static void setCastProjection(Sema::MatchPatternState &State,
                               MatchPattern *Pattern,
                               MatchProjection *Projection) {
@@ -1556,8 +1565,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
       State.get(P).Projection = Projection;
       for (auto [Binding, Child] :
            llvm::zip(Decomposed->bindings(), P->children())) {
-        if (CheckCompleteMatchPattern(Binding->getBinding(), Child,
-                                      State, ProjectionCache))
+        Expr *Element = getDecompositionElement(*this, Subject, Binding);
+        if (CheckCompleteMatchPattern(Element, Child, State, ProjectionCache))
           return true;
         if (ProjectionCache)
           appendProjectionPath(Child, ProjectionCache->CurrentProjectionPath,
@@ -1592,8 +1601,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
     unsigned I = 0;
     for (MatchPattern *C : P->children()) {
       BindingDecl *BD = Bindings[I];
-      if (CheckCompleteMatchPattern(BD->getBinding(), C, State,
-                                    ProjectionCache)) {
+      Expr *Element = getDecompositionElement(*this, Subject, BD);
+      if (CheckCompleteMatchPattern(Element, C, State, ProjectionCache)) {
         return true;
       }
       if (ProjectionCache)
