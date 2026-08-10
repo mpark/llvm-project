@@ -4527,6 +4527,10 @@ private:
   // C++ Pattern Matching
   ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                  InjectedDeclSet *InjectedDecls);
+  Sema::ConditionResult
+  ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
+                     InjectedDeclSet *InjectedDecls,
+                     Sema::MatchTemplateRegionRAII *Region = nullptr);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,
@@ -4541,6 +4545,7 @@ private:
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
                bool Decomp = false,
+               bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *> ParseWildcardPattern();
@@ -4548,6 +4553,7 @@ private:
   ActionResult<MatchPattern *> ParseTypePattern();
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                         bool StopAtEqual,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();
@@ -5171,11 +5177,12 @@ private:
   /// is used up" rather than "no init-statement is permitted here".
   ///
   /// \returns The parsed condition.
-  Sema::ConditionResult ParseCondition(StmtResult *InitStmt, SourceLocation Loc,
-                                       Sema::ConditionKind CK, bool MissingOK,
-                                       InjectedDeclSet *InjectedDecls = nullptr,
-                                       ForRangeInfo *FRI = nullptr,
-                                       bool AfterInitStmt = false);
+  Sema::ConditionResult
+  ParseCondition(StmtResult *InitStmt, SourceLocation Loc,
+                 Sema::ConditionKind CK, bool MissingOK,
+                 InjectedDeclSet *InjectedDecls = nullptr,
+                 ForRangeInfo *FRI = nullptr, bool AfterInitStmt = false,
+                 Sema::MatchTemplateRegionRAII *Region = nullptr);
   DeclGroupPtrTy ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
                                                       ParsedAttributes &Attrs);
 
@@ -7649,12 +7656,11 @@ public:
   /// still have semantic errors in the condition. Additionally, it will assign
   /// the location of the outer-most '(' and ')', to LParenLoc and RParenLoc,
   /// respectively.
-  bool ParseParenExprOrCondition(StmtResult *InitStmt,
-                                 Sema::ConditionResult &CondResult,
-                                 SourceLocation Loc, Sema::ConditionKind CK,
-                                 SourceLocation &LParenLoc,
-                                 SourceLocation &RParenLoc,
-                                 InjectedDeclSet *InjectedDecls = nullptr);
+  bool ParseParenExprOrCondition(
+      StmtResult *InitStmt, Sema::ConditionResult &CondResult,
+      SourceLocation Loc, Sema::ConditionKind CK, SourceLocation &LParenLoc,
+      SourceLocation &RParenLoc, InjectedDeclSet *InjectedDecls = nullptr,
+      Sema::MatchTemplateRegionRAII *Region = nullptr);
 
   /// ParseIfStatement
   /// \verbatim

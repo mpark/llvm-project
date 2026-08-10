@@ -19271,9 +19271,7 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->getAlternativeKind() == AlternativePattern::Auto ||
-          Alternative->getAlternativeKind() == AlternativePattern::Concept)
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
@@ -19399,7 +19397,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
       HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
       Representative.PatternInstantiation, Representative.IfLoc,
       Representative.Guard, Representative.PatternIsIrrefutable,
-      StillNeedsCaseInstantiation, Instantiations);
+      StillNeedsCaseInstantiation, E->usesCaseConditionSyntax(),
+      Instantiations);
   if (Result.isUsable())
     cast<MatchTestExpr>(Result.get())->setRegion(E->getRegion());
   return Result;

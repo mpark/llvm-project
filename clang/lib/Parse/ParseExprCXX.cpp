@@ -28,6 +28,7 @@
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <numeric>
@@ -1981,13 +1982,10 @@ Parser::ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
   return DG;
 }
 
-Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
-                                             SourceLocation Loc,
-                                             Sema::ConditionKind CK,
-                                             bool MissingOK,
-                                             InjectedDeclSet *InjectedDecls,
-                                             ForRangeInfo *FRI,
-                                             bool AfterInitStmt) {
+Sema::ConditionResult Parser::ParseCondition(
+    StmtResult *InitStmt, SourceLocation Loc, Sema::ConditionKind CK,
+    bool MissingOK, InjectedDeclSet *InjectedDecls, ForRangeInfo *FRI,
+    bool AfterInitStmt, Sema::MatchTemplateRegionRAII *Region) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
   PreferredType.enterCondition(Actions, Tok.getLocation());
 
@@ -2058,7 +2056,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       ExtensionGuard.reset();
       return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
                             /*FRI=*/nullptr,
-                            /*AfterInitStmt=*/true);
+                            /*AfterInitStmt=*/true, Region);
     }
 
     // Handle '(; expr)', '([[...]]; expr)' and '(__attribute__((...)); expr)'
@@ -2074,7 +2072,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       ExtensionGuard.reset();
       return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
                             /*FRI=*/nullptr,
-                            /*AfterInitStmt=*/true);
+                            /*AfterInitStmt=*/true, Region);
     }
   }
 
@@ -2098,7 +2096,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       ExtensionGuard.reset();
       return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
                             /*FRI=*/nullptr,
-                            /*AfterInitStmt=*/true);
+                            /*AfterInitStmt=*/true, Region);
     }
 
     // The evaluation context must stay active through ActOnCondition below, so
@@ -2112,6 +2110,10 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
         /*ShouldEnter=*/CK == Sema::ConditionKind::ConstexprIf);
 
     ExtensionGuard.reset();
+    if (getLangOpts().PatternMatching &&
+        CK != Sema::ConditionKind::Switch && Tok.is(tok::kw_case))
+      return ParseCaseCondition(Loc, CK, InjectedDecls, Region);
+
     InjectedDeclSet Decls;
     ExprResult Expr = ExtLoc.isValid()
                           ? ParseExpressionWithLeadingExtension(ExtLoc, &Decls)
@@ -2139,7 +2141,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       ConsumeToken();
       return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
                             /*FRI=*/nullptr,
-                            /*AfterInitStmt=*/true);
+                            /*AfterInitStmt=*/true, Region);
     }
 
     return Actions.ActOnCondition(getCurScope(), Loc, Expr.get(), CK,
@@ -2162,7 +2164,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
     ExtensionGuard.reset();
     return ParseCondition(nullptr, Loc, CK, MissingOK, InjectedDecls,
                           /*FRI=*/nullptr,
-                          /*AfterInitStmt=*/true);
+                          /*AfterInitStmt=*/true, Region);
   }
 
   case ConditionOrInitStatement::ForRangeDecl: {
@@ -4003,6 +4005,101 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
                       needsAlternativeCandidateSpecialization);
 }
 
+Sema::ConditionResult
+Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
+                           InjectedDeclSet *InjectedDecls,
+                           Sema::MatchTemplateRegionRAII *Region) {
+  assert(Tok.is(tok::kw_case) && "not a case condition");
+  SourceLocation CaseLoc = ConsumeToken();
+  ParseScope MatchTestScope(this, Scope::DeclScope);
+  ActionResult<MatchPattern *> ParsedPattern =
+      ParsePattern(nullptr, /*Decomp=*/false, /*StopAtEqual=*/true);
+  if (ParsedPattern.isInvalid())
+    return Sema::ConditionError();
+  MatchPattern *Pattern = ParsedPattern.get();
+
+  SmallVector<NamedDecl *, 4> PatternDecls;
+  for (Decl *D : getCurScope()->decls())
+    if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName()) {
+      PatternDecls.push_back(ND);
+      Actions.IdResolver.RemoveDecl(ND);
+    }
+  llvm::scope_exit RestorePatternDecls([&] {
+    for (NamedDecl *D : PatternDecls)
+      Actions.IdResolver.AddDecl(D);
+  });
+
+  if (ExpectAndConsume(tok::equal, diag::err_expected_after, "pattern"))
+    return Sema::ConditionError();
+
+  ExprResult Subject = ParseAssignmentExpression();
+  if (Subject.isInvalid())
+    return Sema::ConditionError();
+
+  for (NamedDecl *D : PatternDecls)
+    Actions.IdResolver.AddDecl(D);
+  RestorePatternDecls.release();
+
+  VarDecl *HoldingVar = nullptr;
+  Subject = Actions.ActOnMatchSubject(Subject.get(), HoldingVar);
+  if (Subject.isInvalid())
+    return Sema::ConditionError();
+
+  bool PatternNeedsAlternativeSpecialization =
+      needsAlternativeCandidateSpecialization(Pattern);
+  Sema::MatchProjectionCache ProjectionCache;
+  Sema::MatchPatternState PatternState;
+  ProjectionCache.DeferAlternativeChoices = true;
+  if (Actions.CheckCompleteMatchPattern(Subject.get(), Pattern, PatternState,
+                                        &ProjectionCache))
+    return Sema::ConditionError();
+
+  if (Region)
+    Region->enter(CaseLoc, Pattern, ProjectionCache.RequiresTemplateRegion);
+
+  SourceLocation IfLoc;
+  StmtResult GuardInit;
+  Sema::ConditionResult Guard =
+      ParseMatchGuard(IfLoc, Pattern, GuardInit);
+  if (Guard.isInvalid())
+    return Sema::ConditionError();
+
+  bool NeedsCaseInstantiation =
+      ProjectionCache.HasDeferredAlternativeChoices ||
+      (PatternNeedsAlternativeSpecialization &&
+       Subject.get()->isTypeDependent());
+  Sema::MatchPatternSemanticAnalysis Semantic =
+      Actions.AnalyzeMatchPatternSemantics(Pattern, PatternState);
+  bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+  ExprResult Result = Actions.ActOnMatchTestExpr(
+      HoldingVar, Subject.get(), CaseLoc, Pattern,
+      MatchPatternInstantiation::Create(Actions.Context, Pattern,
+                                        PatternState.Infos),
+      IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
+      PatternIsIrrefutable, NeedsCaseInstantiation,
+      /*CaseConditionSyntax=*/true);
+  if (Result.isInvalid())
+    return Sema::ConditionError();
+  if (Region)
+    cast<MatchTestExpr>(Result.get())->setRegion(Region->getRegion());
+
+  Scope::decl_range DR = getCurScope()->decls();
+  InjectedDeclSet Decls = {DR.begin(), DR.end()};
+  MatchTestScope.Exit();
+
+  if (InjectedDecls) {
+    *InjectedDecls = Decls;
+  } else {
+    Scope *S = getCurScope();
+    for (Decl *D : Decls)
+      Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
+                                /*AddToContext=*/false);
+  }
+
+  return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), CK,
+                                /*MissingOK=*/false);
+}
+
 ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                        InjectedDeclSet *InjectedDecls) {
   if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
@@ -4256,6 +4353,7 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
 ActionResult<MatchPattern *>
 Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
+                     bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
   auto StartsPlaceholderDeclarationPattern = [&] {
     return (Tok.is(tok::kw_auto) && NextToken().isNot(tok::colon)) ||
@@ -4292,7 +4390,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                     tok::kw_constinit))
       return false;
 
-    RevertingTentativeParsingAction TPA(*this);
+    RevertingTentativeParsingAction TPA(*this, /*Unannotated=*/true);
     if (!isCXXTypeId(TentativeCXXTypeIdContext::InMatchPattern))
       return false;
 
@@ -4301,7 +4399,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
       return false;
 
     return Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi, tok::comma,
-                       tok::r_paren, tok::r_square, tok::r_brace, tok::eof);
+                       tok::r_paren, tok::r_square, tok::r_brace, tok::eof) ||
+           (StopAtEqual && Tok.is(tok::equal));
   };
   if (StartsAttributedDeclarationPattern())
     return ParseDeclarationPattern();
@@ -4311,7 +4410,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
 
   switch (Tok.getKind()) {
   case tok::l_paren:
-    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
+    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
                                   CorrectionBehavior);
   case tok::l_brace:
     return ParseBracedAlternativePattern();
@@ -4328,10 +4427,13 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
       return ParseDeclarationPattern();
     if (StartsTypePattern())
       return ParseTypePattern();
+    if (StopAtEqual &&
+        isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false))
+      return ParseDeclarationPattern();
     if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                /*AllowPatternDecl=*/true))
       return ParseDeclarationPattern();
-    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp,
+    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
                                   CorrectionBehavior);
   }
   }
@@ -4381,10 +4483,12 @@ ActionResult<MatchPattern *>
 Parser::ParseExpressionPattern(
     ExprResult *LHSOfMatchTestExpr,
     bool,
+    bool StopAtEqual,
     TypoCorrectionTypeBehavior CorrectionBehavior) {
   ExprResult Expr = [&] {
     if (!LHSOfMatchTestExpr) {
-      return ParseAssignmentExpression(CorrectionBehavior);
+      return StopAtEqual ? ParseConditionalExpression()
+                         : ParseAssignmentExpression(CorrectionBehavior);
     }
     bool RHSIsInitList = false;
     prec::Level NextTokPrec;

@@ -1301,18 +1301,17 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr, bool isDoExpr) {
                                    Stmts, isStmtExpr);
 }
 
-bool Parser::ParseParenExprOrCondition(StmtResult *InitStmt,
-                                       Sema::ConditionResult &Cond,
-                                       SourceLocation Loc,
-                                       Sema::ConditionKind CK,
-                                       SourceLocation &LParenLoc,
-                                       SourceLocation &RParenLoc,
-                                       InjectedDeclSet *InjectedDecls) {
+bool Parser::ParseParenExprOrCondition(
+    StmtResult *InitStmt, Sema::ConditionResult &Cond, SourceLocation Loc,
+    Sema::ConditionKind CK, SourceLocation &LParenLoc,
+    SourceLocation &RParenLoc, InjectedDeclSet *InjectedDecls,
+    Sema::MatchTemplateRegionRAII *Region) {
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
   SourceLocation Start = Tok.getLocation();
 
-  Cond = ParseCondition(InitStmt, Loc, CK, false, InjectedDecls);
+  Cond = ParseCondition(InitStmt, Loc, CK, false, InjectedDecls,
+                        /*FRI=*/nullptr, /*AfterInitStmt=*/false, Region);
 
   // If the parser was confused by the condition and we don't have a ')', try to
   // recover by skipping ahead to a semi and bailing out.  If condexp is
@@ -1531,6 +1530,7 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   // switch statement (including the controlled statement).
   //
   ParseScope IfScope(this, Scope::DeclScope | Scope::ControlScope, C99orCXX);
+  Sema::MatchTemplateRegionRAII Region(Actions);
 
   // Parse the condition.
   StmtResult InitStmt;
@@ -1544,7 +1544,7 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     if (ParseParenExprOrCondition(&InitStmt, Cond, IfLoc,
                                   IsConstexpr ? Sema::ConditionKind::ConstexprIf
                                               : Sema::ConditionKind::Boolean,
-                                  LParen, RParen, &InjectedDecls))
+                                  LParen, RParen, &InjectedDecls, &Region))
       return StmtError();
 
     if (IsConstexpr)
@@ -1616,6 +1616,8 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
 
   // Pop the 'if' scope if needed.
   InnerScope.Exit();
+  Region.exit(ThenStmt.isUsable() ? ThenStmt.get()->getEndLoc()
+                                  : SourceLocation());
 
   // If it has an else, parse it.
   SourceLocation ElseLoc;
@@ -1838,13 +1840,15 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   unsigned ScopeFlags =
       Scope::ControlScope | (C99orCXX ? Scope::DeclScope : Scope::NoScope);
   ParseScope WhileScope(this, ScopeFlags);
+  Sema::MatchTemplateRegionRAII Region(Actions);
 
   // Parse the condition.
   Sema::ConditionResult Cond;
   SourceLocation LParen;
   SourceLocation RParen;
   if (ParseParenExprOrCondition(nullptr, Cond, WhileLoc,
-                                Sema::ConditionKind::Boolean, LParen, RParen))
+                                Sema::ConditionKind::Boolean, LParen, RParen,
+                                /*InjectedDecls=*/nullptr, &Region))
     return StmtError();
 
   // OpenACC Restricts a while-loop inside of certain construct/clause
@@ -1876,6 +1880,7 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   // Pop the body scope if needed.
   InnerScope.Exit();
   WhileScope.Exit();
+  Region.exit(Body.isUsable() ? Body.get()->getEndLoc() : SourceLocation());
 
   if (Cond.isInvalid() || Body.isInvalid())
     return StmtError();
@@ -2077,6 +2082,7 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   if (ESD)
     ScopeFlags |= Scope::TemplateParamScope | Scope::ExpansionStmtScope;
   ParseScope ForScope(this, ScopeFlags);
+  Sema::MatchTemplateRegionRAII Region(Actions);
   BalancedDelimiterTracker T(*this, tok::l_paren);
   T.consumeOpen();
 
@@ -2275,7 +2281,8 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
             /*InitStmt=*/nullptr, ForLoc, CK,
             // FIXME: recovery if we don't see another semi!
             /*MissingOK=*/true, /*InjectedDecls=*/nullptr,
-            MightBeForRangeStmt ? &ForRangeInfo : nullptr);
+            MightBeForRangeStmt ? &ForRangeInfo : nullptr,
+            /*AfterInitStmt=*/false, &Region);
 
         if (ForRangeInfo.ParsedForRangeDecl()) {
           DiagCompat(FirstPart.get() ? FirstPart.get()->getBeginLoc()
@@ -2428,6 +2435,7 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   InnerScope.Exit();
 
   getActions().OpenACC().ActOnForStmtEnd(ForLoc, Body);
+  Region.exit(Body.isUsable() ? Body.get()->getEndLoc() : SourceLocation());
 
   // Leave the for-scope.
   ForScope.Exit();
