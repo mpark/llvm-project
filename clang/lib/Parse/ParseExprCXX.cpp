@@ -3991,6 +3991,11 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
 
   Scope::decl_range DR = getCurScope()->decls();
   InjectedDeclSet Decls = {DR.begin(), DR.end()};
+  for (Decl *D : Decls) {
+    getCurScope()->RemoveDecl(D);
+    if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+      Actions.IdResolver.RemoveDecl(ND);
+  }
   MatchTestScope.Exit();
 
   if (InjectedDecls) {
@@ -4084,6 +4089,11 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     if (InjectedDecls) {
       Scope::decl_range DR = getCurScope()->decls();
       *InjectedDecls = {DR.begin(), DR.end()};
+      for (Decl *D : *InjectedDecls) {
+        getCurScope()->RemoveDecl(D);
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.IdResolver.RemoveDecl(ND);
+      }
     }
     bool NeedsCaseInstantiation =
         ProjectionCache.HasDeferredAlternativeChoices ||
