@@ -61,6 +61,19 @@ int failed_guard_preserves_trivially_moved_subject() {
   };
 }
 
+const Tracked& identity(const Tracked& value) { return value; }
+
+bool indirect_subject_lives_through_controlled_statement(int value) {
+  int alive = 0;
+  bool observed = false;
+  if (identity(Tracked(&alive, value)) match
+      case auto&& bound if (bound.value == 1))
+    observed = alive == 1;
+  else
+    observed = alive == 1;
+  return observed && alive == 0;
+}
+
 int main(int, char**) {
   if (declaration_lifetime_in_if(0) != 2)
     return 1;
@@ -70,5 +83,9 @@ int main(int, char**) {
     return 3;
   if (failed_guard_preserves_trivially_moved_subject() != 1)
     return 4;
+  if (!indirect_subject_lives_through_controlled_statement(1))
+    return 5;
+  if (!indirect_subject_lives_through_controlled_statement(2))
+    return 6;
   return 0;
 }
