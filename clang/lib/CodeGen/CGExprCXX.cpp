@@ -2490,7 +2490,7 @@ RValue CodeGenFunction::EmitAlternativePattern(
   else if (!Projected && Projection->getProjectedExpr() &&
            Projection->getProjectedExpr()->getType()->isVoidType())
     EmitIgnoredExpr(Projection->getProjectedExpr());
-  RValue MatchResult = AltPattern->isEmpty()
+  RValue MatchResult = !AltPattern->getSubPattern()
                            ? RValue::get(Builder.getTrue())
                            : EmitMatchPattern(AltPattern->getSubPattern(),
                                               Instantiation, nullptr);
