@@ -604,6 +604,53 @@ constexpr int test_match_subject_full_expression_lifetime() {
 
 static_assert(test_match_subject_full_expression_lifetime() == 1);
 
+struct IndirectMatchSubjectLifetime {
+  bool *alive;
+  int value;
+
+  constexpr IndirectMatchSubjectLifetime(bool *alive, int value)
+      : alive(alive), value(value) {
+    *alive = true;
+  }
+  constexpr ~IndirectMatchSubjectLifetime() { *alive = false; }
+};
+
+template <class T>
+constexpr const T &identity(const T &value) {
+  return value;
+}
+
+constexpr bool test_indirect_match_subject_lifetime(int value) {
+  bool alive = false;
+  bool observed = false;
+  if (identity(IndirectMatchSubjectLifetime(&alive, value)) match
+      case auto&& bound if (bound.value == 1))
+    observed = alive;
+  else
+    observed = alive;
+  return observed && !alive;
+}
+
+static_assert(test_indirect_match_subject_lifetime(1));
+static_assert(test_indirect_match_subject_lifetime(2));
+
+template <class T>
+constexpr bool test_dependent_indirect_match_subject_lifetime(int value) {
+  bool alive = false;
+  bool observed = false;
+  if (identity(T(&alive, value)) match case auto&& bound
+      if (bound.value == 1))
+    observed = alive;
+  else
+    observed = alive;
+  return observed && !alive;
+}
+
+static_assert(test_dependent_indirect_match_subject_lifetime<
+              IndirectMatchSubjectLifetime>(1));
+static_assert(test_dependent_indirect_match_subject_lifetime<
+              IndirectMatchSubjectLifetime>(2));
+
 namespace N1 {
   struct S {
     int index;
