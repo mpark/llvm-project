@@ -671,11 +671,12 @@ ExprResult Sema::ActOnMatchTestExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
     SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
-    bool NeedsCaseInstantiation,
+    bool NeedsCaseInstantiation, bool CaseConditionSyntax,
     ArrayRef<MatchTestInstantiation> Instantiations) {
   return new (Context) MatchTestExpr(
       Context, HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc,
-      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
+      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, CaseConditionSyntax,
+      Instantiations);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(
@@ -1729,8 +1730,6 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
                      Info->Projection->getKind() == MatchProjection::CastProjection
                  ? MatchPatternRefutability::Refutable
                  : MatchPatternRefutability::Irrefutable;
-    case MatchPattern::ParenPatternClass:
-      return Recurse(static_cast<ParenPattern *>(P)->getSubPattern(), Recurse);
     case MatchPattern::DecompositionPatternClass: {
       MatchPatternRefutability Refutability =
           MatchPatternRefutability::Irrefutable;

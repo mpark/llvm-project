@@ -5586,6 +5586,7 @@ class MatchTestExpr final : public Expr {
   ArrayRef<MatchTestInstantiation> Instantiations;
   bool PatternIsIrrefutable;
   bool NeedsCaseInstantiation;
+  bool CaseConditionSyntax;
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
@@ -5595,13 +5596,15 @@ public:
                          SourceLocation IfLoc, MatchGuard Guard,
                          bool PatternIsIrrefutable,
                          bool NeedsCaseInstantiation,
+                         bool CaseConditionSyntax = false,
                          ArrayRef<MatchTestInstantiation> Instantiations = {})
       : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
         HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
         Pattern(Pattern), PatternInstantiation(PatternInstantiation),
         IfLoc(IfLoc), Guard(Guard),
         PatternIsIrrefutable(PatternIsIrrefutable),
-        NeedsCaseInstantiation(NeedsCaseInstantiation) {
+        NeedsCaseInstantiation(NeedsCaseInstantiation),
+        CaseConditionSyntax(CaseConditionSyntax) {
     if (!Instantiations.empty()) {
       auto *Storage =
           Ctx.Allocate<MatchTestInstantiation>(Instantiations.size());
@@ -5614,7 +5617,8 @@ public:
 
   explicit MatchTestExpr(EmptyShell Empty)
       : Expr(MatchTestExprClass, Empty), PatternInstantiation(nullptr),
-        PatternIsIrrefutable(false), NeedsCaseInstantiation(false) {}
+        PatternIsIrrefutable(false), NeedsCaseInstantiation(false),
+        CaseConditionSyntax(false) {}
 
   const VarDecl* getHoldingVar() const { return HoldingVar; }
   VarDecl* getHoldingVar() { return HoldingVar; }
@@ -5657,13 +5661,16 @@ public:
 
   bool needsCaseInstantiation() const { return NeedsCaseInstantiation; }
 
+  bool usesCaseConditionSyntax() const { return CaseConditionSyntax; }
+
   SourceLocation getBeginLoc() const LLVM_READONLY {
-    return getSubject()->getBeginLoc();
+    return CaseConditionSyntax ? MatchLoc : getSubject()->getBeginLoc();
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
-    return Guard.Condition ? Guard.Condition->getEndLoc()
-                           : Pattern->getEndLoc();
+    if (Guard.Condition)
+      return Guard.Condition->getEndLoc();
+    return CaseConditionSyntax ? Subject->getEndLoc() : Pattern->getEndLoc();
   }
 
   child_range children() {
