@@ -14,17 +14,20 @@
 #define LLVM_CLANG_AST_PATTERN_H
 
 #include "clang/AST/ASTConcept.h"
-#include "clang/AST/Type.h"
 #include "clang/AST/DependenceFlags.h"
+#include "clang/AST/Type.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TrailingObjects.h"
 
 namespace clang {
 
 class ASTContext;
+class Decl;
 class Expr;
+class Stmt;
 class BindingDecl;
 class DecompositionDecl;
 class VarDecl;
@@ -414,6 +417,14 @@ public:
   }
   const MatchPatternInfo *find(const MatchPattern *P) const;
 };
+
+/// Visit the declarations and statements that implement one semantically
+/// checked pattern. Repeated pointers within the instantiation are reported
+/// once.
+void visitMatchPatternEvaluation(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<void(const Decl *)> VisitDecl,
+    llvm::function_ref<void(const Stmt *)> VisitStmt);
 
 } // end namespace clang
 
