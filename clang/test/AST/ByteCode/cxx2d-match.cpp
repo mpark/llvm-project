@@ -540,6 +540,52 @@ constexpr int dependent_variant_arms_share_projection() {
 
 static_assert(dependent_variant_arms_share_projection() == 111);
 
+struct PrvalueAlternative {
+  int *destructions;
+};
+
+struct PrvalueProjection {
+  const PrvalueProjection *self;
+  int *destructions;
+
+  constexpr PrvalueProjection(int *destructions)
+      : self(this), destructions(destructions) {}
+  PrvalueProjection(const PrvalueProjection &) = delete;
+  PrvalueProjection(PrvalueProjection &&) = delete;
+  constexpr ~PrvalueProjection() { ++*destructions; }
+};
+
+template <>
+struct std::alternative_traits<PrvalueAlternative> {
+  static constexpr __SIZE_TYPE__ size = 1;
+  static constexpr bool is_exhaustive = true;
+
+  template <__SIZE_TYPE__ I>
+    requires(I == 0)
+  using projection_type = PrvalueProjection;
+
+  static constexpr __SIZE_TYPE__ index(const PrvalueAlternative &) noexcept {
+    return 0;
+  }
+
+  template <__SIZE_TYPE__ I, class Self>
+    requires(I == 0)
+  static constexpr PrvalueProjection get(Self &&self) {
+    return PrvalueProjection(self.destructions);
+  }
+};
+
+constexpr int prvalue_projection_initializes_declaration_directly() {
+  int destructions = 0;
+  PrvalueAlternative alternative{&destructions};
+  bool has_expected_identity = alternative match {
+    case { PrvalueProjection value } => value.self == &value;
+  };
+  return has_expected_identity * 10 + destructions;
+}
+
+static_assert(prvalue_projection_initializes_declaration_directly() == 11);
+
 namespace N1 {
   struct S {
     int index;

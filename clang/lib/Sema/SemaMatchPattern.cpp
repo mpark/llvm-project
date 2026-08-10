@@ -1289,6 +1289,11 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
                                        State, ProjectionCache);
   }
   ExprValueKind ProjectedValueKind = GetCall.get()->getValueKind();
+  if (ProjectedValueKind == VK_PRValue) {
+    Projection->setProjectedExpr(GetCall.get());
+    return S.CheckCompleteMatchPattern(GetCall.get(), Pattern->getSubPattern(),
+                                       State, ProjectionCache);
+  }
   QualType ProjectedType = GetCall.get()->refersToBitField()
                                ? S.Context.getAutoDeductType()
                                : S.Context.getAutoRRefDeductType();

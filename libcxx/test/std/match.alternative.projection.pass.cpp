@@ -246,6 +246,51 @@ int match_uneven_nested_variants(T& value) {
   };
 }
 
+struct PrvalueAlternative {
+  int* destructions;
+};
+
+struct PrvalueProjection {
+  const PrvalueProjection* self;
+  int* destructions;
+
+  explicit PrvalueProjection(int* destructions)
+      : self(this), destructions(destructions) {}
+  PrvalueProjection(const PrvalueProjection&) = delete;
+  PrvalueProjection(PrvalueProjection&&) = delete;
+  ~PrvalueProjection() { ++*destructions; }
+};
+
+template<>
+struct std::alternative_traits<PrvalueAlternative> {
+  static constexpr std::size_t size = 1;
+  static constexpr bool is_exhaustive = true;
+
+  template<std::size_t I>
+    requires(I == 0)
+  using projection_type = PrvalueProjection;
+
+  static constexpr std::size_t index(const PrvalueAlternative&) noexcept {
+    return 0;
+  }
+
+  template<std::size_t I, class Self>
+    requires(I == 0)
+  static PrvalueProjection get(Self&& self) {
+    return PrvalueProjection(self.destructions);
+  }
+};
+
+void test_prvalue_projection_initialization() {
+  int destructions = 0;
+  PrvalueAlternative alternative{&destructions};
+  bool has_expected_identity = alternative match {
+    case { PrvalueProjection value } => value.self == &value;
+  };
+  assert(has_expected_identity);
+  assert(destructions == 1);
+}
+
 int main(int, char**) {
   int value = 42;
   assert(match_pointer(&value) == 42);
@@ -352,5 +397,6 @@ int main(int, char**) {
   assert(match_uneven_nested_variants(uneven) == 73);
   std::get<1>(uneven).emplace<2>(true);
   assert(match_uneven_nested_variants(uneven) == 74);
+  test_prvalue_projection_initialization();
   return 0;
 }
