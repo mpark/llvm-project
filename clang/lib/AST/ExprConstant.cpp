@@ -21000,16 +21000,6 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   if (const VarDecl *VD = E->getHoldingVar()) {
     // This means that the subject and the bindings have the lifetime
     // of a hypothetical condition variable, skip the `BlockScopeRAII`.
-    //
-    // Without `BlockScopeRAII`, the binding variables and such are
-    // in the surrounding block scope. This does *some* lifetime extension
-    // but not all since we only extend the temporaries that bind directly
-    // to the references.
-    //
-    // const T& f(const T&);
-    // T g();
-    //
-    // if (f(g()) match ...) // f(g()) is not extended properly currently.
     if (!EvaluateDecl(Info, VD))
       return false;
     if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
