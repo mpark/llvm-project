@@ -114,25 +114,9 @@ struct VoidOrInt {
   int value;
 };
 
-template<__SIZE_TYPE__ I>
-struct VoidOrIntAlternative;
-
-template<>
-struct VoidOrIntAlternative<0> {
-  using type = void;
-};
-
-template<>
-struct VoidOrIntAlternative<1> {
-  using type = int;
-};
-
 template<>
 struct std::alternative_traits<VoidOrInt> {
   static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename VoidOrIntAlternative<I>::type;
 
   static constexpr __SIZE_TYPE__ index(const VoidOrInt& value) noexcept {
     return value.has_value ? 0 : 1;
