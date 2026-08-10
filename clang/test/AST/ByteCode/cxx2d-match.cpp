@@ -155,6 +155,56 @@ static_assert(test_nested_decomposition_pattern({Blue, {0, 2}}) == Result{Blue, 
 static_assert(test_nested_decomposition_pattern({Blue, {2, 3}}) == Result{Blue, 6});
 static_assert(test_nested_decomposition_pattern({Blue, {3, 4}}) == Result{Blue, 12});
 
+struct DecompositionMoveOnly {
+  int value;
+
+  constexpr DecompositionMoveOnly(int value) : value(value) {}
+  DecompositionMoveOnly(const DecompositionMoveOnly &) = delete;
+  constexpr DecompositionMoveOnly(DecompositionMoveOnly &&other)
+      : value(other.value) {
+    other.value = -1;
+  }
+};
+
+struct DecompositionInner {
+  int y;
+  DecompositionMoveOnly widget;
+};
+
+struct DecompositionOuter {
+  int x;
+  DecompositionInner inner;
+};
+
+constexpr int test_nested_decomposition_forwards_xvalues() {
+  DecompositionOuter subject{1, {2, DecompositionMoveOnly(3)}};
+  int result = static_cast<DecompositionOuter &&>(subject) match {
+    case [1, [0, _]] => 0;
+    case [auto&& x, [auto&& y, DecompositionMoveOnly widget]] =>
+      __is_same(decltype(x), int &&) &&
+              __is_same(decltype(y), int &&)
+          ? x + y + widget.value
+          : -100;
+  };
+  return result * 10 - subject.inner.widget.value;
+}
+
+static_assert(test_nested_decomposition_forwards_xvalues() == 61);
+
+constexpr int test_nested_decomposition_preserves_lvalues() {
+  DecompositionOuter subject{1, {2, DecompositionMoveOnly(3)}};
+  int result = subject match {
+    case [1, [0, _]] => 0;
+    case [auto&& x, [auto&& y, DecompositionMoveOnly& widget]] =>
+      __is_same(decltype(x), int &) && __is_same(decltype(y), int &)
+          ? (widget.value = 4, x + y + widget.value)
+          : -100;
+  };
+  return result * 10 + subject.inner.widget.value;
+}
+
+static_assert(test_nested_decomposition_preserves_lvalues() == 74);
+
 enum State { FizzBuzz, Fizz, Buzz, N };
 constexpr int Size = 15;
 
@@ -285,6 +335,16 @@ struct Pair {
   int y;
 };
 
+struct LvalueProjectingTuple {
+  DecompositionMoveOnly widget;
+
+  template <int I>
+  constexpr DecompositionMoveOnly &get() && {
+    static_assert(I == 0);
+    return widget;
+  }
+};
+
 namespace std {
   template <typename T>
   struct tuple_size;
@@ -300,6 +360,11 @@ namespace std {
     static constexpr int value = 2;
   };
 
+  template <>
+  struct tuple_size<LvalueProjectingTuple> {
+    static constexpr int value = 1;
+  };
+
   template <int I, typename T>
   struct tuple_element;
 
@@ -311,6 +376,12 @@ namespace std {
   template <int I>
   struct tuple_element<I, Pair> {
     using type = int;
+  };
+
+  template <int I>
+  struct tuple_element<I, LvalueProjectingTuple> {
+    static_assert(I == 0);
+    using type = DecompositionMoveOnly;
   };
 }
 
@@ -327,6 +398,16 @@ static_assert(test_tuple_like_decomposition_pattern({0, 0}) == -1);
 static_assert(test_tuple_like_decomposition_pattern({0, 2}) == 4);
 static_assert(test_tuple_like_decomposition_pattern({2, 0}) == 8);
 static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
+
+constexpr bool test_tuple_like_decomposition_preserves_get_category() {
+  LvalueProjectingTuple subject{DecompositionMoveOnly(3)};
+  int result = static_cast<LvalueProjectingTuple &&>(subject) match {
+    case [DecompositionMoveOnly& widget] => (widget.value = 4);
+  };
+  return result == 4 && subject.widget.value == 4;
+}
+
+static_assert(test_tuple_like_decomposition_preserves_get_category());
 
 constexpr int test_tuple_like_decomposition_pattern_dependent(const auto &tup) {
   return tup match {
