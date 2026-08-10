@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CheckExprLifetime.h"
+#include "TreeTransform.h"
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
@@ -434,14 +435,82 @@ static ExprResult buildOpenAlternativeTraitsTryCastCall(
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
 }
 
+namespace {
+class MatchSubjectDefaultArgFinder
+    : public EvaluatedExprVisitor<MatchSubjectDefaultArgFinder> {
+  using Inherited = EvaluatedExprVisitor<MatchSubjectDefaultArgFinder>;
+
+public:
+  bool ContainsDefaultArg = false;
+  bool NeedsRebuild = false;
+
+  explicit MatchSubjectDefaultArgFinder(ASTContext &Context)
+      : Inherited(Context) {}
+
+  void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
+    ContainsDefaultArg = true;
+    NeedsRebuild |= !E->hasRewrittenInit();
+  }
+};
+
+class MatchSubjectLifetimeRebuilder
+    : public TreeTransform<MatchSubjectLifetimeRebuilder> {
+public:
+  explicit MatchSubjectLifetimeRebuilder(Sema &S) : TreeTransform(S) {}
+
+  bool AlreadyTransformed(QualType T) {
+    return T.isNull() || !T->isInstantiationDependentType();
+  }
+
+  ExprResult TransformLambdaExpr(LambdaExpr *E) { return E; }
+  ExprResult TransformBlockExpr(BlockExpr *E) { return E; }
+  ExprResult TransformOpaqueValueExpr(OpaqueValueExpr *E) { return E; }
+
+  bool ReplacingOriginal() { return true; }
+  bool AllowSkippingCXXConstructExpr() { return false; }
+};
+} // namespace
+
+static ExprResult rebuildMatchSubjectForLifetimeExtension(
+    Sema &S, Expr *Subject,
+    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries,
+    bool &ContainsDefaultArg) {
+  MatchSubjectDefaultArgFinder Finder(S.Context);
+  Finder.Visit(Subject);
+  ContainsDefaultArg = Finder.ContainsDefaultArg;
+  if (!Finder.NeedsRebuild)
+    return Subject;
+
+  EnterExpressionEvaluationContext LifetimeContext(
+      S, Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
+      /*LambdaContextDecl=*/nullptr,
+      Sema::ExpressionEvaluationContextRecord::EK_Other,
+      /*ShouldEnter=*/true);
+  auto &Record = S.currentEvaluationContext();
+  Record.InLifetimeExtendingContext = true;
+  Record.RebuildDefaultArgOrDefaultInit = true;
+
+  ExprResult Rebuilt = MatchSubjectLifetimeRebuilder(S).TransformExpr(Subject);
+  Temporaries = std::move(Record.ForRangeLifetimeExtendTemps);
+  return Rebuilt;
+}
+
 ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
+  SmallVector<MaterializeTemporaryExpr *, 8> RebuiltTemporaries;
+  bool ContainsDefaultArg = false;
+  ExprResult Rebuilt = rebuildMatchSubjectForLifetimeExtension(
+      *this, Subject, RebuiltTemporaries, ContainsDefaultArg);
+  if (Rebuilt.isInvalid())
+    return ExprError();
+  Subject = Rebuilt.get();
+
   if (Subject->getType()->isVoidType())
     return Subject;
 
   bool IsConstant = Subject->isCXX11ConstantExpr(Context);
   bool MaterializeConstantPrValue =
       IsConstant && Subject->isPRValue() && Subject->getType()->isRecordType();
-  if (IsConstant && !MaterializeConstantPrValue)
+  if (IsConstant && !MaterializeConstantPrValue && !ContainsDefaultArg)
     return Subject;
 
   QualType Deduced = Subject->refersToBitField() ? Context.getAutoDeductType()
@@ -472,16 +541,21 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
         Temporaries.push_back(E);
       Inherited::VisitStmt(E);
     }
+
+    void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
+      if (E->hasRewrittenInit())
+        Visit(E->getRewrittenExpr());
+    }
   };
 
-  SmallVector<MaterializeTemporaryExpr *, 8> Temporaries;
+  SmallVector<MaterializeTemporaryExpr *, 8> Temporaries =
+      std::move(RebuiltTemporaries);
   TemporaryCollector(Context, Temporaries).Visit(HoldingVar->getInit());
-  if (!Temporaries.empty()) {
-    InitializedEntity Entity =
-        InitializedEntity::InitializeVariable(HoldingVar);
-    for (MaterializeTemporaryExpr *Temporary : Temporaries)
-      Temporary->setExtendingDecl(HoldingVar, Entity.allocateManglingNumber());
-  }
+  llvm::SmallPtrSet<MaterializeTemporaryExpr *, 8> Seen;
+  llvm::erase_if(Temporaries, [&](MaterializeTemporaryExpr *Temporary) {
+    return Temporary->getExtendingDecl() || !Seen.insert(Temporary).second;
+  });
+  ApplyForRangeOrExpansionStatementLifetimeExtension(HoldingVar, Temporaries);
 
   ExprResult Ref = BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
