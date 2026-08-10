@@ -384,6 +384,65 @@ void test_match_in_if_condition_lifetime_extended() {
   check(!match_in_if_condition_lifetime_extended(303));
 }
 
+bool default_argument_lifetime_alive = false;
+
+struct DefaultArgumentLifetime {
+  DefaultArgumentLifetime() { default_argument_lifetime_alive = true; }
+  ~DefaultArgumentLifetime() { default_argument_lifetime_alive = false; }
+};
+
+const DefaultArgumentLifetime& default_argument_identity(
+    const DefaultArgumentLifetime& value = DefaultArgumentLifetime()) {
+  return value;
+}
+
+struct DefaultArgumentHolder {
+  const DefaultArgumentLifetime& value;
+
+  DefaultArgumentHolder(
+      const DefaultArgumentLifetime& value = DefaultArgumentLifetime())
+      : value(value) {}
+};
+
+bool match_default_argument_lifetime_extended() {
+  if (default_argument_identity() match case [[maybe_unused]] auto&& value) {
+    return default_argument_lifetime_alive;
+  }
+  return false;
+}
+
+bool match_constructor_default_argument_lifetime_extended() {
+  if (DefaultArgumentHolder() match
+      case [[maybe_unused]] auto&& value) {
+    return default_argument_lifetime_alive;
+  }
+  return false;
+}
+
+template <class T>
+const T& dependent_default_argument_identity(const T& value = T()) {
+  return value;
+}
+
+template <class T>
+bool match_dependent_default_argument_lifetime_extended() {
+  if (dependent_default_argument_identity<T>() match
+      case [[maybe_unused]] auto&& value) {
+    return default_argument_lifetime_alive;
+  }
+  return false;
+}
+
+void test_match_default_argument_lifetime_extended() {
+  check(match_default_argument_lifetime_extended());
+  check(!default_argument_lifetime_alive);
+  check(match_constructor_default_argument_lifetime_extended());
+  check(!default_argument_lifetime_alive);
+  check(match_dependent_default_argument_lifetime_extended<
+        DefaultArgumentLifetime>());
+  check(!default_argument_lifetime_alive);
+}
+
 bool match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
   if ((Lifetime(&flag, n) match case [{ _ }, 101])) {
@@ -634,6 +693,7 @@ int main() {
   test_match_pattern_guards();
   test_match_in_if_condition();
   test_match_in_if_condition_lifetime_extended();
+  test_match_default_argument_lifetime_extended();
   test_match_in_if_condition_not_lifetime_extended();
   test_match_in_while_condition();
   test_variant_like_alternative_pattern();
