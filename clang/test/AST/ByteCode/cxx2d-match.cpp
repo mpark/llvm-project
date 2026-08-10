@@ -732,6 +732,44 @@ static_assert(test_dependent_indirect_match_subject_lifetime<
 static_assert(test_dependent_indirect_match_subject_lifetime<
               IndirectMatchSubjectLifetime>(2));
 
+struct DefaultArgumentMatchSubjectLifetime {
+  int value;
+
+  constexpr DefaultArgumentMatchSubjectLifetime(int value) : value(value) {}
+  constexpr ~DefaultArgumentMatchSubjectLifetime() {}
+};
+
+constexpr const DefaultArgumentMatchSubjectLifetime &
+default_argument_identity(
+    const DefaultArgumentMatchSubjectLifetime &value =
+        DefaultArgumentMatchSubjectLifetime(42)) {
+  return value;
+}
+
+constexpr bool test_default_argument_match_subject_lifetime() {
+  if (default_argument_identity() match case auto&& value)
+    return value.value == 42;
+  return false;
+}
+
+static_assert(test_default_argument_match_subject_lifetime());
+
+template <class T>
+constexpr const T &dependent_default_argument_identity(
+    const T &value = T(42)) {
+  return value;
+}
+
+template <class T>
+constexpr bool test_dependent_default_argument_match_subject_lifetime() {
+  if (dependent_default_argument_identity<T>() match case auto&& value)
+    return value.value == 42;
+  return false;
+}
+
+static_assert(test_dependent_default_argument_match_subject_lifetime<
+              DefaultArgumentMatchSubjectLifetime>());
+
 namespace N1 {
   struct S {
     int index;
