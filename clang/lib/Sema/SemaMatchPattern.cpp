@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CheckExprLifetime.h"
+#include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Lex/Preprocessor.h"
@@ -20,8 +21,8 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/TemplateDeduction.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace clang;
 using namespace sema;
@@ -453,6 +454,35 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
     return ExprError();
   }
   HoldingVar = VD;
+
+  // Associate every materialized temporary in the subject with its hidden
+  // holder. In an expression match the holder ends with the full-expression;
+  // in an unparenthesized condition it has condition-variable lifetime.
+  class TemporaryCollector : public EvaluatedExprVisitor<TemporaryCollector> {
+    using Inherited = EvaluatedExprVisitor<TemporaryCollector>;
+    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries;
+
+  public:
+    TemporaryCollector(ASTContext &Context,
+                       SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries)
+        : Inherited(Context), Temporaries(Temporaries) {}
+
+    void VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
+      if (!E->getExtendingDecl())
+        Temporaries.push_back(E);
+      Inherited::VisitStmt(E);
+    }
+  };
+
+  SmallVector<MaterializeTemporaryExpr *, 8> Temporaries;
+  TemporaryCollector(Context, Temporaries).Visit(HoldingVar->getInit());
+  if (!Temporaries.empty()) {
+    InitializedEntity Entity =
+        InitializedEntity::InitializeVariable(HoldingVar);
+    for (MaterializeTemporaryExpr *Temporary : Temporaries)
+      Temporary->setExtendingDecl(HoldingVar, Entity.allocateManglingNumber());
+  }
+
   ExprResult Ref = BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
       Subject->getExprLoc());
