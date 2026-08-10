@@ -129,6 +129,16 @@ constexpr int match_pointer(int *pointer) {
 static_assert(match_pointer(nullptr) == -1);
 static_assert([] { int value = 42; return match_pointer(&value); }() == 42);
 
+constexpr int match_named_pointer(int *pointer) {
+  return pointer match {
+    case { .some: auto &&value } => value;
+    case { .none } => -2;
+  };
+}
+
+static_assert(match_named_pointer(nullptr) == -2);
+static_assert([] { int value = 43; return match_named_pointer(&value); }() == 43);
+
 static_assert([](int x) { return x match case 0; }(0));
 static_assert([](auto x) -> bool { return x match case 0; }(0));
 static_assert(![](int y) { return 0 match case y; }(1));
@@ -630,9 +640,6 @@ namespace std {
   struct alternative_traits<Variant> {
     static constexpr __SIZE_TYPE__ size = 3;
 
-    template <__SIZE_TYPE__ I>
-    using projection_type = __type_pack_element<I, int, double, float>;
-
     static constexpr __SIZE_TYPE__ index(const Variant& value) noexcept {
       return value.index();
     }
@@ -766,10 +773,6 @@ template <>
 struct std::alternative_traits<PrvalueAlternative> {
   static constexpr __SIZE_TYPE__ size = 1;
   static constexpr bool is_exhaustive = true;
-
-  template <__SIZE_TYPE__ I>
-    requires(I == 0)
-  using projection_type = PrvalueProjection;
 
   static constexpr __SIZE_TYPE__ index(const PrvalueAlternative &) noexcept {
     return 0;
@@ -1082,10 +1085,6 @@ struct tuple_element<I, SharedProjection> {
 template<>
 struct alternative_traits<SharedVariantProjection> {
   static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using projection_type = SharedProjection;
 
   static constexpr __SIZE_TYPE__
   index(const SharedVariantProjection& value) noexcept {

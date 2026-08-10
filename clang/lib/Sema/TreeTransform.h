@@ -4437,7 +4437,7 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-      if (P->isEmpty())
+      if (!P->getSubPattern())
         return Pattern;
 
       auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
