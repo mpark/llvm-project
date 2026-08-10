@@ -91,6 +91,23 @@ int condition(int value) {
   return -1;
 }
 
+int case_condition(int value) {
+  if (case int copy = value)
+    return copy;
+  return -1;
+}
+
+template <class T>
+int dependent_case_condition(T value) {
+  if (case int copy = value) // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
+    return copy;
+  return -1;
+}
+
+int dependent_case_condition_ok = dependent_case_condition(1);
+int dependent_case_condition_error =
+    dependent_case_condition(1.0); // expected-note {{in instantiation of function template specialization 'declaration_patterns::dependent_case_condition<double>' requested here}}
+
 int polymorphic_reference(Shape &shape) {
   return shape match {
     case Circle &circle => circle.radius;
