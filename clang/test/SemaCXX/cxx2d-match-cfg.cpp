@@ -42,25 +42,9 @@ struct Choice {
   double real;
 };
 
-template<__SIZE_TYPE__ I>
-struct ChoiceAlternative;
-
-template<>
-struct ChoiceAlternative<0> {
-  using type = int;
-};
-
-template<>
-struct ChoiceAlternative<1> {
-  using type = double;
-};
-
 template<>
 struct std::alternative_traits<Choice> {
   static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename ChoiceAlternative<I>::type;
 
   static constexpr __SIZE_TYPE__ index(const Choice& value) noexcept {
     return value.active;

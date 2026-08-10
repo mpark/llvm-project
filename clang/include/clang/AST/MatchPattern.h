@@ -378,6 +378,7 @@ struct MatchPatternInfo {
   Expr *Condition = nullptr;
   MatchProjection *Projection = nullptr;
   QualType CheckedSubjectType;
+  QualType AlternativeProviderType;
   ArrayRef<QualType> AlternativeTypes;
   ArrayRef<unsigned char> ProjectableAlternatives;
   ArrayRef<unsigned> SelectedAlternatives;

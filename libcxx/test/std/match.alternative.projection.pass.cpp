@@ -13,6 +13,7 @@
 #include <array>
 #include <cassert>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -30,6 +31,34 @@ int match_optional(const std::optional<int>& value) {
   return value match {
     case { const int& number } => number;
     case {} => -1;
+  };
+}
+
+int match_named_optional(const std::optional<int>& value) {
+  return value match {
+    case { .some: const int& number } => number;
+    case { .none } => -2;
+  };
+}
+
+int match_unique_ptr(const std::unique_ptr<int>& value) {
+  return value match {
+    case { int& number } => number;
+    case {} => -3;
+  };
+}
+
+int match_shared_ptr(const std::shared_ptr<int>& value) {
+  return value match {
+    case { .some: int& number } => number;
+    case { .none } => -4;
+  };
+}
+
+int match_nullable(const auto& value) {
+  return value match {
+    case { .some: const int& number } => number;
+    case { .none } => -6;
   };
 }
 
@@ -61,6 +90,22 @@ int match_expected(const std::expected<int, long>& value) {
   };
 }
 
+int match_nullable_expected(const std::expected<int, long>& value) {
+  return value match {
+    case { .some: const int& result } => result;
+    case { .none } => -5;
+  };
+}
+
+int match_complete_nullable_view_after_primary(
+    const std::expected<int, long>& value) {
+  return value match {
+    case { .value: 0 } => 20;
+    case { .some: const int& result } => result;
+    case { .none } => -7;
+  };
+}
+
 int match_same_type_expected(const std::expected<int, int>& value) {
   return value match {
     case { .value: const int& result } => result;
@@ -72,6 +117,14 @@ int match_void_expected(const std::expected<void, std::string>& value) {
   return value match {
     case { void } => 40;
     case { std::string } => 41;
+  };
+}
+
+int match_nullable_void_expected(
+    const std::expected<void, std::string>& value) {
+  return value match {
+    case { .some } => 42;
+    case { .none } => 43;
   };
 }
 
@@ -266,10 +319,6 @@ struct std::alternative_traits<PrvalueAlternative> {
   static constexpr std::size_t size = 1;
   static constexpr bool is_exhaustive = true;
 
-  template<std::size_t I>
-    requires(I == 0)
-  using projection_type = PrvalueProjection;
-
   static constexpr std::size_t index(const PrvalueAlternative&) noexcept {
     return 0;
   }
@@ -297,6 +346,22 @@ int main(int, char**) {
   assert(match_pointer(nullptr) == -1);
   assert(match_optional(7) == 7);
   assert(match_optional(std::nullopt) == -1);
+  assert(match_named_optional(7) == 7);
+  assert(match_named_optional(std::nullopt) == -2);
+  assert(match_unique_ptr(std::make_unique<int>(8)) == 8);
+  assert(match_unique_ptr(nullptr) == -3);
+  assert(match_shared_ptr(std::make_shared<int>(9)) == 9);
+  assert(match_shared_ptr(nullptr) == -4);
+  assert(match_nullable(&value) == 42);
+  assert(match_nullable(static_cast<int*>(nullptr)) == -6);
+  assert(match_nullable(std::optional<int>(10)) == 10);
+  assert(match_nullable(std::optional<int>()) == -6);
+  assert(match_nullable(std::expected<int, long>(11)) == 11);
+  assert(match_nullable(std::expected<int, long>(std::unexpected(1L))) == -6);
+  assert(match_nullable(std::make_unique<int>(12)) == 12);
+  assert(match_nullable(std::unique_ptr<int>()) == -6);
+  assert(match_nullable(std::make_shared<int>(13)) == 13);
+  assert(match_nullable(std::shared_ptr<int>()) == -6);
   assert(match_rvalue_optional(std::optional<int>(8)) == 8);
   assert(match_variant(9) == 9);
   assert(match_variant(2.5) == 12);
@@ -308,10 +373,19 @@ int main(int, char**) {
   assert(match_dependent_zero(1.0) == 85);
   assert(match_expected(10) == 10);
   assert(match_expected(std::unexpected(3L)) == 23);
+  assert(match_nullable_expected(10) == 10);
+  assert(match_nullable_expected(std::unexpected(3L)) == -5);
+  assert(match_complete_nullable_view_after_primary(0) == 20);
+  assert(match_complete_nullable_view_after_primary(10) == 10);
+  assert(match_complete_nullable_view_after_primary(std::unexpected(3L)) ==
+         -7);
   assert(match_same_type_expected(11) == 11);
   assert(match_same_type_expected(std::unexpected(4)) == 34);
   assert(match_void_expected({}) == 40);
   assert(match_void_expected(std::unexpected(std::string("error"))) == 41);
+  assert(match_nullable_void_expected({}) == 42);
+  assert(match_nullable_void_expected(
+             std::unexpected(std::string("error"))) == 43);
   std::variant<int, double> generic = 12;
   assert(match_generic_variant(generic) == 40);
   generic = 1.5;

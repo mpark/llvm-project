@@ -481,12 +481,12 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
 
     CoveragePatterns Results;
     for (unsigned Index : Info->SelectedAlternatives) {
-      CtorKey C = CtorKey::alternativeCtor(Type, Index, Info->AlternativeTypes,
-                                           Info->ProjectableAlternatives,
-                                           Info->IsExhaustive);
+      CtorKey C = CtorKey::alternativeCtor(
+          Info->AlternativeProviderType, Index, Info->AlternativeTypes,
+          Info->ProjectableAlternatives, Info->IsExhaustive);
       CoveragePattern Result =
           CoveragePattern::ctor(std::move(C), P->getBeginLoc());
-      if (!Info->ProjectableAlternatives[Index]) {
+      if (!Info->ProjectableAlternatives[Index] || !P->getSubPattern()) {
         Results.push_back(std::move(Result));
         continue;
       }
@@ -625,8 +625,8 @@ firstMissingValueInRange(const IntegralValueDomain &Domain,
 
 std::optional<SmallVector<CtorKey, 4>>
 constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
-                    const CoveragePattern &Candidate,
-                    ConstructorDomain Domain) {
+                    const CoveragePattern &Candidate, ConstructorDomain Domain,
+                    QualType AlternativeProvider = QualType()) {
   Type = Type.getNonReferenceType().getUnqualifiedType();
   SmallVector<CtorKey, 4> Ctors;
 
@@ -752,6 +752,9 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
   auto AddAlternatives = [&](const CoveragePattern &P) -> bool {
     if (P.K != CoveragePattern::Ctor || P.C.K != CtorKey::Alternative)
       return false;
+    if (!AlternativeProvider.isNull() &&
+        !S.Context.hasSameType(P.C.AlternativeOwnerType, AlternativeProvider))
+      return false;
     for (unsigned I = 0; I < P.C.AlternativeTypes.size(); ++I)
       Ctors.push_back(CtorKey::alternativeCtor(
           P.C.AlternativeOwnerType, I, P.C.AlternativeTypes,
@@ -822,92 +825,140 @@ Usefulness isUseful(Sema &S, ArrayRef<PatternRow> Matrix, PatternRow Candidate,
   if (Head.K == CoveragePattern::Opaque)
     return Usefulness::MaybeUseful;
 
-  SmallVector<CtorKey, 4> Ctors;
-  if (Head.K == CoveragePattern::Ctor) {
-    Ctors.push_back(Head.C);
-  } else {
-    auto KnownCtors =
-        constructorsForType(S, Types.front(), Matrix, Head, Domain);
-    if (!KnownCtors) {
-      SmallVector<PatternRow, 8> DefaultMatrix;
+  // A complete view covers the subject independently of the provider used by
+  // a later pattern. This also catches nested candidates that switch views.
+  if (Head.K == CoveragePattern::Ctor && !Matrix.empty()) {
+    PatternRow WildCandidate;
+    for (unsigned I = 0; I < Candidate.size(); ++I)
+      WildCandidate.push_back(CoveragePattern::wild());
+    if (isUseful(S, Matrix, std::move(WildCandidate), Types, Domain, nullptr) ==
+        Usefulness::NotUseful)
+      return Usefulness::NotUseful;
+  }
+
+  auto CheckConstructors = [&](ArrayRef<CtorKey> Ctors,
+                               SmallVectorImpl<CtorKey> *CtorWitness) {
+    bool AnyMaybeUseful = false;
+    for (const CtorKey &C : Ctors) {
+      SmallVector<PatternRow, 8> SpecializedMatrix;
       for (const PatternRow &Row : Matrix) {
-        if (Row.empty() || Row.front().K != CoveragePattern::Wild)
+        if (Row.empty())
           continue;
-        PatternRow DefaultRow;
-        DefaultRow.append(Row.begin() + 1, Row.end());
-        DefaultMatrix.push_back(std::move(DefaultRow));
+        PatternRow Specialized;
+        TypeRow SpecializedTypes;
+        if (!specializePattern(Row.front(), C, Specialized, SpecializedTypes))
+          continue;
+        Specialized.append(Row.begin() + 1, Row.end());
+        SpecializedMatrix.push_back(std::move(Specialized));
       }
 
-      PatternRow DefaultCandidate;
-      DefaultCandidate.append(Candidate.begin() + 1, Candidate.end());
-      TypeRow DefaultTypes;
-      DefaultTypes.append(Types.begin() + 1, Types.end());
-      SmallVector<CtorKey, 4> SubWitness;
-      Usefulness Result = isUseful(
-          S, DefaultMatrix, std::move(DefaultCandidate),
-          std::move(DefaultTypes), Domain, Witness ? &SubWitness : nullptr);
-      if (Result == Usefulness::Useful && Witness) {
-        Witness->push_back(CtorKey::wildcardCtor());
-        Witness->append(SubWitness.begin(), SubWitness.end());
-      }
-      return Result;
-    }
-    Ctors = *KnownCtors;
-  }
-
-  bool AnyMaybeUseful = false;
-  for (const CtorKey &C : Ctors) {
-    SmallVector<PatternRow, 8> SpecializedMatrix;
-    for (const PatternRow &Row : Matrix) {
-      if (Row.empty())
-        continue;
-      PatternRow Specialized;
+      PatternRow SpecializedCandidate;
       TypeRow SpecializedTypes;
-      if (!specializePattern(Row.front(), C, Specialized, SpecializedTypes))
+      if (!specializePattern(Head, C, SpecializedCandidate, SpecializedTypes))
         continue;
-      Specialized.append(Row.begin() + 1, Row.end());
-      SpecializedMatrix.push_back(std::move(Specialized));
+      SpecializedCandidate.append(Candidate.begin() + 1, Candidate.end());
+      SpecializedTypes.append(Types.begin() + 1, Types.end());
+
+      SmallVector<CtorKey, 4> SubWitness;
+      Usefulness Result;
+      if (C.K == CtorKey::Alternative &&
+          C.ProjectableAlternatives[C.AlternativeIndex] &&
+          SpecializedMatrix.empty()) {
+        assert(!SpecializedCandidate.empty() && !SpecializedTypes.empty());
+        SpecializedCandidate.erase(SpecializedCandidate.begin());
+        SpecializedTypes.erase(SpecializedTypes.begin());
+        SmallVector<CtorKey, 4> RemainingWitness;
+        Result = isUseful(S, SpecializedMatrix, std::move(SpecializedCandidate),
+                          std::move(SpecializedTypes), Domain,
+                          CtorWitness ? &RemainingWitness : nullptr);
+        if (Result == Usefulness::Useful && CtorWitness) {
+          SubWitness.push_back(CtorKey::wildcardCtor());
+          SubWitness.append(RemainingWitness.begin(), RemainingWitness.end());
+        }
+      } else {
+        Result = isUseful(S, SpecializedMatrix, std::move(SpecializedCandidate),
+                          std::move(SpecializedTypes), Domain,
+                          CtorWitness ? &SubWitness : nullptr);
+      }
+      if (Result == Usefulness::Useful) {
+        if (CtorWitness) {
+          CtorWitness->push_back(C);
+          CtorWitness->append(SubWitness.begin(), SubWitness.end());
+        }
+        return Usefulness::Useful;
+      }
+      AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
     }
 
-    PatternRow SpecializedCandidate;
-    TypeRow SpecializedTypes;
-    if (!specializePattern(Head, C, SpecializedCandidate, SpecializedTypes))
-      continue;
-    SpecializedCandidate.append(Candidate.begin() + 1, Candidate.end());
-    SpecializedTypes.append(Types.begin() + 1, Types.end());
+    return AnyMaybeUseful ? Usefulness::MaybeUseful : Usefulness::NotUseful;
+  };
 
-    SmallVector<CtorKey, 4> SubWitness;
-    Usefulness Result;
-    if (C.K == CtorKey::Alternative &&
-        C.ProjectableAlternatives[C.AlternativeIndex] &&
-        SpecializedMatrix.empty()) {
-      assert(!SpecializedCandidate.empty() && !SpecializedTypes.empty());
-      SpecializedCandidate.erase(SpecializedCandidate.begin());
-      SpecializedTypes.erase(SpecializedTypes.begin());
-      SmallVector<CtorKey, 4> RemainingWitness;
-      Result = isUseful(S, SpecializedMatrix, std::move(SpecializedCandidate),
-                        std::move(SpecializedTypes), Domain,
-                        Witness ? &RemainingWitness : nullptr);
-      if (Result == Usefulness::Useful && Witness) {
-        SubWitness.push_back(CtorKey::wildcardCtor());
-        SubWitness.append(RemainingWitness.begin(), RemainingWitness.end());
-      }
-    } else {
-      Result = isUseful(S, SpecializedMatrix, std::move(SpecializedCandidate),
-                        std::move(SpecializedTypes), Domain,
-                        Witness ? &SubWitness : nullptr);
-    }
-    if (Result == Usefulness::Useful) {
-      if (Witness) {
-        Witness->push_back(C);
-        Witness->append(SubWitness.begin(), SubWitness.end());
-      }
-      return Usefulness::Useful;
-    }
-    AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
+  if (Head.K == CoveragePattern::Ctor) {
+    CtorKey Ctor = Head.C;
+    return CheckConstructors(ArrayRef(Ctor), Witness);
   }
 
-  return AnyMaybeUseful ? Usefulness::MaybeUseful : Usefulness::NotUseful;
+  SmallVector<QualType, 4> AlternativeProviders;
+  for (const PatternRow &Row : Matrix) {
+    if (Row.empty() || Row.front().K != CoveragePattern::Ctor ||
+        Row.front().C.K != CtorKey::Alternative)
+      continue;
+    QualType Provider = Row.front().C.AlternativeOwnerType;
+    if (llvm::none_of(AlternativeProviders, [&](QualType Existing) {
+          return S.Context.hasSameType(Existing, Provider);
+        }))
+      AlternativeProviders.push_back(Provider);
+  }
+
+  if (!AlternativeProviders.empty()) {
+    Usefulness Combined = Usefulness::MaybeUseful;
+    SmallVector<CtorKey, 4> FirstWitness;
+    for (QualType Provider : AlternativeProviders) {
+      auto KnownCtors =
+          constructorsForType(S, Types.front(), Matrix, Head, Domain, Provider);
+      assert(KnownCtors && "alternative provider has no constructors");
+      SmallVector<CtorKey, 4> ProviderWitness;
+      Usefulness Result =
+          CheckConstructors(*KnownCtors, Witness ? &ProviderWitness : nullptr);
+      if (Result == Usefulness::NotUseful)
+        return Usefulness::NotUseful;
+      if (Result == Usefulness::Useful) {
+        Combined = Usefulness::Useful;
+        if (FirstWitness.empty())
+          FirstWitness = std::move(ProviderWitness);
+      }
+    }
+    if (Combined == Usefulness::Useful && Witness)
+      Witness->append(FirstWitness.begin(), FirstWitness.end());
+    return Combined;
+  }
+
+  auto KnownCtors = constructorsForType(S, Types.front(), Matrix, Head, Domain);
+  if (KnownCtors)
+    return CheckConstructors(*KnownCtors, Witness);
+
+  SmallVector<PatternRow, 8> DefaultMatrix;
+  for (const PatternRow &Row : Matrix) {
+    if (Row.empty() || Row.front().K != CoveragePattern::Wild)
+      continue;
+    PatternRow DefaultRow;
+    DefaultRow.append(Row.begin() + 1, Row.end());
+    DefaultMatrix.push_back(std::move(DefaultRow));
+  }
+
+  PatternRow DefaultCandidate;
+  DefaultCandidate.append(Candidate.begin() + 1, Candidate.end());
+  TypeRow DefaultTypes;
+  DefaultTypes.append(Types.begin() + 1, Types.end());
+  SmallVector<CtorKey, 4> SubWitness;
+  Usefulness Result = isUseful(S, DefaultMatrix, std::move(DefaultCandidate),
+                               std::move(DefaultTypes), Domain,
+                               Witness ? &SubWitness : nullptr);
+  if (Result == Usefulness::Useful && Witness) {
+    Witness->push_back(CtorKey::wildcardCtor());
+    Witness->append(SubWitness.begin(), SubWitness.end());
+  }
+  return Result;
 }
 
 std::string printCtor(const CtorKey &C) {

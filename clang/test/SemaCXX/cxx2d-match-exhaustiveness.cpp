@@ -354,6 +354,28 @@ int explicit_value_completes_signed_enum_domain(Signed value) {
   };
 }
 
+namespace std {
+template<class T>
+struct alternative_traits;
+
+template<class Provider>
+struct alternative_name {
+  using provider = Provider;
+  __SIZE_TYPE__ index;
+  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
+};
+
+template<>
+struct alternative_traits<int*> {
+  static constexpr __SIZE_TYPE__ size = 1;
+
+  static constexpr __SIZE_TYPE__ index(int*) noexcept { return 0; }
+
+  template<__SIZE_TYPE__, class Self>
+  static constexpr double get(Self&&) { return 0; }
+};
+}
+
 int exhaustive_pointer(int *pointer) {
   return pointer match {
     case {} => 0;
@@ -372,6 +394,19 @@ int pointer_wildcard_after_both_states(int *pointer) {
 int missing_null_pointer_state(int *pointer) {
   return pointer match { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
     case { int &value } => value;
+  };
+}
+
+int named_pointer_states_are_builtin(int *pointer) {
+  return pointer match {
+    case { .some: int &value } => value;
+    case { .none } => 0;
+  };
+}
+
+int void_pointer_has_no_alternative_protocol(void *pointer) {
+  return pointer match {
+    case {} => 0; // expected-error {{braced alternative patterns do not support pointers to void}}
   };
 }
 
@@ -455,8 +490,6 @@ public:
   bool operator==(const type_info&) const;
 };
 
-template<class T>
-struct alternative_traits;
 }
 
 struct Choice {
@@ -465,30 +498,13 @@ struct Choice {
   int number;
 };
 
-template<__SIZE_TYPE__ I>
-struct ChoiceAlternative;
-
-template<>
-struct ChoiceAlternative<0> {
-  using type = bool;
-};
-
-template<>
-struct ChoiceAlternative<1> {
-  using type = int;
-};
-
 template<>
 struct std::alternative_traits<Choice> {
+  using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 4;
 
-  template<__SIZE_TYPE__ I>
-    requires (I < 2)
-  using projection_type = typename ChoiceAlternative<I>::type;
-
   struct names {
-    static constexpr __SIZE_TYPE__ flag = 0;
-    static constexpr __SIZE_TYPE__ number = 1;
+    static constexpr alternative_name<AT> flag = 0, number = 1;
   };
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
@@ -578,6 +594,92 @@ int no_residual_state_after_all_alternatives(Choice choice) {
   };
 }
 
+struct NullableChoice {
+  bool engaged;
+  int value;
+};
+
+struct NullableChoiceView {
+  static constexpr __SIZE_TYPE__ size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
+    return choice.engaged ? 1 : 0;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 1)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+template<>
+struct std::alternative_traits<NullableChoice> {
+  using AT = alternative_traits;
+  static constexpr __SIZE_TYPE__ size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
+    return choice.engaged ? 0 : 1;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+
+  struct names {
+    static constexpr alternative_name<AT> value = 0, error = 1;
+    static constexpr alternative_name<NullableChoiceView> none = 0, some = 1;
+  };
+};
+
+int complete_secondary_view_after_partial_primary(NullableChoice choice) {
+  return choice match {
+    case { .value: 0 } => 0;
+    case { .some: _ } => 1;
+    case { .none } => 2;
+  };
+}
+
+int partial_views_do_not_combine(NullableChoice choice) {
+  return choice match { // expected-error {{match expression is not exhaustive}}
+    case { .value: _ } => 0;
+    case { .none } => 1;
+  };
+}
+
+int overlap_between_views_is_maybe_useful(NullableChoice choice) {
+  return choice match {
+    case { .value: _ } => 0;
+    case { .some: _ } => 1;
+    case { .none } => 2;
+  };
+}
+
+int complete_view_makes_other_view_redundant(NullableChoice choice) {
+  return choice match {
+    case { .some: _ } => 0;
+    case { .none } => 1;
+    case { .value: _ } => 2; // expected-error {{match case is redundant}}
+  };
+}
+
+struct NullableChoiceProduct {
+  NullableChoice choice;
+  bool flag;
+};
+
+int complete_nested_view_makes_other_view_redundant(
+    NullableChoiceProduct value) {
+  return value match {
+    case [{ .some: _ }, _] => 0;
+    case [{ .none }, _] => 1;
+    case [{ .value: _ }, _] => 2; // expected-error {{match case is redundant}}
+  };
+}
+
 struct ResidualChoice {
   unsigned state;
   bool flag;
@@ -588,9 +690,6 @@ template<>
 struct std::alternative_traits<ResidualChoice> {
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = false;
-
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename ChoiceAlternative<I>::type;
 
   static constexpr __SIZE_TYPE__ index(const ResidualChoice& choice) noexcept {
     return choice.state;

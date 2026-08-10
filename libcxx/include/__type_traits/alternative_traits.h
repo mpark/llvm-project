@@ -10,6 +10,9 @@
 #define _LIBCPP___TYPE_TRAITS_ALTERNATIVE_TRAITS_H
 
 #include <__config>
+#include <__cstddef/size_t.h>
+#include <__type_traits/is_void.h>
+#include <__utility/forward.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -21,6 +24,40 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp>
 struct alternative_traits;
+
+template <class _Provider>
+struct alternative_name {
+  using provider = _Provider;
+
+  size_t index;
+
+  consteval alternative_name(size_t __index) : index(__index) {}
+};
+
+template <class _Tp>
+struct alternative_traits<_Tp*> {
+  using _AT = alternative_traits;
+
+  static constexpr size_t size        = 2;
+  static constexpr bool is_exhaustive = true;
+
+  // This provider is inherited by nullable types and also names a nullable
+  // view of expected, so its operations act on the actual matching subject.
+  template <class _Self>
+  _LIBCPP_HIDE_FROM_ABI static constexpr bool index(const _Self& __self) noexcept {
+    return __self ? true : false;
+  }
+
+  template <bool _HasValue, class _Self>
+    requires(_HasValue && !is_void_v<_Tp>)
+  _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
+    return *std::forward<_Self>(__self);
+  }
+
+  struct names {
+    static constexpr alternative_name<_AT> none = 0, some = 1;
+  };
+};
 
 #endif // _LIBCPP_STD_VER >= 26
 
