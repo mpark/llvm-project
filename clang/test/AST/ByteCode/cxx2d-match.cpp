@@ -586,6 +586,24 @@ constexpr int prvalue_projection_initializes_declaration_directly() {
 
 static_assert(prvalue_projection_initializes_declaration_directly() == 11);
 
+struct MatchFullExpressionLifetime {
+  int *destructions;
+
+  constexpr ~MatchFullExpressionLifetime() { ++*destructions; }
+};
+
+constexpr int test_match_subject_full_expression_lifetime() {
+  int destructions = 0;
+  int observed =
+      ((MatchFullExpressionLifetime{&destructions} match {
+         case auto&& value => 0;
+       }),
+       destructions);
+  return observed * 10 + destructions;
+}
+
+static_assert(test_match_subject_full_expression_lifetime() == 1);
+
 namespace N1 {
   struct S {
     int index;
