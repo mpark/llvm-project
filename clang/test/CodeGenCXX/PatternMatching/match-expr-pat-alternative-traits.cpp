@@ -16,21 +16,18 @@ template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
 
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using projection_type = int;
-
   static __SIZE_TYPE__ index(const MaybeInt&) noexcept;
 
   template<__SIZE_TYPE__ I>
+    requires(I == 0)
   static int& get(MaybeInt&);
 };
 
 // CHECK-LABEL: define{{.*}} i32 @_Z17match_alternativeR8MaybeInt
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0EEERiRS0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0EEERiRS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0E
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0E
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK: ret i32
 int match_alternative(MaybeInt& value) {
@@ -76,13 +73,10 @@ template<>
 struct std::alternative_traits<Choice> {
   static constexpr __SIZE_TYPE__ size = 2;
 
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename ChoiceAlternative<I>::type;
-
   static __SIZE_TYPE__ index(const Choice&) noexcept;
 
   template<__SIZE_TYPE__ I>
-  static projection_type<I>& get(Choice&);
+  static typename ChoiceAlternative<I>::type& get(Choice&);
 };
 
 template<class T>
