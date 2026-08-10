@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <tuple>
+#include <utility>
 #include <variant>
 #include <any>
 
@@ -132,6 +133,38 @@ void test_nested_decomposition_pattern() {
   check(nested_decomposition_pattern({Blue, {0, 2}}) == Result{Blue, 8});
   check(nested_decomposition_pattern({Blue, {2, 3}}) == Result{Blue, 6});
   check(nested_decomposition_pattern({Blue, {3, 4}}) == Result{Blue, 12});
+}
+
+struct MoveOnlyWidget {
+  int value;
+
+  explicit MoveOnlyWidget(int value) : value(value) {}
+  MoveOnlyWidget(const MoveOnlyWidget&) = delete;
+  MoveOnlyWidget(MoveOnlyWidget&& other) : value(other.value) {
+    other.value = -1;
+  }
+};
+
+void test_nested_decomposition_forwards_xvalues() {
+  std::tuple<int, std::pair<int, MoveOnlyWidget>> subject(
+      1, std::pair<int, MoveOnlyWidget>(2, MoveOnlyWidget(3)));
+  int result = static_cast<decltype(subject)&&>(subject) match {
+    case [auto&& x, [auto&& y, MoveOnlyWidget widget]] =>
+      x + y + widget.value;
+  };
+  check(result == 6);
+  check(std::get<1>(subject).second.value == -1);
+}
+
+void test_nested_decomposition_preserves_lvalues() {
+  std::tuple<int, std::pair<int, MoveOnlyWidget>> subject(
+      1, std::pair<int, MoveOnlyWidget>(2, MoveOnlyWidget(3)));
+  int result = subject match {
+    case [auto&& x, [auto&& y, MoveOnlyWidget& widget]] =>
+      (widget.value = 4, x + y + widget.value);
+  };
+  check(result == 7);
+  check(std::get<1>(subject).second.value == 4);
 }
 
 enum State { FizzBuzz, Fizz, Buzz, N };
@@ -589,6 +622,8 @@ int main() {
   test_char_pattern();
   test_decomposition_pattern();
   test_nested_decomposition_pattern();
+  test_nested_decomposition_forwards_xvalues();
+  test_nested_decomposition_preserves_lvalues();
   test_fizzbuzz();
   test_trailing_return_type();
   test_alternative_pattern_const();
