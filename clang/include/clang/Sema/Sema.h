@@ -11300,6 +11300,7 @@ public:
       MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
       SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
       bool NeedsCaseInstantiation,
+      bool CaseConditionSyntax = false,
       ArrayRef<MatchTestInstantiation> Instantiations = {});
   ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
