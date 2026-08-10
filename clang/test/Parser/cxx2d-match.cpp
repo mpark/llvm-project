@@ -485,6 +485,48 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
   }
 }
 
+void test_case_condition(int value, const int (&pair)[2]) {
+  if (case int copy = value) {
+    copy;
+  } else {
+    copy; // expected-error {{use of undeclared identifier 'copy'}}
+  }
+  copy; // expected-error {{use of undeclared identifier 'copy'}}
+
+  if (int init = 1;
+      case int copy = value if (int sum = init + copy; sum > 0)) {
+    init;
+    copy;
+    sum;
+  } else {
+    init;
+    copy; // expected-error {{use of undeclared identifier 'copy'}}
+    sum;  // expected-error {{use of undeclared identifier 'sum'}}
+  }
+
+  while (case int copy = value) {
+    copy;
+    break;
+  }
+
+  for (int count = 0; case int copy = value; ++copy, ++count) {
+    copy;
+    count;
+    break;
+  }
+
+  if (case [int first, int second] = pair) {
+    first;
+    second;
+  }
+}
+
+void test_case_condition_is_direct_only(int value) {
+  if ((case int copy = value)) {} // expected-error {{expected expression}}
+  bool result = case int copy = value; // expected-error {{expected expression}}
+  switch (case int copy = value) {} // expected-error {{expected expression}}
+}
+
 template <int... Is, int N>
 int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
   return p match {
