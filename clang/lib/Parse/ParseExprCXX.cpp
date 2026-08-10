@@ -4124,8 +4124,8 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   if (T.expectAndConsume())
     return true;
   Sema::MatchProjectionCache ProjectionCache;
-  // Parse each source arm once. Sema specializes an arm whose selector can
-  // project more than one alternative after its guard and handler are parsed.
+  // Parse each source arm once. Sema specializes every generic projection arm
+  // after its guard and handler are parsed.
   ProjectionCache.DeferAlternativeChoices = true;
   bool InvalidBody = false;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {

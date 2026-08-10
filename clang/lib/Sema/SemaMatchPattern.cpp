@@ -743,7 +743,8 @@ ExprResult Sema::ActOnMatchSelectExpr(
     bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
     SmallVectorImpl<MatchCase> &SourceCases, SourceRange Braces,
     bool ExpandDeferredCases, bool RequireFirstCaseViable,
-    std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations) {
+    std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
+    std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
   if (ExpandDeferredCases) {
     auto *E = MatchSelectExpr::Create(
         Context, HoldingVar, Subject, MatchLoc, IsConstexpr,
@@ -762,7 +763,10 @@ ExprResult Sema::ActOnMatchSelectExpr(
                                     Case.PatternInstantiation});
   }
 
-  CheckMatchSelectExhaustiveness(Subject, SourceCases, CaseInstantiations);
+  CheckMatchSelectExhaustiveness(
+      Subject, SourceCases,
+      DiagnosticInstantiations.value_or(
+          ArrayRef<MatchCaseInstantiation>(CaseInstantiations)));
   return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
                                  IsConstexpr, RequireFirstCaseViable,
                                  OrigResultType, RetTy, SourceCases,
@@ -1791,44 +1795,78 @@ Sema::MatchPatternSemanticAnalysis
 Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
                                    const MatchPatternState &State) {
   MatchPatternSemanticAnalysis Result;
+
   auto Analyze = [&](MatchPattern *P,
                      auto &Recurse) -> MatchPatternRefutability {
     const MatchPatternInfo *Info = State.find(P);
     switch (P->getMatchPatternClass()) {
     case MatchPattern::WildcardPatternClass:
       return MatchPatternRefutability::Irrefutable;
+
     case MatchPattern::ExpressionPatternClass:
-    case MatchPattern::AlternativePatternClass:
       return MatchPatternRefutability::Refutable;
+
     case MatchPattern::DeclarationPatternClass:
-      return Info && Info->Projection &&
-                     Info->Projection->getKind() == MatchProjection::CastProjection
-                 ? MatchPatternRefutability::Refutable
-                 : MatchPatternRefutability::Irrefutable;
+      if (Info && Info->Projection &&
+          Info->Projection->getKind() == MatchProjection::CastProjection)
+        return MatchPatternRefutability::Refutable;
+      return MatchPatternRefutability::Irrefutable;
+
     case MatchPattern::TypePatternClass:
       if (!Info || !Info->TypePatternResolved)
         return MatchPatternRefutability::Refutable;
       if (!Info->TypePatternMatches)
         return MatchPatternRefutability::Impossible;
-      return Info->Projection &&
-                     Info->Projection->getKind() == MatchProjection::CastProjection
-                 ? MatchPatternRefutability::Refutable
-                 : MatchPatternRefutability::Irrefutable;
+      if (Info->Projection &&
+          Info->Projection->getKind() == MatchProjection::CastProjection)
+        return MatchPatternRefutability::Refutable;
+      return MatchPatternRefutability::Irrefutable;
+
+    case MatchPattern::AlternativePatternClass: {
+      auto *Alternative = static_cast<AlternativePattern *>(P);
+      if (!Info)
+        return MatchPatternRefutability::Refutable;
+
+      if (Info->IsOpenAlternative) {
+        if (Info->OpenAlternativeProjectableWildcard &&
+            !Info->OpenAlternativeHasEmpty)
+          return MatchPatternRefutability::Irrefutable;
+        return MatchPatternRefutability::Refutable;
+      }
+
+      if (Info->Projection && !Info->AlternativeProviderType.isNull()) {
+        const VarDecl *HoldingVar = Info->Projection->getHoldingVar();
+        assert(HoldingVar && HoldingVar->getInit() &&
+               "closed alternative projection has no subject");
+        MatchSemanticDomainConstraint Constraint;
+        Constraint.Subject = HoldingVar->getInit();
+        Constraint.ProviderType = Info->AlternativeProviderType;
+        Constraint.Alternatives.append(Info->SelectedAlternatives.begin(),
+                                       Info->SelectedAlternatives.end());
+        Result.Domain.push_back(std::move(Constraint));
+      }
+
+      if (!Alternative->getSubPattern())
+        return MatchPatternRefutability::Irrefutable;
+      return Recurse(Alternative->getSubPattern(), Recurse);
+    }
+
     case MatchPattern::DecompositionPatternClass: {
-      MatchPatternRefutability Refutability =
+      MatchPatternRefutability Decomposition =
           MatchPatternRefutability::Irrefutable;
       for (MatchPattern *Child : P->children()) {
         MatchPatternRefutability ChildResult = Recurse(Child, Recurse);
         if (ChildResult == MatchPatternRefutability::Impossible)
-          return ChildResult;
+          return MatchPatternRefutability::Impossible;
         if (ChildResult == MatchPatternRefutability::Refutable)
-          Refutability = ChildResult;
+          Decomposition = MatchPatternRefutability::Refutable;
       }
-      return Refutability;
+      return Decomposition;
     }
     }
     llvm_unreachable("unknown match pattern kind");
   };
+
   Result.Refutability = Analyze(Pattern, Analyze);
   return Result;
 }

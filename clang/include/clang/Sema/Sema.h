@@ -11166,6 +11166,8 @@ public:
       SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
       bool ExpandDeferredCases = false, bool RequireFirstCaseViable = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =
+          std::nullopt,
+      std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations =
           std::nullopt);
   ExprResult ExpandDeferredMatchSelectExpr(MatchSelectExpr *E);
 
@@ -11242,7 +11244,6 @@ public:
   struct MatchPatternSemanticAnalysis {
     MatchPatternRefutability Refutability = MatchPatternRefutability::Refutable;
     SmallVector<MatchSemanticDomainConstraint, 4> Domain;
-
     bool isUnconditionallyMatched() const {
       return Domain.empty() &&
              Refutability == MatchPatternRefutability::Irrefutable;

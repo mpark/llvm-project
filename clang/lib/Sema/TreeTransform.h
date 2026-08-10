@@ -19313,8 +19313,29 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     RetTy = E->getType();
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
+  SmallVector<MatchCaseInstantiation, 32> DiagnosticInstantiations;
+  SmallVector<SmallVector<Sema::MatchSemanticDomainConstraint, 4>, 8>
+      ClosedDomains;
   Sema::MatchProjectionCache ProjectionCache;
-  enum class TransformCaseResult { Success, NoMatch, Error };
+  enum class TransformCaseResult { Success, Dominated, NoMatch, Error };
+
+  // An earlier irrefutable arm dominates a candidate when every restriction
+  // imposed by the earlier arm also holds for the candidate's narrower domain.
+  auto DomainCovers =
+      [&](ArrayRef<Sema::MatchSemanticDomainConstraint> Closed,
+          ArrayRef<Sema::MatchSemanticDomainConstraint> Candidate) {
+        return llvm::all_of(Closed, [&](const auto &Required) {
+          return llvm::any_of(Candidate, [&](const auto &Actual) {
+            if (Required.Subject != Actual.Subject ||
+                !getSema().Context.hasSameType(Required.ProviderType,
+                                               Actual.ProviderType))
+              return false;
+            return llvm::all_of(Actual.Alternatives, [&](unsigned Alternative) {
+              return llvm::is_contained(Required.Alternatives, Alternative);
+            });
+          });
+        });
+      };
   auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
@@ -19343,15 +19364,15 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
     };
 
-    bool SourceWasMaybeUseful =
+    bool IsSubstitutionDependent =
         E->getSubject()->isTypeDependent() ||
         static_cast<bool>(Case.Pattern->getDependence() &
                           ExprDependence::Instantiation);
-    SourceCases[CaseIndex].MaybeUseful |= SourceWasMaybeUseful;
-    bool WasMaybeUseful =
-        SourceWasMaybeUseful ||
+    SourceCases[CaseIndex].MaybeUseful |= IsSubstitutionDependent;
+    bool AllowsSubstitutionFailure =
+        IsSubstitutionDependent ||
         HasAlternativeChoice(Case.Pattern, HasAlternativeChoice);
-    if (WasMaybeUseful) {
+    if (AllowsSubstitutionFailure) {
       Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
       if (TransformAndCheckPattern())
         return Trap.hasErrorOccurred() ? TransformCaseResult::NoMatch
@@ -19359,6 +19380,24 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     } else if (TransformAndCheckPattern()) {
       return TransformCaseResult::Error;
     }
+
+    MatchPatternInstantiation *PatternInstantiation =
+        MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,
+                                          PatternState.Infos);
+    Sema::MatchPatternSemanticAnalysis Semantic =
+        getSema().AnalyzeMatchPatternSemantics(TransformedPattern,
+                                               PatternState);
+    DiagnosticInstantiations.push_back({TransformedPattern, Case.IfLoc,
+                                        Case.Guard, Case.Handler, CaseIndex,
+                                        PatternInstantiation});
+
+    if (Semantic.Refutability == Sema::MatchPatternRefutability::Impossible)
+      return TransformCaseResult::NoMatch;
+
+    if (llvm::any_of(ClosedDomains, [&](const auto &Closed) {
+          return DomainCovers(Closed, Semantic.Domain);
+        }))
+      return TransformCaseResult::Dominated;
 
     StmtResult GuardInit;
     if (Case.Guard.Init) {
@@ -19392,9 +19431,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                    {GuardInit.get(), Guard.get().first, Guard.get().second},
                    Handler.get(),
                    CaseIndex,
-                   MatchPatternInstantiation::Create(getSema().Context,
-                                                     TransformedPattern,
-                                                     PatternState.Infos)};
+                   PatternInstantiation};
+    if (!Case.Guard.hasGuard() &&
+        Semantic.Refutability == Sema::MatchPatternRefutability::Irrefutable)
+      ClosedDomains.push_back(std::move(Semantic.Domain));
     return TransformCaseResult::Success;
   };
 
@@ -19402,6 +19442,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   for (auto [CaseIndex, Case] : llvm::enumerate(E->getCases())) {
     size_t InitialCaseCount = Instantiations.size();
     bool SawAlternativeChoice = false;
+    bool SawViableCandidate = false;
     SmallVector<unsigned, 4> ForcedSelections;
     while (true) {
       ProjectionCache.AlternativeChoices.clear();
@@ -19416,8 +19457,13 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         return ExprError();
       if (Result == TransformCaseResult::NoMatch)
         ProjectionCache.Entries.resize(SavedProjectionCount);
-      else
+      else if (Result == TransformCaseResult::Success) {
         Instantiations.push_back(ExpandedCase);
+        SawViableCandidate = true;
+      } else {
+        assert(Result == TransformCaseResult::Dominated);
+        SawViableCandidate = true;
+      }
       SawAlternativeChoice |= !ProjectionCache.AlternativeChoices.empty();
 
       SmallVector<unsigned, 4> NextSelections;
@@ -19438,7 +19484,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         break;
       ForcedSelections = std::move(NextSelections);
     }
-    if (Instantiations.size() == InitialCaseCount && SawAlternativeChoice &&
+    if (!SawViableCandidate && Instantiations.size() == InitialCaseCount &&
+        SawAlternativeChoice &&
         (!E->getSubject()->isTypeDependent() ||
          (IsFirstSourceCase && E->requiresFirstCaseViable()))) {
       getSema().Diag(Case.Pattern->getBeginLoc(),
@@ -19453,7 +19500,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
       E->getOrigResultType(), RetTy, SourceCases, E->getBraces(),
       /*ExpandDeferredCases=*/false, E->requiresFirstCaseViable(),
-      ArrayRef<MatchCaseInstantiation>(Instantiations));
+      ArrayRef<MatchCaseInstantiation>(Instantiations),
+      ArrayRef<MatchCaseInstantiation>(DiagnosticInstantiations));
 }
 
 } // end namespace clang
