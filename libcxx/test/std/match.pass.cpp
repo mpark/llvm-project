@@ -498,20 +498,8 @@ struct Variant {
 
 namespace std {
   template <>
-  struct variant_size<Variant> {
-    static constexpr int value = 3;
-  };
-
-  template <> struct variant_alternative<0, Variant> { using type = int; };
-  template <> struct variant_alternative<1, Variant> { using type = double; };
-  template <> struct variant_alternative<2, Variant> { using type = float; };
-
-  template <>
   struct alternative_traits<Variant> {
     static constexpr size_t size = 3;
-
-    template <size_t I>
-    using projection_type = typename variant_alternative<I, Variant>::type;
 
     static constexpr size_t index(const Variant& value) noexcept {
       return value.index();

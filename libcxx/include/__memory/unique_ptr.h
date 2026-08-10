@@ -25,6 +25,7 @@
 #include <__memory/compressed_pair.h>
 #include <__memory/pointer_traits.h>
 #include <__type_traits/add_reference.h>
+#include <__type_traits/alternative_traits.h>
 #include <__type_traits/common_type.h>
 #include <__type_traits/conditional.h>
 #include <__type_traits/enable_if.h>
@@ -762,6 +763,14 @@ struct hash<__enable_hash_helper< unique_ptr<_Tp, _Dp>, typename unique_ptr<_Tp,
     return hash<pointer>()(__ptr.get());
   }
 };
+
+#if _LIBCPP_STD_VER >= 26
+
+template <class _Tp, class _Dp>
+  requires(!is_array_v<_Tp>)
+struct alternative_traits<unique_ptr<_Tp, _Dp>> : alternative_traits<_Tp*> {};
+
+#endif // _LIBCPP_STD_VER >= 26
 
 _LIBCPP_END_NAMESPACE_STD
 
