@@ -3,6 +3,13 @@
 namespace std {
 template<class T>
 struct alternative_traits;
+
+template<class Provider>
+struct alternative_name {
+  using provider = Provider;
+  __SIZE_TYPE__ index;
+  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
+};
 }
 
 struct Choice {
@@ -11,29 +18,13 @@ struct Choice {
   double second;
 };
 
-template<__SIZE_TYPE__ I>
-struct ChoiceAlternative;
-
-template<>
-struct ChoiceAlternative<0> {
-  using type = int;
-};
-
-template<>
-struct ChoiceAlternative<1> {
-  using type = double;
-};
-
 template<>
 struct std::alternative_traits<Choice> {
+  using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
 
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename ChoiceAlternative<I>::type;
-
   struct names {
-    static constexpr __SIZE_TYPE__ first = 0;
-    static constexpr __SIZE_TYPE__ second = 1;
+    static constexpr alternative_name<AT> first = 0, second = 1;
   };
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
@@ -54,13 +45,32 @@ struct MaybeInt {
   int value;
 };
 
+struct MultiViewChoice {
+  bool engaged;
+  int value;
+  int* primary_index_calls;
+  int* nullable_index_calls;
+};
+
+struct NullableChoiceView {
+  static constexpr __SIZE_TYPE__ size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
+    ++*choice.nullable_index_calls;
+    return choice.engaged ? 1 : 0;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 1)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
 template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using projection_type = int;
 
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
@@ -71,6 +81,29 @@ struct std::alternative_traits<MaybeInt> {
   static constexpr decltype(auto) get(Self&& value) {
     return (static_cast<Self&&>(value).value);
   }
+};
+
+template<>
+struct std::alternative_traits<MultiViewChoice> {
+  using AT = alternative_traits;
+  static constexpr __SIZE_TYPE__ size = 2;
+  static constexpr bool is_exhaustive = true;
+
+  static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
+    ++*choice.primary_index_calls;
+    return choice.engaged ? 0 : 1;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+
+  struct names {
+    static constexpr alternative_name<AT> value = 0, error = 1;
+    static constexpr alternative_name<NullableChoiceView> none = 0, some = 1;
+  };
 };
 
 constexpr int match_choice(Choice choice) {
@@ -94,6 +127,20 @@ constexpr int match_generic(Choice choice) {
   return choice match {
     case { auto&& value } => classify(value);
   };
+}
+
+constexpr int multiple_views_cache_each_discriminator() {
+  int primary_index_calls = 0;
+  int nullable_index_calls = 0;
+  MultiViewChoice choice{
+      true, 2, &primary_index_calls, &nullable_index_calls};
+  int result = choice match {
+    case { .value: 0 } => 0;
+    case { .some: 1 } => 1;
+    case { .some: int value } => value;
+    case { .none } => -1;
+  };
+  return primary_index_calls * 100 + nullable_index_calls * 10 + result;
 }
 
 template<class T>
@@ -156,6 +203,7 @@ static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
 static_assert(match_generic({0, 3, 4}) == 1);
 static_assert(match_generic({1, 3, 4}) == 2);
+static_assert(multiple_views_cache_each_discriminator() == 112);
 constexpr Choice dependent_first{0, 3, 4};
 constexpr Choice dependent_second{1, 3, 4};
 static_assert(match_dependent_generic(dependent_first) == 1);

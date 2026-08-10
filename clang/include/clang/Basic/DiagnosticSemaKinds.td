@@ -14510,6 +14510,8 @@ def err_braced_alternative_no_viable_state : Error<
   "braced alternative pattern does not match any projectable state of %0">;
 def err_empty_alternative_not_found : Error<
   "type %0 has no non-projectable alternative state">;
+def err_braced_alternative_void_pointer : Error<
+  "braced alternative patterns do not support pointers to void">;
 def err_open_alternative_pattern_not_type_directed : Error<
   "open alternative protocol for type %0 requires a declaration or type "
   "pattern with a non-placeholder, non-void type">;

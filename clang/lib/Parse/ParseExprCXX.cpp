@@ -4447,6 +4447,11 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
     }
     Name = Tok.getIdentifierInfo();
     NameRange = {PeriodLoc, ConsumeToken()};
+    if (Tok.is(tok::r_brace)) {
+      T.consumeClose();
+      return Actions.ActOnNamedAlternativePattern(T.getRange(), NameRange, Name,
+                                                  SourceLocation(), nullptr);
+    }
     if (ExpectAndConsume(tok::colon)) {
       T.skipToEnd();
       return true;
