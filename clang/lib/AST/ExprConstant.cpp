@@ -1363,6 +1363,16 @@ namespace {
       OldStackSize = std::numeric_limits<unsigned>::max();
       return OK;
     }
+    void extendToFullExpression() {
+      static_assert(Kind == ScopeKind::Block);
+      assert(OldStackSize <= Info.CleanupStack.size() &&
+             "extending cleanups out of order?");
+      // Transfer this scope's objects to the surrounding full-expression.
+      for (unsigned I = OldStackSize, End = Info.CleanupStack.size(); I != End;
+           ++I)
+        Info.CleanupStack[I].setDestroyedAtEndOf(ScopeKind::FullExpression);
+      OldStackSize = std::numeric_limits<unsigned>::max();
+    }
     ~ScopeRAII() {
       if (OldStackSize != std::numeric_limits<unsigned>::max())
         destroy(false);
@@ -9661,13 +9671,16 @@ public:
           return false;
         if (!Scope.destroy())
           return false;
-        return MatchScope.destroy();
+        MatchScope.extendToFullExpression();
+        return true;
       }
       if (!Scope.destroy())
         return false;
     }
-    if (E->getType()->isVoidType())
-      return MatchScope.destroy();
+    if (E->getType()->isVoidType()) {
+      MatchScope.extendToFullExpression();
+      return true;
+    }
     return Error(E);
   }
 
