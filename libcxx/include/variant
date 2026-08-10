@@ -1728,9 +1728,6 @@ struct alternative_traits<variant<_Types...>> {
   static constexpr size_t size = sizeof...(_Types);
   static constexpr bool is_exhaustive = false;
 
-  template <size_t _Ip>
-  using projection_type = _Types...[_Ip];
-
   _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const variant<_Types...>& __value) noexcept {
     return __value.index();
   }

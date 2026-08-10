@@ -8,6 +8,13 @@ public:
 
 template<class T>
 struct alternative_traits; // expected-note {{template is declared here}}
+
+template<class Provider>
+struct alternative_name {
+  using provider = Provider;
+  __SIZE_TYPE__ index;
+  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
+};
 }
 
 struct Choice {
@@ -16,28 +23,13 @@ struct Choice {
   double real;
 };
 
-template<__SIZE_TYPE__ I>
-struct ChoiceAlternative;
-
-template<>
-struct ChoiceAlternative<0> {
-  using type = int;
-};
-
-template<>
-struct ChoiceAlternative<1> {
-  using type = double;
-};
-
 template<>
 struct std::alternative_traits<Choice> {
+  using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
 
-  template<__SIZE_TYPE__ I>
-  using projection_type = typename ChoiceAlternative<I>::type;
-
   struct names {
-    enum { integer, real };
+    static constexpr alternative_name<AT> integer = 0, real = 1;
   };
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
@@ -87,10 +79,6 @@ template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
 
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using projection_type = int;
-
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
   }
@@ -108,14 +96,10 @@ struct ThrowingIndex {
 
 template<>
 struct std::alternative_traits<ThrowingIndex> {
+  using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using projection_type = int;
-
   struct names {
-    static constexpr __SIZE_TYPE__ value = 0;
+    static constexpr alternative_name<AT> value = 0;
   };
   static __SIZE_TYPE__ index(const ThrowingIndex&);
 
