@@ -4507,6 +4507,9 @@ private:
   // C++ Pattern Matching
   ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                  InjectedDeclSet *InjectedDecls);
+  Sema::ConditionResult
+  ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
+                     InjectedDeclSet *InjectedDecls);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,
@@ -4521,6 +4524,7 @@ private:
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
                bool Decomp = false,
+               bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *> ParseWildcardPattern();
@@ -4528,6 +4532,7 @@ private:
   ActionResult<MatchPattern *> ParseTypePattern();
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                         bool StopAtEqual,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();
