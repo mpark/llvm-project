@@ -213,6 +213,12 @@ int direct_generic_alternative(ChoicePair pair) {
   return 0;
 }
 
+int direct_generic_alternative_case_condition(ChoicePair pair) {
+  if (case [{ auto&& value }, _] = pair)
+    return classify(value);
+  return 0;
+}
+
 int direct_generic_guard(ChoicePair pair) {
   if (pair match case [{ auto&& value }, _] if (classify(value) != 0))
     return classify(value);
