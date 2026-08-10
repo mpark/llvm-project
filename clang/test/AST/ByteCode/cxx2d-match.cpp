@@ -8,6 +8,95 @@ void test_decltypes() {
   static_assert(__is_same(decltype(x match case y), bool));
 }
 
+constexpr int test_case_condition(int value) {
+  if (case 0 = value)
+    return 1;
+  if (case int copy = value if (int doubled = copy * 2; doubled > 10))
+    return doubled;
+  return -1;
+}
+
+static_assert(test_case_condition(0) == 1);
+static_assert(test_case_condition(6) == 12);
+static_assert(test_case_condition(2) == -1);
+
+constexpr bool test_case_condition_assignment_parsing() {
+  int pattern_value = 0;
+  int source = 0;
+  if (case 3 = source = 3) {
+  } else {
+    return false;
+  }
+  if (case (pattern_value = 4) = source = 4) {
+  } else {
+    return false;
+  }
+  return pattern_value == 4 && source == 4;
+}
+
+static_assert(test_case_condition_assignment_parsing());
+
+constexpr int test_case_condition_same_name() {
+  int value = 42;
+  if (case int value = value)
+    return value;
+  return 0;
+}
+
+static_assert(test_case_condition_same_name() == 42);
+
+constexpr int test_case_condition_while(int value) {
+  int sum = 0;
+  while (case int& current = value if (current > 0))
+    sum += current--;
+  return sum;
+}
+
+static_assert(test_case_condition_while(4) == 10);
+
+constexpr int test_case_condition_for(int value) {
+  int sum = 0;
+  for (int count = 0;
+       case int& current = value if (current > 0);
+       --current, ++count)
+    sum += current + count;
+  return sum;
+}
+
+static_assert(test_case_condition_for(3) == 9);
+
+constexpr int test_match_condition_for(int value) {
+  int sum = 0;
+  for (int count = 0;
+       value match case int& current if (current > 0);
+       --current, ++count)
+    sum += current + count;
+  return sum;
+}
+
+static_assert(test_match_condition_for(3) == 9);
+
+struct CaseConditionLifetime {
+  int* alive;
+
+  constexpr explicit CaseConditionLifetime(int& count) : alive(&count) {
+    ++*alive;
+  }
+  constexpr ~CaseConditionLifetime() { --*alive; }
+};
+
+constexpr bool test_case_condition_lifetime() {
+  int alive = 0;
+  bool observed_alive = false;
+  if (case auto&& value = CaseConditionLifetime(alive)) {
+    (void)value;
+    observed_alive = alive == 1;
+  }
+  return observed_alive && alive == 0;
+}
+
+static_assert(test_case_condition_lifetime());
+
 static_assert(0 match case _);
 static_assert(0 match case 0);
 static_assert(!(0 match case 1));
