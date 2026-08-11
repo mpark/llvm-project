@@ -2108,8 +2108,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
       } else {
         Scope *S = getCurScope();
         for (Decl *D : Decls)
-          Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
-                                    /*AddToContext=*/false);
+          if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+            Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
       }
     }
 
@@ -3970,6 +3970,19 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
                       needsAlternativeCandidateSpecialization);
 }
 
+static bool containsDeclarationBindingPack(MatchPattern *Pattern) {
+  if (Pattern->getMatchPatternClass() ==
+      MatchPattern::DeclarationPatternClass) {
+    auto *Declaration =
+        static_cast<DeclarationPattern *>(Pattern)->getDeclaration();
+    if (auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
+      return llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
+        return Binding->isParameterPack();
+      });
+  }
+  return llvm::any_of(Pattern->children(), containsDeclarationBindingPack);
+}
+
 Sema::ConditionResult
 Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
                            InjectedDeclSet *InjectedDecls) {
@@ -4011,6 +4024,7 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
 
   bool PatternNeedsAlternativeSpecialization =
       needsAlternativeCandidateSpecialization(Pattern);
+  bool PatternContainsBindingPack = containsDeclarationBindingPack(Pattern);
   Sema::MatchProjectionCache ProjectionCache;
   Sema::MatchPatternState PatternState;
   ProjectionCache.DeferAlternativeChoices = true;
@@ -4027,6 +4041,7 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
 
   bool NeedsCaseInstantiation =
       ProjectionCache.HasDeferredAlternativeChoices ||
+      PatternContainsBindingPack ||
       (PatternNeedsAlternativeSpecialization &&
        Subject.get()->isTypeDependent());
   Sema::MatchPatternSemanticAnalysis Semantic =
@@ -4056,8 +4071,8 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
   } else {
     Scope *S = getCurScope();
     for (Decl *D : Decls)
-      Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
-                                /*AddToContext=*/false);
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
   }
 
   return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), CK,
@@ -4111,6 +4126,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     bool PatternNeedsAlternativeSpecialization =
         Pattern.isUsable() &&
         needsAlternativeCandidateSpecialization(Pattern.get());
+    bool PatternContainsBindingPack =
+        Pattern.isUsable() && containsDeclarationBindingPack(Pattern.get());
     Sema::MatchProjectionCache ProjectionCache;
     Sema::MatchPatternState PatternState;
     ProjectionCache.DeferAlternativeChoices = true;
@@ -4150,6 +4167,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     }
     bool NeedsCaseInstantiation =
         ProjectionCache.HasDeferredAlternativeChoices ||
+        PatternContainsBindingPack ||
         (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
     Sema::MatchPatternSemanticAnalysis Semantic =
         Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
@@ -4188,7 +4206,9 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
     MatchCase Case;
     bool Invalid = ParseMatchCase(Subject, OrigResultType, RetTy, Case,
                                   ProjectionCache);
-    if (ProjectionCache.HasDeferredAlternativeChoices) {
+    bool ContainsBindingPack =
+        !Invalid && containsDeclarationBindingPack(Case.Pattern);
+    if (ProjectionCache.HasDeferredAlternativeChoices || ContainsBindingPack) {
       ProjectionCache.Entries.resize(SavedProjectionCount);
       HasDeferredCases = true;
     }
