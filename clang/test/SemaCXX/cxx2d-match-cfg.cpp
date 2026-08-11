@@ -2,8 +2,6 @@
 // RUN:   -Wreturn-type -Wuninitialized \
 // RUN:   -verify %s
 
-// expected-no-diagnostics
-
 int exhaustive(bool value) {
   value match {
     case true => return 1;
@@ -23,6 +21,15 @@ int declaration(int value) {
     case int copy => return copy;
   };
 }
+
+enum Gapped { Zero = 0, Two = 2 };
+
+int required_but_not_fully_covered(Gapped value) {
+  value match {
+    case Zero => return 0;
+    case Two => return 2;
+  };
+} // expected-warning {{non-void function does not return a value in all control paths}}
 
 int guarded_init_statement(int value) {
   return value match {
