@@ -2130,8 +2130,8 @@ Sema::ConditionResult Parser::ParseCondition(
       } else {
         Scope *S = getCurScope();
         for (Decl *D : Decls)
-          Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
-                                    /*AddToContext=*/false);
+          if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+            Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
       }
     }
 
@@ -4065,7 +4065,7 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
     return Sema::ConditionError();
 
   bool NeedsCaseInstantiation =
-      ProjectionCache.HasDeferredAlternativeChoices ||
+      ProjectionCache.hasDeferredPatterns() ||
       (PatternNeedsAlternativeSpecialization &&
        Subject.get()->isTypeDependent());
   Sema::MatchPatternSemanticAnalysis Semantic =
@@ -4097,8 +4097,8 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
   } else {
     Scope *S = getCurScope();
     for (Decl *D : Decls)
-      Actions.PushOnScopeChains(dyn_cast<NamedDecl>(D), S,
-                                /*AddToContext=*/false);
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
   }
 
   return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), CK,
@@ -4160,7 +4160,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                           PatternState, &ProjectionCache))
       return ExprError();
     if (!InjectedDecls && PatternNeedsAlternativeSpecialization &&
-        (ProjectionCache.HasDeferredAlternativeChoices ||
+        (ProjectionCache.hasDeferredPatterns() ||
          LHS.get()->isTypeDependent())) {
       LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
       if (LHS.isInvalid())
@@ -4172,6 +4172,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                             PatternState, &ProjectionCache))
         return ExprError();
     }
+    Sema::MatchTemplateRegionRAII Region(Actions);
+    Region.enter(MatchLoc, Pattern.get(), ProjectionCache.RequiresTemplateRegion);
     SourceLocation IfLoc;
     StmtResult GuardInit;
     Sema::ConditionResult Guard =
@@ -4190,7 +4192,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
       }
     }
     bool NeedsCaseInstantiation =
-        ProjectionCache.HasDeferredAlternativeChoices ||
+        ProjectionCache.hasDeferredPatterns() ||
         (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
     Sema::MatchPatternSemanticAnalysis Semantic =
         Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
@@ -4201,6 +4203,9 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                           PatternState.Infos),
         IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
         PatternIsIrrefutable, NeedsCaseInstantiation);
+    Region.exit();
+    if (Result.isUsable())
+      cast<MatchTestExpr>(Result.get())->setRegion(Region.getRegion());
     if (Result.isInvalid() || InjectedDecls || !NeedsCaseInstantiation ||
         Actions.CurContext->isDependentContext())
       return Result;
@@ -4225,11 +4230,12 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     ProjectionCache.AlternativeChoices.clear();
     ProjectionCache.HasDeferredAlternativeChoices = false;
+    ProjectionCache.RequiresTemplateRegion = false;
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
     bool Invalid = ParseMatchCase(Subject, OrigResultType, RetTy, Case,
                                   ProjectionCache);
-    if (ProjectionCache.HasDeferredAlternativeChoices) {
+    if (ProjectionCache.hasDeferredPatterns()) {
       ProjectionCache.Entries.resize(SavedProjectionCount);
       HasDeferredCases = true;
     }
@@ -4266,7 +4272,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get(),
                                                PatternState, &ProjectionCache))
     return true;
-  if (ProjectionCache.HasDeferredAlternativeChoices &&
+  if (ProjectionCache.hasDeferredPatterns() &&
       OrigResultType.getType()->getContainedAutoType())
     RetTy = Actions.Context.DependentTy;
   Sema::MatchTemplateRegionRAII Region(Actions);

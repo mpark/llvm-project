@@ -4081,10 +4081,11 @@ public:
 
   void ProcessPragmaExport(DeclaratorDecl *newDecl);
 
-  Decl *ActOnDeclarator(Scope *S, Declarator &D);
+  Decl *ActOnDeclarator(Scope *S, Declarator &D, bool IsPatternDecl = false);
 
   NamedDecl *HandleDeclarator(Scope *S, Declarator &D,
-                              MultiTemplateParamsArg TemplateParameterLists);
+                              MultiTemplateParamsArg TemplateParameterLists,
+                              bool IsPatternDecl = false);
 
   /// Attempt to fold a variable-sized type to a constant-sized type, returning
   /// true if we were successful.
@@ -6737,7 +6738,8 @@ public:
 
   NamedDecl *
   ActOnDecompositionDeclarator(Scope *S, Declarator &D,
-                               MultiTemplateParamsArg TemplateParamLists);
+                               MultiTemplateParamsArg TemplateParamLists,
+                               bool IsPatternDecl = false);
   void DiagPlaceholderVariableDefinition(SourceLocation Loc);
   bool DiagRedefinedPlaceholderFieldDecl(SourceLocation Loc,
                                          RecordDecl *ClassDecl,
@@ -11436,6 +11438,9 @@ public:
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
     bool RequiresTemplateRegion = false;
+    bool hasDeferredPatterns() const {
+      return HasDeferredAlternativeChoices || RequiresTemplateRegion;
+    }
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
   };
