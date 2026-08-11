@@ -37,3 +37,31 @@ int match_stmt_action(int limit) {
 // CHECK: [[RETURN]]:
 // CHECK:   store i32 99, ptr %retval, align 4
 // CHECK:   br label %return
+
+auto match_only_return_actions(int value) {
+  value match {
+    case 0 => return 101;
+    case 1 => return 202;
+    case _ => return -1;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z25match_only_return_actionsi
+// CHECK: match.select.action:
+// CHECK:   store i32 101, ptr %retval
+// CHECK: match.select.action{{[0-9]+}}:
+// CHECK:   store i32 202, ptr %retval
+// CHECK: match.select.action{{[0-9]+}}:
+// CHECK:   store i32 -1, ptr %retval
+
+template <class T>
+auto match_only_return_actions_template(T value) {
+  value match {
+    case 0 => return 303;
+    case _ => return -2;
+  };
+}
+
+template auto match_only_return_actions_template<int>(int);
+
+// CHECK-LABEL: define{{.*}} @_Z{{.*}}match_only_return_actions_template

@@ -1057,7 +1057,7 @@ bool hasGuard(const MatchCaseInstantiation &Case) {
 
 } // namespace
 
-void Sema::CheckMatchSelectExhaustiveness(
+bool Sema::CheckMatchSelectExhaustiveness(
     Expr *Subject, ArrayRef<MatchCase> Cases,
     ArrayRef<MatchCaseInstantiation> Instantiations) {
   if (!Subject || Subject->isTypeDependent() ||
@@ -1066,7 +1066,7 @@ void Sema::CheckMatchSelectExhaustiveness(
         return static_cast<bool>(Dependence & (ExprDependence::Instantiation |
                                                ExprDependence::Error));
       }))
-    return;
+    return false;
 
   QualType SubjectType = Subject->getType();
   SmallVector<PatternRow, 8> DefiniteMatrix;
@@ -1136,4 +1136,8 @@ void Sema::CheckMatchSelectExhaustiveness(
     Diag(Subject->getBeginLoc(), diag::err_match_not_exhaustive)
         << true << printWitness(Context, Witness);
   }
+
+  return isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
+                  ConstructorDomain::RequiredAndResidual,
+                  nullptr) == Usefulness::NotUseful;
 }
