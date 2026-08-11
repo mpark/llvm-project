@@ -1734,7 +1734,7 @@ struct alternative_traits<variant<_Types...>> {
 
   template <size_t _Ip, class _Self>
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
-    return std::forward_like<_Self>(*std::get_if<_Ip>(std::addressof(__self)));
+    return std::__unchecked_get<_Ip>(std::forward<_Self>(__self));
   }
 };
 
