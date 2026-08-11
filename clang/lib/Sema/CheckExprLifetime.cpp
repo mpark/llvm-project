@@ -132,6 +132,12 @@ getEntityLifetime(const InitializedEntity *Entity,
     // expression?
     return {nullptr, LK_StmtExprResult};
 
+  case InitializedEntity::EK_MatchExprResult:
+    // A match arm is not a return-like lifetime boundary. References produced
+    // by an arm remain usable through the containing full-expression, and the
+    // completed MatchSelectExpr is inspected in its enclosing context.
+    return {nullptr, LK_FullExpression};
+
   case InitializedEntity::EK_New:
     //   -- A temporary bound to a reference in a new-initializer persists
     //      until the completion of the full-expression containing the
@@ -292,6 +298,18 @@ static void forEachDoExprResult(
     return;
   for (const Stmt *Child : S->children())
     forEachDoExprResult(Child, VisitResult, /*IsRoot=*/false);
+}
+
+static void collectTransparentMatchDeclarations(
+    const MatchPattern *Pattern,
+    llvm::SmallDenseSet<const Decl *, 8> &Declarations) {
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
+    const VarDecl *Variable = Declaration->getDeclaration();
+    if (Variable->getType()->isReferenceType())
+      Declarations.insert(Variable);
+  }
+  for (const MatchPattern *Child : Pattern->children())
+    collectTransparentMatchDeclarations(Child, Declarations);
 }
 
 static bool pathContainsInit(const IndirectLocalPath &Path) {
@@ -724,28 +742,32 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
   }
 
   case Stmt::MatchSelectExprClass: {
+    const auto *Match = cast<MatchSelectExpr>(Init);
     llvm::SmallDenseSet<unsigned, 4> VisitedLocations;
+    llvm::SmallDenseSet<const Decl *, 8> TransparentDeclarations;
+    if (const VarDecl *Holding = Match->getHoldingVar();
+        Holding && Holding->getType()->isReferenceType())
+      TransparentDeclarations.insert(Holding);
+    for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
+      collectTransparentMatchDeclarations(Case.Pattern,
+                                          TransparentDeclarations);
     auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
                          ReferenceKind RK) {
       if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
         return false;
-      return Visit(Path, L, RK);
+      llvm::SmallVector<IndirectLocalPathEntry, 8> FilteredPath;
+      for (const IndirectLocalPathEntry &Entry : Path)
+        if (Entry.Kind != IndirectLocalPathEntry::VarInit ||
+            !TransparentDeclarations.contains(Entry.D))
+          FilteredPath.push_back(Entry);
+      return Visit(FilteredPath, L, RK);
     };
     LocalVisitor MatchVisit(VisitOnce);
     MatchVisit.enableBindingDecls();
-    for (const MatchCaseInstantiation &Case :
-         cast<MatchSelectExpr>(Init)->getCaseInstantiations())
+    for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
       if (auto *Handler = dyn_cast<Expr>(Case.Handler);
           Handler && !Handler->getType()->isVoidType())
         visitLocalsRetainedByReferenceBinding(Path, Handler, RK, MatchVisit);
-    break;
-  }
-
-  case Stmt::CompoundLiteralExprClass: {
-    if (auto *CLE = dyn_cast<CompoundLiteralExpr>(Init)) {
-      if (!CLE->isFileScope())
-        Visit(Path, Local(CLE), RK);
-    }
     break;
   }
 
@@ -755,6 +777,14 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
         visitLocalsRetainedByReferenceBinding(Path, Result, RK, Visit);
     });
     break;
+
+  case Stmt::CompoundLiteralExprClass: {
+    if (auto *CLE = dyn_cast<CompoundLiteralExpr>(Init)) {
+      if (!CLE->isFileScope())
+        Visit(Path, Local(CLE), RK);
+    }
+    break;
+  }
 
     // FIXME: Visit the left-hand side of an -> or ->*.
 
@@ -1017,17 +1047,29 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
   }
 
   case Stmt::MatchSelectExprClass: {
+    const auto *Match = cast<MatchSelectExpr>(Init);
     llvm::SmallDenseSet<unsigned, 4> VisitedLocations;
+    llvm::SmallDenseSet<const Decl *, 8> TransparentDeclarations;
+    if (const VarDecl *Holding = Match->getHoldingVar();
+        Holding && Holding->getType()->isReferenceType())
+      TransparentDeclarations.insert(Holding);
+    for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
+      collectTransparentMatchDeclarations(Case.Pattern,
+                                          TransparentDeclarations);
     auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
                          ReferenceKind RK) {
       if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
         return false;
-      return Visit(Path, L, RK);
+      llvm::SmallVector<IndirectLocalPathEntry, 8> FilteredPath;
+      for (const IndirectLocalPathEntry &Entry : Path)
+        if (Entry.Kind != IndirectLocalPathEntry::VarInit ||
+            !TransparentDeclarations.contains(Entry.D))
+          FilteredPath.push_back(Entry);
+      return Visit(FilteredPath, L, RK);
     };
     LocalVisitor MatchVisit(VisitOnce);
     MatchVisit.enableBindingDecls();
-    for (const MatchCaseInstantiation &Case :
-         cast<MatchSelectExpr>(Init)->getCaseInstantiations())
+    for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
       if (auto *Handler = dyn_cast<Expr>(Case.Handler))
         visitLocalsRetainedByInitializer(Path, Handler, MatchVisit,
                                          /*RevisitSubinits=*/true);

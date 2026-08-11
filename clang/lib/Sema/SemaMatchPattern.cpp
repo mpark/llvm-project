@@ -655,7 +655,7 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
     E = ImpCastExprToType(E, Context.VoidTy, CK_ToVoid).get();
   }
   Sema::NamedReturnInfo NRInfo = getNamedReturnInfo(E);
-  auto Entity = InitializedEntity::InitializeStmtExprResult(Loc, RetTy);
+  auto Entity = InitializedEntity::InitializeMatchExprResult(Loc, RetTy);
   ER = PerformMoveOrCopyInitialization(Entity, NRInfo, E);
   if (ER.isInvalid())
     return StmtError();
