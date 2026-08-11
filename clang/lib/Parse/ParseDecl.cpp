@@ -2363,7 +2363,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
     return nullptr;
 
   if (IsPatternDecl) {
-    Decl *ThisDecl = Actions.ActOnDeclarator(getCurScope(), D);
+    Decl *ThisDecl =
+        Actions.ActOnDeclarator(getCurScope(), D, /*IsPatternDecl=*/true);
     Actions.ActOnCXXForRangeDecl(ThisDecl, /*InExpansionStmt=*/false);
     D.complete(ThisDecl);
     return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, ThisDecl);
