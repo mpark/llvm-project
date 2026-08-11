@@ -21,6 +21,37 @@ void test_throw_action() {
   } == 1);
 }
 
+constexpr void test_null_and_static_assert_handlers(bool value) {
+  value match {
+    case true => ;
+    case false => static_assert(sizeof(int) >= 2);
+  };
+}
+
+static_assert((test_null_and_static_assert_handlers(true), true));
+static_assert((test_null_and_static_assert_handlers(false), true));
+
+auto test_null_handler_result_mismatch(int value) {
+  return value match {
+    case 0 => ;
+    case _ => 1; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
+  };
+}
+
+auto test_static_assert_handler_result_mismatch(int value) {
+  return value match {
+    case 0 => static_assert(true);
+    case _ => 1; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
+  };
+}
+
+auto test_value_then_null_handler_result_mismatch(int value) {
+  return value match {
+    case 0 => 1;
+    case _ => ; // expected-error {{'auto' in return type deduced as 'void' here but deduced as 'int' in earlier return statement}}
+  };
+}
+
 void test_decomposition_pattern_arity() {
   struct S { int a; int b; };
   S s{1, 2};
@@ -453,6 +484,17 @@ int dependent_deleted_copy_does_not_fall_back(T& value) {
 
 int instantiate_dependent_deleted_copy(DeletedCopy& value) {
   return dependent_deleted_copy_does_not_fall_back(value); // expected-note {{in instantiation of function template specialization 'declaration_patterns::dependent_deleted_copy_does_not_fall_back<declaration_patterns::DeletedCopy>' requested here}}
+}
+
+constexpr void selected_static_assert_handler(auto value) {
+  value match {
+    case int => ;
+    case _ => static_assert(false, "selected static assertion handler"); // expected-error {{static assertion failed: selected static assertion handler}}
+  };
+}
+
+void instantiate_selected_static_assert_handler() {
+  selected_static_assert_handler(0.0); // expected-note {{in instantiation of function template specialization}}
 }
 
 struct BindingPackTriple {
