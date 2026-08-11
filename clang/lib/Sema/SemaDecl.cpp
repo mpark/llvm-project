@@ -6358,7 +6358,7 @@ void Sema::warnOnReservedIdentifier(const NamedDecl *D) {
   }
 }
 
-Decl *Sema::ActOnDeclarator(Scope *S, Declarator &D) {
+Decl *Sema::ActOnDeclarator(Scope *S, Declarator &D, bool IsPatternDecl) {
   D.setFunctionDefinitionKind(FunctionDefinitionKind::Declaration);
 
   // Check if we are in an `omp begin/end declare variant` scope. Handle this
@@ -6371,7 +6371,7 @@ Decl *Sema::ActOnDeclarator(Scope *S, Declarator &D) {
       OpenMP().ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
           S, D, MultiTemplateParamsArg(), Bases);
 
-  Decl *Dcl = HandleDeclarator(S, D, MultiTemplateParamsArg());
+  Decl *Dcl = HandleDeclarator(S, D, MultiTemplateParamsArg(), IsPatternDecl);
 
   if (OriginalLexicalContext && OriginalLexicalContext->isObjCContainer() &&
       Dcl && Dcl->getDeclContext()->isFileContext())
@@ -6542,7 +6542,8 @@ bool Sema::diagnoseQualifiedDeclaration(CXXScopeSpec &SS, DeclContext *DC,
 }
 
 NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
-                                  MultiTemplateParamsArg TemplateParamLists) {
+                                  MultiTemplateParamsArg TemplateParamLists,
+                                  bool IsPatternDecl) {
   // TODO: consider using NameInfo for diagnostic.
   DeclarationNameInfo NameInfo = GetNameForDeclarator(D);
   DeclarationName Name = NameInfo.getName();
@@ -6550,7 +6551,8 @@ NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
   // All of these full declarators require an identifier.  If it doesn't have
   // one, the ParsedFreeStandingDeclSpec action should be used.
   if (D.isDecompositionDeclarator()) {
-    return ActOnDecompositionDeclarator(S, D, TemplateParamLists);
+    return ActOnDecompositionDeclarator(S, D, TemplateParamLists,
+                                        IsPatternDecl);
   } else if (!Name) {
     if (!D.isInvalidType())  // Reject this if we think it is valid.
       Diag(D.getDeclSpec().getBeginLoc(), diag::err_declarator_need_ident)

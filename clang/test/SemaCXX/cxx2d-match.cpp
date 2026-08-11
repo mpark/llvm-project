@@ -455,6 +455,50 @@ int instantiate_dependent_deleted_copy(DeletedCopy& value) {
   return dependent_deleted_copy_does_not_fall_back(value); // expected-note {{in instantiation of function template specialization 'declaration_patterns::dependent_deleted_copy_does_not_fall_back<declaration_patterns::DeletedCopy>' requested here}}
 }
 
+struct BindingPackTriple {
+  int first;
+  int second;
+  int third;
+};
+
+constexpr int binding_pack_sum(BindingPackTriple value) {
+  return value match {
+    case auto [...elements] => (... + elements);
+  };
+}
+
+static_assert(binding_pack_sum({1, 2, 3}) == 6);
+
+constexpr int binding_pack_case_condition(BindingPackTriple value) {
+  if (case auto [...elements] = value)
+    return (... + elements);
+  return 0;
+}
+
+static_assert(binding_pack_case_condition({1, 2, 3}) == 6);
+
+template<class T>
+constexpr int dependent_binding_pack_size(T value) {
+  return value match -> int {
+    case auto [...elements] => int(sizeof...(elements));
+    case _ => -1;
+  };
+}
+
+struct EmptyBindingPack {};
+
+static_assert(dependent_binding_pack_size(EmptyBindingPack{}) == 0);
+static_assert(dependent_binding_pack_size(Pair{1, 2}) == 2);
+static_assert(dependent_binding_pack_size(1) == -1);
+
+int binding_pack_does_not_alias_a_fixed_arity_decomposition(Pair &value) {
+  return value match {
+    case auto &&[...elements] if (false) => 0;
+    case auto &&[element] => element; // expected-error {{type 'Pair' binds to 2 elements, but only 1 name was provided}}
+    case _ => -1;
+  };
+}
+
 int bad_conversion(int value) {
   return value match {
     case char converted => converted; // expected-error {{declaration pattern of type 'char' is not an exact match for subject of type 'int'}}

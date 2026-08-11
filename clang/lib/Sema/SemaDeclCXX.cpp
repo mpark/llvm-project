@@ -758,7 +758,8 @@ void Sema::DiagPlaceholderVariableDefinition(SourceLocation Loc) {
 
 NamedDecl *
 Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
-                                   MultiTemplateParamsArg TemplateParamLists) {
+                                   MultiTemplateParamsArg TemplateParamLists,
+                                   bool IsPatternDecl) {
   assert(D.isDecompositionDeclarator());
   const DecompositionDeclarator &Decomp = D.getDecompositionDeclarator();
 
@@ -919,7 +920,7 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
 
     QualType QT;
     if (B.EllipsisLoc.isValid()) {
-      if (!cast<Decl>(DC)->isTemplated())
+      if (!cast<Decl>(DC)->isTemplated() && !IsPatternDecl)
         Diag(B.EllipsisLoc, diag::err_pack_outside_template);
       QT = Context.getPackExpansionType(Context.DependentTy, std::nullopt,
                                         /*ExpectsPackInType=*/false);
