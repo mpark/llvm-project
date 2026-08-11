@@ -132,6 +132,9 @@ public:
     /// object initialized via parenthesized aggregate initialization.
     EK_ParenAggInitMember,
 
+    /// The entity being initialized is the result of a match expression arm.
+    EK_MatchExprResult,
+
     /// The entity being initialized is the result of a do-expression
     /// ('do_return' operand). Like EK_Result, but the lifetime boundary is
     /// the do-expression, not the enclosing function: references to
@@ -353,9 +356,14 @@ public:
     return InitializedEntity(EK_StmtExprResult, ReturnLoc, Type);
   }
 
+  static InitializedEntity InitializeMatchExprResult(SourceLocation Loc,
+                                                      QualType Type) {
+    return InitializedEntity(EK_MatchExprResult, Loc, Type);
+  }
+
   static InitializedEntity InitializeDoExprResult(SourceLocation DoReturnLoc,
-                                                  QualType Type,
-                                                  Scope *OuterScope) {
+                                                   QualType Type,
+                                                   Scope *OuterScope) {
     InitializedEntity Result;
     Result.Kind = EK_DoExprResult;
     Result.Type = Type;
@@ -585,15 +593,15 @@ public:
            Variable.FieldKind == FieldInitKind::DefaultMember;
   }
 
-  /// Determine the location of the 'return' keyword when initializing
-  /// the result of a function call.
+  /// Determine the source location for a function, statement-expression, or
+  /// match-expression result initialization.
   SourceLocation getReturnLoc() const {
-    assert(getKind() == EK_Result && "No 'return' location!");
+    assert((getKind() == EK_Result || getKind() == EK_StmtExprResult ||
+            getKind() == EK_MatchExprResult) &&
+           "No result location!");
     return LocAndNRVO.Location;
   }
 
-  /// Determine the location of the 'throw' keyword when initializing
-  /// an exception object.
   SourceLocation getDoExprResultLoc() const {
     assert(getKind() == EK_DoExprResult && "Not a do-expression result!");
     return DoExprResult.Location;
@@ -604,6 +612,8 @@ public:
     return DoExprResult.OuterScope;
   }
 
+  /// Determine the location of the 'throw' keyword when initializing
+  /// an exception object.
   SourceLocation getThrowLoc() const {
     assert(getKind() == EK_Exception && "No 'throw' location!");
     return LocAndNRVO.Location;
