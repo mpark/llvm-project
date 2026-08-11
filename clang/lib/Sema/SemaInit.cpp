@@ -1313,6 +1313,7 @@ static void warnBracedScalarInit(Sema &S, const InitializedEntity &Entity,
   case InitializedEntity::EK_LambdaToBlockConversionBlockElement:
   case InitializedEntity::EK_Binding:
   case InitializedEntity::EK_StmtExprResult:
+  case InitializedEntity::EK_MatchExprResult:
   case InitializedEntity::EK_DoExprResult:
     llvm_unreachable("unexpected braced scalar init");
   }
@@ -3800,6 +3801,7 @@ DeclarationName InitializedEntity::getName() const {
 
   case EK_Result:
   case EK_StmtExprResult:
+  case EK_MatchExprResult:
   case EK_DoExprResult:
   case EK_Exception:
   case EK_New:
@@ -3835,6 +3837,7 @@ ValueDecl *InitializedEntity::getDecl() const {
 
   case EK_Result:
   case EK_StmtExprResult:
+  case EK_MatchExprResult:
   case EK_DoExprResult:
   case EK_Exception:
   case EK_New:
@@ -3863,6 +3866,7 @@ bool InitializedEntity::allowsNRVO() const {
     return LocAndNRVO.NRVO == NRVOKind::Allowed;
 
   case EK_StmtExprResult:
+  case EK_MatchExprResult:
   case EK_DoExprResult:
   case EK_Variable:
   case EK_Parameter:
@@ -3904,6 +3908,7 @@ unsigned InitializedEntity::dumpImpl(raw_ostream &OS) const {
   case EK_TemplateParameter: OS << "TemplateParameter"; break;
   case EK_Result: OS << "Result"; break;
   case EK_StmtExprResult: OS << "StmtExprResult"; break;
+  case EK_MatchExprResult: OS << "MatchExprResult"; break;
   case EK_DoExprResult: OS << "DoExprResult"; break;
   case EK_Exception: OS << "Exception"; break;
   case EK_Member:
@@ -4380,6 +4385,7 @@ static void MaybeProduceObjCObject(Sema &S,
   /// last instant.
   } else if (Entity.getKind() == InitializedEntity::EK_Result ||
              Entity.getKind() == InitializedEntity::EK_StmtExprResult ||
+             Entity.getKind() == InitializedEntity::EK_MatchExprResult ||
              Entity.getKind() == InitializedEntity::EK_DoExprResult) {
     if (!Entity.getType()->isObjCRetainableType())
       return;
@@ -7185,6 +7191,7 @@ static AssignmentAction getAssignmentAction(const InitializedEntity &Entity,
 
   case InitializedEntity::EK_Result:
   case InitializedEntity::EK_StmtExprResult: // FIXME: Not quite right.
+  case InitializedEntity::EK_MatchExprResult:
   case InitializedEntity::EK_DoExprResult:
     return AssignmentAction::Returning;
 
@@ -7224,6 +7231,7 @@ static bool shouldBindAsTemporary(const InitializedEntity &Entity) {
   case InitializedEntity::EK_ParenAggInitMember:
   case InitializedEntity::EK_Result:
   case InitializedEntity::EK_StmtExprResult:
+  case InitializedEntity::EK_MatchExprResult:
   case InitializedEntity::EK_DoExprResult:
   case InitializedEntity::EK_New:
   case InitializedEntity::EK_Variable:
@@ -7257,6 +7265,7 @@ static bool shouldDestroyEntity(const InitializedEntity &Entity) {
   switch (Entity.getKind()) {
     case InitializedEntity::EK_Result:
     case InitializedEntity::EK_StmtExprResult:
+    case InitializedEntity::EK_MatchExprResult:
     case InitializedEntity::EK_DoExprResult:
     case InitializedEntity::EK_New:
     case InitializedEntity::EK_Base:
@@ -7293,6 +7302,7 @@ static SourceLocation getInitializationLoc(const InitializedEntity &Entity,
   switch (Entity.getKind()) {
   case InitializedEntity::EK_Result:
   case InitializedEntity::EK_StmtExprResult:
+  case InitializedEntity::EK_MatchExprResult:
     return Entity.getReturnLoc();
 
   case InitializedEntity::EK_DoExprResult:
