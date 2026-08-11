@@ -32,6 +32,22 @@ int decompose(Pair pair) {
   };
 }
 
+struct Triple {
+  int first;
+  int second;
+  int third;
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z16sum_binding_pack6Triple
+// CHECK: add nsw i32
+// CHECK: add nsw i32
+// CHECK: ret i32
+int sum_binding_pack(Triple triple) {
+  return triple match {
+    case auto [...elements] => (... + elements);
+  };
+}
+
 template<class T>
 T dependent(T value) {
   return value match { case auto &&ref => ref; };
@@ -205,5 +221,17 @@ int reuse_declaration_projection(RuntimeProjection &subject) {
   return subject match {
     case auto &&[x, y] if (x == 0) => 0;
     case auto &&[x, y] => x + y;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z29reuse_binding_pack_projectionR17RuntimeProjection
+// CHECK: call{{.*}} @_ZNR17RuntimeProjection3getILm0EEERiv
+// CHECK: call{{.*}} @_ZNR17RuntimeProjection3getILm1EEERiv
+// CHECK-NOT: call{{.*}} @_ZNR17RuntimeProjection3get
+// CHECK: ret i32
+int reuse_binding_pack_projection(RuntimeProjection &subject) {
+  return subject match {
+    case auto &&[...elements] if ((... + elements) == 0) => 0;
+    case auto &&[...elements] => (... + elements);
   };
 }
