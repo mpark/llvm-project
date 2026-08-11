@@ -3252,10 +3252,12 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
   if (LastCase != Cases.end())
     Cases = Cases.take_front(std::distance(Cases.begin(), LastCase) + 1);
 
-  // Falling through a void match does nothing. Falling through a non-void
-  // match terminates, so represent that edge as unreachable.
-  CFGBlock *NextCaseBlock =
-      E->getType()->isVoidType() ? ConfluenceBlock : nullptr;
+  // If no case matches, a void match completes normally while a non-void
+  // match terminates. Omit that unmatched-case edge when Sema proved that
+  // every runtime state is covered.
+  CFGBlock *NextCaseBlock = E->getType()->isVoidType() && !E->isFullyCovered()
+                                ? ConfluenceBlock
+                                : nullptr;
   for (const MatchCaseInstantiation &Case : llvm::reverse(Cases)) {
     Succ = ConfluenceBlock;
     Block = nullptr;
