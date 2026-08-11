@@ -137,3 +137,28 @@ int match_open_alternative(OpenChoice& value) {
     case {} => -1;
   };
 }
+
+struct ChoiceProduct {
+  Choice first;
+  Choice second;
+};
+
+int combine(int&, int&);
+int combine(int&, double&);
+int combine(double&, int&);
+int combine(double&, double&);
+
+// Both sibling discriminators are initialized before the first selected-index
+// comparison, and neither is recomputed in another Cartesian branch.
+// CHECK-LABEL: define{{.*}} i32 @_Z20match_choice_productR13ChoiceProduct
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK: icmp eq
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK: ret i32
+int match_choice_product(ChoiceProduct& value) {
+  return value match {
+    case [{ auto&& first }, { auto&& second }] => combine(first, second);
+  };
+}
