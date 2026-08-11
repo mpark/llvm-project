@@ -19549,6 +19549,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
       ProjectionCache.NextForcedAlternativeSelection = 0;
       ProjectionCache.CurrentProjectionPath.clear();
+      ProjectionCache.CurrentDiscriminatorPath.clear();
       size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
       TransformCaseResult Result =

@@ -11290,7 +11290,11 @@ public:
       MatchProjection *Projection;
       QualType Discriminator;
       unsigned Arity;
+      // The full semantic path identifies conditionally initialized projected
+      // values. The discriminator path contains only enclosing alternatives,
+      // allowing independent sibling discriminators to be shared.
       SmallVector<unsigned, 4> Path;
+      SmallVector<unsigned, 4> DiscriminatorPath;
     };
 
     struct AlternativeChoice {
@@ -11305,6 +11309,7 @@ public:
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
+    SmallVector<unsigned, 4> CurrentDiscriminatorPath;
   };
   struct MatchPatternState {
     SmallVector<MatchPatternInfo, 8> Infos;
