@@ -4248,8 +4248,26 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
       return StmtError();
     }
     return Result;
-  case tok::semi:
-    return Actions.ActOnNullStmt(ConsumeToken(), Tok.hasLeadingEmptyMacro());
+  case tok::semi: {
+    bool HasLeadingEmptyMacro = Tok.hasLeadingEmptyMacro();
+    Result = Actions.ActOnNullStmt(ConsumeToken(), HasLeadingEmptyMacro);
+    if (Actions.ActOnMatchVoidHandler(OrigResultType, RetTy,
+                                      Result.get()->getBeginLoc()))
+      return StmtError();
+    return Result;
+  }
+  case tok::kw_static_assert: {
+    SourceLocation DeclStart = Tok.getLocation();
+    SourceLocation DeclEnd;
+    Decl *D = ParseStaticAssertDeclaration(DeclEnd);
+    if (!D || cast<StaticAssertDecl>(D)->isFailed())
+      return StmtError();
+    DeclGroupPtrTy DG = Actions.ConvertDeclToDeclGroup(D);
+    Result = Actions.ActOnDeclStmt(DG, DeclStart, DeclEnd);
+    if (Actions.ActOnMatchVoidHandler(OrigResultType, RetTy, DeclStart))
+      return StmtError();
+    return Result;
+  }
   case tok::kw_break:
     Result = ParseBreakStatement();
     SemiError = "break";
