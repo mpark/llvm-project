@@ -841,7 +841,8 @@ createMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
   auto *Projection = new (S.Context) MatchProjection(Kind);
   if (Cache)
     Cache->Entries.push_back({Subject, Projection, Discriminator, Arity,
-                              Cache->CurrentProjectionPath});
+                              Cache->CurrentProjectionPath,
+                              Cache->CurrentDiscriminatorPath});
   return Projection;
 }
 
@@ -853,7 +854,7 @@ findAlternativeHoldingProjection(Sema::MatchProjectionCache *Cache,
   for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
     if (Entry.Subject == Subject &&
         Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
-        Entry.Path == Cache->CurrentProjectionPath)
+        Entry.DiscriminatorPath == Cache->CurrentDiscriminatorPath)
       return Entry.Projection;
   }
   return nullptr;
@@ -867,7 +868,7 @@ static MatchProjection *findAlternativeDiscriminatorProjection(
   for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
     if (Entry.Subject == Subject &&
         Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
-        Entry.Path == Cache->CurrentProjectionPath &&
+        Entry.DiscriminatorPath == Cache->CurrentDiscriminatorPath &&
         !Entry.Discriminator.isNull() &&
         S.Context.hasSameType(Entry.Discriminator, ProviderType))
       return Entry.Projection;
@@ -1386,6 +1387,29 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       ArrayRef(SelectedAlternatives, Selected.size());
   PatternInfo.IsExhaustive = Traits.IsExhaustive;
 
+  auto CheckSubPattern = [&](Expr *ProjectedSubject) {
+    size_t SavedProjectionPathSize =
+        ProjectionCache ? ProjectionCache->CurrentProjectionPath.size() : 0;
+    size_t SavedDiscriminatorPathSize =
+        ProjectionCache ? ProjectionCache->CurrentDiscriminatorPath.size() : 0;
+    llvm::scope_exit RestoreProjectionPath([&] {
+      if (ProjectionCache) {
+        ProjectionCache->CurrentProjectionPath.resize(
+            SavedProjectionPathSize);
+        ProjectionCache->CurrentDiscriminatorPath.resize(
+            SavedDiscriminatorPathSize);
+      }
+    });
+    if (ProjectionCache) {
+      ProjectionCache->CurrentProjectionPath.push_back(Selected.front() + 1);
+      ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() +
+                                                          1);
+    }
+    return S.CheckCompleteMatchPattern(ProjectedSubject,
+                                       Pattern->getSubPattern(), State,
+                                       ProjectionCache);
+  };
+
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
   if (MatchProjection *Projection = findMatchProjection(
           S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
@@ -1393,9 +1417,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     PatternInfo.Projection = Projection;
     if (!Pattern->getSubPattern())
       return false;
-    return S.CheckCompleteMatchPattern(Projection->getProjectedExpr(),
-                                       Pattern->getSubPattern(), State,
-                                       ProjectionCache);
+    return CheckSubPattern(Projection->getProjectedExpr());
   }
 
   MatchProjection *Projection = createMatchProjection(
@@ -1487,14 +1509,12 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (GetCall.isInvalid())
       return true;
     Projection->setProjectedExpr(GetCall.get());
-    return S.CheckCompleteMatchPattern(GetCall.get(), Pattern->getSubPattern(),
-                                       State, ProjectionCache);
+    return CheckSubPattern(GetCall.get());
   }
   ExprValueKind ProjectedValueKind = GetCall.get()->getValueKind();
   if (ProjectedValueKind == VK_PRValue) {
     Projection->setProjectedExpr(GetCall.get());
-    return S.CheckCompleteMatchPattern(GetCall.get(), Pattern->getSubPattern(),
-                                       State, ProjectionCache);
+    return CheckSubPattern(GetCall.get());
   }
   QualType ProjectedType = GetCall.get()->refersToBitField()
                                ? S.Context.getAutoDeductType()
@@ -1508,8 +1528,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       Loc);
   ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
   Projection->setProjectedExpr(ProjectedRef);
-  return S.CheckCompleteMatchPattern(ProjectedRef, Pattern->getSubPattern(),
-                                     State, ProjectionCache);
+  return CheckSubPattern(ProjectedRef);
 }
 
 bool Sema::CheckCompleteMatchPatternImpl(

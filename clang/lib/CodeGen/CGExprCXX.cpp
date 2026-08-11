@@ -2418,7 +2418,7 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
   return Value;
 }
 
-RValue CodeGenFunction::EmitAlternativePattern(
+void CodeGenFunction::EmitAlternativeDiscriminator(
     const AlternativePattern *AltPattern,
     const MatchPatternInstantiation *Instantiation) {
   const MatchPatternInfo *Info = Instantiation->find(AltPattern);
@@ -2430,6 +2430,14 @@ RValue CodeGenFunction::EmitAlternativePattern(
   if (const VarDecl *Intermediate = Projection->getIntermediateVar();
       Intermediate && !LocalDeclMap.count(Intermediate))
     EmitVarDecl(*Intermediate);
+}
+
+RValue CodeGenFunction::EmitAlternativePattern(
+    const AlternativePattern *AltPattern,
+    const MatchPatternInstantiation *Instantiation) {
+  const MatchPatternInfo *Info = Instantiation->find(AltPattern);
+  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+  EmitAlternativeDiscriminator(AltPattern, Instantiation);
   if (const VarDecl *Condition = Projection->getConditionVar();
       Condition && !LocalDeclMap.count(Condition))
     EmitVarDecl(*Condition);
@@ -2489,6 +2497,15 @@ RValue CodeGenFunction::EmitDecompositionPattern(
                       : nullptr;
   if (!LocalDeclMap.count(D))
     EmitDecl(*D, /*EvaluateConditionDecl=*/true);
+
+  // Sibling alternative discriminators have the decomposition declaration as
+  // their common dependency. Emit them here so semantically specialized cases
+  // can share one discriminator without initializing it in only one branch.
+  for (const MatchPattern *SubPattern : DecompPattern->children())
+    if (SubPattern->getMatchPatternClass() ==
+        MatchPattern::AlternativePatternClass)
+      EmitAlternativeDiscriminator(
+          static_cast<const AlternativePattern *>(SubPattern), Instantiation);
 
   for (auto *SubPattern : DecompPattern->children()) {
     RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr);
