@@ -1376,6 +1376,25 @@ constexpr void null_and_static_assert_handlers(bool value) {
 static_assert((null_and_static_assert_handlers(true), true));
 static_assert((null_and_static_assert_handlers(false), true));
 
+struct DependentHandlerResult {
+  constexpr unsigned long size() const { return 5; }
+};
+
+constexpr auto dependent_handler_result(auto value) {
+  return value match {
+    case int i => i;
+    case DependentHandlerResult result => result.size();
+    case _ => static_assert(false, "unsupported match subject");
+  };
+}
+
+static_assert(dependent_handler_result(0) == 0);
+static_assert(dependent_handler_result(DependentHandlerResult{}) == 5);
+static_assert(__is_same(decltype(dependent_handler_result(0)), int));
+static_assert(__is_same(
+    decltype(dependent_handler_result(DependentHandlerResult{})),
+    unsigned long));
+
 struct BindingPackTriple {
   int first;
   int second;
