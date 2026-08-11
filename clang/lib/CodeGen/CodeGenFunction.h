@@ -5363,6 +5363,9 @@ public:
                            const MatchPatternInstantiation *Instantiation);
   RValue EmitAlternativePattern(const AlternativePattern *Pattern,
                                 const MatchPatternInstantiation *Instantiation);
+  void
+  EmitAlternativeDiscriminator(const AlternativePattern *Pattern,
+                               const MatchPatternInstantiation *Instantiation);
   void EmitSharedDeclarationProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
