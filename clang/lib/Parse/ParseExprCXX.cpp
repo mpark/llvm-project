@@ -4145,6 +4145,9 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   // Parse each source arm once. Sema specializes every generic projection arm
   // after its guard and handler are parsed.
   ProjectionCache.DeferAlternativeChoices = true;
+  if (Subject->isTypeDependent() &&
+      OrigResultType.getType()->getContainedAutoType())
+    RetTy = Actions.Context.DependentTy;
   bool InvalidBody = false;
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
     ProjectionCache.AlternativeChoices.clear();
