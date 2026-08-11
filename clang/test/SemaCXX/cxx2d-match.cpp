@@ -497,6 +497,34 @@ void instantiate_selected_static_assert_handler() {
   selected_static_assert_handler(0.0); // expected-note {{in instantiation of function template specialization}}
 }
 
+struct DependentHandlerResult {
+  constexpr unsigned long size() const { return 5; }
+};
+
+constexpr auto dependent_handler_result(auto value) {
+  return value match {
+    case int i => i;
+    case DependentHandlerResult result => result.size();
+    case _ => static_assert(false, "unsupported match subject");
+  };
+}
+
+static_assert(dependent_handler_result(0) == 0);
+static_assert(dependent_handler_result(DependentHandlerResult{}) == 5);
+static_assert(__is_same(decltype(dependent_handler_result(0)), int));
+static_assert(__is_same(
+    decltype(dependent_handler_result(DependentHandlerResult{})),
+    unsigned long));
+
+constexpr auto dependent_runtime_result_mismatch(auto value) {
+  return value match {
+    case 0 => 1;
+    case _ => 2.0; // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
+  };
+}
+
+constexpr auto instantiate_dependent_runtime_result_mismatch = dependent_runtime_result_mismatch(0); // expected-note {{in instantiation of function template specialization}}
+
 struct BindingPackTriple {
   int first;
   int second;
