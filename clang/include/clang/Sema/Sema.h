@@ -11265,7 +11265,9 @@ public:
   bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache);
-  void CheckMatchSelectExhaustiveness(
+  /// Diagnose required exhaustiveness and return whether the cases also cover
+  /// every residual runtime state.
+  bool CheckMatchSelectExhaustiveness(
       Expr *Subject, ArrayRef<MatchCase> Cases,
       ArrayRef<MatchCaseInstantiation> Instantiations);
 

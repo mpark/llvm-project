@@ -748,7 +748,8 @@ ExprResult Sema::ActOnMatchSelectExpr(
   if (ExpandDeferredCases) {
     auto *E = MatchSelectExpr::Create(
         Context, HoldingVar, Subject, MatchLoc, IsConstexpr,
-        RequireFirstCaseViable, OrigResultType, RetTy, SourceCases, {}, Braces);
+        RequireFirstCaseViable, /*IsFullyCovered=*/false, OrigResultType, RetTy,
+        SourceCases, {}, Braces);
     return ExpandDeferredMatchSelectExpr(E);
   }
 
@@ -763,14 +764,18 @@ ExprResult Sema::ActOnMatchSelectExpr(
                                     Case.PatternInstantiation});
   }
 
-  CheckMatchSelectExhaustiveness(
+  if (const AutoType *AT = RetTy->getContainedAutoType();
+      AT && !AT->isDeduced())
+    RetTy = Context.VoidTy;
+
+  bool IsFullyCovered = CheckMatchSelectExhaustiveness(
       Subject, SourceCases,
       DiagnosticInstantiations.value_or(
           ArrayRef<MatchCaseInstantiation>(CaseInstantiations)));
   return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
                                  IsConstexpr, RequireFirstCaseViable,
-                                 OrigResultType, RetTy, SourceCases,
-                                 CaseInstantiations, Braces);
+                                 IsFullyCovered, OrigResultType, RetTy,
+                                 SourceCases, CaseInstantiations, Braces);
 }
 
 ActionResult<MatchPattern *>
