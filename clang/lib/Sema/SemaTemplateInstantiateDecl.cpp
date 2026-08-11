@@ -7337,8 +7337,14 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
         TTPT && TTPT->getDepth() < TemplateArgs.getNumRetainedOuterLevels())
       return D;
   }
-  if (isa<ParmVarDecl>(D) || isa<NonTypeTemplateParmDecl>(D) ||
-      isa<TemplateTypeParmDecl>(D) || isa<TemplateTemplateParmDecl>(D) ||
+  // An implicit template region can rebuild a structured binding pack in an
+  // otherwise non-dependent function.
+  bool IsMappedBinding =
+      isa<BindingDecl>(D) && CurrentInstantiationScope &&
+      CurrentInstantiationScope->getInstantiationOfIfExists(D);
+  if (isa<ParmVarDecl>(D) || IsMappedBinding ||
+      isa<NonTypeTemplateParmDecl>(D) || isa<TemplateTypeParmDecl>(D) ||
+      isa<TemplateTemplateParmDecl>(D) ||
       (ParentDependsOnArgs && (ParentDC->isFunctionOrMethod() ||
                                isa<OMPDeclareReductionDecl>(ParentDC) ||
                                isa<OMPDeclareMapperDecl>(ParentDC))) ||
