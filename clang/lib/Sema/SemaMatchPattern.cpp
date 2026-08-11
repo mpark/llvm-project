@@ -952,9 +952,8 @@ static ExprResult buildMatchProjectionCondition(Sema &S,
 
 static bool isReusableDecompositionDeclaration(const VarDecl *Declaration) {
   const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration);
-  return Decomposition && Declaration->getType()->isRValueReferenceType() &&
-         Declaration->getType().getNonReferenceType().getQualifiers().empty() &&
-         Declaration->getType()->getContainedAutoType();
+  return Decomposition && Declaration->getType()->isReferenceType() &&
+         Declaration->getType().getNonReferenceType().getQualifiers().empty();
 }
 
 enum class CastProjectionResult { NotApplicable, Success, Error };
@@ -1588,7 +1587,13 @@ bool Sema::CheckCompleteMatchPatternImpl(
     VarDecl *VD = P->getDeclaration();
     auto *Decomposition = dyn_cast<DecompositionDecl>(VD);
     if (isReusableDecompositionDeclaration(VD)) {
-      unsigned Arity = Decomposition->bindings().size();
+      unsigned Arity = llvm::range_size(Decomposition->flat_bindings());
+      if (llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
+            return Binding->isParameterPack();
+          }))
+        if (UnsignedOrNone Count =
+                GetDecompositionElementCount(Subject->getType(), Loc))
+          Arity = *Count;
       if (MatchProjection *Projection = findMatchProjection(
               *this, ProjectionCache, Subject,
               MatchProjection::DecompositionProjection, QualType(), Arity)) {
@@ -1596,6 +1601,24 @@ bool Sema::CheckCompleteMatchPatternImpl(
         DecompositionDecl *Canonical = Projection->getDecomposedDecl();
         for (auto [Alias, Binding] :
              llvm::zip(Decomposition->bindings(), Canonical->bindings())) {
+          if (Alias->isParameterPack()) {
+            assert(Binding->isParameterPack());
+            ArrayRef<BindingDecl *> AliasPack = Alias->getBindingPackDecls();
+            ArrayRef<BindingDecl *> CanonicalPack =
+                Binding->getBindingPackDecls();
+            assert(AliasPack.size() == CanonicalPack.size());
+            for (auto [AliasPackBinding, CanonicalPackBinding] :
+                 llvm::zip(AliasPack, CanonicalPack)) {
+              Expr *CanonicalRef = BuildDeclRefExpr(
+                  CanonicalPackBinding, CanonicalPackBinding->getType(),
+                  VK_LValue, AliasPackBinding->getLocation());
+              AliasPackBinding->setBinding(CanonicalPackBinding->getType(),
+                                           CanonicalRef);
+              AliasPackBinding->setDecomposedDecl(Canonical);
+            }
+            Alias->setDecomposedDecl(Canonical);
+            continue;
+          }
           Expr *CanonicalRef = BuildDeclRefExpr(
               Binding, Binding->getType(), VK_LValue, Alias->getLocation());
           Alias->setBinding(Binding->getType(), CanonicalRef);

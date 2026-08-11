@@ -1366,6 +1366,70 @@ constexpr int declaration_arms_share_projections() {
 
 static_assert(declaration_arms_share_projections() == 113);
 
+struct BindingPackTriple {
+  int first;
+  int second;
+  int third;
+};
+
+constexpr int binding_pack_sum(BindingPackTriple value) {
+  return value match {
+    case auto [...elements] => (... + elements);
+  };
+}
+
+static_assert(binding_pack_sum({1, 2, 3}) == 6);
+
+constexpr int binding_pack_prefix_and_suffix(BindingPackTriple value) {
+  return value match {
+    case auto [first, ...middle, last] => first + (... + middle) + last;
+  };
+}
+
+static_assert(binding_pack_prefix_and_suffix({1, 2, 3}) == 6);
+
+constexpr int binding_pack_guard(BindingPackTriple value) {
+  return value match {
+    case auto [...elements] if ((... + elements) < 0) => -1;
+    case auto [...elements] => (... + elements);
+  };
+}
+
+static_assert(binding_pack_guard({1, 2, 3}) == 6);
+
+constexpr int binding_pack_case_condition(BindingPackTriple value) {
+  if (case auto [...elements] = value)
+    return (... + elements);
+  return 0;
+}
+
+static_assert(binding_pack_case_condition({1, 2, 3}) == 6);
+
+constexpr int binding_pack_size(auto value) {
+  return value match -> int {
+    case auto [...elements] => int(sizeof...(elements));
+    case _ => -1;
+  };
+}
+
+struct EmptyBindingPack {};
+
+static_assert(binding_pack_size(EmptyBindingPack{}) == 0);
+static_assert(binding_pack_size(Pair{1, 2}) == 2);
+static_assert(binding_pack_size(1) == -1);
+
+struct NestedBindingPack {
+  Pair pair;
+};
+
+constexpr int nested_binding_pack(NestedBindingPack value) {
+  return value match {
+    case [auto [...elements]] => (... + elements);
+  };
+}
+
+static_assert(nested_binding_pack({{1, 2}}) == 3);
+
 constexpr int nested_arms_share_projections() {
   int element_projections[2] = {};
   int index_calls = 0;
