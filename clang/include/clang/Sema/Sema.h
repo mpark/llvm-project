@@ -11248,6 +11248,8 @@ public:
 
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
+  bool ActOnMatchVoidHandler(TypeLoc OrigResultType, QualType &RetTy,
+                             SourceLocation Loc);
 
   ExprResult ActOnMatchTestExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
