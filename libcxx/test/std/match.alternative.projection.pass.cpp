@@ -299,6 +299,13 @@ int match_uneven_nested_variants(T& value) {
   };
 }
 
+template<class T>
+int match_repeated_nested_variants(T& value) {
+  return value match {
+    case { { auto&& alternative } } => classify_nested(alternative);
+  };
+}
+
 struct PrvalueAlternative {
   int* destructions;
 };
@@ -471,6 +478,11 @@ int main(int, char**) {
   assert(match_uneven_nested_variants(uneven) == 73);
   std::get<1>(uneven).emplace<2>(true);
   assert(match_uneven_nested_variants(uneven) == 74);
+  using RepeatedNestedVariants =
+      std::variant<std::variant<int, double>, std::variant<int, double>>;
+  RepeatedNestedVariants repeated(
+      std::in_place_index<1>, std::in_place_index<1>, 4.0);
+  assert(match_repeated_nested_variants(repeated) == 71);
   test_prvalue_projection_initialization();
   return 0;
 }
