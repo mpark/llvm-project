@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2d -verify -fsyntax-only %s
+// RUN: %clang_cc1 -std=c++2d -verify -fsyntax-only -fpattern-matching %s
 
 // Reference-typed do-expressions follow the same lifetime semantics as a
 // function returning a reference: a temporary materialized in `do_return`
@@ -147,3 +147,64 @@ Holder aggregate_result_retains_local_address() {
     do_return Holder{&local}; // expected-warning {{address of stack memory associated with local variable 'local' returned}}
   };
 }
+
+namespace match_result_lifetime {
+
+struct Owner {
+  int value;
+};
+
+Owner make_owner();
+
+int &&project([[clang::lifetimebound]] Owner &&owner) {
+  return static_cast<int &&>(owner.value);
+}
+
+int consume(int);
+
+void reference_escaping_full_expression_warns() {
+  auto &&dangling = make_owner() match -> decltype(auto) { // expected-warning {{temporary bound to local reference 'dangling' will be destroyed at the end of the full-expression}}
+    case auto &&owner => do -> decltype(auto) {
+      project(static_cast<decltype(owner) &&>(owner))
+    };
+  };
+  (void)dangling;
+}
+
+int reference_consumed_in_full_expression_is_valid() {
+  return consume(make_owner() match -> decltype(auto) {
+    case auto &&owner => do -> decltype(auto) {
+      project(static_cast<decltype(owner) &&>(owner))
+    };
+  });
+}
+
+int &&reference_returned_from_function_is_ill_formed() {
+  return make_owner() match -> decltype(auto) { // expected-error {{returning reference to local temporary object}}
+    case auto &&owner => do -> decltype(auto) {
+      project(static_cast<decltype(owner) &&>(owner))
+    };
+  };
+}
+
+const Owner &by_value_pattern_variable_dangles(Owner subject) {
+  return subject match -> const Owner & {
+    case Owner owner => owner; // expected-warning {{reference to stack memory associated with local variable 'owner' returned}}
+  };
+}
+
+const Owner &by_value_pattern_variable_through_do_dangles(Owner subject) {
+  return subject match -> const Owner & {
+    case Owner owner => do -> const Owner & {
+      owner // expected-warning {{reference to stack memory associated with local variable 'owner' returned}}
+    };
+  };
+}
+
+const Owner &reference_pattern_is_an_alias(Owner &subject) {
+  return subject match -> const Owner & {
+    case Owner &owner => do -> const Owner & { owner };
+  };
+}
+
+} // namespace match_result_lifetime
