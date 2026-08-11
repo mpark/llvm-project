@@ -590,6 +590,8 @@ struct Variant {
   constexpr Variant(float z) : i(2), z(z) {}
   constexpr Variant(int x, int &index_calls, int &get_calls)
       : i(0), x(x), index_calls(&index_calls), get_calls(&get_calls) {}
+  constexpr Variant(double y, int &index_calls, int &get_calls)
+      : i(1), y(y), index_calls(&index_calls), get_calls(&get_calls) {}
 
   constexpr int index() const {
     if (index_calls)
@@ -716,6 +718,29 @@ constexpr int dependent_variant_arms_share_projection() {
 }
 
 static_assert(dependent_variant_arms_share_projection() == 111);
+
+struct VariantProduct {
+  Variant first;
+  Variant second;
+};
+
+constexpr int sibling_variant_discriminators_are_shared() {
+  int first_index_calls = 0;
+  int first_get_calls = 0;
+  int second_index_calls = 0;
+  int second_get_calls = 0;
+  VariantProduct value{
+      Variant(1, first_index_calls, first_get_calls),
+      Variant(2.0, second_index_calls, second_get_calls)};
+  int result = value match {
+    case [{ auto&& first }, { auto&& second }] =>
+        static_cast<int>(first) + static_cast<int>(second);
+  };
+  return first_index_calls * 10000 + second_index_calls * 1000 +
+         first_get_calls * 100 + second_get_calls * 10 + result;
+}
+
+static_assert(sibling_variant_discriminators_are_shared() == 11113);
 
 template <typename V>
 constexpr int dependent_variant_match_condition_return(V &&var) {
