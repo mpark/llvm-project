@@ -18,6 +18,21 @@ struct Choice {
   double second;
 };
 
+struct OneElement {
+  int first;
+};
+
+struct TwoElements {
+  int first;
+  int second;
+};
+
+struct TupleChoice {
+  unsigned state;
+  OneElement one;
+  TwoElements two;
+};
+
 template<>
 struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
@@ -37,6 +52,23 @@ struct std::alternative_traits<Choice> {
       return (static_cast<Self&&>(choice).first);
     else
       return (static_cast<Self&&>(choice).second);
+  }
+};
+
+template<>
+struct std::alternative_traits<TupleChoice> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  static constexpr __SIZE_TYPE__ index(const TupleChoice& choice) noexcept {
+    return choice.state;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(choice).one);
+    else
+      return (static_cast<Self&&>(choice).two);
   }
 };
 
@@ -129,6 +161,12 @@ constexpr int match_generic(Choice choice) {
   };
 }
 
+constexpr int match_generic_binding_pack(TupleChoice choice) {
+  return choice match {
+    case { auto [...elements] } => (... + elements);
+  };
+}
+
 constexpr int multiple_views_cache_each_discriminator() {
   int primary_index_calls = 0;
   int nullable_index_calls = 0;
@@ -203,6 +241,8 @@ static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
 static_assert(match_generic({0, 3, 4}) == 1);
 static_assert(match_generic({1, 3, 4}) == 2);
+static_assert(match_generic_binding_pack({0, {3}, {4, 5}}) == 3);
+static_assert(match_generic_binding_pack({1, {3}, {4, 5}}) == 9);
 static_assert(multiple_views_cache_each_discriminator() == 112);
 constexpr Choice dependent_first{0, 3, 4};
 constexpr Choice dependent_second{1, 3, 4};
