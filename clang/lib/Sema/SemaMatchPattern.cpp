@@ -726,6 +726,15 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   return ER.get();
 }
 
+bool Sema::ActOnMatchVoidHandler(TypeLoc OrigResultType, QualType &RetTy,
+                                 SourceLocation Loc) {
+  // Give fallthrough statement handlers the same result deduction behavior as
+  // a void expression handler such as `do {}`.
+  ExprResult VoidExpr =
+      new (Context) CXXScalarValueInitExpr(Context.VoidTy, nullptr, Loc);
+  return ActOnMatchExprHandler(OrigResultType, RetTy, VoidExpr).isInvalid();
+}
+
 ExprResult Sema::ActOnMatchTestExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,

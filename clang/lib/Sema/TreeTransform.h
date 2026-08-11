@@ -19423,6 +19423,16 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Expr *HE = dyn_cast<Expr>(HS))
       Handler = getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy,
                                                 HE);
+    else if (auto *DS = dyn_cast<DeclStmt>(HS);
+             isa<NullStmt>(HS) ||
+             (DS && DS->isSingleDecl() &&
+              isa<StaticAssertDecl>(DS->getSingleDecl()))) {
+      if (DS && cast<StaticAssertDecl>(DS->getSingleDecl())->isFailed())
+        return TransformCaseResult::Error;
+      if (getSema().ActOnMatchVoidHandler(E->getOrigResultType(), RetTy,
+                                          HS->getBeginLoc()))
+        return TransformCaseResult::Error;
+    }
     if (Handler.isInvalid())
       return TransformCaseResult::Error;
 
