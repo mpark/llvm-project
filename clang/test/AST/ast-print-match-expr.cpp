@@ -121,3 +121,19 @@ constexpr int constexpr_selection() {
 // CHECK-NEXT: {{^        }}case 0 => 1;
 // CHECK-NEXT: {{^        }}case _ => static_assert(false);
 // CHECK-NEXT: {{^    }}};
+
+template<class T>
+int attributed_cases(T value) {
+  return value match {
+    [[likely]] case int integer => integer;
+    [[unlikely]] case _ => 0;
+  };
+}
+
+// CHECK-LABEL: template <class T> int attributed_cases(T value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        \[\[likely\]\] case int integer => integer;}}
+// CHECK-NEXT: {{^        \[\[unlikely\]\] case _ => 0;}}
+// CHECK-NEXT: {{^    }}};
+
+int instantiate_attributed_cases = attributed_cases(1);

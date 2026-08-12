@@ -5693,6 +5693,7 @@ struct MatchCase {
   Stmt *Handler;
   bool MaybeUseful = false;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
+  ArrayRef<const Attr *> Attributes;
 };
 
 /// A semantically checked form of a source match case. A source case can have
@@ -5704,6 +5705,7 @@ struct MatchCaseInstantiation {
   Stmt *Handler;
   unsigned CaseIndex;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
+  ArrayRef<const Attr *> Attributes;
 };
 
 class MatchSelectExpr final
