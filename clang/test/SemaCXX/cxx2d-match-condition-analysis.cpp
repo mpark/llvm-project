@@ -166,6 +166,34 @@ void strict_dependent_constexpr_condition(T value) {
 template void strict_dependent_constexpr_condition(Pair);
 template void strict_dependent_constexpr_condition(int); // expected-note {{in instantiation of function template specialization 'strict_dependent_constexpr_condition<int>' requested here}}
 
+int filtered_range() {
+  Pair pairs[] = {{1, 0}, {2, 1}, {3, 0}};
+  int sum = 0;
+  for (case [int element, 0] : pairs)
+    sum += element;
+  return sum;
+}
+
+constexpr int irrefutable_range() {
+  int values[] = {1, 2, 3};
+  int sum = 0;
+  for (case int value : values)
+    sum += value;
+  return sum;
+}
+
+static_assert(irrefutable_range() == 6);
+
+constexpr int same_name_range_initializer() {
+  int values[] = {1, 2, 3};
+  int sum = 0;
+  for (case int values : values)
+    sum += values;
+  return sum;
+}
+
+static_assert(same_name_range_initializer() == 6);
+
 constexpr int condition_binding_lifetime(int value) {
   while (case int& copy = value) {
     ++copy;
