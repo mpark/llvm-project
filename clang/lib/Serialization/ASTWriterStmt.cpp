@@ -2579,6 +2579,10 @@ void ASTStmtWriter::VisitMatchTestExpr(MatchTestExpr *E) {
   Code = serialization::EXPR_MATCH_TEST;
 }
 
+void ASTStmtWriter::VisitCaseConditionExpr(CaseConditionExpr *E) {
+  VisitMatchTestExpr(E);
+}
+
 void ASTStmtWriter::VisitMatchSelectExpr(MatchSelectExpr *E) {
   VisitExpr(E);
   Code = serialization::EXPR_MATCH_SELECT;

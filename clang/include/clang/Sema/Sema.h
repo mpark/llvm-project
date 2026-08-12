@@ -11148,6 +11148,8 @@ public:
 
 public:
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
+  bool CheckMatchSubjectBindingReferences(Expr *Subject,
+                                          MatchPattern *Pattern);
   void CheckGuardedMatchPattern(MatchPattern *Pattern);
 
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
@@ -11158,17 +11160,34 @@ public:
   ExprResult ActOnMatchTestExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
       MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
-      SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
-      bool NeedsCaseInstantiation,
-      bool CaseConditionSyntax = false,
-      ArrayRef<MatchTestInstantiation> Instantiations = {});
+      SourceLocation IfLoc, MatchGuard Guard,
+      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+      ArrayRef<MatchTestInstantiation> Instantiations = {},
+      bool HasSemanticInstantiations = false);
+  ExprResult ActOnMatchTestExpr(
+      VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
+      MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
+      SourceLocation IfLoc, MatchGuard Guard,
+      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+      bool CaseConditionSyntax,
+      ArrayRef<MatchTestInstantiation> Instantiations = {},
+      bool HasSemanticInstantiations = false);
+  ExprResult
+  ActOnCaseConditionExpr(VarDecl *HoldingVar, Expr *Subject,
+                         SourceLocation CaseLoc, MatchPattern *Pattern,
+                         MatchPatternInstantiation *PatternInstantiation,
+                         bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+                         ArrayRef<MatchTestInstantiation> Instantiations = {},
+                         bool HasSemanticInstantiations = false);
+  ExprResult AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
+                                      Expr *Increment = nullptr);
   ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
   ExprResult ActOnMatchSelectExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
       bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
       SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
-      bool ExpandDeferredCases = false, bool RequireFirstCaseViable = false,
+      bool ExpandDeferredCases = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =
           std::nullopt,
       std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations =
@@ -11256,6 +11275,7 @@ public:
   struct MatchPatternSemanticAnalysis {
     MatchPatternRefutability Refutability = MatchPatternRefutability::Refutable;
     SmallVector<MatchSemanticDomainConstraint, 4> Domain;
+
     bool isUnconditionallyMatched() const {
       return Domain.empty() &&
              Refutability == MatchPatternRefutability::Irrefutable;
