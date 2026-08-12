@@ -11,8 +11,11 @@ void test_decltypes() {
 constexpr int test_case_condition(int value) {
   if (case 0 = value)
     return 1;
-  if (case int copy = value if (int doubled = copy * 2; doubled > 10))
-    return doubled;
+  if (case int copy = value) {
+    int doubled = copy * 2;
+    if (doubled > 10)
+      return doubled;
+  }
   return -1;
 }
 
@@ -38,8 +41,8 @@ static_assert(test_case_condition_assignment_parsing());
 
 constexpr int test_case_condition_same_name() {
   int value = 42;
-  if (case int value = value)
-    return value;
+  if (case int copy = value)
+    return copy;
   return 0;
 }
 
@@ -47,8 +50,11 @@ static_assert(test_case_condition_same_name() == 42);
 
 constexpr int test_case_condition_while(int value) {
   int sum = 0;
-  while (case int& current = value if (current > 0))
+  while (case int& current = value) {
+    if (current <= 0)
+      break;
     sum += current--;
+  }
   return sum;
 }
 
@@ -57,9 +63,12 @@ static_assert(test_case_condition_while(4) == 10);
 constexpr int test_case_condition_for(int value) {
   int sum = 0;
   for (int count = 0;
-       case int& current = value if (current > 0);
-       --current, ++count)
+       case int& current = value;
+       --current, ++count) {
+    if (current <= 0)
+      break;
     sum += current + count;
+  }
   return sum;
 }
 
@@ -68,13 +77,32 @@ static_assert(test_case_condition_for(3) == 9);
 constexpr int test_match_condition_for(int value) {
   int sum = 0;
   for (int count = 0;
-       value match case int& current if (current > 0);
-       --current, ++count)
+       case int& current = value;
+       --current, ++count) {
+    if (current <= 0)
+      break;
     sum += current + count;
+  }
   return sum;
 }
 
 static_assert(test_match_condition_for(3) == 9);
+
+template<class T>
+constexpr int test_dependent_match_condition_for(T value) {
+  int count = 0;
+  for (; case auto&& current = value; ++current) {
+    if (current >= 3)
+      break;
+    ++count;
+    if (current == 1)
+      continue;
+  }
+  return count;
+}
+
+static_assert(test_dependent_match_condition_for(0) == 3);
+static_assert(test_dependent_match_condition_for(1.0) == 2);
 
 struct CaseConditionLifetime {
   int* alive;
@@ -559,7 +587,7 @@ static_assert(test_match_guard_init_statement({4, 7}) == 11);
 
 constexpr int test_match_test_guard_init_statement(int value) {
   if (value match case int copy if (int doubled = copy * 2; doubled == 4))
-    return doubled;
+    return value * 2;
   return -1;
 }
 
@@ -744,7 +772,7 @@ static_assert(sibling_variant_discriminators_are_shared() == 11113);
 
 template <typename V>
 constexpr int dependent_variant_match_condition_return(V &&var) {
-  if (static_cast<V &&>(var) match case { auto &&value })
+  if (case { auto &&value } = static_cast<V &&>(var))
     return sizeof(value);
   return 0;
 }
@@ -863,7 +891,7 @@ constexpr bool test_indirect_match_subject_lifetime(int value) {
     observed = alive;
   else
     observed = alive;
-  return observed && !alive;
+  return !observed && !alive;
 }
 
 static_assert(test_indirect_match_subject_lifetime(1));
@@ -878,7 +906,7 @@ constexpr bool test_dependent_indirect_match_subject_lifetime(int value) {
     observed = alive;
   else
     observed = alive;
-  return observed && !alive;
+  return !observed && !alive;
 }
 
 static_assert(test_dependent_indirect_match_subject_lifetime<
@@ -901,7 +929,7 @@ default_argument_identity(
 }
 
 constexpr bool test_default_argument_match_subject_lifetime() {
-  if (default_argument_identity() match case auto&& value)
+  if (case auto&& value = default_argument_identity())
     return value.value == 42;
   return false;
 }
@@ -916,7 +944,7 @@ constexpr const T &dependent_default_argument_identity(
 
 template <class T>
 constexpr bool test_dependent_default_argument_match_subject_lifetime() {
-  if (dependent_default_argument_identity<T>() match case auto&& value)
+  if (case auto&& value = dependent_default_argument_identity<T>())
     return value.value == 42;
   return false;
 }
