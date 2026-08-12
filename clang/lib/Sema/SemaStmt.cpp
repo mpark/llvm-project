@@ -2448,6 +2448,16 @@ VarDecl *Sema::BuildForRangeVarDecl(SourceLocation Loc, QualType Type,
   return Decl;
 }
 
+StmtResult Sema::BuildMatchForRangeLoopVar(Scope *S, SourceLocation Loc) {
+  const std::string Depth = std::to_string(S->getDepth() / 2);
+  IdentifierInfo *Name = PP.getIdentifierInfo("__match_element" + Depth);
+  VarDecl *LoopVar = BuildForRangeVarDecl(
+      Loc, Context.getAutoRRefDeductType(), Name, /*IsConstexpr=*/false);
+  Decl *D = LoopVar;
+  DeclGroupPtrTy Group = BuildDeclaratorGroup(MutableArrayRef<Decl *>(&D, 1));
+  return ActOnDeclStmt(Group, Loc, Loc);
+}
+
 static bool ObjCEnumerationCollection(Expr *Collection) {
   return !Collection->isTypeDependent()
           && Collection->getType()->getAs<ObjCObjectPointerType>() != nullptr;
