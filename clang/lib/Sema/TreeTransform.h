@@ -19391,7 +19391,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                                                PatternState);
     DiagnosticInstantiations.push_back({TransformedPattern, Case.IfLoc,
                                         Case.Guard, Case.Handler, CaseIndex,
-                                        PatternInstantiation});
+                                        PatternInstantiation,
+                                        Case.Attributes});
 
     if (Semantic.Refutability == Sema::MatchPatternRefutability::Impossible)
       return TransformCaseResult::NoMatch;
@@ -19471,12 +19472,32 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Handler.isInvalid())
       return TransformCaseResult::Error;
 
+    SmallVector<const Attr *, 4> TransformedAttributes;
+    bool AttributesChanged = false;
+    for (const Attr *A : Case.Attributes) {
+      const Attr *TransformedAttribute = getDerived().TransformStmtAttr(
+          Case.Handler, Handler.get(), A);
+      AttributesChanged |= A != TransformedAttribute;
+      if (TransformedAttribute)
+        TransformedAttributes.push_back(TransformedAttribute);
+    }
+    if (getSema().CheckRebuiltStmtAttributes(TransformedAttributes))
+      return TransformCaseResult::Error;
+    ArrayRef<const Attr *> Attributes = Case.Attributes;
+    if (AttributesChanged) {
+      const Attr **Storage = getSema().Context.template Allocate<const Attr *>(
+          TransformedAttributes.size());
+      llvm::copy(TransformedAttributes, Storage);
+      Attributes = {Storage, TransformedAttributes.size()};
+    }
+
     Transformed = {TransformedPattern,
                    Case.IfLoc,
                    {GuardInit.get(), Guard.get().first, Guard.get().second},
                    Handler.get(),
                    CaseIndex,
-                   PatternInstantiation};
+                   PatternInstantiation,
+                   Attributes};
     if (!Case.Guard.hasGuard() &&
         Semantic.Refutability == Sema::MatchPatternRefutability::Irrefutable)
       ClosedDomains.push_back(std::move(Semantic.Domain));
