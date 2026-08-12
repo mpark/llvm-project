@@ -117,7 +117,7 @@ int reference(int &value) {
 }
 
 int condition(int value) {
-  if (value match case int copy)
+  if (case int copy = value)
     return copy;
   return -1;
 }
@@ -546,6 +546,24 @@ constexpr int binding_pack_case_condition(BindingPackTriple value) {
 }
 
 static_assert(binding_pack_case_condition({1, 2, 3}) == 6);
+
+void binding_pack_loop_conditions(BindingPackTriple value) {
+  while (case auto [...elements] = value) {
+    (void)sizeof...(elements);
+    break;
+  }
+  for (; case auto [...elements] = value;
+       (void)sizeof...(elements)) {
+    break;
+  }
+  while (value match case auto [...elements]) {
+    break;
+  }
+  for (; value match case auto [...elements];
+       (void)0) {
+    break;
+  }
+}
 
 template<class T>
 constexpr int dependent_binding_pack_size(T value) {

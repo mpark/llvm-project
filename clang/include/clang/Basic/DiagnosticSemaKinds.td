@@ -14480,10 +14480,18 @@ def err_cuda_device_kernel_launch_require_rdc
 // Pattern Matching
 def err_pattern_binding_used_in_pattern : Error<
   "pattern binding %0 cannot be used within the pattern that introduces it">;
+def err_pattern_binding_used_in_subject : Error<
+  "pattern binding %0 cannot be used in its own subject initializer">;
 def err_match_case_redundant : Error<"match case is redundant">;
 def err_match_case_impossible : Error<
   "match case can never match a subject of type %0">;
 def err_match_default_guard : Error<"default match arm cannot have a guard">;
+def err_case_condition_guard : Error<
+  "a pattern condition cannot have a trailing guard">;
+def err_case_init_statement : Error<
+  "a pattern condition cannot be used as an init-statement">;
+def err_case_switch_condition : Error<
+  "a pattern condition is not permitted in a switch statement">;
 def err_match_not_exhaustive : Error<
   "match expression is not exhaustive%select{|; example of a missing case: %1}0">;
 def err_declaration_pattern_not_exact_match : Error<

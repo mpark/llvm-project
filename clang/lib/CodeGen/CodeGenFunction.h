@@ -5300,6 +5300,9 @@ public:
       const MatchTestExpr &S, JumpDest SuccessDest,
       llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
       JumpDest FailureDest, llvm::function_ref<void()> EmitFailure);
+  void EmitSelectedMatchTestInstantiation(
+      const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
+      llvm::function_ref<void()> EmitSuccess);
   RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   LValue EmitMatchSelectExprLValue(const MatchSelectExpr *E);
   RValue EmitMatchPattern(const MatchPattern *Pattern,
@@ -5314,6 +5317,9 @@ public:
   EmitAlternativeDiscriminator(const AlternativePattern *Pattern,
                                const MatchPatternInstantiation *Instantiation);
   void EmitSharedDeclarationProjections(
+      const MatchPattern *Pattern,
+      const MatchPatternInstantiation *Instantiation);
+  void EmitSelectedMatchPatternProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
   RValue EmitMatchGuard(const MatchGuard &MG, llvm::Value *PatBoolRes);

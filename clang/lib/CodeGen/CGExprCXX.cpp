@@ -2633,6 +2633,62 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     EmitSharedDeclarationProjections(Child, Instantiation);
 }
 
+static bool referencesDeclaration(const Stmt *S, const ValueDecl *D) {
+  if (!S)
+    return false;
+  if (const auto *Reference = dyn_cast<DeclRefExpr>(S);
+      Reference && Reference->getDecl() == D)
+    return true;
+  return llvm::any_of(S->children(), [&](const Stmt *Child) {
+    return referencesDeclaration(Child, D);
+  });
+}
+
+void CodeGenFunction::EmitSelectedMatchPatternProjections(
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation) {
+  const MatchPatternInfo *Info = Instantiation->find(Pattern);
+  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+  if (Projection) {
+    const VarDecl *Intermediate = Projection->getIntermediateVar();
+    const VarDecl *Condition = Projection->getConditionVar();
+    const VarDecl *Projected = Projection->getProjectedVar();
+    const Expr *ProjectedExpr = Projection->getProjectedExpr();
+    const DecompositionDecl *Decomposition = Projection->getDecomposedDecl();
+    auto ProjectionResultReferences = [&](const ValueDecl *D) {
+      return referencesDeclaration(Projected ? Projected->getInit() : nullptr,
+                                   D) ||
+             referencesDeclaration(ProjectedExpr, D) ||
+             referencesDeclaration(
+                 Decomposition ? Decomposition->getInit() : nullptr, D);
+    };
+    bool NeedsCondition = Condition && ProjectionResultReferences(Condition);
+    bool NeedsIntermediate =
+        Intermediate &&
+        (ProjectionResultReferences(Intermediate) ||
+         (NeedsCondition &&
+          referencesDeclaration(Condition->getInit(), Intermediate)));
+
+    if (const VarDecl *Holding = Projection->getHoldingVar();
+        Holding && !LocalDeclMap.count(Holding))
+      EmitVarDecl(*Holding);
+    if (NeedsIntermediate && !LocalDeclMap.count(Intermediate))
+      EmitVarDecl(*Intermediate);
+    if (NeedsCondition && !LocalDeclMap.count(Condition))
+      EmitVarDecl(*Condition);
+    if (Projected && !LocalDeclMap.count(Projected))
+      EmitVarDecl(*Projected);
+    else if (!Projected && Projection->getProjectedExpr() &&
+             Projection->getProjectedExpr()->getType()->isVoidType())
+      EmitIgnoredExpr(Projection->getProjectedExpr());
+    if (Decomposition && !LocalDeclMap.count(Decomposition))
+      EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
+  }
+
+  for (const MatchPattern *Child : Pattern->children())
+    EmitSelectedMatchPatternProjections(Child, Instantiation);
+}
+
 static bool hasPatternDeclarations(const MatchPattern *Pattern) {
   if (isa<DeclarationPattern>(Pattern))
     return true;
@@ -2672,6 +2728,22 @@ RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
 
   EmitBlock(GuardEndBB);
   return RValue::get(Builder.CreateLoad(GuardResultAddr));
+}
+
+void CodeGenFunction::EmitSelectedMatchTestInstantiation(
+    const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
+    llvm::function_ref<void()> EmitSuccess) {
+  RunCleanupsScope MatchScope(*this);
+  if (const VarDecl *HoldingVar = S.getHoldingVar())
+    EmitVarDecl(*HoldingVar);
+  else if (S.getSubject()->getType()->isVoidType())
+    EmitIgnoredExpr(S.getSubject());
+
+  EmitSelectedMatchPatternProjections(Instantiation.Pattern,
+                                      Instantiation.PatternInstantiation);
+  emitPatternDeclarations(*this, Instantiation.Pattern,
+                          Instantiation.PatternInstantiation);
+  EmitSuccess();
 }
 
 void CodeGenFunction::EmitMatchTestDispatch(
@@ -2749,8 +2821,18 @@ void CodeGenFunction::EmitMatchTestDispatch(
 
 RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   assert(!S.getType()->isVoidType() && "match test must produce bool");
+  if (S.hasSemanticInstantiations() && S.getInstantiations().empty()) {
+    RunCleanupsScope MatchScope(*this);
+    if (const VarDecl *HoldingVar = S.getHoldingVar())
+      EmitVarDecl(*HoldingVar);
+    else
+      EmitIgnoredExpr(S.getSubject());
+    return RValue::get(Builder.getFalse());
+  }
+
   if (S.getInstantiations().empty()) {
-    bool NeedsCleanup = !S.getHoldingVar();
+    bool NeedsCleanup =
+        !S.getHoldingVar() || !S.usesCaseConditionSyntax();
     auto EmitTest = [&]() {
       if (S.getHoldingVar())
         EmitVarDecl(*S.getHoldingVar());

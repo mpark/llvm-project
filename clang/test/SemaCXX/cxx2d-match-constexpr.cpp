@@ -21,6 +21,20 @@ constexpr auto deduces_from_selected_handler() {
 static_assert(deduces_from_selected_handler<0>() == 1);
 static_assert(deduces_from_selected_handler<1>()[0] == 'o');
 
+struct Pair {
+  int first;
+  int second;
+};
+
+constexpr int initializes_structural_bindings() {
+  return Pair{42, 0} match constexpr {
+    case [int first, 0] => first;
+    case _ => -1;
+  };
+}
+
+static_assert(initializes_structural_bindings() == 42);
+
 constexpr int default_handler(bool value) {
   return value match {
     case true => 1;
@@ -56,8 +70,8 @@ int runtime_guard_with_constant_condition(int value) {
   };
 }
 
-int runtime_refutable(int value) {
-  return value match constexpr { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{read of non-constexpr variable '' is not allowed in a constant expression}} expected-note {{declared here}}
+int runtime_refutable(int value) { // expected-note {{declared here}}
+  return value match constexpr { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}} expected-note {{in call to '<expression body>'}}
     case 0 => 1;
     case _ => 2;
   };

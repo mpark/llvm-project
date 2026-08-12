@@ -4507,8 +4507,12 @@ private:
   ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
                                  InjectedDeclSet *InjectedDecls);
   Sema::ConditionResult
-  ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
+  ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
+                     Sema::ConditionKind CK, bool MissingOK,
                      InjectedDeclSet *InjectedDecls);
+  bool AttachCaseCondition(Sema::ConditionResult &Condition,
+                           SourceLocation Loc, Stmt *Handler,
+                           Expr *Increment = nullptr);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,

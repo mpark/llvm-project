@@ -5575,7 +5575,7 @@ struct MatchTestInstantiation {
   Expr *Increment = nullptr;
 };
 
-class MatchTestExpr final : public Expr {
+class MatchTestExpr : public Expr {
   VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
@@ -5586,25 +5586,23 @@ class MatchTestExpr final : public Expr {
   ArrayRef<MatchTestInstantiation> Instantiations;
   bool PatternIsIrrefutable;
   bool NeedsCaseInstantiation;
-  bool CaseConditionSyntax;
+  bool HasSemanticInstantiations;
 
-public:
-  explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
-                         Expr *Subject, SourceLocation MatchLoc,
-                         MatchPattern *Pattern,
+protected:
+  explicit MatchTestExpr(StmtClass SC, const ASTContext &Ctx,
+                         VarDecl *HoldingVar, Expr *Subject,
+                         SourceLocation MatchLoc, MatchPattern *Pattern,
                          MatchPatternInstantiation *PatternInstantiation,
                          SourceLocation IfLoc, MatchGuard Guard,
-                         bool PatternIsIrrefutable,
-                         bool NeedsCaseInstantiation,
-                         bool CaseConditionSyntax = false,
-                         ArrayRef<MatchTestInstantiation> Instantiations = {})
-      : Expr(MatchTestExprClass, Ctx.BoolTy, VK_PRValue, OK_Ordinary),
-        HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
-        Pattern(Pattern), PatternInstantiation(PatternInstantiation),
-        IfLoc(IfLoc), Guard(Guard),
+                         bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+                         ArrayRef<MatchTestInstantiation> Instantiations,
+                         bool HasSemanticInstantiations)
+      : Expr(SC, Ctx.BoolTy, VK_PRValue, OK_Ordinary), HoldingVar(HoldingVar),
+        Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern),
+        PatternInstantiation(PatternInstantiation), IfLoc(IfLoc), Guard(Guard),
         PatternIsIrrefutable(PatternIsIrrefutable),
         NeedsCaseInstantiation(NeedsCaseInstantiation),
-        CaseConditionSyntax(CaseConditionSyntax) {
+        HasSemanticInstantiations(HasSemanticInstantiations) {
     if (!Instantiations.empty()) {
       auto *Storage =
           Ctx.Allocate<MatchTestInstantiation>(Instantiations.size());
@@ -5615,10 +5613,27 @@ public:
     setDependence(computeDependence(this));
   }
 
-  explicit MatchTestExpr(EmptyShell Empty)
-      : Expr(MatchTestExprClass, Empty), PatternInstantiation(nullptr),
+  explicit MatchTestExpr(StmtClass SC, EmptyShell Empty)
+      : Expr(SC, Empty), PatternInstantiation(nullptr),
         PatternIsIrrefutable(false), NeedsCaseInstantiation(false),
-        CaseConditionSyntax(false) {}
+        HasSemanticInstantiations(false) {}
+
+public:
+  explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
+                         Expr *Subject, SourceLocation MatchLoc,
+                         MatchPattern *Pattern,
+                         MatchPatternInstantiation *PatternInstantiation,
+                         SourceLocation IfLoc, MatchGuard Guard,
+                         bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+                         ArrayRef<MatchTestInstantiation> Instantiations = {},
+                         bool HasSemanticInstantiations = false)
+      : MatchTestExpr(MatchTestExprClass, Ctx, HoldingVar, Subject, MatchLoc,
+                      Pattern, PatternInstantiation, IfLoc, Guard,
+                      PatternIsIrrefutable, NeedsCaseInstantiation,
+                      Instantiations, HasSemanticInstantiations) {}
+
+  explicit MatchTestExpr(EmptyShell Empty)
+      : MatchTestExpr(MatchTestExprClass, Empty) {}
 
   const VarDecl* getHoldingVar() const { return HoldingVar; }
   VarDecl* getHoldingVar() { return HoldingVar; }
@@ -5651,6 +5666,10 @@ public:
     return Instantiations;
   }
 
+  bool hasSemanticInstantiations() const {
+    return HasSemanticInstantiations;
+  }
+
   bool hasConditionInstantiations() const {
     return llvm::any_of(Instantiations, [](const auto &Instantiation) {
       return Instantiation.Handler != nullptr;
@@ -5661,16 +5680,33 @@ public:
 
   bool needsCaseInstantiation() const { return NeedsCaseInstantiation; }
 
-  bool usesCaseConditionSyntax() const { return CaseConditionSyntax; }
+  bool usesCaseConditionSyntax() const {
+    return getStmtClass() == CaseConditionExprClass;
+  }
+
+  static MatchTestExpr *findInCondition(Expr *Condition) {
+    if (!Condition)
+      return nullptr;
+    Condition = Condition->IgnoreParens();
+    if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
+      Condition = Constant->getSubExpr()->IgnoreParens();
+    return dyn_cast<MatchTestExpr>(Condition);
+  }
+  static const MatchTestExpr *findInCondition(const Expr *Condition) {
+    return findInCondition(const_cast<Expr *>(Condition));
+  }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
-    return CaseConditionSyntax ? MatchLoc : getSubject()->getBeginLoc();
+    return getStmtClass() == CaseConditionExprClass
+               ? MatchLoc
+               : getSubject()->getBeginLoc();
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
     if (Guard.Condition)
       return Guard.Condition->getEndLoc();
-    return CaseConditionSyntax ? Subject->getEndLoc() : Pattern->getEndLoc();
+    return getStmtClass() == CaseConditionExprClass ? Subject->getEndLoc()
+                                                    : Pattern->getEndLoc();
   }
 
   child_range children() {
@@ -5682,7 +5718,31 @@ public:
   }
 
   static bool classof(const Stmt *T) {
-    return T->getStmtClass() == MatchTestExprClass;
+    return T->getStmtClass() == MatchTestExprClass ||
+           T->getStmtClass() == CaseConditionExprClass;
+  }
+};
+
+class CaseConditionExpr final : public MatchTestExpr {
+public:
+  explicit CaseConditionExpr(
+      const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
+      SourceLocation CaseLoc, MatchPattern *Pattern,
+      MatchPatternInstantiation *PatternInstantiation,
+      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+      ArrayRef<MatchTestInstantiation> Instantiations = {},
+      bool HasSemanticInstantiations = false)
+      : MatchTestExpr(CaseConditionExprClass, Ctx, HoldingVar, Subject, CaseLoc,
+                      Pattern, PatternInstantiation, /*IfLoc=*/{},
+                      /*Guard=*/{}, PatternIsIrrefutable,
+                      NeedsCaseInstantiation, Instantiations,
+                      HasSemanticInstantiations) {}
+
+  explicit CaseConditionExpr(EmptyShell Empty)
+      : MatchTestExpr(CaseConditionExprClass, Empty) {}
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CaseConditionExprClass;
   }
 };
 
@@ -5719,7 +5779,6 @@ class MatchSelectExpr final
   Expr *Subject;
   SourceLocation MatchLoc;
   bool IsConstexpr;
-  bool RequireFirstCaseViable;
   /// True when the cases cover required and residual runtime states.
   bool IsFullyCovered;
   TypeLoc OrigResultType;
@@ -5729,17 +5788,15 @@ class MatchSelectExpr final
 
   explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
                            SourceLocation MatchLoc, bool IsConstexpr,
-                           bool RequireFirstCaseViable, bool IsFullyCovered,
-                           TypeLoc OrigResultType, QualType Ty,
-                           ArrayRef<MatchCase> Cases,
+                           bool IsFullyCovered, TypeLoc OrigResultType,
+                           QualType Ty, ArrayRef<MatchCase> Cases,
                            ArrayRef<MatchCaseInstantiation> Instantiations,
                            SourceRange Braces);
 
   explicit MatchSelectExpr(unsigned NumCases, unsigned NumCaseInstantiations,
                            EmptyShell Empty)
-      : Expr(MatchSelectExprClass, Empty), RequireFirstCaseViable(false),
-        IsFullyCovered(false), NumCases(NumCases),
-        NumCaseInstantiations(NumCaseInstantiations) {}
+      : Expr(MatchSelectExprClass, Empty), IsFullyCovered(false),
+        NumCases(NumCases), NumCaseInstantiations(NumCaseInstantiations) {}
 
 public:
   unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
@@ -5752,9 +5809,8 @@ public:
 
   static MatchSelectExpr *
   Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
-         SourceLocation MatchLoc, bool IsConstexpr, bool RequireFirstCaseViable,
-         bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
-         ArrayRef<MatchCase> Cases,
+         SourceLocation MatchLoc, bool IsConstexpr, bool IsFullyCovered,
+         TypeLoc OrigResultType, QualType Ty, ArrayRef<MatchCase> Cases,
          ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases,
@@ -5773,8 +5829,6 @@ public:
   TypeLoc getOrigResultType() const { return OrigResultType; }
 
   bool isConstexpr() const { return IsConstexpr; }
-
-  bool requiresFirstCaseViable() const { return RequireFirstCaseViable; }
 
   bool isFullyCovered() const { return IsFullyCovered; }
 

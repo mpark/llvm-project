@@ -3241,17 +3241,20 @@ void StmtPrinter::VisitMatchTestExpr(MatchTestExpr *Node) {
   Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
                       ? Node->getHoldingVar()->getInit()
                       : Node->getSubject();
-  if (Node->usesCaseConditionSyntax()) {
-    OS << "case ";
-    PrintMatchPattern(Node->getPattern());
-    OS << " = ";
-    PrintExpr(Subject);
-  } else {
-    PrintExpr(Subject);
-    OS << " match case ";
-    PrintMatchPattern(Node->getPattern());
-  }
+  PrintExpr(Subject);
+  OS << " match case ";
+  PrintMatchPattern(Node->getPattern());
   PrintMatchGuard(Node->getGuard());
+}
+
+void StmtPrinter::VisitCaseConditionExpr(CaseConditionExpr *Node) {
+  Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
+                      ? Node->getHoldingVar()->getInit()
+                      : Node->getSubject();
+  OS << "case ";
+  PrintMatchPattern(Node->getPattern());
+  OS << " = ";
+  PrintExpr(Subject);
 }
 
 void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {

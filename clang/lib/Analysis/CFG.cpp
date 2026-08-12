@@ -2421,6 +2421,10 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
     case Stmt::ConditionalOperatorClass:
       return VisitConditionalOperator(cast<ConditionalOperator>(S), asc);
 
+    case Stmt::MatchTestExprClass:
+    case Stmt::CaseConditionExprClass:
+      return VisitMatchTestExpr(cast<MatchTestExpr>(S), asc);
+
     case Stmt::MatchSelectExprClass:
       return VisitMatchSelectExpr(cast<MatchSelectExpr>(S), asc);
 
@@ -3152,16 +3156,31 @@ std::pair<CFGBlock *, CFGBlock *>
 CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
                                ArrayRef<CFGBlock *> TrueBlocks,
                                CFGBlock *FalseBlock) {
+  if (E->hasSemanticInstantiations() && E->getInstantiations().empty()) {
+    Succ = FalseBlock;
+    Block = nullptr;
+    CFGBlock *EntryBlock;
+    if (VarDecl *HoldingVar = E->getHoldingVar())
+      EntryBlock = addStmt(HoldingVar->getInit());
+    else
+      EntryBlock = addStmt(E->getSubject());
+    return {EntryBlock ? EntryBlock : FalseBlock, nullptr};
+  }
+
+  TryResult KnownVal = tryEvaluateBool(E);
   auto BuildCandidate = [&](MatchPattern *Pattern, const MatchGuard &Guard,
-                            bool PatternIsIrrefutable,
-                            CFGBlock *TrueBlock,
-                            CFGBlock *CandidateFalseBlock) {
+                            bool PatternIsIrrefutable, CFGBlock *TrueBlock,
+                            CFGBlock *CandidateFalseBlock,
+                            bool IsFinalCandidate) {
     CFGBlock *SuccessBlock = TrueBlock;
     if (Guard.hasGuard()) {
       Block = createBlock(false);
       Block->setTerminator(Term ? Term : E);
-      addSuccessor(Block, TrueBlock);
-      addSuccessor(Block, CandidateFalseBlock);
+      addSuccessor(Block, TrueBlock,
+                   /* IsReachable = */ !KnownVal.isFalse());
+      addSuccessor(Block, CandidateFalseBlock,
+                   /* IsReachable = */
+                   !(IsFinalCandidate && KnownVal.isTrue()));
       if (Expr *Condition = Guard.Condition)
         addStmt(Condition);
       if (VarDecl *ConditionVariable = Guard.ConditionVariable) {
@@ -3187,9 +3206,13 @@ CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
 
     CFGBlock *PatternBlock = createBlock(false);
     PatternBlock->setTerminator(Term ? Term : E);
-    addSuccessor(PatternBlock, PatternBodyBlock);
+    addSuccessor(PatternBlock, PatternBodyBlock,
+                 /* IsReachable = */
+                 Guard.hasGuard() || !KnownVal.isFalse());
     if (!PatternIsIrrefutable)
-      addSuccessor(PatternBlock, CandidateFalseBlock);
+      addSuccessor(PatternBlock, CandidateFalseBlock,
+                   /* IsReachable = */
+                   !(IsFinalCandidate && KnownVal.isTrue()));
     return PatternBlock;
   };
 
@@ -3203,16 +3226,17 @@ CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
       const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
       CFGBlock *TrueBlock =
           TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
-      CandidateEntry = PatternBlock =
-          BuildCandidate(Instantiation.Pattern, Instantiation.Guard,
-                         Instantiation.PatternIsIrrefutable, TrueBlock,
-                         CandidateEntry);
+      CandidateEntry = PatternBlock = BuildCandidate(
+          Instantiation.Pattern, Instantiation.Guard,
+          Instantiation.PatternIsIrrefutable, TrueBlock, CandidateEntry,
+          /* IsFinalCandidate = */
+          I == E->getInstantiations().size() - 1);
     }
   } else {
     assert(TrueBlocks.size() == 1);
     CandidateEntry = PatternBlock = BuildCandidate(
         E->getPattern(), E->getGuard(), E->isPatternIrrefutable(),
-        TrueBlocks.front(), FalseBlock);
+        TrueBlocks.front(), FalseBlock, /* IsFinalCandidate = */ true);
   }
 
   Succ = CandidateEntry;
@@ -3231,6 +3255,7 @@ CFGBlock *CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, AddStmtChoice asc) {
     appendStmt(ConfluenceBlock, E);
   return VisitMatchTestExpr(E, nullptr, ConfluenceBlock, ConfluenceBlock).first;
 }
+
 CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
                                            AddStmtChoice asc) {
   CFGBlock *ConfluenceBlock = Block ? Block : createBlock();
@@ -3287,20 +3312,9 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
       CaseBodyBlock = Block;
     }
 
-    SmallVector<VarDecl *, 4> PatternDecls;
-    auto CollectPatternDecls = [&](MatchPattern *Pattern,
-                                   auto &Recurse) -> void {
-      if (Pattern->getMatchPatternClass() ==
-          MatchPattern::DeclarationPatternClass)
-        PatternDecls.push_back(
-            static_cast<DeclarationPattern *>(Pattern)->getDeclaration());
-      for (MatchPattern *Child : Pattern->children())
-        Recurse(Child, Recurse);
-    };
-    CollectPatternDecls(Case.Pattern, CollectPatternDecls);
     Succ = CaseBodyBlock;
     CFGBlock *PatternBodyBlock = CaseBodyBlock;
-    for (VarDecl *D : llvm::reverse(PatternDecls)) {
+    for (VarDecl *D : llvm::reverse(collectMatchPatternDecls(Case.Pattern))) {
       DeclStmt *DS = new (Context)
           DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
       Block = nullptr;
@@ -3559,10 +3573,10 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
     }
   }
 
-  Expr *Condition = I->isConsteval() ? nullptr : I->getCond()->IgnoreParens();
+  Expr *Condition = I->isConsteval() ? nullptr : I->getCond();
   MatchTestExpr *MatchCondition =
       I->getConditionVariable() ? nullptr
-                                : dyn_cast_or_null<MatchTestExpr>(Condition);
+                                : MatchTestExpr::findInCondition(Condition);
 
   // Process the true branch.
   CFGBlock *ThenBlock;
@@ -3616,8 +3630,7 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   // removes infeasible paths from the control-flow graph by having the
   // control-flow transfer of '&&' or '||' go directly into the then/else
   // blocks directly.
-  BinaryOperator *Cond = I->isConsteval() || I->getConditionVariable() ||
-                                 MatchCondition
+  BinaryOperator *Cond = I->getConditionVariable() || MatchCondition
                              ? nullptr
                              : dyn_cast_or_null<BinaryOperator>(Condition);
   CFGBlock *LastBlock;
@@ -3974,8 +3987,7 @@ CFGBlock *CFGBuilder::VisitGCCAsmStmt(GCCAsmStmt *G, AddStmtChoice asc) {
 
 CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
   CFGBlock *LoopSuccessor = nullptr;
-  auto *MatchCondition = dyn_cast_or_null<MatchTestExpr>(
-      F->getCond() ? F->getCond()->IgnoreParens() : nullptr);
+  auto *MatchCondition = MatchTestExpr::findInCondition(F->getCond());
   SmallVector<CFGBlock *, 4> MatchBodyBlocks;
 
   // Save local scope position because in case of condition variable ScopePos
@@ -4100,6 +4112,7 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
               : VisitMatchTestExpr(Match, F, MatchBodyBlocks, LoopSuccessor);
       break;
     }
+
     // Specially handle logical operators, which have a slightly
     // more optimal CFG representation.
     if (BinaryOperator *Cond =
@@ -4360,7 +4373,7 @@ CFGBlock *CFGBuilder::VisitPseudoObjectExpr(PseudoObjectExpr *E) {
 
 CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
   CFGBlock *LoopSuccessor = nullptr;
-  auto *MatchCondition = dyn_cast<MatchTestExpr>(W->getCond()->IgnoreParens());
+  auto *MatchCondition = MatchTestExpr::findInCondition(W->getCond());
   SmallVector<CFGBlock *, 4> MatchBodyBlocks;
 
   // Save local scope position because in case of condition variable ScopePos
@@ -4456,6 +4469,7 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
               : VisitMatchTestExpr(Match, W, MatchBodyBlocks, LoopSuccessor);
       break;
     }
+
     // Specially handle logical operators, which have a slightly
     // more optimal CFG representation.
     if (BinaryOperator *Cond = dyn_cast<BinaryOperator>(C->IgnoreParens()))
