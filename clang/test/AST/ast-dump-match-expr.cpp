@@ -61,3 +61,11 @@ void test_type_pattern_dump(int x) {
   // CHECK-NEXT: `-TypePattern 0x{{[^ ]*}} <col:16>
   // CHECK-NEXT:   `-BuiltinType 0x{{[^ ]*}} 'int'
 }
+
+void test_attributed_case_dump(int x) {
+  x match { [[likely]] case _ => 0; };
+  // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:37> 'int'
+  // CHECK:      LikelyAttr 0x{{[^ ]*}} <col:15>
+  // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:29>
+  // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:34> 'int' 0
+}

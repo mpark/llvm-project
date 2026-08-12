@@ -3269,7 +3269,12 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
   OS << " {" << NL;
   IndentLevel += Policy.Indentation;
   for (const MatchCase &Case : Node->getCases()) {
-    Indent() << "case ";
+    Indent();
+    for (const Attr *Attribute : Case.Attributes) {
+      Attribute->printPretty(OS, Policy);
+      OS << ' ';
+    }
+    OS << "case ";
     PrintMatchPattern(Case.Pattern);
     PrintMatchGuard(Case.Guard);
     OS << " => ";

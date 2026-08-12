@@ -2872,6 +2872,21 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     }
   };
 
+  auto EmitCaseHandler = [&](const MatchCaseInstantiation &Case) {
+    EmitWithStmtAttributes(Case.Handler, Case.Attributes, [&] {
+      if (const Expr *E = dyn_cast<Expr>(Case.Handler))
+        EmitHandler(E);
+      else
+        EmitStmt(Case.Handler);
+    });
+  };
+
+  auto ApplyCaseLikelihood = [&](llvm::Value *Condition,
+                                 const MatchCaseInstantiation &Case) {
+    return emitCondLikelihoodViaExpectIntrinsic(
+        Condition, Stmt::getLikelihood(Case.Attributes));
+  };
+
   llvm::BasicBlock *SelectEndBB = createBasicBlock("match.select.end");
   llvm::BasicBlock *NoMatchBB =
       IgnoreResult ? SelectEndBB : createBasicBlock("match.select.no_match");
@@ -2891,21 +2906,12 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
           (CasePatternIdx == (Cases.size() - 1))
               ? NoMatchBB
               : createBasicBlock("match.select.next_pattern");
-      Builder.CreateCondBr(MatchResult.getScalarVal(), ExecuteActionBB,
-                           NextPatternBB);
+      llvm::Value *Condition =
+          ApplyCaseLikelihood(MatchResult.getScalarVal(), MatchC);
+      Builder.CreateCondBr(Condition, ExecuteActionBB, NextPatternBB);
 
       EmitBlock(ExecuteActionBB);
-
-      const Expr *E = dyn_cast<Expr>(MatchC.Handler);
-      if (!E) {
-        EmitStmt(MatchC.Handler);
-        EmitBranch(SelectEndBB);
-        EmitBlock(NextPatternBB);
-        CasePatternIdx++;
-        continue;
-      }
-
-      EmitHandler(E);
+      EmitCaseHandler(MatchC);
       EmitBranch(SelectEndBB);
       EmitBlock(NextPatternBB);
       CasePatternIdx++;
@@ -2926,8 +2932,9 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
         (CasePatternIdx == (Cases.size() - 1))
             ? NoMatchBB
             : createBasicBlock("match.select.next_pattern");
-    Builder.CreateCondBr(PatternResult.getScalarVal(), InitializePatternBB,
-                         NextPatternBB);
+    llvm::Value *PatternCondition =
+        ApplyCaseLikelihood(PatternResult.getScalarVal(), MatchC);
+    Builder.CreateCondBr(PatternCondition, InitializePatternBB, NextPatternBB);
 
     EmitBlock(InitializePatternBB);
     EmitSharedDeclarationProjections(MatchC.Pattern,
@@ -2935,16 +2942,16 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
     RunCleanupsScope CaseScope(*this);
     emitPatternDeclarations(*this, MatchC.Pattern, MatchC.PatternInstantiation);
     RValue GuardResult = RValue::get(Builder.getTrue());
-    if (hasMatchGuard(MatchC.Guard))
+    if (hasMatchGuard(MatchC.Guard)) {
       GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());
-    Builder.CreateCondBr(GuardResult.getScalarVal(), ExecuteActionBB,
-                         GuardFailedBB);
+      GuardResult = RValue::get(
+          ApplyCaseLikelihood(GuardResult.getScalarVal(), MatchC));
+    }
+    llvm::Value *GuardCondition = GuardResult.getScalarVal();
+    Builder.CreateCondBr(GuardCondition, ExecuteActionBB, GuardFailedBB);
 
     EmitBlock(ExecuteActionBB);
-    if (const Expr *E = dyn_cast<Expr>(MatchC.Handler))
-      EmitHandler(E);
-    else
-      EmitStmt(MatchC.Handler);
+    EmitCaseHandler(MatchC);
     if (HaveInsertPoint()) {
       Builder.CreateStore(Builder.getTrue(), CaseSelected);
       EmitBranch(CleanupBB);

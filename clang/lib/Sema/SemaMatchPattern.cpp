@@ -770,7 +770,8 @@ ExprResult Sema::ActOnMatchSelectExpr(
     for (auto [Index, Case] : llvm::enumerate(SourceCases))
       CaseInstantiations.push_back({Case.Pattern, Case.IfLoc, Case.Guard,
                                     Case.Handler, static_cast<unsigned>(Index),
-                                    Case.PatternInstantiation});
+                                    Case.PatternInstantiation,
+                                    Case.Attributes});
   }
 
   if (const AutoType *AT = RetTy->getContainedAutoType();
@@ -785,6 +786,27 @@ ExprResult Sema::ActOnMatchSelectExpr(
                                  IsConstexpr, RequireFirstCaseViable,
                                  IsFullyCovered, OrigResultType, RetTy,
                                  SourceCases, CaseInstantiations, Braces);
+}
+
+ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(
+    const ParsedAttributes &Attributes, Stmt *Handler) {
+  if (Attributes.empty())
+    return {};
+
+  SmallVector<const Attr *, 4> SemanticAttributes;
+  ProcessStmtAttributes(Handler, Attributes, SemanticAttributes);
+  for (const Attr *A : SemanticAttributes) {
+    if (A->getKind() != attr::MustTail)
+      continue;
+    if (!checkAndRewriteMustTailAttr(Handler, *A))
+      return {};
+    setFunctionHasMustTail();
+  }
+
+  const Attr **Storage =
+      Context.Allocate<const Attr *>(SemanticAttributes.size());
+  llvm::copy(SemanticAttributes, Storage);
+  return {Storage, SemanticAttributes.size()};
 }
 
 ActionResult<MatchPattern *>

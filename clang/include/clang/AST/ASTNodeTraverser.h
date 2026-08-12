@@ -1078,6 +1078,8 @@ public:
     Visit(Node->getSubject());
     for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
       getNodeDelegate().AddChild([&] {
+        for (const Attr *Attribute : Case.Attributes)
+          Visit(Attribute);
         VisitMatchPattern(Case.Pattern);
         if (Case.Guard.hasGuard()) {
           if (Case.Guard.Init)

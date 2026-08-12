@@ -521,6 +521,19 @@ void test_case_condition_is_direct_only(int value) {
   switch (case int copy = value) {} // expected-error {{expected expression}}
 }
 
+int test_attributed_cases(int value) {
+  return value match {
+    [[likely]] case 0 => 1;
+    [[unlikely]] case _ => 2;
+  };
+}
+
+int test_unknown_case_attribute(int value) {
+  return value match {
+    [[unknown_match_case_attribute]] case _ => 0; // expected-warning {{unknown attribute 'unknown_match_case_attribute' ignored}}
+  };
+}
+
 template <int... Is, int N>
 int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
   return p match {
