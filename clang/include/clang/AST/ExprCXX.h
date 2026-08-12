@@ -5694,6 +5694,7 @@ struct MatchCase {
   bool MaybeUseful = false;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
   ArrayRef<const Attr *> Attributes;
+  bool IsDefault = false;
 };
 
 /// A semantically checked form of a source match case. A source case can have

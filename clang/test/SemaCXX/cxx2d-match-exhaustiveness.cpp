@@ -75,6 +75,28 @@ int exhaustive_integer(int value) {
   };
 }
 
+int exhaustive_integer_with_default(int value) {
+  return value match {
+    case 0 => 0;
+    default => 1;
+  };
+}
+
+int case_after_default_is_redundant(bool value) {
+  return value match {
+    default => 0;
+    case true => 1; // expected-error {{match case is redundant}}
+  };
+}
+
+int default_after_complete_domain_is_redundant(bool value) {
+  return value match {
+    case false => 0;
+    case true => 1;
+    default => 2; // expected-error {{match case is redundant}}
+  };
+}
+
 int redundant_integer_catch_all(int value) {
   return value match {
     case _ => 0;

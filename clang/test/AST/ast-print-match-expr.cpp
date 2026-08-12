@@ -126,14 +126,14 @@ template<class T>
 int attributed_cases(T value) {
   return value match {
     [[likely]] case int integer => integer;
-    [[unlikely]] case _ => 0;
+    [[unlikely]] default => 0;
   };
 }
 
 // CHECK-LABEL: template <class T> int attributed_cases(T value) {
 // CHECK-NEXT: {{^    }}return value match {
 // CHECK-NEXT: {{^        \[\[likely\]\] case int integer => integer;}}
-// CHECK-NEXT: {{^        \[\[unlikely\]\] case _ => 0;}}
+// CHECK-NEXT: {{^        \[\[unlikely\]\] default => 0;}}
 // CHECK-NEXT: {{^    }}};
 
 int instantiate_attributed_cases = attributed_cases(1);

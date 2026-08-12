@@ -3274,8 +3274,12 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
       Attribute->printPretty(OS, Policy);
       OS << ' ';
     }
-    OS << "case ";
-    PrintMatchPattern(Case.Pattern);
+    if (Case.IsDefault) {
+      OS << "default";
+    } else {
+      OS << "case ";
+      PrintMatchPattern(Case.Pattern);
+    }
     PrintMatchGuard(Case.Guard);
     OS << " => ";
     PrintMatchHandler(Case.Handler);

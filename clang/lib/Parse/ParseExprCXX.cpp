@@ -4203,13 +4203,18 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   ParsedAttributes Attributes(AttrFactory);
   MaybeParseCXX11Attributes(Attributes,
                             /*MightBeObjCMessageSend=*/true);
-  if (ExpectAndConsume(tok::kw_case))
+  SourceLocation IntroducerLoc;
+  bool IsDefault = TryConsumeToken(tok::kw_default, IntroducerLoc);
+  if (!IsDefault && !TryConsumeToken(tok::kw_case, IntroducerLoc)) {
+    ExpectAndConsume(tok::kw_case);
     return true;
+  }
 
   ParseScope MatchCaseScope(this, Scope::DeclScope);
   Sema::MatchPatternState PatternState;
 
-  ActionResult<MatchPattern *> Pattern = ParsePattern();
+  ActionResult<MatchPattern *> Pattern =
+      IsDefault ? Actions.ActOnWildcardPattern(IntroducerLoc) : ParsePattern();
   if (Pattern.isInvalid()) {
     SkipUntil(tok::kw_if, tok::equalgreater, tok::r_brace,
               StopAtSemi | StopBeforeMatch);
@@ -4223,6 +4228,9 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
     RetTy = Actions.Context.DependentTy;
   SourceLocation IfLoc;
   StmtResult GuardInit;
+  bool InvalidDefaultGuard = IsDefault && Tok.is(tok::kw_if);
+  if (InvalidDefaultGuard)
+    Diag(Tok, diag::err_match_default_guard);
   Sema::ConditionResult Guard =
       ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
   if (Guard.isInvalid()) {
@@ -4235,13 +4243,15 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
     return true;
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy,
                                          DeferHandlerChecking);
-  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
+  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid() ||
+      InvalidDefaultGuard)
     return true;
   Case = {Pattern.get(), IfLoc,
           {GuardInit.get(), Guard.get().first, Guard.get().second},
           Handler.get()};
   Case.Attributes =
       Actions.ActOnMatchCaseAttributes(Attributes, Handler.get());
+  Case.IsDefault = IsDefault;
   Case.PatternInstantiation = MatchPatternInstantiation::Create(
       Actions.Context, Pattern.get(), PatternState.Infos);
   return false;

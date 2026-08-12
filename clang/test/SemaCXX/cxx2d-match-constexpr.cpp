@@ -4,7 +4,7 @@ template<int I>
 constexpr int discards_unselected_handler() {
   return I match constexpr -> int {
     case 0 => 1;
-    case _ => static_assert(false);
+    default => static_assert(false);
   };
 }
 
@@ -20,6 +20,16 @@ constexpr auto deduces_from_selected_handler() {
 
 static_assert(deduces_from_selected_handler<0>() == 1);
 static_assert(deduces_from_selected_handler<1>()[0] == 'o');
+
+constexpr int default_handler(bool value) {
+  return value match {
+    case true => 1;
+    default => 2;
+  };
+}
+
+static_assert(default_handler(true) == 1);
+static_assert(default_handler(false) == 2);
 
 constexpr auto immediate_integer = 0 match constexpr {
   case 0 => 1;

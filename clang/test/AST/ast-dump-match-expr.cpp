@@ -69,3 +69,12 @@ void test_attributed_case_dump(int x) {
   // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:29>
   // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:34> 'int' 0
 }
+
+void test_default_case_dump(int x) {
+  x match { [[unlikely]] default => 0; };
+  // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:40> 'int'
+  // CHECK:      default:
+  // CHECK-NEXT: UnlikelyAttr 0x{{[^ ]*}} <col:15>
+  // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:26>
+  // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:37> 'int' 0
+}

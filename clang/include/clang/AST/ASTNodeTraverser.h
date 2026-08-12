@@ -1077,7 +1077,9 @@ public:
       Visit(HoldingVar);
     Visit(Node->getSubject());
     for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
-      getNodeDelegate().AddChild([&] {
+      StringRef Label =
+          Node->getCases()[Case.CaseIndex].IsDefault ? "default" : "";
+      getNodeDelegate().AddChild(Label, [&] {
         for (const Attr *Attribute : Case.Attributes)
           Visit(Attribute);
         VisitMatchPattern(Case.Pattern);

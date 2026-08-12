@@ -528,6 +528,19 @@ int test_attributed_cases(int value) {
   };
 }
 
+int test_default_case(int value) {
+  return value match {
+    case 0 => 1;
+    [[unlikely]] default => 2;
+  };
+}
+
+int test_guarded_default_case(int value) {
+  return value match {
+    default if (value != 0) => 1; // expected-error {{default match arm cannot have a guard}}
+  };
+}
+
 int test_unknown_case_attribute(int value) {
   return value match {
     [[unknown_match_case_attribute]] case _ => 0; // expected-warning {{unknown attribute 'unknown_match_case_attribute' ignored}}

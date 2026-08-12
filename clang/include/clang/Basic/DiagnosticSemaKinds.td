@@ -14483,6 +14483,7 @@ def err_pattern_binding_used_in_pattern : Error<
 def err_match_case_redundant : Error<"match case is redundant">;
 def err_match_case_impossible : Error<
   "match case can never match a subject of type %0">;
+def err_match_default_guard : Error<"default match arm cannot have a guard">;
 def err_match_not_exhaustive : Error<
   "match expression is not exhaustive%select{|; example of a missing case: %1}0">;
 def err_declaration_pattern_not_exact_match : Error<
