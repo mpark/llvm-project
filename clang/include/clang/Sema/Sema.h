@@ -11481,6 +11481,8 @@ public:
   VarDecl *BuildForRangeVarDecl(SourceLocation Loc, QualType Type,
                                 IdentifierInfo *Name, bool IsConstexpr);
 
+  StmtResult BuildMatchForRangeLoopVar(Scope *S, SourceLocation Loc);
+
   /// Build the range variable of a range-based for loop or iterating
   /// expansion statement and return its DeclStmt.
   StmtResult BuildCXXForRangeRangeVar(Scope *S, Expr *Range, QualType Type,
