@@ -70,14 +70,16 @@ int classify(int&);
 int classify(double&);
 
 int projected_if(Choice& choice) {
-  if (choice match case { auto&& value })
+  if (case { auto&& value } = choice)
     return classify(value);
   else
     return 0;
 }
 
 int projected_guard(Choice& choice) {
-  if (choice match case { auto&& value } if (classify(value) != 0))
-    return classify(value);
+  if (case { auto&& value } = choice) {
+    if (classify(value) != 0)
+      return classify(value);
+  }
   return 0;
 }

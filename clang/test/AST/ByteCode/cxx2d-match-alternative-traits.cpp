@@ -206,14 +206,19 @@ constexpr int match_condition_if(Choice choice) {
 
 constexpr int match_condition_while(Choice choice) {
   int count = 0;
-  while (case { auto&& value } = choice if (value-- > 0))
+  while (case { auto&& value } = choice) {
+    if (value-- <= 0)
+      break;
     ++count;
+  }
   return count;
 }
 
 constexpr int match_condition_for(Choice choice) {
   int count = 0;
-  for (; case { auto&& value } = choice if (value < 3); ++value) {
+  for (; case { auto&& value } = choice; ++value) {
+    if (value >= 3)
+      break;
     ++count;
     if (value == 1)
       continue;

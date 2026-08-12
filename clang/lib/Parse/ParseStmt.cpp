@@ -1478,6 +1478,30 @@ struct MisleadingIndentationChecker {
 
 }
 
+bool Parser::AttachCaseCondition(Sema::ConditionResult &Condition,
+                                 SourceLocation Loc, Stmt *Handler,
+                                 Expr *Increment) {
+  Expr *ConditionExpr = Condition.get().second;
+  bool IsConstexprCondition =
+      ConditionExpr && isa<ConstantExpr>(ConditionExpr->IgnoreParens());
+  auto *Match = dyn_cast_if_present<CaseConditionExpr>(
+      MatchTestExpr::findInCondition(ConditionExpr));
+  if (!Match || Match->needsCaseInstantiation() ||
+      Actions.CurContext->isDependentContext())
+    return false;
+
+  ExprResult Attached =
+      Actions.AttachMatchTestCondition(Match, Handler, Increment);
+  if (Attached.isInvalid())
+    return true;
+  Condition = Actions.ActOnCondition(getCurScope(), Loc, Attached.get(),
+                                     IsConstexprCondition
+                                         ? Sema::ConditionKind::ConstexprIf
+                                         : Sema::ConditionKind::Boolean,
+                                     /*MissingOK=*/false);
+  return Condition.isInvalid();
+}
+
 StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
   assert(Tok.is(tok::kw_if) && "Not an if stmt!");
   SourceLocation IfLoc = ConsumeToken();  // eat the 'if'.
@@ -1712,12 +1736,18 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     Kind = NotLocation.isValid() ? IfStatementKind::ConstevalNegated
                                  : IfStatementKind::ConstevalNonNegated;
 
+  bool AttachPatternCondition = Kind == IfStatementKind::Ordinary ||
+                                (Kind == IfStatementKind::Constexpr &&
+                                 ConstexprCondition.value_or(false));
+  if (AttachPatternCondition &&
+      AttachCaseCondition(Cond, IfLoc, ThenStmt.get()))
+    return StmtError();
   StmtResult Result =
       Actions.ActOnIfStmt(IfLoc, Kind, LParen, InitStmt.get(), Cond, RParen,
                           ThenStmt.get(), ElseLoc, ElseStmt.get());
-  if (Result.isInvalid() || Kind != IfStatementKind::Ordinary)
+  if (Result.isInvalid())
     return Result;
-  if (auto *Match = dyn_cast<MatchTestExpr>(Cond.get().second);
+  if (auto *Match = MatchTestExpr::findInCondition(Cond.get().second);
       Match && Match->needsCaseInstantiation() &&
       !Actions.CurContext->isDependentContext())
     return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
@@ -1806,7 +1836,9 @@ StmtResult Parser::ParseSwitchStatement(SourceLocation *TrailingElseLoc,
   InnerScope.Exit();
   SwitchScope.Exit();
 
-  return Actions.ActOnFinishSwitchStmt(SwitchLoc, Switch.get(), Body.get());
+  StmtResult Result =
+      Actions.ActOnFinishSwitchStmt(SwitchLoc, Switch.get(), Body.get());
+  return Result;
 }
 
 StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
@@ -1878,6 +1910,9 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   WhileScope.Exit();
 
   if (Cond.isInvalid() || Body.isInvalid())
+    return StmtError();
+
+  if (AttachCaseCondition(Cond, WhileLoc, Body.get()))
     return StmtError();
 
   StmtResult Result =
@@ -2146,6 +2181,12 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
     if (!ForRangeInfo.ExpansionStmt)
       ForRangeInfo.LoopVar =
           Actions.ActOnCXXForRangeIdentifier(getCurScope(), Loc, Name, attrs);
+  } else if (getLangOpts().PatternMatching && Tok.is(tok::kw_case)) {
+    ProhibitAttributes(attrs);
+    SecondPart = ParseCondition(&FirstPart, ForLoc,
+                                Sema::ConditionKind::Boolean,
+                                /*MissingOK=*/true,
+                                /*InjectedDecls=*/nullptr);
   } else if (isForInitDeclaration()) {  // for (int X = 4;
     ParenBraceBracketBalancer BalancerRAIIObj(*this);
     ExpansionStmtContextRAII EnterParentContext{
@@ -2459,6 +2500,8 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   if (ForRangeInfo.ParsedForRangeDecl())
     return Actions.FinishCXXForRangeStmt(ForRangeStmt.get(), Body.get());
 
+  if (AttachCaseCondition(SecondPart, ForLoc, Body.get(), ThirdPart.get()))
+    return StmtError();
   StmtResult Result = Actions.ActOnForStmt(
       ForLoc, T.getOpenLocation(), FirstPart.get(), SecondPart, ThirdPart,
       T.getCloseLocation(), Body.get());

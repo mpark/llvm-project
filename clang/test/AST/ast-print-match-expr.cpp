@@ -59,14 +59,16 @@ int select(Pair pair) {
 
 bool tests(Pair pair) {
   bool direct = pair match case [int first, long second] if (first < second);
-  if (case [int first, long second] = pair if (first < second))
-    return true;
+  if (case [int first, long second] = pair)
+    return first < second;
   return direct;
 }
 
 // CHECK-LABEL: bool tests(Pair pair) {
 // CHECK-NEXT: {{^    }}bool direct = pair match case [int first, long second] if (first < second);
-// CHECK-NEXT: {{^    }}if (case [int first, long second] = pair if (first < second))
+// CHECK-NEXT: {{^    }}if (case [int first, long second] = pair)
+// CHECK-NEXT: {{^        }}return first < second;
+// CHECK-NEXT: {{^    }}return direct;
 
 int alternatives(Choice choice) {
   return choice match {

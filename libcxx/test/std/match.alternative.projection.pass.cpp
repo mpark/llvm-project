@@ -244,7 +244,7 @@ int match_nested_variants(TwoVariants& value) {
 }
 
 int test_nested_variant(std::pair<std::variant<int, double>, int>& value) {
-  if (value match case [{ auto&& alternative }, _])
+  if (case [{ auto&& alternative }, _] = value)
     return classify(alternative);
   return -1;
 }
@@ -254,15 +254,15 @@ bool accepts_guard(double& value) { return value == 2.5; }
 
 int test_nested_variant_guard(
     std::pair<std::variant<int, double>, int>& value) {
-  if (value match case [{ auto&& alternative }, _]
-      if (accepts_guard(alternative)))
-    return classify(alternative);
-  else
-    return -1;
+  if (case [{ auto&& alternative }, _] = value) {
+    if (accepts_guard(alternative))
+      return classify(alternative);
+  }
+  return -1;
 }
 
 int test_two_variants(TwoVariants& value) {
-  if (value match case [{ auto&& first }, { auto&& second }])
+  if (case [{ auto&& first }, { auto&& second }] = value)
     return combine(first, second);
   return -1;
 }
