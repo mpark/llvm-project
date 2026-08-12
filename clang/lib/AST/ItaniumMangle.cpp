@@ -6227,6 +6227,7 @@ recurse:
     return;
   }
   case Expr::MatchTestExprClass:
+  case Expr::CaseConditionExprClass:
   case Expr::MatchSelectExprClass:
     assert(0 && "not implemented");
   }

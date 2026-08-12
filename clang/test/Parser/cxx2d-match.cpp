@@ -336,9 +336,9 @@ bool test_match_test_with_guard(const int (&xs)[2]) {
   y; // expected-error {{use of undeclared identifier 'y'}}
   sum; // expected-error {{use of undeclared identifier 'sum'}}
   if (xs match case auto&& [x, y] if (int sum = x + y; sum == 0)) {
-    x;
-    y;
-    sum;
+    x; // expected-error {{use of undeclared identifier 'x'}}
+    y; // expected-error {{use of undeclared identifier 'y'}}
+    sum; // expected-error {{use of undeclared identifier 'sum'}}
   } else {
     sum; // expected-error {{use of undeclared identifier 'sum'}}
   }
@@ -362,39 +362,39 @@ int test_match_select_with_guards(const int (&p)[2]) {
 void test_match_in_condition(const int *p, const int (*q)[2]) {
   p match case { auto&& v };
   v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case { auto&& v }) v;
+  if (p match case { auto&& v }) v; // expected-error {{use of undeclared identifier 'v'}}
   else v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case { auto&& v }) // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v'}}
+  if (p match case { auto&& v })
+    int v;
   else
     int v;
   if (p match case { auto&& v }) {
-    v;
+    v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
   if (int i = 0; p match case { auto&& v }) {
     i;
-    v;
+    v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (p match case { auto&& v }) { // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v'}}
+  if (p match case { auto&& v }) {
+    int v;
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case { auto&& v }) { // expected-note {{previous definition is here}}
+      p match case { auto&& v }) {
     int i; // expected-error {{redefinition of 'i'}}
-    int v; // expected-error {{redefinition of 'v'}}
+    int v;
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case { auto&& v }) { // expected-note {{previous definition is here}}
-    int v; // expected-error {{redefinition of 'v'}}
+      p match case { auto&& v }) {
+    int v;
   } else {
     int i; // expected-error {{redefinition of 'i'}}
     int v;
@@ -418,13 +418,13 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
   }
   if (q match case { [0, auto&& v] } match case auto&& w) {
     v; // expected-error {{use of undeclared identifier 'v'}}
-    w;
+    w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   if (p match case { 0 } match case auto&& w) {
-    w;
+    w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
@@ -434,8 +434,8 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   if (q match case { [auto&& v, auto&& w] }) {
-    v;
-    w;
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
@@ -448,34 +448,32 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   auto next = []() -> int* { return nullptr; };
-  for (int i = 0; next() match case { auto&& elem }; ++i) elem;
-  for (int i = 0;
-       next() match case { auto&& elem }; // expected-note {{previous definition is here}}
-       ++i)
-    int elem; // expected-error {{redefinition of 'elem'}}
+  for (int i = 0; next() match case { auto&& elem }; ++i)
+    elem; // expected-error {{use of undeclared identifier 'elem'}}
+  for (int i = 0; next() match case { auto&& elem }; ++i)
+    int elem;
   for (int i = 0; next() match case { auto&& elem }; ++i) {
-    elem;
+    elem; // expected-error {{use of undeclared identifier 'elem'}}
   }
-  for (int i = 0;
-       next() match case { auto&& elem }; // expected-note {{previous definition is here}}
-       ++i) {
-    int elem; // expected-error {{redefinition of 'elem'}}
+  for (int i = 0; next() match case { auto&& elem }; ++i) {
+    int elem;
   }
-  while (next() match case { auto&& elem }) elem;
-  while (next() match case { auto&& elem }) // expected-note {{previous definition is here}}
-    int elem; // expected-error {{redefinition of 'elem'}}
+  while (next() match case { auto&& elem })
+    elem; // expected-error {{use of undeclared identifier 'elem'}}
+  while (next() match case { auto&& elem })
+    int elem;
   while (next() match case { auto&& elem }) {
-    elem;
+    elem; // expected-error {{use of undeclared identifier 'elem'}}
   }
-  while (next() match case { auto&& elem }) { // expected-note {{previous definition is here}}
-    int elem; // expected-error {{redefinition of 'elem'}}
+  while (next() match case { auto&& elem }) {
+    int elem;
   }
 
   auto f = [](int x, int y) { return true; };
   if (q match case { [auto&& x, auto&& y] } if (bool b = f(x, y))) {
-    x;
-    y;
-    b;
+    x; // expected-error {{use of undeclared identifier 'x'}}
+    y; // expected-error {{use of undeclared identifier 'y'}}
+    b; // expected-error {{use of undeclared identifier 'b'}}
   }
 }
 
@@ -486,17 +484,6 @@ void test_case_condition(int value, const int (&pair)[2]) {
     copy; // expected-error {{use of undeclared identifier 'copy'}}
   }
   copy; // expected-error {{use of undeclared identifier 'copy'}}
-
-  if (int init = 1;
-      case int copy = value if (int sum = init + copy; sum > 0)) {
-    init;
-    copy;
-    sum;
-  } else {
-    init;
-    copy; // expected-error {{use of undeclared identifier 'copy'}}
-    sum;  // expected-error {{use of undeclared identifier 'sum'}}
-  }
 
   while (case int copy = value) {
     copy;
@@ -518,7 +505,26 @@ void test_case_condition(int value, const int (&pair)[2]) {
 void test_case_condition_is_direct_only(int value) {
   if ((case int copy = value)) {} // expected-error {{expected expression}}
   bool result = case int copy = value; // expected-error {{expected expression}}
-  switch (case int copy = value) {} // expected-error {{expected expression}}
+  switch (case int copy = value) {} // expected-error {{a pattern condition is not permitted in a switch statement}}
+}
+
+void test_case_condition_is_not_an_init_statement(int value) {
+  if (case int copy = value; copy > 0) {} // expected-error {{a pattern condition cannot be used as an init-statement}}
+}
+
+void test_case_condition_is_not_a_switch_init_statement(int value) {
+  switch (case int copy = value; copy) {} // expected-error {{a pattern condition cannot be used as an init-statement}}
+}
+
+void test_case_condition_is_not_a_for_init_statement(int value) {
+  for (case int copy = value; copy > 0; ++copy) {} // expected-error {{a pattern condition cannot be used as an init-statement}}
+}
+
+int test_case_condition_is_not_a_guard_init_statement(int value) {
+  return value match {
+    case int copy if (case int nested = copy; nested > 0) => 1; // expected-error {{a pattern condition cannot be used as an init-statement}}
+    case _ => 0;
+  };
 }
 
 int test_attributed_cases(int value) {

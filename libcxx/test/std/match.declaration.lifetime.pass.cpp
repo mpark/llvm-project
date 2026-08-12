@@ -24,7 +24,7 @@ struct Tracked {
 int declaration_lifetime_in_if(int value) {
   int alive = 0;
   Tracked subject(&alive, value);
-  if (subject match case auto copy)
+  if (case auto copy = subject)
     return alive;
   return -1;
 }
@@ -41,7 +41,9 @@ int declaration_lifetime_in_while() {
   int alive = 0;
   int iterations = 0;
   Tracked subject(&alive, 0);
-  while (subject match case auto copy if (iterations++ == 0)) {
+  while (case auto copy = subject) {
+    if (iterations++ != 0)
+      break;
     if (alive != 2)
       return -1;
   }
@@ -66,11 +68,8 @@ const Tracked& identity(const Tracked& value) { return value; }
 bool indirect_subject_lives_through_controlled_statement(int value) {
   int alive = 0;
   bool observed = false;
-  if (identity(Tracked(&alive, value)) match
-      case auto&& bound if (bound.value == 1))
-    observed = alive == 1;
-  else
-    observed = alive == 1;
+  if (case auto&& bound = identity(Tracked(&alive, value)))
+    observed = bound.value == value && alive == 1;
   return observed && alive == 0;
 }
 
