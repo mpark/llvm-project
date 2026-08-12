@@ -70,6 +70,25 @@ struct std::alternative_traits<CopyChoice> {
   }
 };
 
+struct SingleChoice {
+  int integer;
+};
+
+template<>
+struct std::alternative_traits<SingleChoice> {
+  static constexpr __SIZE_TYPE__ size = 1;
+
+  static constexpr __SIZE_TYPE__ index(const SingleChoice&) noexcept {
+    return 0;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).integer);
+  }
+};
+
 struct MaybeInt {
   bool engaged;
   int value;
@@ -142,6 +161,29 @@ int projected_deleted_hypothetical_copy_is_invalid(const CopyChoice& choice) {
   };
 }
 
+constexpr int direct_constexpr_alternative() {
+  if constexpr (case { int value } = Choice{0, 42, 0.0})
+    return value;
+  else
+    return -1;
+}
+
+static_assert(direct_constexpr_alternative() == 42);
+
+template <unsigned State>
+constexpr int dependent_constexpr_alternative() {
+  if constexpr (case { int value } = Choice{State, 42, 1.0}) {
+    static_assert(State == 0);
+    return value;
+  } else {
+    static_assert(State != 0);
+    return -1;
+  }
+}
+
+static_assert(dependent_constexpr_alternative<0>() == 42);
+static_assert(dependent_constexpr_alternative<1>() == -1);
+
 int empty(MaybeInt value) {
   return value match {
     case { int number } => number;
@@ -179,6 +221,58 @@ int no_viable_alternative(Choice choice) {
   };
 }
 
+int valid_single_alternative(SingleChoice choice) {
+  return choice match {
+    case { int value } => value;
+  };
+}
+
+int no_viable_single_alternative(SingleChoice choice) {
+  return choice match {
+    case { char value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
+    case _ => 0;
+  };
+}
+
+template<class T>
+int dependent_single_alternative(T choice) {
+  return choice match {
+    case { char value } => value;
+    case _ => 0;
+  };
+}
+
+int instantiate_dependent_single_alternative(SingleChoice choice) {
+  return dependent_single_alternative(choice);
+}
+
+int direct_single_alternative(SingleChoice choice) {
+  if (case { auto&& value } = choice)
+    return value;
+  return 0;
+}
+
+template<class T>
+concept CanDirectlyProjectChar = requires(T value) {
+  value match case { char projected };
+};
+
+static_assert(!CanDirectlyProjectChar<SingleChoice>);
+
+bool invalid_direct_single_alternative(SingleChoice choice) {
+  return choice match case { char value }; // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
+}
+
+void single_alternative_loop_conditions(SingleChoice choice) {
+  while (case { auto&& value } = choice) {
+    (void)value;
+    break;
+  }
+  for (; case { auto&& value } = choice; (void)value) {
+    break;
+  }
+}
+
 int no_structural_alternative(Choice choice) {
   return choice match {
     case { auto&& [first, second] } => first; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
@@ -192,9 +286,22 @@ struct ChoicePair {
 };
 
 int direct_generic_alternative(ChoicePair pair) {
-  if (pair match case [{ auto&& value }, _])
+  if (case [{ auto&& value }, _] = pair)
     return classify(value);
   return 0;
+}
+
+bool standalone_generic_alternative(Choice choice) {
+  return choice match case { auto&& value };
+}
+
+template<class C>
+bool dependent_standalone_generic_alternative(C choice) {
+  return choice match case { auto&& value };
+}
+
+bool instantiate_dependent_standalone_generic_alternative(Choice choice) {
+  return dependent_standalone_generic_alternative(choice);
 }
 
 int direct_generic_alternative_case_condition(ChoicePair pair) {
@@ -204,10 +311,11 @@ int direct_generic_alternative_case_condition(ChoicePair pair) {
 }
 
 int direct_generic_guard(ChoicePair pair) {
-  if (pair match case [{ auto&& value }, _] if (classify(value) != 0))
-    return classify(value);
-  else
-    return 0;
+  if (case [{ auto&& value }, _] = pair) {
+    if (classify(value) != 0)
+      return classify(value);
+  }
+  return 0;
 }
 
 bool nested_match_subject(ChoicePair pair) {

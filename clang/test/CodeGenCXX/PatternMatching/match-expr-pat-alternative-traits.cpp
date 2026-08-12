@@ -43,7 +43,7 @@ int match_alternative(MaybeInt& value) {
 // CHECK-LABEL: define{{.*}} i32 @_Z23match_alternative_whileR8MaybeInt
 int match_alternative_while(MaybeInt& value) {
   int result = -1;
-  while (value match case { int& number }) {
+  while (case { int& number } = value) {
     result = number;
     value.engaged = false;
   }
