@@ -76,6 +76,27 @@ static bool checkPatternBindingReferences(Sema &S, MatchPattern *Pattern) {
   return checkPatternBindingReferences(S, Pattern, Bindings);
 }
 
+bool Sema::CheckMatchSubjectBindingReferences(Expr *Subject,
+                                              MatchPattern *Pattern) {
+  llvm::SmallPtrSet<const ValueDecl *, 8> Bindings;
+  collectPatternBindings(Pattern, Bindings);
+
+  SmallVector<Stmt *, 16> Worklist{Subject};
+  while (!Worklist.empty()) {
+    Stmt *Node = Worklist.pop_back_val();
+    if (auto *Reference = dyn_cast<DeclRefExpr>(Node);
+        Reference && Bindings.contains(Reference->getDecl())) {
+      Diag(Reference->getExprLoc(), diag::err_pattern_binding_used_in_subject)
+          << Reference->getDecl();
+      return true;
+    }
+    for (Stmt *Child : Node->children())
+      if (Child)
+        Worklist.push_back(Child);
+  }
+  return false;
+}
+
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
                              Expr *Init, bool IsConstexpr = false) {
   DeclContext *DC = SemaRef.CurContext;
@@ -735,30 +756,84 @@ bool Sema::ActOnMatchVoidHandler(TypeLoc OrigResultType, QualType &RetTy,
   return ActOnMatchExprHandler(OrigResultType, RetTy, VoidExpr).isInvalid();
 }
 
+ExprResult
+Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
+                         SourceLocation MatchLoc, MatchPattern *Pattern,
+                         MatchPatternInstantiation *Instantiation,
+                         SourceLocation IfLoc, MatchGuard Guard,
+                         bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+                         ArrayRef<MatchTestInstantiation> Instantiations,
+                         bool HasSemanticInstantiations) {
+  return new (Context) MatchTestExpr(
+      Context, HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc,
+      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
+      HasSemanticInstantiations);
+}
+
 ExprResult Sema::ActOnMatchTestExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
     SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
     bool NeedsCaseInstantiation, bool CaseConditionSyntax,
-    ArrayRef<MatchTestInstantiation> Instantiations) {
-  return new (Context) MatchTestExpr(
-      Context, HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc,
-      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, CaseConditionSyntax,
-      Instantiations);
+    ArrayRef<MatchTestInstantiation> Instantiations,
+    bool HasSemanticInstantiations) {
+  if (CaseConditionSyntax)
+    return ActOnCaseConditionExpr(
+        HoldingVar, Subject, MatchLoc, Pattern, Instantiation,
+        PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
+        HasSemanticInstantiations);
+  return ActOnMatchTestExpr(
+      HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc, Guard,
+      PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
+      HasSemanticInstantiations);
+}
+
+ExprResult Sema::ActOnCaseConditionExpr(
+    VarDecl *HoldingVar, Expr *Subject, SourceLocation CaseLoc,
+    MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
+    bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+    ArrayRef<MatchTestInstantiation> Instantiations,
+    bool HasSemanticInstantiations) {
+  return new (Context) CaseConditionExpr(
+      Context, HoldingVar, Subject, CaseLoc, Pattern, Instantiation,
+      PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
+      HasSemanticInstantiations);
+
+}
+
+ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
+                                          Expr *Increment) {
+  assert(E->getInstantiations().empty() &&
+         "condition already has semantic instantiations");
+
+  MatchTestInstantiation Instantiation{
+      E->getPattern(),
+      E->getIfLoc(),
+      E->getGuard(),
+      E->getPatternInstantiation(),
+      E->isPatternIrrefutable(),
+      Handler,
+      Increment,
+  };
+  return ActOnCaseConditionExpr(
+      E->getHoldingVar(), E->getSubject(), E->getMatchLoc(), E->getPattern(),
+      E->getPatternInstantiation(), E->isPatternIrrefutable(),
+      /*NeedsCaseInstantiation=*/false, ArrayRef(Instantiation),
+      /*HasSemanticInstantiations=*/true);
 }
 
 ExprResult Sema::ActOnMatchSelectExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
     SmallVectorImpl<MatchCase> &SourceCases, SourceRange Braces,
-    bool ExpandDeferredCases, bool RequireFirstCaseViable,
+    bool ExpandDeferredCases,
     std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
     std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
   if (ExpandDeferredCases) {
-    auto *E = MatchSelectExpr::Create(
-        Context, HoldingVar, Subject, MatchLoc, IsConstexpr,
-        RequireFirstCaseViable, /*IsFullyCovered=*/false, OrigResultType, RetTy,
-        SourceCases, {}, Braces);
+    auto *E = MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
+                                      IsConstexpr,
+                                      /*IsFullyCovered=*/false, OrigResultType,
+                                      RetTy, SourceCases, {}, Braces);
     return ExpandDeferredMatchSelectExpr(E);
   }
 
@@ -782,10 +857,9 @@ ExprResult Sema::ActOnMatchSelectExpr(
       Subject, SourceCases,
       DiagnosticInstantiations.value_or(
           ArrayRef<MatchCaseInstantiation>(CaseInstantiations)));
-  return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
-                                 IsConstexpr, RequireFirstCaseViable,
-                                 IsFullyCovered, OrigResultType, RetTy,
-                                 SourceCases, CaseInstantiations, Braces);
+  return MatchSelectExpr::Create(
+      Context, HoldingVar, Subject, MatchLoc, IsConstexpr, IsFullyCovered,
+      OrigResultType, RetTy, SourceCases, CaseInstantiations, Braces);
 }
 
 ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(

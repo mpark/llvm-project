@@ -15,8 +15,10 @@ void basic(int a, int b) {
 // CHECK-LABEL: define{{.*}} i32 @_Z14case_conditioni(
 // CHECK-SAME: i32 {{.*}} %[[VALUE:.*]])
 int case_condition(int value) {
-  if (case int copy = value if (copy > 0))
-    return copy;
+  if (case int copy = value) {
+    if (copy > 0)
+      return copy;
+  }
   return -1;
   // CHECK: %[[NOT_POSITIVE:.*]] = icmp slt i32 %[[VALUE]], 1
   // CHECK: %[[RESULT:.*]] = select i1 %[[NOT_POSITIVE]], i32 -1, i32 %[[VALUE]]

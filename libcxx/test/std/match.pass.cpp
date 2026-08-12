@@ -347,7 +347,7 @@ void test_match_pattern_guards() {
 }
 
 int match_in_if_condition(const int *p) {
-  if (p match case { [[maybe_unused]] auto&& v }) {
+  if (case { [[maybe_unused]] auto&& v } = p) {
     return v;
   }
   return -1;
@@ -370,7 +370,7 @@ struct Lifetime {
 
 bool match_in_if_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (Lifetime(&flag, n) match case [{ [[maybe_unused]] auto&& b }, 101]) {
+  if (case [{ [[maybe_unused]] auto&& b }, 101] = Lifetime(&flag, n)) {
     return b;
   } else if (n == 202) {
     return flag;
@@ -388,8 +388,8 @@ using DeferredLifetime = std::variant<Lifetime, Lifetime>;
 
 bool deferred_match_condition_lifetime_extended(int n) {
   bool flag = false;
-  if (DeferredLifetime(std::in_place_index<0>, &flag, n) match
-      case { auto&& value }) {
+  if (case { auto&& value } =
+          DeferredLifetime(std::in_place_index<0>, &flag, n)) {
     return *value.flag;
   }
   return flag;
@@ -430,15 +430,14 @@ struct DefaultArgumentHolder {
 };
 
 bool match_default_argument_lifetime_extended() {
-  if (default_argument_identity() match case [[maybe_unused]] auto&& value) {
+  if (case [[maybe_unused]] auto&& value = default_argument_identity()) {
     return default_argument_lifetime_alive;
   }
   return false;
 }
 
 bool match_constructor_default_argument_lifetime_extended() {
-  if (DefaultArgumentHolder() match
-      case [[maybe_unused]] auto&& value) {
+  if (case [[maybe_unused]] auto&& value = DefaultArgumentHolder()) {
     return default_argument_lifetime_alive;
   }
   return false;
@@ -451,8 +450,8 @@ const T& dependent_default_argument_identity(const T& value = T()) {
 
 template <class T>
 bool match_dependent_default_argument_lifetime_extended() {
-  if (dependent_default_argument_identity<T>() match
-      case [[maybe_unused]] auto&& value) {
+  if (case [[maybe_unused]] auto&& value =
+          dependent_default_argument_identity<T>()) {
     return default_argument_lifetime_alive;
   }
   return false;
@@ -489,7 +488,7 @@ int match_in_while_condition() {
   auto next = [&]() -> int* {
     return i < 4 ? &i : nullptr;
   };
-  while (next() match case { [[maybe_unused]] auto&& v }) {
+  while (case { [[maybe_unused]] auto&& v } = next()) {
     ++v;
   }
   return i;
