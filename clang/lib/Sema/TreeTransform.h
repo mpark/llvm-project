@@ -19495,9 +19495,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       return Recurse(Child, Recurse);
     });
   };
-  auto TransformCase =
-      [&](const MatchCase &Case, unsigned CaseIndex,
-          MatchCaseInstantiation &Transformed) -> TransformCaseResult {
+  auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
+                           MatchCaseInstantiation &Transformed,
+                           std::optional<bool> &ConstexprConditionValue,
+                           bool DiscardedByConstexpr) -> TransformCaseResult {
     MatchCandidateInstantiationScope CandidateScope(
         getSema(), SourceCases[CaseIndex].Region);
     if (CandidateScope.isInvalid())
@@ -19549,6 +19550,12 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         }))
       return TransformCaseResult::Dominated;
 
+    // The patterns in later arms still participate in exhaustiveness and
+    // usefulness analysis, but their guards and handlers are discarded once a
+    // preceding constexpr arm has been selected.
+    if (DiscardedByConstexpr)
+      return TransformCaseResult::Success;
+
     StmtResult GuardInit;
     if (Case.Guard.Init) {
       GuardInit = getDerived().TransformStmt(Case.Guard.Init);
@@ -19563,6 +19570,33 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                          : Sema::ConditionKind::Boolean);
     if (Guard.isInvalid())
       return TransformCaseResult::Error;
+
+    if (E->isConstexpr()) {
+      if (Semantic.Domain.empty() &&
+          Semantic.Refutability ==
+              Sema::MatchPatternRefutability::Irrefutable) {
+        ConstexprConditionValue =
+            Case.Guard.hasGuard() ? Guard.getKnownValue() : true;
+      } else {
+        ExprResult Test = getSema().ActOnMatchTestExpr(
+            HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
+            PatternInstantiation, Case.IfLoc,
+            {GuardInit.get(), Guard.get().first, Guard.get().second},
+            /*NeedsCaseInstantiation=*/false);
+        if (Test.isInvalid())
+          return TransformCaseResult::Error;
+        Test = getSema().CheckBooleanCondition(E->getMatchLoc(), Test.get(),
+                                               /*IsConstexpr=*/true);
+        if (Test.isInvalid())
+          return TransformCaseResult::Error;
+        if (std::optional<llvm::APSInt> Value =
+                Test.get()->getIntegerConstantExpr(getSema().Context))
+          ConstexprConditionValue = !!*Value;
+      }
+
+      if (ConstexprConditionValue && !*ConstexprConditionValue)
+        return TransformCaseResult::Success;
+    }
 
     StmtResult Handler =
         getDerived().TransformStmt(Case.Handler, StmtDiscardKind::NotDiscarded);
@@ -19599,6 +19633,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   };
 
   bool IsFirstSourceCase = true;
+  bool ConstexprSelectionComplete = false;
   for (const auto &[CaseIndex, Case] : CasesToTransform) {
     bool SawViableCandidate = false;
     bool SawAlternativeChoice = false;
@@ -19611,15 +19646,24 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       ProjectionCache.CurrentDiscriminatorPath.clear();
       size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
+      std::optional<bool> ConstexprConditionValue;
+      bool DiscardedByConstexpr = ConstexprSelectionComplete;
       TransformCaseResult Result =
-          TransformCase(Case, CaseIndex, ExpandedCase);
+          TransformCase(Case, CaseIndex, ExpandedCase, ConstexprConditionValue,
+                        DiscardedByConstexpr);
       if (Result == TransformCaseResult::Error)
         return ExprError();
       if (Result == TransformCaseResult::NoMatch)
         ProjectionCache.Entries.resize(SavedProjectionCount);
       else if (Result == TransformCaseResult::Success) {
-        Instantiations.push_back(ExpandedCase);
         SawViableCandidate = true;
+        if (!DiscardedByConstexpr &&
+            (!E->isConstexpr() || !ConstexprConditionValue ||
+             *ConstexprConditionValue))
+          Instantiations.push_back(ExpandedCase);
+        ConstexprSelectionComplete |=
+            E->isConstexpr() && ConstexprConditionValue &&
+            *ConstexprConditionValue;
       } else {
         assert(Result == TransformCaseResult::Dominated);
         SawViableCandidate = true;
