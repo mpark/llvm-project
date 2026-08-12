@@ -3332,6 +3332,8 @@ DEF_TRAVERSE_STMT(MatchSelectExpr, {
                                       ? S->getHoldingVar()->getInit()
                                       : S->getSubject());
   for (const MatchCase &Case : S->getCases()) {
+    for (const Attr *Attribute : Case.Attributes)
+      TRY_TO(getDerived().TraverseAttr(const_cast<Attr *>(Attribute)));
     TRY_TO(TraverseMatchPattern(Case.Pattern));
     if (Case.Guard.hasGuard()) {
       TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Init);

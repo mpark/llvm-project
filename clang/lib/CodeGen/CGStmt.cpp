@@ -789,7 +789,9 @@ void CodeGenFunction::EmitLabelStmt(const LabelStmt &S) {
   EmitStmt(S.getSubStmt());
 }
 
-void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
+void CodeGenFunction::EmitWithStmtAttributes(
+    const Stmt *S, ArrayRef<const Attr *> Attrs,
+    llvm::function_ref<void()> Emit) {
   bool nomerge = InNoMergeAttributedStmt;
   bool noinline = InNoInlineAttributedStmt;
   bool alwaysinline = InAlwaysInlineAttributedStmt;
@@ -799,7 +801,7 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   const CallExpr *musttail = MustTailCall;
   const AtomicAttr *AA = nullptr;
 
-  for (const auto *A : S.getAttrs()) {
+  for (const Attr *A : Attrs) {
     switch (A->getKind()) {
     default:
       break;
@@ -818,8 +820,7 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
       noconvergent = true;
       break;
     case attr::MustTail: {
-      const Stmt *Sub = S.getSubStmt();
-      const ReturnStmt *R = cast<ReturnStmt>(Sub);
+      const ReturnStmt *R = cast<ReturnStmt>(S);
       musttail = cast<CallExpr>(R->getRetValue()->IgnoreParens());
     } break;
     case attr::CXXAssume: {
@@ -853,7 +854,12 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_musttail(MustTailCall, musttail);
   SaveAndRestore save_flattenOrBranch(HLSLControlFlowAttr, flattenOrBranch);
   CGAtomicOptionsRAII AORAII(CGM, AA);
-  EmitStmt(S.getSubStmt(), S.getAttrs());
+  Emit();
+}
+
+void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
+  EmitWithStmtAttributes(S.getSubStmt(), S.getAttrs(),
+                         [&] { EmitStmt(S.getSubStmt(), S.getAttrs()); });
 }
 
 void CodeGenFunction::EmitGotoStmt(const GotoStmt &S) {
