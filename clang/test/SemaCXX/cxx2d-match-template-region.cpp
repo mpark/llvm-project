@@ -40,7 +40,7 @@ int deferred_assertion(Choice value) {
 }
 
 int nondependent_lookup(Choice value) {
-  return value match { // expected-error {{cannot initialize return object of type 'int' with an rvalue of type '<dependent type>'}}
+  return value match {
     case { auto payload } => undeclared_name(); // expected-error {{use of undeclared identifier 'undeclared_name'}}
   };
 }

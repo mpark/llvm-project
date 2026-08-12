@@ -205,6 +205,7 @@ def CXXExpansionSelectExpr : StmtNode<Expr>;
 
 // Pattern matching expression
 def MatchTestExpr : StmtNode<Expr>;
+def CaseConditionExpr : StmtNode<MatchTestExpr>;
 def MatchSelectExpr : StmtNode<Expr>;
 
 // Obj-C Expressions.

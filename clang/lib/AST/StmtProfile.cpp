@@ -2782,7 +2782,11 @@ void StmtProfiler::VisitMatchTestExpr(const MatchTestExpr *S) {
   if (Guard.Condition)
     Visit(Guard.Condition);
   ID.AddBoolean(S->needsCaseInstantiation());
-  ID.AddBoolean(S->usesCaseConditionSyntax());
+  ID.AddBoolean(S->hasSemanticInstantiations());
+}
+
+void StmtProfiler::VisitCaseConditionExpr(const CaseConditionExpr *S) {
+  VisitMatchTestExpr(S);
 }
 
 void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
@@ -2792,7 +2796,6 @@ void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
             : S->getSubject());
   VisitType(S->getType());
   ID.AddBoolean(S->isConstexpr());
-  ID.AddBoolean(S->requiresFirstCaseViable());
   ID.AddInteger(S->getNumCases());
   for (const MatchCase &Case : S->getCases()) {
     VisitMatchPattern(Case.Pattern);

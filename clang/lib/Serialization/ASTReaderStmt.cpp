@@ -2562,6 +2562,10 @@ void ASTStmtReader::VisitMatchTestExpr(MatchTestExpr *E) {
   VisitExpr(E);
 }
 
+void ASTStmtReader::VisitCaseConditionExpr(CaseConditionExpr *E) {
+  VisitMatchTestExpr(E);
+}
+
 void ASTStmtReader::VisitMatchSelectExpr(MatchSelectExpr *E) {
   VisitExpr(E);
 }

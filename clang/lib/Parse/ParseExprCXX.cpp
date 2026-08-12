@@ -2110,30 +2110,17 @@ Sema::ConditionResult Parser::ParseCondition(
         /*ShouldEnter=*/CK == Sema::ConditionKind::ConstexprIf);
 
     ExtensionGuard.reset();
-    if (getLangOpts().PatternMatching &&
-        CK != Sema::ConditionKind::Switch && Tok.is(tok::kw_case))
-      return ParseCaseCondition(Loc, CK, InjectedDecls, Region);
+    if (getLangOpts().PatternMatching && Tok.is(tok::kw_case) &&
+        (CK != Sema::ConditionKind::Switch || InitStmt))
+      return ParseCaseCondition(InitStmt, Loc, CK, MissingOK, InjectedDecls, Region);
 
-    InjectedDeclSet Decls;
     ExprResult Expr = ExtLoc.isValid()
-                          ? ParseExpressionWithLeadingExtension(ExtLoc, &Decls)
+                          ? ParseExpressionWithLeadingExtension(ExtLoc)
                           : ParseExpression(
-                                TypoCorrectionTypeBehavior::AllowNonTypes,
-                                &Decls);
+                                TypoCorrectionTypeBehavior::AllowNonTypes);
 
     if (Expr.isInvalid())
       return Sema::ConditionError();
-
-    if (isa<MatchTestExpr>(Expr.get())) {
-      if (InjectedDecls) {
-        *InjectedDecls = Decls;
-      } else {
-        Scope *S = getCurScope();
-        for (Decl *D : Decls)
-          if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
-            Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
-      }
-    }
 
     if (InitStmt && Tok.is(tok::semi)) {
       WarnOnInit();
@@ -4006,7 +3993,8 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
 }
 
 Sema::ConditionResult
-Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
+Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
+                           Sema::ConditionKind CK, bool MissingOK,
                            InjectedDeclSet *InjectedDecls,
                            Sema::MatchTemplateRegionRAII *Region) {
   assert(Tok.is(tok::kw_case) && "not a case condition");
@@ -4029,17 +4017,25 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
       Actions.IdResolver.AddDecl(D);
   });
 
+  // A same-named binding denotes the binding being introduced, not an outer
+  // declaration. Its use in the subject initializer is diagnosed below.
+  for (NamedDecl *D : PatternDecls)
+    Actions.IdResolver.AddDecl(D);
+  RestorePatternDecls.release();
+
   if (ExpectAndConsume(tok::equal, diag::err_expected_after, "pattern"))
     return Sema::ConditionError();
 
   ExprResult Subject = ParseAssignmentExpression();
   if (Subject.isInvalid())
     return Sema::ConditionError();
-
-  for (NamedDecl *D : PatternDecls)
-    Actions.IdResolver.AddDecl(D);
-  RestorePatternDecls.release();
-
+  if (Actions.CheckMatchSubjectBindingReferences(Subject.get(), Pattern))
+    return Sema::ConditionError();
+  if (InitStmt && Tok.is(tok::semi)) {
+    Diag(CaseLoc, diag::err_case_init_statement);
+    SkipUntil(tok::r_paren, StopBeforeMatch);
+    return Sema::ConditionError();
+  }
   VarDecl *HoldingVar = nullptr;
   Subject = Actions.ActOnMatchSubject(Subject.get(), HoldingVar);
   if (Subject.isInvalid())
@@ -4057,12 +4053,13 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
   if (Region)
     Region->enter(CaseLoc, Pattern, ProjectionCache.RequiresTemplateRegion);
 
-  SourceLocation IfLoc;
-  StmtResult GuardInit;
-  Sema::ConditionResult Guard =
-      ParseMatchGuard(IfLoc, Pattern, GuardInit);
-  if (Guard.isInvalid())
+  if (Tok.is(tok::kw_if)) {
+    Diag(Tok, diag::err_case_condition_guard);
+    SourceLocation IfLoc;
+    StmtResult GuardInit;
+    ParseMatchGuard(IfLoc, Pattern, GuardInit);
     return Sema::ConditionError();
+  }
 
   bool NeedsCaseInstantiation =
       ProjectionCache.hasDeferredPatterns() ||
@@ -4071,13 +4068,11 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
   Sema::MatchPatternSemanticAnalysis Semantic =
       Actions.AnalyzeMatchPatternSemantics(Pattern, PatternState);
   bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
-  ExprResult Result = Actions.ActOnMatchTestExpr(
+  ExprResult Result = Actions.ActOnCaseConditionExpr(
       HoldingVar, Subject.get(), CaseLoc, Pattern,
       MatchPatternInstantiation::Create(Actions.Context, Pattern,
                                         PatternState.Infos),
-      IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
-      PatternIsIrrefutable, NeedsCaseInstantiation,
-      /*CaseConditionSyntax=*/true);
+      PatternIsIrrefutable, NeedsCaseInstantiation);
   if (Result.isInvalid())
     return Sema::ConditionError();
   if (Region)
@@ -4101,7 +4096,16 @@ Parser::ParseCaseCondition(SourceLocation Loc, Sema::ConditionKind CK,
         Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
   }
 
-  return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), CK,
+  if (CK == Sema::ConditionKind::Switch) {
+    Diag(CaseLoc, diag::err_case_switch_condition);
+    return Sema::ConditionError();
+  }
+
+  Sema::ConditionKind InitialCK =
+      NeedsCaseInstantiation && CK == Sema::ConditionKind::ConstexprIf
+          ? Sema::ConditionKind::Boolean
+          : CK;
+  return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), InitialCK,
                                 /*MissingOK=*/false);
 }
 
@@ -4162,8 +4166,10 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     if (ExpectAndConsume(tok::kw_case))
       return ExprError();
     VarDecl *HoldingVar = nullptr;
-    if (InjectedDecls && LHS.isUsable()) {
+    if (LHS.isUsable()) {
       LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
+      if (LHS.isInvalid())
+        return ExprError();
     }
     ParseScope MatchTestScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
@@ -4177,19 +4183,6 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
         Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(),
                                           PatternState, &ProjectionCache))
       return ExprError();
-    if (!InjectedDecls && PatternNeedsAlternativeSpecialization &&
-        (ProjectionCache.hasDeferredPatterns() ||
-         LHS.get()->isTypeDependent())) {
-      LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
-      if (LHS.isInvalid())
-        return ExprError();
-      ProjectionCache = {};
-      PatternState = {};
-      ProjectionCache.DeferAlternativeChoices = true;
-      if (Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(),
-                                            PatternState, &ProjectionCache))
-        return ExprError();
-    }
     Sema::MatchTemplateRegionRAII Region(Actions);
     Region.enter(MatchLoc, Pattern.get(), ProjectionCache.RequiresTemplateRegion);
     SourceLocation IfLoc;

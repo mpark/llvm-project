@@ -942,8 +942,28 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
   if (S.getConditionVariable())
     EmitDecl(*S.getConditionVariable());
 
-  if (auto *Match = dyn_cast<MatchTestExpr>(S.getCond()->IgnoreParens());
+  if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {
+    if (S.isConstexpr()) {
+      bool CondConstant;
+      if (!ConstantFoldsToSimpleInteger(S.getCond(), CondConstant,
+                                        /*AllowLabels=*/true) ||
+          !CondConstant)
+        llvm_unreachable(
+            "constexpr match condition with a handler must be true");
+      const MatchTestInstantiation *Selected = llvm::find_if(
+          Match->getInstantiations(), [](const auto &Instantiation) {
+            return Instantiation.Handler != nullptr;
+          });
+      assert(Selected != Match->getInstantiations().end() &&
+             "constexpr match condition has no selected handler");
+      incrementProfileCounter(UseExecPath, &S, /*UseBoth=*/true);
+      EmitSelectedMatchTestInstantiation(*Match, *Selected,
+                                         [&] { EmitStmt(Selected->Handler); });
+      PGO->markStmtMaybeUsed(Else);
+      return;
+    }
+
     JumpDest Cont = getJumpDestInCurrentScope("if.end");
     EmitMatchTestDispatch(
         *Match, Cont,
@@ -1077,7 +1097,7 @@ bool CodeGenFunction::checkIfLoopMustProgress(const Expr *ControllingExpression,
 
 void CodeGenFunction::EmitWhileStmt(const WhileStmt &S,
                                     ArrayRef<const Attr *> WhileAttrs) {
-  if (auto *Match = dyn_cast<MatchTestExpr>(S.getCond()->IgnoreParens());
+  if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {
     JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
     EmitBlock(LoopHeader.getBlock());
@@ -1329,8 +1349,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     LoopExit = getJumpDestInCurrentScope("for.end");
   }
 
-  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
-          S.getCond() ? S.getCond()->IgnoreParens() : nullptr);
+  if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {
     JumpDest CondDest = getJumpDestInCurrentScope("for.cond");
     EmitBlock(CondDest.getBlock());
