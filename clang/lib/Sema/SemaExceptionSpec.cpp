@@ -1362,6 +1362,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
     return canSubStmtsThrow(*this, S);
 
   case Expr::MatchTestExprClass:
+  case Expr::CaseConditionExprClass:
     return canMatchTestThrow(*this, cast<MatchTestExpr>(S));
 
   case Expr::MatchSelectExprClass:

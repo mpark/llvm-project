@@ -2959,6 +2959,7 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     return true;
   }
   case MatchTestExprClass:
+  case CaseConditionExprClass:
   case MatchSelectExprClass:
     if (HasSideEffects(Ctx))
       return false;
@@ -3888,7 +3889,8 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     return Finder.hasSideEffects();
   }
 
-  case MatchTestExprClass: {
+  case MatchTestExprClass:
+  case CaseConditionExprClass: {
     const auto *ME = cast<MatchTestExpr>(this);
     SideEffectFinder Finder(Ctx, IncludePossibleEffects);
     Finder.Visit(ME->getHoldingVar() && ME->getHoldingVar()->getInit()

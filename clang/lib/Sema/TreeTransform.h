@@ -51,6 +51,7 @@
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include <algorithm>
@@ -890,7 +891,8 @@ public:
 #include "clang/AST/StmtNodes.inc"
 
   ExprResult TransformMatchTestExpr(MatchTestExpr *E, Stmt *Handler,
-                                    Expr *Increment);
+                                    Expr *Increment,
+                                    bool SelectConstexprHandler = false);
 
 #define GEN_CLANG_CLAUSE_CLASS
 #define CLAUSE_CLASS(Enum, Str, Class)                                         \
@@ -4426,6 +4428,21 @@ public:
     }
     case MatchPattern::DeclarationPatternClass: {
       auto *P = static_cast<DeclarationPattern *>(Pattern);
+      // A declaration pattern has no source initializer. Its current
+      // initializer was synthesized by semantic pattern checking and may
+      // refer to projections from a previous instantiation. Transform only
+      // the source declaration; CheckCompleteMatchPattern will synthesize the
+      // initializer for the transformed subject. A decomposition declaration
+      // retains its initializer because its binding-pack transformation needs
+      // the initialized decomposition type.
+      Expr *PatternInit = P->getDeclaration()->getInit();
+      bool ClearPatternInit = !isa<DecompositionDecl>(P->getDeclaration());
+      if (ClearPatternInit)
+        P->getDeclaration()->setInit(nullptr);
+      auto RestorePatternInit = llvm::scope_exit([&] {
+        if (ClearPatternInit)
+          P->getDeclaration()->setInit(PatternInit);
+      });
       auto *VD = dyn_cast_or_null<VarDecl>(getDerived().TransformDefinition(
           P->getBeginLoc(), P->getDeclaration()));
       if (!VD)
@@ -8706,28 +8723,58 @@ TreeTransform<Derived>::TransformIfStmt(IfStmt *S) {
   if (Init.isInvalid())
     return StmtError();
 
-  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
-          S->getCond() ? S->getCond()->IgnoreParens() : nullptr);
-      Match &&
+  if (auto *Match = MatchTestExpr::findInCondition(S->getCond());
+      Match && Match->usesCaseConditionSyntax() &&
       (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
-    ExprResult CondExpr =
-        getDerived().TransformMatchTestExpr(Match, S->getThen(), nullptr);
+    ExprResult CondExpr = getDerived().TransformMatchTestExpr(
+        Match, S->getThen(), nullptr,
+        /*SelectConstexprHandler=*/S->isConstexpr());
     if (CondExpr.isInvalid())
       return StmtError();
     auto *TransformedMatch = cast<MatchTestExpr>(CondExpr.get());
-    Sema::ConditionResult Cond = getSema().ActOnCondition(
-        nullptr, S->getIfLoc(), TransformedMatch, Sema::ConditionKind::Boolean,
+    Sema::ConditionResult CheckedCond = getSema().ActOnCondition(
+        nullptr, S->getIfLoc(), TransformedMatch,
+        S->isConstexpr() ? Sema::ConditionKind::ConstexprIf
+                         : Sema::ConditionKind::Boolean,
         /*MissingOK=*/false);
-    if (Cond.isInvalid())
+    if (CheckedCond.isInvalid())
       return StmtError();
 
-    StmtResult Else = getDerived().TransformStmt(S->getElse());
-    if (Else.isInvalid())
-      return StmtError();
-    Stmt *Then = TransformedMatch->getInstantiations().front().Handler;
+    std::optional<bool> ConditionValue =
+        S->isConstexpr() ? CheckedCond.getKnownValue() : std::nullopt;
+    if (ConditionValue && !*ConditionValue) {
+      Stmt *Then = new (getSema().Context)
+          CompoundStmt(S->getThen()->getBeginLoc(), S->getThen()->getEndLoc());
+      StmtResult Else = getDerived().TransformStmt(S->getElse());
+      if (Else.isInvalid())
+        return StmtError();
+      return getDerived().RebuildIfStmt(
+          S->getIfLoc(), S->getStatementKind(), S->getLParenLoc(), CheckedCond,
+          S->getRParenLoc(), Init.get(), Then, S->getElseLoc(), Else.get());
+    }
+
+    Sema::ConditionResult Cond = CheckedCond;
+
+    auto Selected =
+        llvm::find_if(TransformedMatch->getInstantiations(),
+                      [](const MatchTestInstantiation &Instantiation) {
+                        return Instantiation.Handler != nullptr;
+                      });
+    assert(Selected != TransformedMatch->getInstantiations().end() &&
+           "match condition has no transformed handler");
+    StmtResult Else;
+    if (ConditionValue && *ConditionValue && S->getElse()) {
+      Else = new (getSema().Context)
+          CompoundStmt(S->getElse()->getBeginLoc(), S->getElse()->getEndLoc());
+    } else {
+      Else = getDerived().TransformStmt(S->getElse());
+      if (Else.isInvalid())
+        return StmtError();
+    }
     return getDerived().RebuildIfStmt(
         S->getIfLoc(), S->getStatementKind(), S->getLParenLoc(), Cond,
-        S->getRParenLoc(), Init.get(), Then, S->getElseLoc(), Else.get());
+        S->getRParenLoc(), Init.get(), Selected->Handler, S->getElseLoc(),
+        Else.get());
   }
 
   Sema::ConditionResult Cond;
@@ -8832,7 +8879,7 @@ StmtResult
 TreeTransform<Derived>::TransformWhileStmt(WhileStmt *S) {
   if (auto *Match =
           dyn_cast_if_present<MatchTestExpr>(S->getCond()->IgnoreParens());
-      Match &&
+      Match && Match->usesCaseConditionSyntax() &&
       (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
     ExprResult CondExpr =
         getDerived().TransformMatchTestExpr(Match, S->getBody(), nullptr);
@@ -8925,7 +8972,7 @@ TreeTransform<Derived>::TransformForStmt(ForStmt *S) {
 
   if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
           S->getCond() ? S->getCond()->IgnoreParens() : nullptr);
-      Match &&
+      Match && Match->usesCaseConditionSyntax() &&
       (Match->needsCaseInstantiation() || Match->isInstantiationDependent())) {
     ExprResult CondExpr =
         getDerived().TransformMatchTestExpr(Match, S->getBody(), S->getInc());
@@ -19163,9 +19210,16 @@ TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E) {
 }
 
 template <typename Derived>
-ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
-                                                          Stmt *Handler,
-                                                          Expr *Increment) {
+ExprResult
+TreeTransform<Derived>::TransformCaseConditionExpr(CaseConditionExpr *E) {
+  return getDerived().TransformMatchTestExpr(E, nullptr, nullptr);
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E, Stmt *Handler,
+                                               Expr *Increment,
+                                               bool SelectConstexprHandler) {
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
   if (VarDecl *HV = E->getHoldingVar()) {
@@ -19198,6 +19252,7 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
   SmallVector<unsigned, 4> ForcedSelections;
   bool SawAlternativeChoice = false;
   bool HasViableCandidate = false;
+  bool ConstexprSelectionComplete = false;
 
   auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
     if (Pattern->getMatchPatternClass() ==
@@ -19218,6 +19273,7 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
     ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
     ProjectionCache.NextForcedAlternativeSelection = 0;
     ProjectionCache.CurrentProjectionPath.clear();
+    ProjectionCache.CurrentDiscriminatorPath.clear();
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
     std::optional<LocalInstantiationScope> CandidateScope;
@@ -19273,14 +19329,43 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
       if (Guard.isInvalid())
         return ExprError();
 
+      bool CandidateSelected = false;
+      bool CandidateSelectionKnown = false;
+      if (SelectConstexprHandler && !ConstexprSelectionComplete) {
+        MatchGuard CandidateGuard{GuardInit.get(), Guard.get().first,
+                                  Guard.get().second};
+        ExprResult CandidateExpr = getSema().ActOnMatchTestExpr(
+            HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
+            PatternInstantiation, E->getIfLoc(), CandidateGuard,
+            PatternIsIrrefutable, /*NeedsCaseInstantiation=*/false,
+            E->usesCaseConditionSyntax());
+        if (CandidateExpr.isInvalid())
+          return ExprError();
+        Sema::ConditionResult CandidateCondition = getSema().ActOnCondition(
+            nullptr, E->getMatchLoc(), CandidateExpr.get(),
+            Sema::ConditionKind::ConstexprIf, /*MissingOK=*/false);
+        if (CandidateCondition.isInvalid())
+          return ExprError();
+        if (std::optional<bool> Value = CandidateCondition.getKnownValue()) {
+          CandidateSelectionKnown = true;
+          CandidateSelected = *Value;
+          ConstexprSelectionComplete = CandidateSelected;
+        }
+      }
+
       StmtResult TransformedHandler;
-      if (Handler) {
+      bool TransformHandler =
+          Handler &&
+          (!SelectConstexprHandler ||
+           (!ConstexprSelectionComplete && !CandidateSelectionKnown) ||
+           CandidateSelected);
+      if (TransformHandler) {
         TransformedHandler = getDerived().TransformStmt(Handler);
         if (TransformedHandler.isInvalid())
           return ExprError();
       }
       ExprResult TransformedIncrement;
-      if (Increment) {
+      if (Increment && TransformHandler) {
         TransformedIncrement = getDerived().TransformExpr(Increment);
         if (TransformedIncrement.isInvalid())
           return ExprError();
@@ -19330,8 +19415,9 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
       HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
       Representative.PatternInstantiation, Representative.IfLoc,
       Representative.Guard, Representative.PatternIsIrrefutable,
-      StillNeedsCaseInstantiation, E->usesCaseConditionSyntax(),
-      Instantiations);
+      StillNeedsCaseInstantiation,
+      E->usesCaseConditionSyntax(), Instantiations,
+      /*HasSemanticInstantiations=*/true);
 }
 
 template <typename Derived>
@@ -19515,6 +19601,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
             HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
             PatternInstantiation, Case.IfLoc,
             {GuardInit.get(), Guard.get().first, Guard.get().second},
+            /*PatternIsIrrefutable=*/false,
             /*NeedsCaseInstantiation=*/false);
         if (Test.isInvalid())
           return TransformCaseResult::Error;
@@ -19585,7 +19672,6 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     return TransformCaseResult::Success;
   };
 
-  bool IsFirstSourceCase = true;
   bool ConstexprSelectionComplete = false;
   for (auto [TransformIndex, Case] : llvm::enumerate(CasesToTransform)) {
     unsigned CaseIndex = SourceCaseIndices[TransformIndex];
@@ -19644,21 +19730,18 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       ForcedSelections = std::move(NextSelections);
     }
     if (!SawViableCandidate && Instantiations.size() == InitialCaseCount &&
-        SawAlternativeChoice &&
-        (!E->getSubject()->isTypeDependent() ||
-         (IsFirstSourceCase && E->requiresFirstCaseViable()))) {
+        SawAlternativeChoice && !E->getSubject()->isTypeDependent()) {
       getSema().Diag(Case.Pattern->getBeginLoc(),
                      diag::err_braced_alternative_no_viable_state)
           << LHS.get()->getType();
       return ExprError();
     }
-    IsFirstSourceCase = false;
   }
 
   return getSema().ActOnMatchSelectExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
       E->getOrigResultType(), RetTy, SourceCases, E->getBraces(),
-      /*ExpandDeferredCases=*/false, E->requiresFirstCaseViable(),
+      /*ExpandDeferredCases=*/false,
       ArrayRef<MatchCaseInstantiation>(Instantiations),
       ArrayRef<MatchCaseInstantiation>(DiagnosticInstantiations));
 }

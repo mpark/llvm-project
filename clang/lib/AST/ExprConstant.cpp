@@ -860,6 +860,11 @@ namespace {
     llvm::SmallPtrSet<const VarDecl *, 8> DoExprInitVarDecls;
     bool EvaluatingSyntheticDoExprFrame = false;
 
+    /// Pattern matching introduces semantic declarations that are evaluated
+    /// as part of a match expression, even when constant expression checking
+    /// starts without a function call frame.
+    llvm::SmallPtrSet<const VarDecl *, 16> MatchExprLocalVarDecls;
+
     struct EvaluatingConstructorRAII {
       EvalInfo &EI;
       ObjectUnderConstruction Object;
@@ -5857,8 +5862,9 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
       (!VD->hasLocalStorage() && Info.EvaluatingSyntheticDoExprFrame &&
        Info.CurrentCall && !Info.CurrentCall->Callee &&
        isSyntheticDoExprDeclContext(VD->getDeclContext()));
+  bool TreatAsMatchExprLocal = Info.MatchExprLocalVarDecls.contains(VD);
   // We don't need to evaluate the initializer for a static local.
-  if (!VD->hasLocalStorage() && !TreatAsDoExprLocal)
+  if (!VD->hasLocalStorage() && !TreatAsDoExprLocal && !TreatAsMatchExprLocal)
     return true;
 
   LValue Result;
@@ -5921,8 +5927,11 @@ static bool EvaluateDecompositionDeclInit(EvalInfo &Info,
                                           const DecompositionDecl *DD) {
   bool OK = true;
   for (auto *BD : DD->flat_bindings())
-    if (auto *VD = BD->getHoldingVar())
+    if (auto *VD = BD->getHoldingVar()) {
+      if (Info.MatchExprLocalVarDecls.contains(DD))
+        Info.MatchExprLocalVarDecls.insert(VD);
       OK &= EvaluateDecl(Info, VD, /*EvaluateConditionDecl=*/true);
+    }
 
   return OK;
 }
@@ -6487,8 +6496,7 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
         return ESR;
       }
     }
-    if (const auto *Match = dyn_cast_if_present<MatchTestExpr>(
-            IS->getCond() ? IS->getCond()->IgnoreParens() : nullptr);
+    if (const auto *Match = MatchTestExpr::findInCondition(IS->getCond());
         Match && Match->hasConditionInstantiations()) {
       bool Matched;
       EvalStmtResult ESR =
@@ -6536,8 +6544,7 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
     const WhileStmt *WS = cast<WhileStmt>(S);
     while (true) {
       BlockScopeRAII Scope(Info);
-      if (const auto *Match =
-              dyn_cast<MatchTestExpr>(WS->getCond()->IgnoreParens());
+      if (const auto *Match = MatchTestExpr::findInCondition(WS->getCond());
           Match && Match->hasConditionInstantiations()) {
         bool Matched;
         EvalStmtResult ESR =
@@ -6619,8 +6626,7 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
     }
     while (true) {
       BlockScopeRAII IterScope(Info);
-      if (const auto *Match = dyn_cast_if_present<MatchTestExpr>(
-              FS->getCond() ? FS->getCond()->IgnoreParens() : nullptr);
+      if (const auto *Match = MatchTestExpr::findInCondition(FS->getCond());
           Match && Match->hasConditionInstantiations()) {
         bool Matched;
         EvalStmtResult ESR =
@@ -10406,7 +10412,8 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
       (VD->hasLocalStorage() && Info.EvaluatingSyntheticDoExprFrame &&
        Info.CurrentCall && !Info.CurrentCall->Callee &&
        isSyntheticDoExprDeclContext(VD->getDeclContext()));
-  if (VD->hasLocalStorage() || IsDoExprLocal) {
+  bool IsMatchExprLocal = Info.MatchExprLocalVarDecls.contains(VD);
+  if (VD->hasLocalStorage() || IsDoExprLocal || IsMatchExprLocal) {
     // Only if a local variable was declared in the function currently being
     // evaluated, do we expect to be able to find its value in the current
     // frame. (Otherwise it was likely declared in an enclosing context and
@@ -10414,7 +10421,7 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
     // variable) or be ill-formed (and trigger an appropriate evaluation
     // diagnostic)).
     CallStackFrame *CurrFrame = Info.CurrentCall;
-    if (IsDoExprLocal) {
+    if (IsDoExprLocal || IsMatchExprLocal) {
       // Usually the current frame, but not always: an init-hoist declaration
       // (`do [k = 5] { ... }`) outlives the body, so its storage is created in
       // the frame that encloses the body rather than in the body's own. Walk
@@ -21107,6 +21114,8 @@ EvaluateProjectionCondition(const MatchProjection *Projection, EvalInfo &Info,
   if (ProjectionCache && !ProjectionCache->Conditions.insert(Projection).second)
     return true;
   auto EvaluateOnce = [&](const VarDecl *D) {
+    if (D)
+      Info.MatchExprLocalVarDecls.insert(D);
     return !D ||
            (ProjectionCache &&
             !ProjectionCache->Declarations.insert(D).second) ||
@@ -21126,16 +21135,20 @@ EvaluateProjectionValue(const MatchProjection *Projection, EvalInfo &Info,
     return true;
   if (const VarDecl *D = Projection->getProjectedVar();
       D &&
-      (!ProjectionCache || ProjectionCache->Declarations.insert(D).second) &&
-      !EvaluateDecl(Info, D))
-    return false;
+      (!ProjectionCache || ProjectionCache->Declarations.insert(D).second)) {
+    Info.MatchExprLocalVarDecls.insert(D);
+    if (!EvaluateDecl(Info, D))
+      return false;
+  }
   if (!Projection->getProjectedVar() && Projection->getProjectedExpr() &&
       Projection->getProjectedExpr()->getType()->isVoidType() &&
       !EvaluateIgnoredValue(Info, Projection->getProjectedExpr()))
     return false;
-  if (const DecompositionDecl *D = Projection->getDecomposedDecl();
-      D && !EvaluateDecl(Info, D, /*EvaluateConditionDecl=*/true))
-    return false;
+  if (const DecompositionDecl *D = Projection->getDecomposedDecl(); D) {
+    Info.MatchExprLocalVarDecls.insert(D);
+    if (!EvaluateDecl(Info, D, /*EvaluateConditionDecl=*/true))
+      return false;
+  }
   return true;
 }
 
@@ -21226,6 +21239,7 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
             MatchProjection::DecompositionProjection)
       return true;
     const VarDecl *Declaration = P->getDeclaration();
+    Info.MatchExprLocalVarDecls.insert(Declaration);
     if (!EvaluateDecl(Info, Declaration))
       return false;
     if (const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
@@ -21259,8 +21273,32 @@ static bool EvaluateSharedDeclarationProjections(
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
+  std::optional<CallStackFrame> SyntheticFrame;
+  if (Info.CurrentCall == &Info.BottomFrame)
+    SyntheticFrame.emplace(Info, E->getSourceRange(), /*Callee=*/nullptr,
+                           /*This=*/nullptr, /*CallExpr=*/E, CallRef());
+
+  std::optional<BlockScopeRAII> MatchScope;
+  if (!E->usesCaseConditionSyntax())
+    MatchScope.emplace(Info);
+  auto Finish = [&](bool Success) {
+    return Success && (!MatchScope || MatchScope->destroy());
+  };
+
+  if (E->hasSemanticInstantiations() && E->getInstantiations().empty()) {
+    if (const VarDecl *VD = E->getHoldingVar()) {
+      Info.MatchExprLocalVarDecls.insert(VD);
+      if (!EvaluateDecl(Info, VD))
+        return false;
+    } else if (!EvaluateIgnoredValue(Info, E->getSubject())) {
+      return false;
+    }
+    return Finish(Success(false, E));
+  }
+
   if (!E->getInstantiations().empty()) {
     if (const VarDecl *VD = E->getHoldingVar()) {
+      Info.MatchExprLocalVarDecls.insert(VD);
       if (!EvaluateDecl(Info, VD))
         return false;
     } else if (E->getSubject()->getType()->isVoidType() &&
@@ -21299,9 +21337,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
       if (!Scope.destroy())
         return false;
       if (Result)
-        return Success(true, E);
+        return Finish(Success(true, E));
     }
-    return Success(false, E);
+    return Finish(Success(false, E));
   }
 
   bool Result;
@@ -21312,6 +21350,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
   if (const VarDecl *VD = E->getHoldingVar()) {
     // This means that the subject and the bindings have the lifetime
     // of a hypothetical condition variable, skip the `BlockScopeRAII`.
+    Info.MatchExprLocalVarDecls.insert(VD);
     if (!EvaluateDecl(Info, VD))
       return false;
     if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
@@ -21335,7 +21374,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                         E->getGuard().Condition, Result))
         return false;
     }
-    return Success(Result, E);
+    return Finish(Success(Result, E));
   } else {
     BlockScopeRAII Scope(Info);
     if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
@@ -21361,7 +21400,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
     }
     if (!Scope.destroy())
       return false;
-    return Success(Result, E);
+    return Finish(Success(Result, E));
   }
 }
 
@@ -23654,6 +23693,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::HLSLOutArgExprClass:
   case Expr::CXXExpansionSelectExprClass:
   case Expr::MatchTestExprClass:
+  case Expr::CaseConditionExprClass:
   case Expr::MatchSelectExprClass:
     return ICEDiag(IK_NotICE, E->getBeginLoc());
 
