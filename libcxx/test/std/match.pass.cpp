@@ -384,6 +384,31 @@ void test_match_in_if_condition_lifetime_extended() {
   check(!match_in_if_condition_lifetime_extended(303));
 }
 
+using DeferredLifetime = std::variant<Lifetime, Lifetime>;
+
+bool deferred_match_condition_lifetime_extended(int n) {
+  bool flag = false;
+  if (DeferredLifetime(std::in_place_index<0>, &flag, n) match
+      case { auto&& value }) {
+    return *value.flag;
+  }
+  return flag;
+}
+
+bool deferred_match_condition_lifetime_not_extended(int n) {
+  bool flag = false;
+  if ((DeferredLifetime(std::in_place_index<0>, &flag, n) match
+       case { [[maybe_unused]] auto&& value })) {
+    return flag;
+  }
+  return flag;
+}
+
+void test_deferred_match_condition_lifetimes() {
+  check(deferred_match_condition_lifetime_extended(101));
+  check(!deferred_match_condition_lifetime_not_extended(101));
+}
+
 bool default_argument_lifetime_alive = false;
 
 struct DefaultArgumentLifetime {
@@ -681,6 +706,7 @@ int main() {
   test_match_pattern_guards();
   test_match_in_if_condition();
   test_match_in_if_condition_lifetime_extended();
+  test_deferred_match_condition_lifetimes();
   test_match_default_argument_lifetime_extended();
   test_match_in_if_condition_not_lifetime_extended();
   test_match_in_while_condition();
