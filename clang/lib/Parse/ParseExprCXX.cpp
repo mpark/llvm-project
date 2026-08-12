@@ -4055,8 +4055,26 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     if (LHS.isInvalid())
       return ExprError();
     if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces,
-                       HasDeferredCases)) {
+                       HasDeferredCases,
+                       /*DeferHandlerChecking=*/IsConstexpr)) {
       return ExprError();
+    }
+    if (IsConstexpr) {
+      bool SelectionIsDependent = LHS.get()->isTypeDependent() ||
+                                  LHS.get()->isValueDependent() ||
+                                  llvm::any_of(Cases, [](const MatchCase &Case) {
+                                    return static_cast<bool>(
+                                               Case.Pattern->getDependence() &
+                                               ExprDependence::Instantiation) ||
+                                           (Case.Guard.Condition &&
+                                            (Case.Guard.Condition
+                                                 ->isTypeDependent() ||
+                                             Case.Guard.Condition
+                                                 ->isValueDependent()));
+                                  });
+      HasDeferredCases |= !SelectionIsDependent;
+      if (OrigResultType.getType()->getContainedAutoType())
+        RetTy = Actions.Context.DependentTy;
     }
     return Actions.ActOnMatchSelectExpr(HoldingVar, LHS.get(), MatchLoc,
                                         IsConstexpr, OrigResultType, RetTy,
@@ -4134,7 +4152,8 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
 
 bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, SmallVectorImpl<MatchCase> &Result,
-                            SourceRange &Braces, bool &HasDeferredCases) {
+                            SourceRange &Braces, bool &HasDeferredCases,
+                            bool DeferHandlerChecking) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in match body");
@@ -4155,7 +4174,7 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
     bool Invalid = ParseMatchCase(Subject, OrigResultType, RetTy, Case,
-                                  ProjectionCache);
+                                  ProjectionCache, DeferHandlerChecking);
     bool ContainsBindingPack =
         !Invalid && containsDeclarationBindingPack(Case.Pattern);
     if (ProjectionCache.HasDeferredAlternativeChoices || ContainsBindingPack) {
@@ -4179,7 +4198,8 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
 
 bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, MatchCase &Case,
-                            Sema::MatchProjectionCache &ProjectionCache) {
+                            Sema::MatchProjectionCache &ProjectionCache,
+                            bool DeferHandlerChecking) {
   if (ExpectAndConsume(tok::kw_case))
     return true;
 
@@ -4210,7 +4230,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after,
                        "pattern"))
     return true;
-  StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy);
+  StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy,
+                                         DeferHandlerChecking);
   if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
   Case = {Pattern.get(), IfLoc,
@@ -4238,23 +4259,30 @@ Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
   return {};
 }
 
-StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
+StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
+                                     bool DeferSemanticChecking) {
   const char *SemiError = nullptr;
   StmtResult Result;
   switch (Tok.getKind()) {
-  default:
-    Result = Actions.ActOnMatchExprHandler(
-        OrigResultType, RetTy,
-        Tok.is(tok::l_brace) ? ParseBraceInitializer() : ParseExpression());
+  default: {
+    ExprResult Expression =
+        Tok.is(tok::l_brace) ? ParseBraceInitializer() : ParseExpression();
+    if (DeferSemanticChecking)
+      Result = Expression.isInvalid() ? StmtError() : Expression.get();
+    else
+      Result = Actions.ActOnMatchExprHandler(OrigResultType, RetTy,
+                                             Expression);
     if (Result.isInvalid() ||
         ExpectAndConsumeSemi(diag::err_expected_semi_after_expr)) {
       return StmtError();
     }
     return Result;
+  }
   case tok::semi: {
     bool HasLeadingEmptyMacro = Tok.hasLeadingEmptyMacro();
     Result = Actions.ActOnNullStmt(ConsumeToken(), HasLeadingEmptyMacro);
-    if (Actions.ActOnMatchVoidHandler(OrigResultType, RetTy,
+    if (!DeferSemanticChecking &&
+        Actions.ActOnMatchVoidHandler(OrigResultType, RetTy,
                                       Result.get()->getBeginLoc()))
       return StmtError();
     return Result;
@@ -4267,7 +4295,8 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy) {
       return StmtError();
     DeclGroupPtrTy DG = Actions.ConvertDeclToDeclGroup(D);
     Result = Actions.ActOnDeclStmt(DG, DeclStart, DeclEnd);
-    if (Actions.ActOnMatchVoidHandler(OrigResultType, RetTy, DeclStart))
+    if (!DeferSemanticChecking &&
+        Actions.ActOnMatchVoidHandler(OrigResultType, RetTy, DeclStart))
       return StmtError();
     return Result;
   }
