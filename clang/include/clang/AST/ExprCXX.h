@@ -5696,6 +5696,7 @@ struct MatchCase {
   Stmt *Handler;
   bool MaybeUseful = false;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
+  ArrayRef<const Attr *> Attributes;
   MatchTemplateRegionDecl *Region = nullptr;
 };
 
@@ -5708,6 +5709,7 @@ struct MatchCaseInstantiation {
   Stmt *Handler;
   unsigned CaseIndex;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
+  ArrayRef<const Attr *> Attributes;
 };
 
 class MatchSelectExpr final

@@ -11396,6 +11396,8 @@ public:
           std::nullopt,
       std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations =
           std::nullopt);
+  ArrayRef<const Attr *>
+  ActOnMatchCaseAttributes(const ParsedAttributes &Attributes, Stmt *Handler);
   ExprResult ExpandDeferredMatchExpr(Expr *E);
 
   ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
