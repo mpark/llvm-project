@@ -1831,6 +1831,8 @@ private:
   };
   struct ForRangeInfo : ForRangeInit {
     StmtResult LoopVar;
+    MatchPattern *Pattern = nullptr;
+    SourceLocation PatternCaseLoc;
   };
 
   /// ParseDeclaration - Parse a full 'declaration', which consists of
@@ -4536,7 +4538,9 @@ private:
   Sema::ConditionResult
   ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
                      Sema::ConditionKind CK, bool MissingOK,
-                     InjectedDeclSet *InjectedDecls);
+                     InjectedDeclSet *InjectedDecls,
+                     ForRangeInfo *FRI = nullptr);
+  ExprResult BuildCaseForRangeCondition(const ForRangeInfo &FRI);
   bool AttachCaseCondition(Sema::ConditionResult &Condition,
                            SourceLocation Loc, Stmt *Handler,
                            Expr *Increment = nullptr);
