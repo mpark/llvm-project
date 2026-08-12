@@ -3689,6 +3689,8 @@ public:
   void EmitLabel(const LabelDecl *D); // helper for EmitLabelStmt.
 
   void EmitLabelStmt(const LabelStmt &S);
+  void EmitWithStmtAttributes(const Stmt *S, ArrayRef<const Attr *> Attrs,
+                              llvm::function_ref<void()> Emit);
   void EmitAttributedStmt(const AttributedStmt &S);
   void EmitGotoStmt(const GotoStmt &S);
   void EmitIndirectGotoStmt(const IndirectGotoStmt &S);
