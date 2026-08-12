@@ -4257,6 +4257,9 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, MatchCase &Case,
                             Sema::MatchProjectionCache &ProjectionCache,
                             bool DeferHandlerChecking) {
+  ParsedAttributes Attributes(AttrFactory);
+  MaybeParseCXX11Attributes(Attributes,
+                            /*MightBeObjCMessageSend=*/true);
   if (ExpectAndConsume(tok::kw_case))
     return true;
 
@@ -4295,7 +4298,10 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
           {GuardInit.get(), Guard.get().first, Guard.get().second},
           Handler.get(),
           /*MaybeUseful=*/false,
-          /*PatternInstantiation=*/nullptr};
+          /*PatternInstantiation=*/nullptr,
+          /*Attributes=*/{}};
+  Case.Attributes =
+      Actions.ActOnMatchCaseAttributes(Attributes, Handler.get());
   Case.PatternInstantiation = MatchPatternInstantiation::Create(
       Actions.Context, Pattern.get(), PatternState.Infos);
   return false;
