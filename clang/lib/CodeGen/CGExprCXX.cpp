@@ -2820,6 +2820,11 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   // just like switch does. Is this already handled in Sema?
   llvm::ArrayRef<MatchCaseInstantiation> Cases = S.getCaseInstantiations();
 
+  // The hidden subject holder belongs to the selection. This is also the
+  // condition-variable scope when a deferred match condition contains its
+  // controlled statement as a handler.
+  RunCleanupsScope MatchScope(*this);
+
   if (const VarDecl *HoldingVar = S.getHoldingVar())
     EmitVarDecl(*HoldingVar);
   else if (S.getSubject()->getType()->isVoidType())
