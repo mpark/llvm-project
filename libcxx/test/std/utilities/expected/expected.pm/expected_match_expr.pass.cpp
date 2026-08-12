@@ -37,14 +37,11 @@ static_assert(match_expected(std::expected<int, long>(std::unexpect, 42l)) == 1)
 
 constexpr int match_expected(std::expected<int, int> v) {
     return v match {
-        case { int } => v.index();
+        case { int } => v.has_value() ? 0 : 1;
     };
 }
 static_assert(match_expected(std::expected<int, int>(42)) == 0);
-// TODO FIXME: This is not a constant expression for some reason....
-#if 0
 static_assert(match_expected(std::expected<int, int>(std::unexpect, 42)) == 1);
-#endif
 
 constexpr int match_expected(std::expected<void, int> v) {
     return v match {
