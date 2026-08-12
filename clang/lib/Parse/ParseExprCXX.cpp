@@ -2071,7 +2071,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
 
     if (getLangOpts().PatternMatching && Tok.is(tok::kw_case) &&
         (CK != Sema::ConditionKind::Switch || InitStmt))
-      return ParseCaseCondition(InitStmt, Loc, CK, MissingOK, InjectedDecls);
+      return ParseCaseCondition(InitStmt, Loc, CK, MissingOK, InjectedDecls,
+                                FRI);
 
     ExprResult Expr =
         ParseExpression(TypoCorrectionTypeBehavior::AllowNonTypes);
@@ -3921,7 +3922,8 @@ static bool containsDeclarationBindingPack(MatchPattern *Pattern) {
 Sema::ConditionResult
 Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
                            Sema::ConditionKind CK, bool MissingOK,
-                           InjectedDeclSet *InjectedDecls) {
+                           InjectedDeclSet *InjectedDecls,
+                           ForRangeInfo *FRI) {
   assert(Tok.is(tok::kw_case) && "not a case condition");
   SourceLocation CaseLoc = ConsumeToken();
   ParseScope MatchTestScope(this, Scope::DeclScope);
@@ -3942,8 +3944,28 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
       Actions.IdResolver.AddDecl(D);
   });
 
-  // A same-named binding denotes the binding being introduced, not an outer
-  // declaration. Its use in the subject initializer is diagnosed below.
+  if (FRI && Tok.is(tok::colon)) {
+    FRI->Pattern = Pattern;
+    FRI->PatternCaseLoc = CaseLoc;
+    FRI->ColonLoc = ConsumeToken();
+    ParseForRangeInitializerAfterColon(*FRI, /*VarDeclSpec=*/nullptr);
+
+    Scope::decl_range DR = getCurScope()->decls();
+    InjectedDeclSet Decls = {DR.begin(), DR.end()};
+    for (Decl *D : Decls)
+      getCurScope()->RemoveDecl(D);
+    RestorePatternDecls.release();
+    MatchTestScope.Exit();
+    Scope *S = getCurScope();
+    for (Decl *D : Decls)
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
+    return {};
+  }
+
+  // Unlike a range initializer, the subject initializer follows ordinary
+  // declaration lookup: a same-named binding denotes the binding being
+  // introduced, not an outer declaration. Its use is diagnosed below.
   for (NamedDecl *D : PatternDecls)
     Actions.IdResolver.AddDecl(D);
   RestorePatternDecls.release();
@@ -4028,6 +4050,44 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
           : CK;
   return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), InitialCK,
                                 /*MissingOK=*/false);
+}
+
+ExprResult Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI) {
+  auto *LoopDeclStmt = dyn_cast_if_present<DeclStmt>(FRI.LoopVar.get());
+  if (!LoopDeclStmt || !LoopDeclStmt->isSingleDecl())
+    return ExprError();
+  auto *LoopVar = dyn_cast<VarDecl>(LoopDeclStmt->getSingleDecl());
+  if (!LoopVar || LoopVar->isInvalidDecl())
+    return ExprError();
+
+  ExprResult Subject = Actions.BuildDeclRefExpr(
+      LoopVar, LoopVar->getType().getNonReferenceType(), VK_LValue,
+      FRI.PatternCaseLoc);
+  if (Subject.isInvalid())
+    return ExprError();
+
+  bool PatternNeedsAlternativeSpecialization =
+      needsAlternativeCandidateSpecialization(FRI.Pattern);
+  bool PatternContainsBindingPack =
+      containsDeclarationBindingPack(FRI.Pattern);
+  Sema::MatchProjectionCache ProjectionCache;
+  Sema::MatchPatternState PatternState;
+  ProjectionCache.DeferAlternativeChoices = true;
+  if (Actions.CheckCompleteMatchPattern(Subject.get(), FRI.Pattern,
+                                        PatternState, &ProjectionCache))
+    return ExprError();
+
+  bool NeedsCaseInstantiation = ProjectionCache.HasDeferredAlternativeChoices ||
+                                PatternContainsBindingPack ||
+                                (PatternNeedsAlternativeSpecialization &&
+                                 Subject.get()->isTypeDependent());
+  Sema::MatchPatternSemanticAnalysis Semantic =
+      Actions.AnalyzeMatchPatternSemantics(FRI.Pattern, PatternState);
+  return Actions.ActOnCaseConditionExpr(
+      /*HoldingVar=*/nullptr, Subject.get(), FRI.PatternCaseLoc, FRI.Pattern,
+      MatchPatternInstantiation::Create(Actions.Context, FRI.Pattern,
+                                        PatternState.Infos),
+      Semantic.isUnconditionallyMatched(), NeedsCaseInstantiation);
 }
 
 ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,

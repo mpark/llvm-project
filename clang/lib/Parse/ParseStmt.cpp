@@ -2116,6 +2116,7 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   ExprResult Collection;
   ForRangeInfo ForRangeInfo;
   FullExprArg ThirdPart(Actions);
+  Sema::ConditionResult PatternRangeCondition;
   ForRangeInfo.ExpansionStmt = ESD;
 
   // RAII helper to enter a context if we're parsing an expansion statement.
@@ -2179,7 +2180,12 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
     SecondPart = ParseCondition(&FirstPart, ForLoc,
                                 Sema::ConditionKind::Boolean,
                                 /*MissingOK=*/true,
-                                /*InjectedDecls=*/nullptr);
+                                /*InjectedDecls=*/nullptr, &ForRangeInfo);
+    if (ForRangeInfo.Pattern) {
+      ForRangeInfo.LoopVar =
+          Actions.BuildMatchForRangeLoopVar(getCurScope(),
+                                            ForRangeInfo.PatternCaseLoc);
+    }
   } else if (isForInitDeclaration()) {  // for (int X = 4;
     ParenBraceBracketBalancer BalancerRAIIObj(*this);
     ExpansionStmtContextRAII EnterParentContext{
@@ -2398,6 +2404,16 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
         ForRangeInfo.LoopVar.get(), ForRangeInfo.ColonLoc,
         ForRangeInfo.RangeExpr.get(), T.getCloseLocation(), Sema::BFRK_Build,
         ForRangeInfo.LifetimeExtendTemps);
+    if (ForRangeInfo.Pattern && ForRangeStmt.isUsable()) {
+      ExprResult Filter = BuildCaseForRangeCondition(ForRangeInfo);
+      if (Filter.isInvalid())
+        return StmtError();
+      PatternRangeCondition = Actions.ActOnCondition(
+          getCurScope(), ForLoc, Filter.get(), Sema::ConditionKind::Boolean,
+          /*MissingOK=*/false);
+      if (PatternRangeCondition.isInvalid())
+        return StmtError();
+    }
   } else if (ForEach) {
     // Similarly, we need to do the semantic analysis for a for-range
     // statement immediately in order to close over temporaries correctly.
@@ -2460,6 +2476,22 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
 
   // Pop the body scope if needed.
   InnerScope.Exit();
+
+  if (Body.isUsable() && ForRangeInfo.Pattern) {
+    if (AttachCaseCondition(PatternRangeCondition, ForLoc, Body.get()))
+      return StmtError();
+    Body = Actions.ActOnIfStmt(
+        ForLoc, IfStatementKind::Ordinary, /*LParenLoc=*/{},
+        /*InitStmt=*/nullptr, PatternRangeCondition, /*RParenLoc=*/{},
+        Body.get(), /*ElseLoc=*/{}, /*ElseStmt=*/nullptr);
+    if (Body.isUsable()) {
+      auto *Match = cast<MatchTestExpr>(PatternRangeCondition.get().second);
+      if (Match->needsCaseInstantiation() &&
+          !Actions.CurContext->isDependentContext())
+        Body = Actions.ExpandDeferredMatchConditionStmt(Body.get(),
+                                                        Match->getMatchLoc());
+    }
+  }
 
   getActions().OpenACC().ActOnForStmtEnd(ForLoc, Body);
 
