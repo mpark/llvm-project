@@ -42,6 +42,17 @@ int condition_if(Choice& choice) {
   return 0;
 }
 
+// CHECK-LABEL: define{{.*}} i32 @_Z15condition_chainR6ChoiceS0_
+// CHECK: call{{.*}} i32 @_Z8classifyRi
+// CHECK: call{{.*}} i32 @_Z8classifyRd
+int condition_chain(Choice& first, Choice& second) {
+  if (first.active < 2 && case { auto&& value } = first &&
+      classify(value) > 0 && case { auto&& other } = second &&
+      classify(other) > classify(value))
+    return classify(value) + classify(other);
+  return -1;
+}
+
 bool standalone_condition(Choice& choice) {
   return choice match case { auto&& value };
 }

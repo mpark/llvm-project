@@ -1744,6 +1744,11 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
       !Actions.CurContext->isDependentContext())
     return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
                                                     Match->getMatchLoc());
+  if (auto *Match = MatchTestExpr::findCaseConditionRequiringInstantiation(
+          Cond.get().second);
+      Match && !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
   return Result;
 }
 
@@ -1914,6 +1919,11 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   if (auto *Match = dyn_cast<MatchTestExpr>(Cond.get().second);
       Match && Match->needsCaseInstantiation() &&
       !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
+  if (auto *Match = MatchTestExpr::findCaseConditionRequiringInstantiation(
+          Cond.get().second);
+      Match && !Actions.CurContext->isDependentContext())
     return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
                                                     Match->getMatchLoc());
   return Result;
@@ -2536,6 +2546,11 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
           Condition ? Condition->IgnoreParens() : nullptr);
       Match && Match->needsCaseInstantiation() &&
       !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
+                                                    Match->getMatchLoc());
+  if (auto *Match =
+          MatchTestExpr::findCaseConditionRequiringInstantiation(Condition);
+      Match && !Actions.CurContext->isDependentContext())
     return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
                                                     Match->getMatchLoc());
   return Result;

@@ -598,9 +598,17 @@ private:
                                                        Stmt *Term,
                                                        CFGBlock *TrueBlock,
                                                        CFGBlock *FalseBlock);
+  std::pair<CFGBlock *, CFGBlock *> VisitMatchTestExpr(
+      MatchTestExpr *E, Stmt *Term, ArrayRef<CFGBlock *> TrueBlocks,
+      CFGBlock *FalseBlock,
+      std::optional<unsigned> SelectedInstantiation = std::nullopt);
+  using MatchTestSuccessBlocks =
+      llvm::DenseMap<const MatchTestInstantiation *, CFGBlock *>;
   std::pair<CFGBlock *, CFGBlock *>
-  VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
-                     ArrayRef<CFGBlock *> TrueBlocks, CFGBlock *FalseBlock);
+  VisitCaseConditionChain(Expr *Condition, Stmt *Term,
+                          CFGBlock *DefaultTrueBlock, CFGBlock *FalseBlock,
+                          const MatchTestSuccessBlocks &SuccessBlocks,
+                          bool SelectConstexprInstantiation = false);
   CFGBlock *VisitMatchSelectExpr(MatchSelectExpr *E, AddStmtChoice asc);
   CFGBlock *VisitContinueStmt(ContinueStmt *C);
   CFGBlock *VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E,
@@ -3145,6 +3153,32 @@ collectMatchPatternDecls(MatchPattern *Pattern) {
   return Decls;
 }
 
+static bool forEachCaseConditionInstantiation(
+    Expr *Condition,
+    llvm::function_ref<void(const MatchTestInstantiation &)> Visit) {
+  if (!Condition)
+    return false;
+  Condition = Condition->IgnoreParens();
+  if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
+    Condition = Constant->getSubExpr()->IgnoreParens();
+
+  if (auto *And = dyn_cast<BinaryOperator>(Condition);
+      And && And->getOpcode() == BO_LAnd)
+    return forEachCaseConditionInstantiation(And->getLHS(), Visit) |
+           forEachCaseConditionInstantiation(And->getRHS(), Visit);
+
+  auto *Match = dyn_cast<CaseConditionExpr>(Condition);
+  if (!Match || !Match->hasSemanticInstantiations())
+    return false;
+
+  for (const MatchTestInstantiation &Instantiation :
+       Match->getInstantiations()) {
+    Visit(Instantiation);
+    forEachCaseConditionInstantiation(Instantiation.Condition, Visit);
+  }
+  return true;
+}
+
 std::pair<CFGBlock *, CFGBlock *>
 CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
                                CFGBlock *TrueBlock, CFGBlock *FalseBlock) {
@@ -3152,10 +3186,97 @@ CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
   return VisitMatchTestExpr(E, Term, TrueBlocks, FalseBlock);
 }
 
-std::pair<CFGBlock *, CFGBlock *>
-CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
-                               ArrayRef<CFGBlock *> TrueBlocks,
-                               CFGBlock *FalseBlock) {
+std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitCaseConditionChain(
+    Expr *Condition, Stmt *Term, CFGBlock *DefaultTrueBlock,
+    CFGBlock *FalseBlock, const MatchTestSuccessBlocks &SuccessBlocks,
+    bool SelectConstexprInstantiation) {
+  Condition = Condition->IgnoreParens();
+  if (auto *Constant = dyn_cast<ConstantExpr>(Condition)) {
+    SelectConstexprInstantiation |= tryEvaluateBool(Constant).isTrue();
+    Condition = Constant->getSubExpr()->IgnoreParens();
+  }
+
+  if (auto *And = dyn_cast<BinaryOperator>(Condition);
+      And && And->getOpcode() == BO_LAnd) {
+    auto RHS = VisitCaseConditionChain(And->getRHS(), Term, DefaultTrueBlock,
+                                       FalseBlock, SuccessBlocks,
+                                       SelectConstexprInstantiation);
+    auto LHS =
+        VisitCaseConditionChain(And->getLHS(), And, RHS.first, FalseBlock,
+                                SuccessBlocks, SelectConstexprInstantiation);
+    return {LHS.first, RHS.second};
+  }
+
+  if (auto *Match = dyn_cast<CaseConditionExpr>(Condition)) {
+    if (!Match->getInstantiations().empty()) {
+      if (SelectConstexprInstantiation && Match->hasSemanticInstantiations()) {
+        for (unsigned I = 0; I != Match->getInstantiations().size(); ++I) {
+          const MatchTestInstantiation &Instantiation =
+              Match->getInstantiations()[I];
+          if (!Instantiation.Handler)
+            continue;
+
+          CFGBlock *Success = SuccessBlocks.lookup(&Instantiation);
+          if (!Success)
+            Success = DefaultTrueBlock;
+          if (Instantiation.Condition) {
+            SaveAndRestore saveBlock(Block), saveSucc(Succ);
+            Block = nullptr;
+            Success =
+                VisitCaseConditionChain(Instantiation.Condition, Term, Success,
+                                        FalseBlock, SuccessBlocks,
+                                        /*SelectConstexprInstantiation=*/true)
+                    .first;
+          }
+          CFGBlock *Successors[] = {Success};
+          return VisitMatchTestExpr(Match, Term, Successors, FalseBlock, I);
+        }
+      }
+
+      SmallVector<CFGBlock *, 4> CandidateSuccessors;
+      CandidateSuccessors.reserve(Match->getInstantiations().size());
+      for (const MatchTestInstantiation &Instantiation :
+           Match->getInstantiations()) {
+        CFGBlock *Success = nullptr;
+        CFGBlock *CandidateDefault = DefaultTrueBlock;
+        if (auto It = SuccessBlocks.find(&Instantiation);
+            It != SuccessBlocks.end())
+          CandidateDefault = It->second;
+        else if (Match->hasSemanticInstantiations())
+          CandidateDefault = FalseBlock;
+
+        if (Instantiation.Condition) {
+          SaveAndRestore saveBlock(Block), saveSucc(Succ);
+          Block = nullptr;
+          Success = VisitCaseConditionChain(
+                        Instantiation.Condition, Term, CandidateDefault,
+                        FalseBlock, SuccessBlocks, SelectConstexprInstantiation)
+                        .first;
+        } else {
+          Success = CandidateDefault;
+        }
+        CandidateSuccessors.push_back(Success);
+      }
+      return VisitMatchTestExpr(Match, Term, CandidateSuccessors, FalseBlock);
+    }
+    return VisitMatchTestExpr(Match, Term, DefaultTrueBlock, FalseBlock);
+  }
+
+  CFGBlock *ExitBlock = createBlock(false);
+  ExitBlock->setTerminator(Term);
+  TryResult KnownVal = SelectConstexprInstantiation
+                           ? TryResult(true)
+                           : tryEvaluateBool(Condition);
+  addSuccessor(ExitBlock, DefaultTrueBlock, !KnownVal.isFalse());
+  addSuccessor(ExitBlock, FalseBlock, !KnownVal.isTrue());
+  Block = ExitBlock;
+  CFGBlock *EntryBlock = addStmt(Condition);
+  return {EntryBlock ? EntryBlock : ExitBlock, ExitBlock};
+}
+
+std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
+    MatchTestExpr *E, Stmt *Term, ArrayRef<CFGBlock *> TrueBlocks,
+    CFGBlock *FalseBlock, std::optional<unsigned> SelectedInstantiation) {
   if (E->hasSemanticInstantiations() && E->getInstantiations().empty()) {
     Succ = FalseBlock;
     Block = nullptr;
@@ -3167,7 +3288,8 @@ CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
     return {EntryBlock ? EntryBlock : FalseBlock, nullptr};
   }
 
-  TryResult KnownVal = tryEvaluateBool(E);
+  TryResult KnownVal =
+      SelectedInstantiation ? TryResult(true) : tryEvaluateBool(E);
   auto BuildCandidate = [&](MatchPattern *Pattern, const MatchGuard &Guard,
                             bool PatternIsIrrefutable, CFGBlock *TrueBlock,
                             CFGBlock *CandidateFalseBlock,
@@ -3219,18 +3341,29 @@ CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, Stmt *Term,
   CFGBlock *PatternBlock = nullptr;
   CFGBlock *CandidateEntry = FalseBlock;
   if (!E->getInstantiations().empty()) {
-    assert((TrueBlocks.size() == 1 ||
-            TrueBlocks.size() == E->getInstantiations().size()) &&
-           "expected either a shared or per-instantiation successor");
-    for (unsigned I = E->getInstantiations().size(); I-- > 0;) {
-      const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
-      CFGBlock *TrueBlock =
-          TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
+    if (SelectedInstantiation) {
+      assert(*SelectedInstantiation < E->getInstantiations().size());
+      assert(TrueBlocks.size() == 1);
+      const MatchTestInstantiation &Instantiation =
+          E->getInstantiations()[*SelectedInstantiation];
       CandidateEntry = PatternBlock = BuildCandidate(
           Instantiation.Pattern, Instantiation.Guard,
-          Instantiation.PatternIsIrrefutable, TrueBlock, CandidateEntry,
-          /* IsFinalCandidate = */
-          I == E->getInstantiations().size() - 1);
+          Instantiation.PatternIsIrrefutable, TrueBlocks.front(), FalseBlock,
+          /*IsFinalCandidate=*/true);
+    } else {
+      assert((TrueBlocks.size() == 1 ||
+              TrueBlocks.size() == E->getInstantiations().size()) &&
+             "expected either a shared or per-instantiation successor");
+      for (unsigned I = E->getInstantiations().size(); I-- > 0;) {
+        const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
+        CFGBlock *TrueBlock =
+            TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
+        CandidateEntry = PatternBlock = BuildCandidate(
+            Instantiation.Pattern, Instantiation.Guard,
+            Instantiation.PatternIsIrrefutable, TrueBlock, CandidateEntry,
+            /* IsFinalCandidate = */
+            I == E->getInstantiations().size() - 1);
+      }
     }
   } else {
     assert(TrueBlocks.size() == 1);
@@ -3574,6 +3707,7 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   }
 
   Expr *Condition = I->isConsteval() ? nullptr : I->getCond();
+  bool IsCaseCondition = MatchTestExpr::containsCaseCondition(Condition);
   MatchTestExpr *MatchCondition =
       I->getConditionVariable() ? nullptr
                                 : MatchTestExpr::findInCondition(Condition);
@@ -3581,7 +3715,36 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   // Process the true branch.
   CFGBlock *ThenBlock;
   SmallVector<CFGBlock *, 4> MatchThenBlocks;
-  if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+  MatchTestSuccessBlocks CaseSuccessBlocks;
+  bool FailedToBuildCaseHandler = false;
+  bool HasSemanticCaseCondition = false;
+  if (IsCaseCondition) {
+    HasSemanticCaseCondition = forEachCaseConditionInstantiation(
+        Condition, [&](const MatchTestInstantiation &Instantiation) {
+          if (!Instantiation.Handler)
+            return;
+          SaveAndRestore saveBlock(Block), saveSucc(Succ);
+          Block = nullptr;
+          if (!isa<CompoundStmt>(Instantiation.Handler))
+            addLocalScopeAndDtors(Instantiation.Handler);
+          CFGBlock *CandidateThen = addStmt(Instantiation.Handler);
+          if (!CandidateThen) {
+            CandidateThen = createBlock(false);
+            addSuccessor(CandidateThen, saveSucc.get());
+          } else if (Block && badCFG) {
+            FailedToBuildCaseHandler = true;
+            return;
+          }
+          CaseSuccessBlocks[&Instantiation] = CandidateThen;
+        });
+  }
+  if (FailedToBuildCaseHandler)
+    return nullptr;
+
+  if (HasSemanticCaseCondition) {
+    ThenBlock = CaseSuccessBlocks.empty() ? ElseBlock
+                                          : CaseSuccessBlocks.begin()->second;
+  } else if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
     for (const MatchTestInstantiation &Instantiation :
          MatchCondition->getInstantiations()) {
       SaveAndRestore sv(Succ);
@@ -3630,11 +3793,16 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   // removes infeasible paths from the control-flow graph by having the
   // control-flow transfer of '&&' or '||' go directly into the then/else
   // blocks directly.
-  BinaryOperator *Cond = I->getConditionVariable() || MatchCondition
-                             ? nullptr
-                             : dyn_cast_or_null<BinaryOperator>(Condition);
+  BinaryOperator *Cond =
+      I->getConditionVariable() || MatchCondition || IsCaseCondition
+          ? nullptr
+          : dyn_cast_or_null<BinaryOperator>(Condition);
   CFGBlock *LastBlock;
-  if (MatchCondition)
+  if (IsCaseCondition)
+    LastBlock = VisitCaseConditionChain(Condition, I, ThenBlock, ElseBlock,
+                                        CaseSuccessBlocks)
+                    .first;
+  else if (MatchCondition)
     LastBlock =
         (MatchThenBlocks.empty()
              ? VisitMatchTestExpr(MatchCondition, I, ThenBlock, ElseBlock)
@@ -3987,8 +4155,11 @@ CFGBlock *CFGBuilder::VisitGCCAsmStmt(GCCAsmStmt *G, AddStmtChoice asc) {
 
 CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
   CFGBlock *LoopSuccessor = nullptr;
+  bool IsCaseCondition = MatchTestExpr::containsCaseCondition(F->getCond());
   auto *MatchCondition = MatchTestExpr::findInCondition(F->getCond());
   SmallVector<CFGBlock *, 4> MatchBodyBlocks;
+  MatchTestSuccessBlocks CaseSuccessBlocks;
+  bool HasSemanticCaseCondition = false;
 
   // Save local scope position because in case of condition variable ScopePos
   // won't be restored when traversing AST.
@@ -4044,7 +4215,43 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
     // variable (if any).
     addAutomaticObjHandling(ScopePos, LoopBeginScopePos, F);
 
-    if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+    if (IsCaseCondition) {
+      bool FailedToBuildCaseHandler = false;
+      HasSemanticCaseCondition = forEachCaseConditionInstantiation(
+          F->getCond(), [&](const MatchTestInstantiation &Instantiation) {
+            if (!Instantiation.Handler)
+              return;
+            Block = nullptr;
+            Succ = TransitionBlock;
+            CFGBlock *IncrementBlock = Instantiation.Increment
+                                           ? addStmt(Instantiation.Increment)
+                                           : TransitionBlock;
+            ContinueJumpTarget = JumpTarget(IncrementBlock, ContinueScopePos);
+            ContinueJumpTarget.block->setLoopTarget(F);
+
+            Block = nullptr;
+            Succ = IncrementBlock;
+            if (!isa<CompoundStmt>(Instantiation.Handler))
+              addLocalScopeAndDtors(Instantiation.Handler);
+            CFGBlock *CandidateBody = addStmt(Instantiation.Handler);
+            if (!CandidateBody)
+              CandidateBody = IncrementBlock;
+            else if (Block && badCFG) {
+              FailedToBuildCaseHandler = true;
+              return;
+            }
+            CaseSuccessBlocks[&Instantiation] = CandidateBody;
+          });
+      if (FailedToBuildCaseHandler)
+        return nullptr;
+      if (HasSemanticCaseCondition)
+        BodyBlock = CaseSuccessBlocks.empty()
+                        ? TransitionBlock
+                        : CaseSuccessBlocks.begin()->second;
+    }
+
+    if (!HasSemanticCaseCondition && MatchCondition &&
+        MatchCondition->hasConditionInstantiations()) {
       for (const MatchTestInstantiation &Instantiation :
            MatchCondition->getInstantiations()) {
         Block = nullptr;
@@ -4067,7 +4274,7 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
         MatchBodyBlocks.push_back(CandidateBody);
       }
       BodyBlock = MatchBodyBlocks.front();
-    } else {
+    } else if (!HasSemanticCaseCondition) {
       if (Stmt *I = F->getInc()) {
         // Generate increment code in its own basic block. This is the target
         // of continue statements.
@@ -4103,6 +4310,13 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
   do {
     Expr *C = F->getCond();
     SaveAndRestore save_scope_pos(ScopePos);
+
+    if (IsCaseCondition) {
+      std::tie(EntryConditionBlock, ExitConditionBlock) =
+          VisitCaseConditionChain(C, F, BodyBlock, LoopSuccessor,
+                                  CaseSuccessBlocks);
+      break;
+    }
 
     if (auto *Match =
             dyn_cast_or_null<MatchTestExpr>(C ? C->IgnoreParens() : nullptr)) {
@@ -4373,8 +4587,11 @@ CFGBlock *CFGBuilder::VisitPseudoObjectExpr(PseudoObjectExpr *E) {
 
 CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
   CFGBlock *LoopSuccessor = nullptr;
+  bool IsCaseCondition = MatchTestExpr::containsCaseCondition(W->getCond());
   auto *MatchCondition = MatchTestExpr::findInCondition(W->getCond());
   SmallVector<CFGBlock *, 4> MatchBodyBlocks;
+  MatchTestSuccessBlocks CaseSuccessBlocks;
+  bool HasSemanticCaseCondition = false;
 
   // Save local scope position because in case of condition variable ScopePos
   // won't be restored when traversing AST.
@@ -4423,7 +4640,35 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
     // Loop body should end with destructor of Condition variable (if any).
     addAutomaticObjHandling(ScopePos, LoopBeginScopePos, W);
 
-    if (MatchCondition && MatchCondition->hasConditionInstantiations()) {
+    if (IsCaseCondition) {
+      bool FailedToBuildCaseHandler = false;
+      HasSemanticCaseCondition = forEachCaseConditionInstantiation(
+          W->getCond(), [&](const MatchTestInstantiation &Instantiation) {
+            if (!Instantiation.Handler)
+              return;
+            Succ = ContinueJumpTarget.block;
+            Block = nullptr;
+            if (!isa<CompoundStmt>(Instantiation.Handler))
+              addLocalScopeAndDtors(Instantiation.Handler);
+            CFGBlock *CandidateBody = addStmt(Instantiation.Handler);
+            if (!CandidateBody)
+              CandidateBody = ContinueJumpTarget.block;
+            else if (Block && badCFG) {
+              FailedToBuildCaseHandler = true;
+              return;
+            }
+            CaseSuccessBlocks[&Instantiation] = CandidateBody;
+          });
+      if (FailedToBuildCaseHandler)
+        return nullptr;
+      if (HasSemanticCaseCondition)
+        BodyBlock = CaseSuccessBlocks.empty()
+                        ? ContinueJumpTarget.block
+                        : CaseSuccessBlocks.begin()->second;
+    }
+
+    if (!HasSemanticCaseCondition && MatchCondition &&
+        MatchCondition->hasConditionInstantiations()) {
       for (const MatchTestInstantiation &Instantiation :
            MatchCondition->getInstantiations()) {
         Succ = ContinueJumpTarget.block;
@@ -4438,7 +4683,7 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
         MatchBodyBlocks.push_back(CandidateBody);
       }
       BodyBlock = MatchBodyBlocks.front();
-    } else {
+    } else if (!HasSemanticCaseCondition) {
       // If body is not a compound statement create implicit scope
       // and add destructors.
       if (!isa<CompoundStmt>(W->getBody()))
@@ -4461,6 +4706,13 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
 
   do {
     Expr *C = W->getCond();
+
+    if (IsCaseCondition) {
+      std::tie(EntryConditionBlock, ExitConditionBlock) =
+          VisitCaseConditionChain(C, W, BodyBlock, LoopSuccessor,
+                                  CaseSuccessBlocks);
+      break;
+    }
 
     if (auto *Match = dyn_cast<MatchTestExpr>(C->IgnoreParens())) {
       std::tie(EntryConditionBlock, ExitConditionBlock) =
