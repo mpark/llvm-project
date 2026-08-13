@@ -274,6 +274,26 @@ static bool isVarOnPath(const IndirectLocalPath &Path, VarDecl *VD) {
   return false;
 }
 
+/// Visit the results belonging to one do-expression, excluding nested
+/// do-expressions and nested function scopes.
+static void forEachDoExprResult(
+    const Stmt *S, llvm::function_ref<void(Expr *)> VisitResult,
+    bool IsRoot = true) {
+  if (!S)
+    return;
+  if (const auto *Result = dyn_cast<DoReturnStmt>(S)) {
+    if (Expr *Operand = Result->getOperand())
+      VisitResult(Operand);
+    return;
+  }
+  if (!IsRoot && isa<DoExpr>(S))
+    return;
+  if (isa<LambdaExpr, BlockExpr>(S))
+    return;
+  for (const Stmt *Child : S->children())
+    forEachDoExprResult(Child, VisitResult, /*IsRoot=*/false);
+}
+
 static bool pathContainsInit(const IndirectLocalPath &Path) {
   return llvm::any_of(Path, [=](IndirectLocalPathEntry E) {
     return E.Kind == IndirectLocalPathEntry::DefaultInit ||
@@ -567,24 +587,6 @@ static void visitFunctionCallArguments(IndirectLocalPath &Path, Expr *Call,
 
 /// Visit the locals that would be reachable through a reference bound to the
 /// glvalue expression \c Init.
-/// Collect the operands of the `do_return` statements that belong to a given
-/// do-expression body. Operands inside nested do-expressions, lambdas, or
-/// blocks are excluded, since those constructs manage their own results.
-static void collectDoReturnOperands(const Stmt *S,
-                                    llvm::SmallVectorImpl<Expr *> &Out) {
-  if (!S)
-    return;
-  if (const auto *DR = dyn_cast<DoReturnStmt>(S)) {
-    if (Expr *Op = DR->getOperand())
-      Out.push_back(Op);
-    return;
-  }
-  if (isa<DoExpr, LambdaExpr, BlockExpr>(S))
-    return;
-  for (const Stmt *Child : S->children())
-    collectDoReturnOperands(Child, Out);
-}
-
 static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
                                                   Expr *Init, ReferenceKind RK,
                                                   LocalVisitor Visit) {
@@ -747,21 +749,12 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     break;
   }
 
-  case Stmt::DoExprClass: {
-    // A do-expression yielding a reference (glvalue) returns whatever its
-    // `do_return` operands designate. Walk into each operand so the analysis
-    // can see references into the do-expression's init-captures, whose lifetime
-    // extends to the end of the enclosing full-expression. When the
-    // do-expression's result is instead consumed by value within the
-    // full-expression, the reference-binding walk never reaches this point, so
-    // no diagnostic is produced.
-    auto *DE = cast<DoExpr>(Init);
-    llvm::SmallVector<Expr *, 4> Operands;
-    collectDoReturnOperands(DE->getBody(), Operands);
-    for (Expr *Op : Operands)
-      visitLocalsRetainedByReferenceBinding(Path, Op, RK, Visit);
+  case Stmt::DoExprClass:
+    forEachDoExprResult(Init, [&](Expr *Result) {
+      if (!Result->getType()->isVoidType())
+        visitLocalsRetainedByReferenceBinding(Path, Result, RK, Visit);
+    });
     break;
-  }
 
     // FIXME: Visit the left-hand side of an -> or ->*.
 
@@ -1041,6 +1034,13 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
     break;
   }
 
+  case Stmt::DoExprClass:
+    forEachDoExprResult(Init, [&](Expr *Result) {
+      visitLocalsRetainedByInitializer(Path, Result, Visit,
+                                       /*RevisitSubinits=*/true);
+    });
+    break;
+
   case Stmt::BlockExprClass:
     if (cast<BlockExpr>(Init)->getBlockDecl()->hasCaptures()) {
       // This is a local block, whose lifetime is that of the function.
@@ -1282,6 +1282,9 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
         return true;
       };
 
+      // Returning through an enclosing declaration is safe at the
+      // do-expression boundary. Its lifetime is checked when the completed
+      // do-expression is used by the enclosing context.
       if (const auto *DRE = dyn_cast<DeclRefExpr>(L);
           DRE && IsOutsideDoExpr(DRE->getDecl()))
         return false;
