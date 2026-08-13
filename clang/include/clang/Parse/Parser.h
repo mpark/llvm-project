@@ -3831,9 +3831,18 @@ public:
   /// \endverbatim
   using InjectedDeclSet = llvm::SmallPtrSet<Decl *, 4>;
 
+  struct CaseConditionParseState {
+    StmtResult *InitStmt;
+    SourceLocation StatementLoc;
+    Sema::ConditionKind ConditionKind;
+    bool MissingOK;
+    InjectedDeclSet Decls;
+  };
+
   ExprResult ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior =
                                  TypoCorrectionTypeBehavior::AllowNonTypes,
-                             InjectedDeclSet *Decls = nullptr);
+                             InjectedDeclSet *Decls = nullptr,
+                             CaseConditionParseState *CaseState = nullptr);
 
   ExprResult ParseConstantExpressionInExprEvalContext(
       TypoCorrectionTypeBehavior CorrectionBehavior =
@@ -3877,7 +3886,8 @@ public:
   ExprResult
   ParseAssignmentExpression(TypoCorrectionTypeBehavior CorrectionBehavior =
                                 TypoCorrectionTypeBehavior::AllowNonTypes,
-                            InjectedDeclSet *Decls = nullptr);
+                            InjectedDeclSet *Decls = nullptr,
+                            CaseConditionParseState *CaseState = nullptr);
 
   ExprResult ParseConditionalExpression();
 
@@ -3951,13 +3961,14 @@ private:
 
   /// Parse a binary expression that starts with \p LHS and has a
   /// precedence of at least \p MinPrec.
-  ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
-                                        InjectedDeclSet *Decls = nullptr);
-  ExprResult ParseRHSExprOfBinaryExpression(ExprResult &LHS,
-                                            ExprResult *TernaryMiddle,
-                                            bool &RHSIsInitList,
-                                            prec::Level ThisPrec,
-                                            prec::Level &NextTokPrec);
+  ExprResult
+  ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
+                             InjectedDeclSet *Decls = nullptr,
+                             CaseConditionParseState *CaseState = nullptr);
+  ExprResult ParseRHSExprOfBinaryExpression(
+      ExprResult &LHS, ExprResult *TernaryMiddle, bool &RHSIsInitList,
+      prec::Level ThisPrec, prec::Level &NextTokPrec, InjectedDeclSet *Decls,
+      CaseConditionParseState *CaseState);
 
   bool isRevertibleTypeTrait(const IdentifierInfo *Id,
                              clang::tok::TokenKind *Kind = nullptr);
@@ -4514,6 +4525,13 @@ private:
                      Sema::ConditionKind CK, bool MissingOK,
                      InjectedDeclSet *InjectedDecls,
                      ForRangeInfo *FRI = nullptr);
+  ExprResult ParseCaseConditionOperand(CaseConditionParseState &State);
+  Sema::ConditionResult ParseCaseConditionChain(StmtResult *InitStmt,
+                                                SourceLocation Loc,
+                                                Sema::ConditionKind CK,
+                                                bool MissingOK,
+                                                InjectedDeclSet *InjectedDecls,
+                                                ForRangeInfo *FRI = nullptr);
   ExprResult BuildCaseForRangeCondition(const ForRangeInfo &FRI);
   bool AttachCaseCondition(Sema::ConditionResult &Condition,
                            SourceLocation Loc, Stmt *Handler,
