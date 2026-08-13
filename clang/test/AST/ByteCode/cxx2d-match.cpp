@@ -26,11 +26,11 @@ static_assert(test_case_condition(2) == -1);
 constexpr bool test_case_condition_assignment_parsing() {
   int pattern_value = 0;
   int source = 0;
-  if (case 3 = source = 3) {
+  if (case 3 = (source = 3)) {
   } else {
     return false;
   }
-  if (case (pattern_value = 4) = source = 4) {
+  if (case (pattern_value = 4) = (source = 4)) {
   } else {
     return false;
   }

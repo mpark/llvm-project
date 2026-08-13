@@ -11388,19 +11388,13 @@ public:
                      SourceLocation IfLoc, MatchGuard Guard,
                      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
                      ArrayRef<MatchTestInstantiation> Instantiations = {});
-  ExprResult ActOnMatchTestExpr(
-      VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-      MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
-      SourceLocation IfLoc, MatchGuard Guard,
-      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-      bool CaseConditionSyntax,
-      ArrayRef<MatchTestInstantiation> Instantiations = {});
   ExprResult
   ActOnCaseConditionExpr(VarDecl *HoldingVar, Expr *Subject,
                          SourceLocation CaseLoc, MatchPattern *Pattern,
                          MatchPatternInstantiation *PatternInstantiation,
                          bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
                          ArrayRef<MatchTestInstantiation> Instantiations = {});
+  ExprResult BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS, Expr *RHS);
   ExprResult AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
                                       Expr *Increment = nullptr);
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);

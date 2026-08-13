@@ -56,6 +56,15 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT:       `-DeclRefExpr 0x{{[^ ]*}} <col:31> 'int' lvalue Var 0x{{[^ ]*}} 'value' 'int'
 }
 
+void test_case_condition_dump(int x) {
+  if (case int value = x && value > 0)
+    (void)value;
+  // CHECK:      BinaryOperator 0x{{[^ ]*}} <line:[[@LINE-2]]:7, col:37> 'bool' '&&'
+  // CHECK-NEXT: |-CaseConditionExpr 0x{{[^ ]*}} <col:7, col:24> 'bool'
+  // CHECK:      | `-DeclarationPattern 0x{{[^ ]*}} <col:12, col:16>
+  // CHECK:      `-BinaryOperator 0x{{[^ ]*}} <col:29, col:37> 'bool' '>'
+}
+
 void test_type_pattern_dump(int x) {
   x match case int;
   // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:16> 'bool'

@@ -32,6 +32,7 @@ void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
                                           MatchPattern *Pattern,
                                           bool RequiresTemplateRegion) {
   if (Region) {
+    // Later conditions already declare their bindings in this region.
     reenter();
     return;
   }
@@ -807,21 +808,6 @@ Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
       Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
 }
 
-ExprResult Sema::ActOnMatchTestExpr(
-    VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-    MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
-    SourceLocation IfLoc, MatchGuard Guard, bool PatternIsIrrefutable,
-    bool NeedsCaseInstantiation, bool CaseConditionSyntax,
-    ArrayRef<MatchTestInstantiation> Instantiations) {
-  if (CaseConditionSyntax)
-    return ActOnCaseConditionExpr(
-        HoldingVar, Subject, MatchLoc, Pattern, Instantiation,
-        PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
-  return ActOnMatchTestExpr(
-      HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc, Guard,
-      PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
-}
-
 ExprResult Sema::ActOnCaseConditionExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation CaseLoc,
     MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
@@ -830,7 +816,22 @@ ExprResult Sema::ActOnCaseConditionExpr(
   return new (Context) CaseConditionExpr(
       Context, HoldingVar, Subject, CaseLoc, Pattern, Instantiation,
       PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
+}
 
+ExprResult Sema::BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS,
+                                       Expr *RHS) {
+  ExprResult ConvertedLHS = CheckBooleanCondition(AndLoc, LHS);
+  ExprResult ConvertedRHS = CheckBooleanCondition(AndLoc, RHS);
+  if (ConvertedLHS.isInvalid() || ConvertedRHS.isInvalid())
+    return ExprError();
+
+  LHS = ConvertedLHS.get();
+  RHS = ConvertedRHS.get();
+  if (LHS->isTypeDependent() || RHS->isTypeDependent())
+    return BinaryOperator::Create(Context, LHS, RHS, BO_LAnd, Context.BoolTy,
+                                  VK_PRValue, OK_Ordinary, AndLoc,
+                                  CurFPFeatureOverrides());
+  return CreateBuiltinBinOp(AndLoc, BO_LAnd, LHS, RHS);
 }
 
 ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
@@ -844,6 +845,7 @@ ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
       E->getGuard(),
       E->getPatternInstantiation(),
       E->isPatternIrrefutable(),
+      nullptr,
       Handler,
       Increment,
   };
