@@ -136,3 +136,14 @@ void init_capture_to_init_capture_ok() {
   (void)v;
   (void)w;
 }
+
+struct Holder {
+  int *pointer;
+};
+
+Holder aggregate_result_retains_local_address() {
+  int local;
+  return do -> Holder {
+    do_return Holder{&local}; // expected-warning {{address of stack memory associated with local variable 'local' returned}}
+  };
+}
