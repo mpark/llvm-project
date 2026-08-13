@@ -11164,14 +11164,6 @@ public:
       bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
       ArrayRef<MatchTestInstantiation> Instantiations = {},
       bool HasSemanticInstantiations = false);
-  ExprResult ActOnMatchTestExpr(
-      VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-      MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
-      SourceLocation IfLoc, MatchGuard Guard,
-      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-      bool CaseConditionSyntax,
-      ArrayRef<MatchTestInstantiation> Instantiations = {},
-      bool HasSemanticInstantiations = false);
   ExprResult
   ActOnCaseConditionExpr(VarDecl *HoldingVar, Expr *Subject,
                          SourceLocation CaseLoc, MatchPattern *Pattern,
@@ -11179,6 +11171,7 @@ public:
                          bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
                          ArrayRef<MatchTestInstantiation> Instantiations = {},
                          bool HasSemanticInstantiations = false);
+  ExprResult BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS, Expr *RHS);
   ExprResult AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
                                       Expr *Increment = nullptr);
   ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
