@@ -871,18 +871,17 @@ namespace {
     /// The number of heap allocations performed so far in this evaluation.
     unsigned NumHeapAllocs = 0;
 
-    /// When a do-expression body terminates via `return`/`break`/`continue`
-    /// (i.e., outer-scope control flow), VisitDoExpr stashes the resulting
-    /// EvalStmtResult here so the enclosing EvaluateStmt can propagate it up
-    /// the statement-evaluation chain. Stored as unsigned since
-    /// EvalStmtResult is declared later in this translation unit. 0
+    /// When control flow escapes from a statement embedded in an expression,
+    /// stash the resulting EvalStmtResult here so the enclosing EvaluateStmt
+    /// can propagate it up the statement-evaluation chain. Stored as unsigned
+    /// since EvalStmtResult is declared later in this translation unit. 0
     /// (ESR_Failed) means "no pending flow".
-    unsigned PendingDoExprControlFlow = 0;
+    unsigned PendingExprControlFlow = 0;
 
-    /// Value returned by an outer-scope `return` seen while evaluating a
-    /// do-expression body. This is consumed when the pending control-flow is
-    /// translated back to ESR_Returned.
-    std::optional<APValue> PendingDoExprReturnValue;
+    /// Value produced by a pending ESR_Returned or ESR_DoReturn. This is
+    /// consumed when the pending control flow is translated back to an
+    /// EvalStmtResult.
+    std::optional<APValue> PendingExprControlFlowValue;
 
     /// Namespace-scope do-expression bodies are parsed without a real function
     /// DeclContext, so declarations inside their compound statement don't have
@@ -1203,9 +1202,14 @@ namespace {
     /// Note that we have had a side-effect, and determine whether we should
     /// keep evaluating.
     bool noteSideEffect() {
-      // An abandoned operand does not become a side effect while outer-scope
-      // control flow is escaping a do-expression.
-      if (PendingDoExprControlFlow != 0)
+      // While unwinding an expression because outer-scope control flow
+      // (`break`/`continue`/`return`) is escaping an expression, a failed
+      // subexpression is not a skipped side effect: the abandoned operand
+      // simply never runs, exactly as at runtime. Don't mark the
+      // (otherwise constant) full-expression as having side effects, and stop
+      // evaluating so the pending control flow is handled at the enclosing
+      // statement boundary.
+      if (PendingExprControlFlow != 0)
         return false;
       EvalStatus.HasSideEffects = true;
       return keepEvaluatingAfterSideEffect();
@@ -1264,10 +1268,10 @@ namespace {
     /// Foo() + 1       // use noteFailure
     [[nodiscard]] bool noteFailure() {
       // See noteSideEffect(): a subexpression abandoned because outer-scope
-      // control flow is escaping a do-expression is not a real failure with a
+      // control flow is escaping an expression is not a real failure with a
       // skipped side effect. Stop evaluating without marking side effects so
       // the pending control flow is handled at the enclosing statement.
-      if (PendingDoExprControlFlow != 0)
+      if (PendingExprControlFlow != 0)
         return false;
       // Failure when evaluating some expression often means there is some
       // subexpression whose evaluation was skipped. Therefore, (because we
@@ -5906,13 +5910,13 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
     // evaluation failed.
     Val = APValue();
     // If the initializer was abandoned because outer-scope control flow
-    // (`break`/`continue`/`return`) escaped a do-expression, this variable's
+    // (`break`/`continue`/`return`) escaped an expression, this variable's
     // lifetime never began: it has no value and must not be destroyed when its
     // enclosing block scope unwinds. Drop the cleanup createTemporary just
     // registered for it (it references Val); any do-expression init-statement
     // variables registered above it stay, since those are alive and destroyed
     // by the enclosing full-expression.
-    if (Info.PendingDoExprControlFlow != 0)
+    if (Info.PendingExprControlFlow != 0)
       llvm::erase_if(Info.CleanupStack,
                      [&](const Cleanup &C) { return C.getValuePtr() == &Val; });
     return false;
@@ -6008,22 +6012,23 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
                                        const Stmt *S,
                                        const SwitchCase *SC = nullptr);
 
-/// Evaluate a statement, then propagate any pending do-expression outer-flow
-/// (e.g. `break` inside a do-expression body) by translating the result to
-/// the stashed control-flow value. This wins over noteFailure-style recovery
-/// (which would otherwise swallow our break/continue and let execution
-/// fall through to the next statement using uninitialized state).
+/// Evaluate a statement, then propagate any pending control flow from a
+/// statement embedded in an expression by translating the result to the
+/// stashed control-flow value. This wins over noteFailure-style recovery,
+/// which would otherwise swallow break/continue and let execution fall
+/// through to the next statement using uninitialized state.
 static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
                                    const Stmt *S,
                                    const SwitchCase *SC = nullptr) {
   EvalStmtResult ESR = EvaluateStmtImpl(Result, Info, S, SC);
-  if (Info.PendingDoExprControlFlow != 0) {
+  if (Info.PendingExprControlFlow != 0) {
     EvalStmtResult Pending =
-        static_cast<EvalStmtResult>(Info.PendingDoExprControlFlow);
-    Info.PendingDoExprControlFlow = 0;
-    if (Pending == ESR_Returned && Info.PendingDoExprReturnValue) {
-      Result.Value = std::move(*Info.PendingDoExprReturnValue);
-      Info.PendingDoExprReturnValue.reset();
+        static_cast<EvalStmtResult>(Info.PendingExprControlFlow);
+    Info.PendingExprControlFlow = 0;
+    if ((Pending == ESR_Returned || Pending == ESR_DoReturn) &&
+        Info.PendingExprControlFlowValue) {
+      Result.Value = std::move(*Info.PendingExprControlFlowValue);
+      Info.PendingExprControlFlowValue.reset();
     }
     return Pending;
   }
@@ -9201,10 +9206,10 @@ public:
 
     case BO_Comma:
       VisitIgnoredValue(E->getLHS());
-      // If outer-scope control flow (`break`/`continue`/`return`) escaped a
-      // do-expression in the discarded left operand, abandon the comma without
+      // If outer-scope control flow (`break`/`continue`/`return`) escaped an
+      // expression in the discarded left operand, abandon the comma without
       // evaluating the right operand, exactly as at runtime.
-      if (Info.PendingDoExprControlFlow != 0)
+      if (Info.PendingExprControlFlow != 0)
         return false;
       return StmtVisitorTy::Visit(E->getRHS());
 
@@ -9857,9 +9862,9 @@ public:
       // EvalStmtResult.
       if (!Scope.destroy())
         return false;
-      Info.PendingDoExprControlFlow = static_cast<unsigned>(ESR);
+      Info.PendingExprControlFlow = static_cast<unsigned>(ESR);
       if (ESR == ESR_Returned && YieldedValue.hasValue())
-        Info.PendingDoExprReturnValue = std::move(YieldedValue);
+        Info.PendingExprControlFlowValue = std::move(YieldedValue);
       return false;
     }
     if (ESR == ESR_Succeeded && E->getType()->isVoidType()) {
@@ -9912,8 +9917,25 @@ public:
           return false;
       }
       if (Result) {
-        if (!this->Visit(Case.Handler))
-          return false;
+        if (const auto *HandlerExpr = dyn_cast<Expr>(Case.Handler)) {
+          if (!this->Visit(HandlerExpr))
+            return false;
+        } else {
+          APValue HandlerValue;
+          StmtResult HandlerResult = {HandlerValue, nullptr};
+          EvalStmtResult ESR = EvaluateStmt(HandlerResult, Info, Case.Handler);
+          if (ESR == ESR_Failed)
+            return false;
+          if (ESR != ESR_Succeeded) {
+            if (!Scope.destroy() || !MatchScope.destroy())
+              return false;
+            Info.PendingExprControlFlow = static_cast<unsigned>(ESR);
+            if ((ESR == ESR_Returned || ESR == ESR_DoReturn) &&
+                HandlerValue.hasValue())
+              Info.PendingExprControlFlowValue = std::move(HandlerValue);
+            return false;
+          }
+        }
         if (!Scope.destroy())
           return false;
         MatchScope.extendToFullExpression();
