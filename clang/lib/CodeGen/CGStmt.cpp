@@ -42,6 +42,63 @@
 using namespace clang;
 using namespace CodeGen;
 
+void CodeGenFunction::EmitCaseConditionChain(
+    const Expr *Condition,
+    llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
+    JumpDest FailureDest) {
+  Condition = Condition->IgnoreParens();
+  if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
+    Condition = Constant->getSubExpr()->IgnoreParens();
+
+  if (const auto *And = dyn_cast<BinaryOperator>(Condition);
+      And && And->getOpcode() == BO_LAnd) {
+    EmitCaseConditionChain(
+        And->getLHS(),
+        [&](const MatchTestInstantiation *LeftInstantiation) {
+          EmitCaseConditionChain(
+              And->getRHS(),
+              [&](const MatchTestInstantiation *RightInstantiation) {
+                EmitSuccess(RightInstantiation ? RightInstantiation
+                                               : LeftInstantiation);
+              },
+              FailureDest);
+        },
+        FailureDest);
+    return;
+  }
+
+  if (const auto *Match = dyn_cast<MatchTestExpr>(Condition);
+      Match && isa<CaseConditionExpr>(Match)) {
+    EmitMatchTestDispatch(
+        *Match, FailureDest,
+        [&](const MatchTestInstantiation &Instantiation) {
+          if (Instantiation.Condition) {
+            EmitCaseConditionChain(
+                Instantiation.Condition,
+                [&](const MatchTestInstantiation *NestedInstantiation) {
+                  EmitSuccess(NestedInstantiation ? NestedInstantiation
+                                                  : &Instantiation);
+                },
+                FailureDest);
+          } else {
+            EmitSuccess(&Instantiation);
+          }
+        },
+        FailureDest, [] {});
+    return;
+  }
+
+  llvm::BasicBlock *Passed = createBasicBlock("case.condition.next");
+  llvm::BasicBlock *Failed = createBasicBlock("case.condition.failed");
+  EmitBranchOnBoolExpr(Condition, Passed, Failed, getProfileCount(Condition));
+
+  EmitBlock(Failed);
+  EmitBranchThroughCleanup(FailureDest);
+
+  EmitBlock(Passed);
+  EmitSuccess(nullptr);
+}
+
 //===----------------------------------------------------------------------===//
 //                              Statement Emission
 //===----------------------------------------------------------------------===//
@@ -924,6 +981,47 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
   if (S.getConditionVariable())
     EmitDecl(*S.getConditionVariable());
 
+  if (MatchTestExpr::isCaseConditionChain(S.getCond())) {
+    if (S.isConstexpr()) {
+      bool CondConstant;
+      if (!ConstantFoldsToSimpleInteger(S.getCond(), CondConstant,
+                                        /*AllowLabels=*/true))
+        llvm_unreachable("constexpr case condition chain is not constant");
+      if (!CondConstant) {
+        PGO->markStmtMaybeUsed(S.getThen());
+        if (Else) {
+          RunCleanupsScope ElseScope(*this);
+          EmitStmt(Else);
+        }
+        return;
+      }
+    }
+
+    JumpDest Cont = getJumpDestInCurrentScope("if.end");
+    JumpDest Failed = Else ? getJumpDestInCurrentScope("if.else") : Cont;
+    EmitCaseConditionChain(
+        S.getCond(),
+        [&](const MatchTestInstantiation *Instantiation) {
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation && Instantiation->Handler
+                       ? Instantiation->Handler
+                       : S.getThen());
+          if (HaveInsertPoint())
+            EmitBranchThroughCleanup(Cont);
+        },
+        Failed);
+
+    if (Else) {
+      EmitBlock(Failed.getBlock(), true);
+      RunCleanupsScope ElseScope(*this);
+      EmitStmt(Else);
+      if (HaveInsertPoint())
+        EmitBranchThroughCleanup(Cont);
+    }
+    EmitBlock(Cont.getBlock(), true);
+    return;
+  }
+
   if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {
     if (S.isConstexpr()) {
@@ -1134,6 +1232,41 @@ template <typename LoopStmt> static bool hasEmptyLoopBody(const LoopStmt &S) {
 
 void CodeGenFunction::EmitWhileStmt(const WhileStmt &S,
                                     ArrayRef<const Attr *> WhileAttrs) {
+  if (MatchTestExpr::isCaseConditionChain(S.getCond())) {
+    JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
+    EmitBlock(LoopHeader.getBlock());
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.push_back(
+          emitConvergenceLoopToken(LoopHeader.getBlock()));
+    JumpDest LoopExit = getJumpDestInCurrentScope("while.end");
+    BreakContinueStack.push_back(BreakContinue(S, LoopExit, LoopHeader));
+
+    const SourceRange &R = S.getSourceRange();
+    LoopStack.push(LoopHeader.getBlock(), CGM.getContext(),
+                   CGM.getCodeGenOpts(), WhileAttrs,
+                   SourceLocToDebugLoc(R.getBegin()),
+                   SourceLocToDebugLoc(R.getEnd()),
+                   checkIfLoopMustProgress(S.getCond(), hasEmptyLoopBody(S)));
+    EmitCaseConditionChain(
+        S.getCond(),
+        [&](const MatchTestInstantiation *Instantiation) {
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation && Instantiation->Handler
+                       ? Instantiation->Handler
+                       : S.getBody());
+          if (HaveInsertPoint())
+            EmitBranchThroughCleanup(LoopHeader);
+        },
+        LoopExit);
+
+    BreakContinueStack.pop_back();
+    LoopStack.pop();
+    EmitBlock(LoopExit.getBlock(), true);
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.pop_back();
+    return;
+  }
+
   if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {
     JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
@@ -1377,6 +1510,49 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   // Evaluate the first part before the loop.
   if (S.getInit())
     EmitStmt(S.getInit());
+
+  if (MatchTestExpr::isCaseConditionChain(S.getCond())) {
+    JumpDest CondDest = getJumpDestInCurrentScope("for.cond");
+    EmitBlock(CondDest.getBlock());
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.push_back(
+          emitConvergenceLoopToken(CondDest.getBlock()));
+    const SourceRange &R = S.getSourceRange();
+    LoopStack.push(CondDest.getBlock(), CGM.getContext(), CGM.getCodeGenOpts(),
+                   ForAttrs, SourceLocToDebugLoc(R.getBegin()),
+                   SourceLocToDebugLoc(R.getEnd()),
+                   checkIfLoopMustProgress(S.getCond(), hasEmptyLoopBody(S)));
+    BreakContinueStack.push_back(BreakContinue(S, LoopExit, CondDest));
+
+    EmitCaseConditionChain(
+        S.getCond(),
+        [&](const MatchTestInstantiation *Instantiation) {
+          JumpDest Increment = getJumpDestInCurrentScope("for.case.increment");
+          BreakContinueStack.back().ContinueBlock = Increment;
+          incrementProfileCounter(UseExecPath, &S);
+          EmitStmt(Instantiation && Instantiation->Handler
+                       ? Instantiation->Handler
+                       : S.getBody());
+          EmitBlock(Increment.getBlock());
+          if (const Expr *Inc = Instantiation && Instantiation->Increment
+                                    ? Instantiation->Increment
+                                    : S.getInc())
+            EmitStmt(Inc);
+          BreakContinueStack.back().ContinueBlock = CondDest;
+          if (HaveInsertPoint())
+            EmitBranchThroughCleanup(CondDest);
+        },
+        LoopExit);
+
+    BreakContinueStack.pop_back();
+    if (ForScope)
+      ForScope->ForceCleanup();
+    LoopStack.pop();
+    EmitBlock(LoopExit.getBlock(), true);
+    if (CGM.shouldEmitConvergenceTokens())
+      ConvergenceTokenStack.pop_back();
+    return;
+  }
 
   if (auto *Match = MatchTestExpr::findInCondition(S.getCond());
       Match && Match->hasConditionInstantiations()) {

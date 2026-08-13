@@ -99,6 +99,179 @@ struct Pair {
   int second;
 };
 
+namespace std {
+template<class T>
+struct alternative_traits;
+}
+
+struct Choice {
+  unsigned active;
+  int integer;
+  double real;
+};
+
+template<>
+struct std::alternative_traits<Choice> {
+  static constexpr __SIZE_TYPE__ size = 2;
+
+  static constexpr __SIZE_TYPE__ index(const Choice& value) noexcept {
+    return value.active;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& value) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(value).integer);
+    else
+      return (static_cast<Self&&>(value).real);
+  }
+};
+
+template<class V, class W>
+constexpr int projected_condition_chain(V first, W second) {
+  if (true && case { auto value } = first && value > 0 &&
+      case { auto other } = second && other > value)
+    return static_cast<int>(value + other);
+  return -1;
+}
+
+static_assert(projected_condition_chain(Choice{0, 2, 0.0},
+                                        Choice{1, 0, 3.0}) == 5);
+static_assert(projected_condition_chain(Choice{0, 3, 0.0},
+                                        Choice{1, 0, 2.0}) == -1);
+
+struct ContextuallyBoolean {
+  constexpr explicit operator bool() const { return true; }
+};
+
+constexpr bool operator&&(ContextuallyBoolean, bool) { return false; }
+
+template<class T>
+constexpr bool condition_chain_uses_builtin_and(T value) {
+  if (value && case int projected = 42)
+    return projected == 42;
+  return false;
+}
+
+static_assert(condition_chain_uses_builtin_and(ContextuallyBoolean{}));
+
+struct PrefixBoolean {
+  bool value;
+  constexpr explicit operator bool() const { return value; }
+};
+
+constexpr PrefixBoolean operator&&(PrefixBoolean, PrefixBoolean) {
+  return {false};
+}
+
+constexpr bool condition_chain_preserves_prefix_overload() {
+  if (PrefixBoolean{true} && PrefixBoolean{true} && case int projected = 42)
+    return projected == 42;
+  return false;
+}
+
+static_assert(!condition_chain_preserves_prefix_overload());
+
+constexpr int condition_chain_short_circuits() {
+  int evaluations = 0;
+  auto next = [&](int value) {
+    ++evaluations;
+    return value;
+  };
+
+  if (next(0) && case int value = next(1))
+    return value;
+  if (case 0 = next(1) && next(2))
+    return -1;
+  return evaluations;
+}
+
+static_assert(condition_chain_short_circuits() == 2);
+
+struct LifetimeProbe {
+  int* alive;
+  int* copies;
+  bool is_copy;
+
+  constexpr LifetimeProbe(int* alive, int* copies)
+      : alive(alive), copies(copies), is_copy(false) {
+    ++*alive;
+  }
+  constexpr LifetimeProbe(const LifetimeProbe& other)
+      : alive(other.alive), copies(other.copies), is_copy(true) {
+    ++*alive;
+    ++*copies;
+  }
+  constexpr ~LifetimeProbe() {
+    --*alive;
+    if (is_copy)
+      --*copies;
+  }
+};
+
+constexpr int condition_chain_cleans_failed_bindings_before_else() {
+  int alive = 0;
+  int copies = 0;
+  int observed = -1;
+  if (case LifetimeProbe copy = LifetimeProbe(&alive, &copies) && false)
+    observed = 100;
+  else
+    observed = alive * 10 + copies;
+  return observed;
+}
+
+// The failed binding is gone, while the hidden subject holder extends the
+// temporary subject through the entire if statement.
+static_assert(condition_chain_cleans_failed_bindings_before_else() == 10);
+
+constexpr int condition_chain_keeps_bindings_alive() {
+  int alive = 0;
+  int copies = 0;
+  if (case LifetimeProbe copy = LifetimeProbe(&alive, &copies) &&
+      case int observed_copies = copies && observed_copies == 1)
+    return alive * 10 + copies;
+  return -1;
+}
+
+static_assert(condition_chain_keeps_bindings_alive() == 21);
+
+template<class V>
+constexpr int dependent_constexpr_projected_condition() {
+  constexpr V value{0, 42, 0.0};
+  if constexpr (case { auto projected } = value && projected == 42)
+    return static_cast<int>(projected);
+  else
+    return -1;
+}
+
+static_assert(dependent_constexpr_projected_condition<Choice>() == 42);
+
+template<class V>
+constexpr int dependent_constexpr_projected_condition_false() {
+  constexpr V value{1, 42, 0.0};
+  if constexpr (case { auto projected } = value && projected == 42) {
+    static_assert(sizeof(V) == 0);
+    return static_cast<int>(projected);
+  } else {
+    return -1;
+  }
+}
+
+static_assert(dependent_constexpr_projected_condition_false<Choice>() == -1);
+
+constexpr int projected_condition_loops(Choice value) {
+  int result = 0;
+  while (case { auto projected } = value && projected > 0 && result < 2)
+    ++result;
+  for (int count = 0;
+       case { auto projected } = value && projected > 0 && count < 2;
+       ++count)
+    result += static_cast<int>(projected);
+  return result;
+}
+
+static_assert(projected_condition_loops(Choice{0, 2, 0.0}) == 6);
+
 int refutable_decomposition_condition(Pair value) {
   if (case [int first, 0] = value)
     return first;

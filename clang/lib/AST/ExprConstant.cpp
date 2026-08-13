@@ -5986,7 +5986,11 @@ static bool EvaluateCond(EvalInfo &Info, const VarDecl *CondDecl,
   FullExpressionRAII Scope(Info);
   if (CondDecl && !EvaluateDecl(Info, CondDecl))
     return false;
-  if (!EvaluateAsBooleanCondition(Cond, Result, Info))
+  const Expr *EvaluatedCond = Cond;
+  if (const auto *Constant = dyn_cast<ConstantExpr>(Cond->IgnoreParens());
+      Constant && MatchTestExpr::containsCaseCondition(Constant->getSubExpr()))
+    EvaluatedCond = Constant->getSubExpr();
+  if (!EvaluateAsBooleanCondition(EvaluatedCond, Result, Info))
     return false;
   if (!MaybeEvaluateDeferredVarDeclInit(Info, CondDecl))
     return false;
@@ -6095,15 +6099,49 @@ static EvalStmtResult EvaluateLoopBody(StmtResult &Result, EvalInfo &Info,
   return ESR;
 }
 
-/// Select and evaluate one semantic instantiation of a match-test condition.
-/// Pattern declarations remain alive through the selected controlled statement
-/// and, for a for-loop, its increment.
-static EvalStmtResult
-EvaluateMatchTestCondition(StmtResult &Result, EvalInfo &Info,
-                           const MatchTestExpr *Match, bool IsLoop,
-                           bool EvaluateIncrement, bool &Matched) {
-  Matched = false;
-  FullExpressionRAII ConditionScope(Info);
+/// Evaluate a case-condition chain and invoke \p OnSuccess while all pattern
+/// scopes selected along the chain are still active.
+static EvalStmtResult EvaluateCaseConditionChain(
+    EvalInfo &Info, const Expr *Condition,
+    llvm::function_ref<EvalStmtResult(const MatchTestInstantiation *)>
+        OnSuccess,
+    bool &Matched) {
+  Condition = Condition->IgnoreParens();
+  if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
+    Condition = Constant->getSubExpr()->IgnoreParens();
+
+  if (const auto *And = dyn_cast<BinaryOperator>(Condition);
+      And && And->getOpcode() == BO_LAnd) {
+    bool LeftMatched = false;
+    EvalStmtResult ESR = EvaluateCaseConditionChain(
+        Info, And->getLHS(),
+        [&](const MatchTestInstantiation *LeftInstantiation) {
+          bool RightMatched = false;
+          EvalStmtResult RightESR = EvaluateCaseConditionChain(
+              Info, And->getRHS(),
+              [&](const MatchTestInstantiation *RightInstantiation) {
+                return OnSuccess(RightInstantiation ? RightInstantiation
+                                                    : LeftInstantiation);
+              },
+              RightMatched);
+          Matched = RightMatched;
+          return RightESR;
+        },
+        LeftMatched);
+    if (!LeftMatched)
+      Matched = false;
+    return ESR;
+  }
+
+  const auto *Match = dyn_cast<MatchTestExpr>(Condition);
+  if (!Match) {
+    bool ConditionValue;
+    if (!EvaluateAsBooleanCondition(Condition, ConditionValue, Info))
+      return ESR_Failed;
+    Matched = ConditionValue;
+    return ConditionValue ? OnSuccess(nullptr) : ESR_Succeeded;
+  }
+
   if (const VarDecl *HoldingVar = Match->getHoldingVar()) {
     if (!EvaluateDecl(Info, HoldingVar))
       return ESR_Failed;
@@ -6113,11 +6151,11 @@ EvaluateMatchTestCondition(StmtResult &Result, EvalInfo &Info,
   }
 
   MatchProjectionEvaluationCache ProjectionCache;
-  auto EvaluateInstantiation =
+  auto EvaluateCandidate =
       [&](const MatchPattern *Pattern,
           const MatchPatternInstantiation *PatternInstantiation,
-          const MatchGuard &Guard, const Stmt *Handler,
-          const Expr *Increment) -> std::optional<EvalStmtResult> {
+          const MatchGuard &Guard, const MatchTestInstantiation *Instantiation)
+      -> std::optional<EvalStmtResult> {
     bool PatternMatched;
     if (!EvaluateMatchPattern(Pattern, PatternInstantiation, PatternMatched,
                               Info, &ProjectionCache))
@@ -6142,38 +6180,93 @@ EvaluateMatchTestCondition(StmtResult &Result, EvalInfo &Info,
                       PatternMatched))
       return ESR_Failed;
 
-    if (!PatternMatched) {
-      if (!CaseScope.destroy())
-        return ESR_Failed;
-      return std::nullopt;
+    EvalStmtResult ESR = ESR_Succeeded;
+    bool CandidateMatched = false;
+    if (PatternMatched && Instantiation && Instantiation->Condition) {
+      ESR = EvaluateCaseConditionChain(
+          Info, Instantiation->Condition,
+          [&](const MatchTestInstantiation *NestedInstantiation) {
+            return OnSuccess(NestedInstantiation ? NestedInstantiation
+                                                 : Instantiation);
+          },
+          CandidateMatched);
+    } else if (PatternMatched &&
+               !(Instantiation && Match->hasSemanticInstantiations() &&
+                 !Instantiation->Handler)) {
+      CandidateMatched = true;
+      ESR = OnSuccess(Instantiation);
     }
 
-    Matched = true;
-    if (!ConditionScope.destroy())
-      return ESR_Failed;
-    assert(Handler && "condition instantiation requires a handler");
-    EvalStmtResult ESR = IsLoop ? EvaluateLoopBody(Result, Info, Handler)
-                                : EvaluateStmt(Result, Info, Handler);
-    if (EvaluateIncrement && (ESR == ESR_Succeeded || ESR == ESR_Continue) &&
-        Increment) {
-      FullExpressionRAII IncScope(Info);
-      if (!EvaluateIgnoredValue(Info, Increment) || !IncScope.destroy())
-        ESR = ESR_Failed;
-    }
     if (ESR != ESR_Failed && !CaseScope.destroy())
       ESR = ESR_Failed;
-    return ESR;
+    Matched = CandidateMatched;
+    if (ESR != ESR_Succeeded || CandidateMatched)
+      return ESR;
+    return std::nullopt;
   };
 
-  for (const MatchTestInstantiation &Instantiation :
-       Match->getInstantiations()) {
-    std::optional<EvalStmtResult> ESR = EvaluateInstantiation(
-        Instantiation.Pattern, Instantiation.PatternInstantiation,
-        Instantiation.Guard, Instantiation.Handler, Instantiation.Increment);
+  if (!Match->getInstantiations().empty()) {
+    for (const MatchTestInstantiation &Instantiation :
+         Match->getInstantiations()) {
+      std::optional<EvalStmtResult> ESR = EvaluateCandidate(
+          Instantiation.Pattern, Instantiation.PatternInstantiation,
+          Instantiation.Guard, &Instantiation);
+      if (ESR)
+        return *ESR;
+    }
+  } else if (!Match->hasSemanticInstantiations()) {
+    std::optional<EvalStmtResult> ESR =
+        EvaluateCandidate(Match->getPattern(), Match->getPatternInstantiation(),
+                          Match->getGuard(), nullptr);
     if (ESR)
       return *ESR;
   }
-  return ConditionScope.destroy() ? ESR_Succeeded : ESR_Failed;
+
+  Matched = false;
+  return ESR_Succeeded;
+}
+
+/// Select and evaluate one semantic instantiation of a match-test condition.
+/// Pattern declarations remain alive through the selected controlled statement
+/// and, for a for-loop, its increment.
+static EvalStmtResult
+EvaluateMatchTestCondition(StmtResult &Result, EvalInfo &Info,
+                           const Expr *Condition, const Stmt *DefaultHandler,
+                           const Expr *DefaultIncrement, bool IsLoop,
+                           bool EvaluateIncrement, bool &Matched) {
+  FullExpressionRAII ConditionScope(Info);
+  bool ConditionScopeDestroyed = false;
+  EvalStmtResult ESR = EvaluateCaseConditionChain(
+      Info, Condition,
+      [&](const MatchTestInstantiation *Instantiation) {
+        Matched = true;
+        if (!ConditionScope.destroy())
+          return ESR_Failed;
+        ConditionScopeDestroyed = true;
+
+        const Stmt *Handler = Instantiation && Instantiation->Handler
+                                  ? Instantiation->Handler
+                                  : DefaultHandler;
+        const Expr *Increment = Instantiation && Instantiation->Increment
+                                    ? Instantiation->Increment
+                                    : DefaultIncrement;
+        assert(Handler && "matched condition requires a handler");
+        EvalStmtResult HandlerResult =
+            IsLoop ? EvaluateLoopBody(Result, Info, Handler)
+                   : EvaluateStmt(Result, Info, Handler);
+        if (EvaluateIncrement &&
+            (HandlerResult == ESR_Succeeded || HandlerResult == ESR_Continue) &&
+            Increment) {
+          FullExpressionRAII IncScope(Info);
+          if (!EvaluateIgnoredValue(Info, Increment) || !IncScope.destroy())
+            HandlerResult = ESR_Failed;
+        }
+        return HandlerResult;
+      },
+      Matched);
+  if (!ConditionScopeDestroyed && !ConditionScope.destroy())
+    return ESR_Failed;
+  return ESR;
 }
 
 /// Evaluate a switch statement.
@@ -6521,11 +6614,13 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
       }
     }
     if (const auto *Match = MatchTestExpr::findInCondition(IS->getCond());
-        Match && Match->hasConditionInstantiations()) {
+        MatchTestExpr::containsCaseCondition(IS->getCond()) ||
+        (Match && Match->hasConditionInstantiations())) {
       bool Matched;
-      EvalStmtResult ESR =
-          EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/false,
-                                     /*EvaluateIncrement=*/false, Matched);
+      EvalStmtResult ESR = EvaluateMatchTestCondition(
+          Result, Info, IS->getCond(), IS->getThen(),
+          /*DefaultIncrement=*/nullptr, /*IsLoop=*/false,
+          /*EvaluateIncrement=*/false, Matched);
       if (ESR != ESR_Succeeded) {
         if (ESR != ESR_Failed && !Scope.destroy())
           return ESR_Failed;
@@ -6569,11 +6664,13 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
     while (true) {
       BlockScopeRAII Scope(Info);
       if (const auto *Match = MatchTestExpr::findInCondition(WS->getCond());
-          Match && Match->hasConditionInstantiations()) {
+          MatchTestExpr::containsCaseCondition(WS->getCond()) ||
+          (Match && Match->hasConditionInstantiations())) {
         bool Matched;
-        EvalStmtResult ESR =
-            EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/true,
-                                       /*EvaluateIncrement=*/false, Matched);
+        EvalStmtResult ESR = EvaluateMatchTestCondition(
+            Result, Info, WS->getCond(), WS->getBody(),
+            /*DefaultIncrement=*/nullptr, /*IsLoop=*/true,
+            /*EvaluateIncrement=*/false, Matched);
         if (!Matched) {
           if (!Scope.destroy())
             return ESR_Failed;
@@ -6651,11 +6748,12 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
     while (true) {
       BlockScopeRAII IterScope(Info);
       if (const auto *Match = MatchTestExpr::findInCondition(FS->getCond());
-          Match && Match->hasConditionInstantiations()) {
+          MatchTestExpr::containsCaseCondition(FS->getCond()) ||
+          (Match && Match->hasConditionInstantiations())) {
         bool Matched;
-        EvalStmtResult ESR =
-            EvaluateMatchTestCondition(Result, Info, Match, /*IsLoop=*/true,
-                                       /*EvaluateIncrement=*/true, Matched);
+        EvalStmtResult ESR = EvaluateMatchTestCondition(
+            Result, Info, FS->getCond(), FS->getBody(), FS->getInc(),
+            /*IsLoop=*/true, /*EvaluateIncrement=*/true, Matched);
         if (!Matched) {
           if (!IterScope.destroy())
             return ESR_Failed;
@@ -20389,6 +20487,16 @@ bool IntExprEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
       return false;
   }
 
+  // A pattern-first condition can introduce declarations used by later
+  // operands. When a condition is checked outside an evaluated function call,
+  // keep one synthetic frame alive for the entire short-circuit chain rather
+  // than creating and destroying one for each CaseConditionExpr.
+  std::optional<CallStackFrame> CaseConditionFrame;
+  if (MatchTestExpr::containsCaseCondition(E) &&
+      Info.CurrentCall == &Info.BottomFrame)
+    CaseConditionFrame.emplace(Info, E->getSourceRange(), /*Callee=*/nullptr,
+                               /*This=*/nullptr, /*CallExpr=*/E, CallRef());
+
   if (DataRecursiveIntBinOpEvaluator::shouldEnqueue(E))
     return DataRecursiveIntBinOpEvaluator(*this, Result).Traverse(E);
 
@@ -21241,11 +21349,15 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
     SyntheticFrame.emplace(Info, E->getSourceRange(), /*Callee=*/nullptr,
                            /*This=*/nullptr, /*CallExpr=*/E, CallRef());
 
-  std::optional<BlockScopeRAII> MatchScope;
-  if (!E->usesCaseConditionSyntax())
-    MatchScope.emplace(Info);
+  BlockScopeRAII MatchScope(Info);
   auto Finish = [&](bool Success) {
-    return Success && (!MatchScope || MatchScope->destroy());
+    if (!Success)
+      return false;
+    if (isa<CaseConditionExpr>(E)) {
+      MatchScope.extendToFullExpression();
+      return true;
+    }
+    return MatchScope.destroy();
   };
 
   if (E->hasSemanticInstantiations() && E->getInstantiations().empty()) {
@@ -21281,7 +21393,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
               Instantiation.Pattern, Instantiation.PatternInstantiation, Info,
               ProjectionCache))
         return false;
-      BlockScopeRAII Scope(Info);
+      std::optional<BlockScopeRAII> Scope;
+      if (!isa<CaseConditionExpr>(E))
+        Scope.emplace(Info);
       if (Result &&
           !EvaluatePatternDeclarations(
               Instantiation.Pattern, Instantiation.PatternInstantiation, Info))
@@ -21297,7 +21411,14 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
           !EvaluateCond(Info, Instantiation.Guard.ConditionVariable,
                         Instantiation.Guard.Condition, Result))
         return false;
-      if (!Scope.destroy())
+      if (Result && Instantiation.Condition) {
+        bool ContinuationMatched;
+        if (!EvaluateAsBooleanCondition(Instantiation.Condition,
+                                        ContinuationMatched, Info))
+          return false;
+        Result = ContinuationMatched;
+      }
+      if (Scope && !Scope->destroy())
         return false;
       if (Result)
         return Finish(Success(true, E));
@@ -21339,7 +21460,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
     }
     return Finish(Success(Result, E));
   } else {
-    BlockScopeRAII Scope(Info);
+    std::optional<BlockScopeRAII> Scope;
+    if (!isa<CaseConditionExpr>(E))
+      Scope.emplace(Info);
     if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
                               Result, Info, &ProjectionCache))
       return false;
@@ -21361,7 +21484,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                         E->getGuard().Condition, Result))
         return false;
     }
-    if (!Scope.destroy())
+    if (Scope && !Scope->destroy())
       return false;
     return Finish(Success(Result, E));
   }

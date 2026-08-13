@@ -5571,6 +5571,7 @@ struct MatchTestInstantiation {
   MatchGuard Guard;
   MatchPatternInstantiation *PatternInstantiation;
   bool PatternIsIrrefutable = false;
+  Expr *Condition = nullptr;
   Stmt *Handler = nullptr;
   Expr *Increment = nullptr;
 };
@@ -5676,13 +5677,15 @@ public:
     });
   }
 
+  bool hasConditionContinuations() const {
+    return llvm::any_of(Instantiations, [](const auto &Instantiation) {
+      return Instantiation.Condition != nullptr;
+    });
+  }
+
   bool isPatternIrrefutable() const { return PatternIsIrrefutable; }
 
   bool needsCaseInstantiation() const { return NeedsCaseInstantiation; }
-
-  bool usesCaseConditionSyntax() const {
-    return getStmtClass() == CaseConditionExprClass;
-  }
 
   static MatchTestExpr *findInCondition(Expr *Condition) {
     if (!Condition)
@@ -5691,6 +5694,61 @@ public:
     if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
       Condition = Constant->getSubExpr()->IgnoreParens();
     return dyn_cast<MatchTestExpr>(Condition);
+  }
+
+  static bool containsCaseCondition(const Expr *Condition) {
+    if (!Condition)
+      return false;
+    Condition = Condition->IgnoreParens();
+    if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
+      Condition = Constant->getSubExpr()->IgnoreParens();
+    if (const auto *Match = dyn_cast<MatchTestExpr>(Condition))
+      return Match->getStmtClass() == CaseConditionExprClass;
+    if (const auto *Binary = dyn_cast<BinaryOperator>(Condition);
+        Binary && Binary->getOpcode() == BO_LAnd)
+      return containsCaseCondition(Binary->getLHS()) ||
+             containsCaseCondition(Binary->getRHS());
+    return false;
+  }
+
+  static bool isCaseConditionChain(const Expr *Condition) {
+    if (!Condition)
+      return false;
+    Condition = Condition->IgnoreParens();
+    if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
+      Condition = Constant->getSubExpr()->IgnoreParens();
+    if (const auto *Match = dyn_cast<MatchTestExpr>(Condition))
+      return Match->hasConditionContinuations();
+    const auto *Binary = dyn_cast<BinaryOperator>(Condition);
+    return Binary && Binary->getOpcode() == BO_LAnd &&
+           containsCaseCondition(Binary);
+  }
+
+  static MatchTestExpr *
+  findCaseConditionRequiringInstantiation(Expr *Condition) {
+    if (!Condition)
+      return nullptr;
+    Condition = Condition->IgnoreParens();
+    if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
+      Condition = Constant->getSubExpr()->IgnoreParens();
+    if (auto *Match = dyn_cast<MatchTestExpr>(Condition);
+        Match && Match->getStmtClass() == CaseConditionExprClass &&
+        (Match->needsCaseInstantiation() || Match->isInstantiationDependent()))
+      return Match;
+    if (auto *Binary = dyn_cast<BinaryOperator>(Condition);
+        Binary && Binary->getOpcode() == BO_LAnd) {
+      if (auto *Match =
+              findCaseConditionRequiringInstantiation(Binary->getLHS()))
+        return Match;
+      return findCaseConditionRequiringInstantiation(Binary->getRHS());
+    }
+    return nullptr;
+  }
+
+  static const MatchTestExpr *
+  findCaseConditionRequiringInstantiation(const Expr *Condition) {
+    return findCaseConditionRequiringInstantiation(
+        const_cast<Expr *>(Condition));
   }
   static const MatchTestExpr *findInCondition(const Expr *Condition) {
     return findInCondition(const_cast<Expr *>(Condition));

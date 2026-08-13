@@ -2071,11 +2071,24 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
 
     if (getLangOpts().PatternMatching && Tok.is(tok::kw_case) &&
         (CK != Sema::ConditionKind::Switch || InitStmt))
-      return ParseCaseCondition(InitStmt, Loc, CK, MissingOK, InjectedDecls,
-                                FRI);
+      return ParseCaseConditionChain(InitStmt, Loc, CK, MissingOK,
+                                     InjectedDecls, FRI);
 
-    ExprResult Expr =
-        ParseExpression(TypoCorrectionTypeBehavior::AllowNonTypes);
+    std::optional<CaseConditionParseState> CaseState;
+    if (getLangOpts().PatternMatching)
+      CaseState.emplace(CaseConditionParseState{InitStmt, Loc, CK, MissingOK});
+    ExprResult Expr = ParseExpression(TypoCorrectionTypeBehavior::AllowNonTypes,
+                                      /*InjectedDecls=*/nullptr,
+                                      CaseState ? &*CaseState : nullptr);
+
+    if (CaseState && !CaseState->Decls.empty() && InjectedDecls) {
+      for (Decl *D : CaseState->Decls) {
+        getCurScope()->RemoveDecl(D);
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.IdResolver.RemoveDecl(ND);
+        InjectedDecls->insert(D);
+      }
+    }
 
     if (Expr.isInvalid())
       return Sema::ConditionError();
@@ -3956,10 +3969,14 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
       getCurScope()->RemoveDecl(D);
     RestorePatternDecls.release();
     MatchTestScope.Exit();
-    Scope *S = getCurScope();
-    for (Decl *D : Decls)
-      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
-        Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
+    if (InjectedDecls) {
+      *InjectedDecls = Decls;
+    } else {
+      Scope *S = getCurScope();
+      for (Decl *D : Decls)
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
+    }
     return {};
   }
 
@@ -3973,7 +3990,9 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   if (ExpectAndConsume(tok::equal, diag::err_expected_after, "pattern"))
     return Sema::ConditionError();
 
-  ExprResult Subject = ParseAssignmentExpression();
+  ExprResult Subject = ParseCastExpression(CastParseKind::AnyCastExpr);
+  if (!Subject.isInvalid())
+    Subject = ParseRHSOfBinaryExpression(Subject, prec::InclusiveOr);
   if (Subject.isInvalid())
     return Sema::ConditionError();
   if (Actions.CheckMatchSubjectBindingReferences(Subject.get(), Pattern))
@@ -4044,12 +4063,114 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
     return Sema::ConditionError();
   }
 
-  Sema::ConditionKind InitialCK =
-      NeedsCaseInstantiation && CK == Sema::ConditionKind::ConstexprIf
-          ? Sema::ConditionKind::Boolean
-          : CK;
-  return Actions.ActOnCondition(getCurScope(), Loc, Result.get(), InitialCK,
+  return Actions.ActOnCondition(getCurScope(), Loc, Result.get(),
+                                Sema::ConditionKind::Boolean,
                                 /*MissingOK=*/false);
+}
+
+ExprResult Parser::ParseCaseConditionOperand(CaseConditionParseState &State) {
+  InjectedDeclSet ElementDecls;
+  Sema::ConditionResult Parsed =
+      ParseCaseCondition(State.InitStmt, State.StatementLoc,
+                         State.ConditionKind, State.MissingOK, &ElementDecls);
+  if (Parsed.isInvalid())
+    return ExprError();
+
+  for (Decl *D : ElementDecls) {
+    State.Decls.insert(D);
+    if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+      Actions.PushOnScopeChains(ND, getCurScope(), /*AddToContext=*/false);
+  }
+  return Parsed.get().second;
+}
+
+Sema::ConditionResult Parser::ParseCaseConditionChain(
+    StmtResult *InitStmt, SourceLocation Loc, Sema::ConditionKind CK,
+    bool MissingOK, InjectedDeclSet *InjectedDecls, ForRangeInfo *FRI) {
+  ParseScope ChainScope(this, Scope::DeclScope);
+  ExprResult Condition;
+  SourceLocation AndLoc;
+
+  while (true) {
+    ExprResult Element;
+    if (Tok.is(tok::kw_case)) {
+      InjectedDeclSet ElementDecls;
+      Sema::ConditionResult Parsed =
+          ParseCaseCondition(InitStmt, Loc, CK, MissingOK, &ElementDecls, FRI);
+      if (Parsed.isInvalid())
+        return Sema::ConditionError();
+      if (FRI && FRI->Pattern) {
+        ChainScope.Exit();
+        if (InjectedDecls) {
+          *InjectedDecls = ElementDecls;
+        } else {
+          Scope *S = getCurScope();
+          for (Decl *D : ElementDecls)
+            if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+              Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
+        }
+        return Parsed;
+      }
+      Element = Parsed.get().second;
+      for (Decl *D : ElementDecls)
+        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+          Actions.PushOnScopeChains(ND, getCurScope(),
+                                    /*AddToContext=*/false);
+    } else {
+      Element = ParseCastExpression(CastParseKind::AnyCastExpr);
+      if (!Element.isInvalid())
+        Element = ParseRHSOfBinaryExpression(Element, prec::InclusiveOr);
+      if (Element.isInvalid())
+        return Sema::ConditionError();
+      if (!Element.get()->getType()->isDependentType()) {
+        Element = Actions.PerformContextuallyConvertToBool(Element.get());
+        if (Element.isInvalid())
+          return Sema::ConditionError();
+      }
+    }
+
+    if (Condition.isUnset()) {
+      Condition = Element;
+    } else {
+      Condition =
+          Actions.BuildCaseConditionAnd(AndLoc, Condition.get(), Element.get());
+      if (Condition.isInvalid())
+        return Sema::ConditionError();
+    }
+
+    if (!TryConsumeToken(tok::ampamp, AndLoc))
+      break;
+  }
+
+  Scope::decl_range DR = getCurScope()->decls();
+  InjectedDeclSet Decls = {DR.begin(), DR.end()};
+  for (Decl *D : Decls) {
+    getCurScope()->RemoveDecl(D);
+    if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+      Actions.IdResolver.RemoveDecl(ND);
+  }
+  ChainScope.Exit();
+
+  if (InjectedDecls) {
+    *InjectedDecls = Decls;
+  } else {
+    Scope *S = getCurScope();
+    for (Decl *D : Decls)
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.PushOnScopeChains(ND, S, /*AddToContext=*/false);
+  }
+
+  if (CK == Sema::ConditionKind::Switch) {
+    Diag(Loc, diag::err_case_switch_condition);
+    return Sema::ConditionError();
+  }
+
+  Sema::ConditionKind EffectiveCK = CK;
+  if (CK == Sema::ConditionKind::ConstexprIf &&
+      MatchTestExpr::findCaseConditionRequiringInstantiation(Condition.get()))
+    EffectiveCK = Sema::ConditionKind::Boolean;
+  return Actions.ActOnCondition(getCurScope(), Loc, Condition.get(),
+                                EffectiveCK, MissingOK);
 }
 
 ExprResult Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI) {
@@ -4544,7 +4665,8 @@ Parser::ParseExpressionPattern(
     bool RHSIsInitList = false;
     prec::Level NextTokPrec;
     ExprResult Expr = ParseRHSExprOfBinaryExpression(
-        *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec);
+        *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec,
+        /*Decls=*/nullptr, /*CaseState=*/nullptr);
     assert(!RHSIsInitList &&
            "RHS of a match test expression cannot be an init list.");
     assert(NextTokPrec <= prec::Match &&

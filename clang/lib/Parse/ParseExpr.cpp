@@ -45,10 +45,13 @@
 #include <optional>
 using namespace clang;
 
-ExprResult Parser::ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior,
-                                   InjectedDeclSet *InjectedDecls) {
-  ExprResult LHS(ParseAssignmentExpression(CorrectionBehavior, InjectedDecls));
-  return ParseRHSOfBinaryExpression(LHS, prec::Comma, InjectedDecls);
+ExprResult
+Parser::ParseExpression(TypoCorrectionTypeBehavior CorrectionBehavior,
+                        InjectedDeclSet *InjectedDecls,
+                        CaseConditionParseState *CaseState) {
+  ExprResult LHS(
+      ParseAssignmentExpression(CorrectionBehavior, InjectedDecls, CaseState));
+  return ParseRHSOfBinaryExpression(LHS, prec::Comma, InjectedDecls, CaseState);
 }
 
 ExprResult
@@ -74,8 +77,10 @@ Parser::ParseExpressionWithLeadingExtension(SourceLocation ExtLoc) {
   return ParseRHSOfBinaryExpression(LHS, prec::Comma);
 }
 
-ExprResult Parser::ParseAssignmentExpression(
-    TypoCorrectionTypeBehavior CorrectionBehavior, InjectedDeclSet *Decls) {
+ExprResult
+Parser::ParseAssignmentExpression(TypoCorrectionTypeBehavior CorrectionBehavior,
+                                  InjectedDeclSet *Decls,
+                                  CaseConditionParseState *CaseState) {
   if (Tok.is(tok::code_completion)) {
     cutOffParsing();
     Actions.CodeCompletion().CodeCompleteExpression(
@@ -91,7 +96,7 @@ ExprResult Parser::ParseAssignmentExpression(
   ExprResult LHS =
       ParseCastExpression(CastParseKind::AnyCastExpr,
                           /*isAddressOfOperand=*/false, CorrectionBehavior);
-  return ParseRHSOfBinaryExpression(LHS, prec::Assignment, Decls);
+  return ParseRHSOfBinaryExpression(LHS, prec::Assignment, Decls, CaseState);
 }
 
 ExprResult Parser::ParseConditionalExpression() {
@@ -316,9 +321,10 @@ bool Parser::isFoldOperator(const Token &Tok) const {
                                            true, getLangOpts().PatternMatching));
 }
 
-ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
-                                              prec::Level MinPrec,
-                                              InjectedDeclSet *Decls) {
+ExprResult
+Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
+                                   InjectedDeclSet *Decls,
+                                   CaseConditionParseState *CaseState) {
   prec::Level NextTokPrec = getBinOpPrecedence(Tok,
                                                GreaterThanIsOperator,
                                                getLangOpts().CPlusPlus11,
@@ -333,6 +339,14 @@ ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
     // because we are called recursively, or because the token is not a binop),
     // then we are done!
     if (NextTokPrec < MinPrec)
+      return LHS;
+
+    // A case condition can only be combined at the top level with lazy &&.
+    // Leave a lower-precedence token for the enclosing condition parser to
+    // diagnose rather than absorbing it into the condition.
+    if (CaseState && !LHS.isInvalid() &&
+        MatchTestExpr::containsCaseCondition(LHS.get()) &&
+        NextTokPrec != prec::LogicalAnd)
       return LHS;
 
     // Consume the operator, saving the operator token for error reporting.
@@ -353,7 +367,7 @@ ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
         }
         UnconsumeToken(OpToken);
         PP.EnterToken(T, /*IsReinject=*/true);
-        return ParseRHSOfBinaryExpression(LHS, MinPrec);
+        return ParseRHSOfBinaryExpression(LHS, MinPrec, Decls, CaseState);
       }
     }
 
@@ -480,8 +494,9 @@ ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
     // the right of the RHS.
     prec::Level ThisPrec = NextTokPrec;
     bool RHSIsInitList = false;
-    ExprResult RHS = ParseRHSExprOfBinaryExpression(
-        LHS, &TernaryMiddle, RHSIsInitList, ThisPrec, NextTokPrec);
+    ExprResult RHS =
+        ParseRHSExprOfBinaryExpression(LHS, &TernaryMiddle, RHSIsInitList,
+                                       ThisPrec, NextTokPrec, Decls, CaseState);
 
     if (!RHS.isInvalid() && RHSIsInitList) {
       if (ThisPrec == prec::Assignment) {
@@ -516,9 +531,15 @@ ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
                          SourceRange(Actions.getExprRange(LHS.get()).getBegin(),
                                      Actions.getExprRange(RHS.get()).getEnd()));
 
-        ExprResult BinOp =
-            Actions.ActOnBinOp(getCurScope(), OpToken.getLocation(),
-                               OpToken.getKind(), LHS.get(), RHS.get());
+        ExprResult BinOp;
+        if (OpToken.is(tok::ampamp) &&
+            (MatchTestExpr::containsCaseCondition(LHS.get()) ||
+             MatchTestExpr::containsCaseCondition(RHS.get())))
+          BinOp = Actions.BuildCaseConditionAnd(OpToken.getLocation(),
+                                                LHS.get(), RHS.get());
+        else
+          BinOp = Actions.ActOnBinOp(getCurScope(), OpToken.getLocation(),
+                                     OpToken.getKind(), LHS.get(), RHS.get());
         if (BinOp.isInvalid())
           BinOp = Actions.CreateRecoveryExpr(LHS.get()->getBeginLoc(),
                                              RHS.get()->getEndLoc(),
@@ -546,11 +567,10 @@ ExprResult Parser::ParseRHSOfBinaryExpression(ExprResult LHS,
   }
 }
 
-ExprResult Parser::ParseRHSExprOfBinaryExpression(ExprResult &LHS,
-                                                  ExprResult *TernaryMiddle,
-                                                  bool &RHSIsInitList,
-                                                  prec::Level ThisPrec,
-                                                  prec::Level &NextTokPrec) {
+ExprResult Parser::ParseRHSExprOfBinaryExpression(
+    ExprResult &LHS, ExprResult *TernaryMiddle, bool &RHSIsInitList,
+    prec::Level ThisPrec, prec::Level &NextTokPrec, InjectedDeclSet *Decls,
+    CaseConditionParseState *CaseState) {
   // Parse another leaf here for the RHS of the operator.
   // ParseCastExpression works here because all RHS expressions in C have it
   // as a prefix, at least. However, in C++, an assignment-expression could
@@ -563,7 +583,9 @@ ExprResult Parser::ParseRHSExprOfBinaryExpression(ExprResult &LHS,
   // they only appear on the RHS of assignments later.
   ExprResult RHS;
   RHSIsInitList = false;
-  if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
+  if (CaseState && ThisPrec == prec::LogicalAnd && Tok.is(tok::kw_case)) {
+    RHS = ParseCaseConditionOperand(*CaseState);
+  } else if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
     RHS = ParseBraceInitializer();
     RHSIsInitList = true;
   } else if (getLangOpts().CPlusPlus && ThisPrec <= prec::Conditional)
@@ -598,8 +620,11 @@ ExprResult Parser::ParseRHSExprOfBinaryExpression(ExprResult &LHS,
     // is okay, to bind exactly as tightly. For example, compile A=B=C=D as
     // A=(B=(C=D)), where each paren is a level of recursion here.
     // The function takes ownership of the RHS.
+    CaseConditionParseState *NestedCaseState =
+        ThisPrec >= prec::LogicalAnd ? CaseState : nullptr;
     RHS = ParseRHSOfBinaryExpression(
-        RHS, static_cast<prec::Level>(ThisPrec + !IsRightAssoc));
+        RHS, static_cast<prec::Level>(ThisPrec + !IsRightAssoc), Decls,
+        NestedCaseState);
     RHSIsInitList = false;
 
     if (RHS.isInvalid() && Tok.isNot(tok::semi))
