@@ -83,3 +83,22 @@ int projected_guard(Choice& choice) {
   }
   return 0;
 }
+
+int projected_condition_chain(Choice& first, Choice& second) {
+  if (first.active < 2 && case { auto&& value } = first &&
+      classify(value) > 0 && case { auto&& other } = second &&
+      classify(other) > classify(value))
+    return classify(value) + classify(other);
+  return -1;
+}
+
+template<class V>
+int projected_constexpr_condition_chain() {
+  constexpr V value{0, 42, 0.0};
+  if constexpr (case { auto projected } = value && projected == 42)
+    return static_cast<int>(projected);
+  else
+    return -1;
+}
+
+template int projected_constexpr_condition_chain<Choice>();
