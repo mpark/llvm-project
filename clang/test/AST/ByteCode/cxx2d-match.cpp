@@ -710,6 +710,43 @@ constexpr int dependent_variant_arms_share_projection() {
 
 static_assert(dependent_variant_arms_share_projection() == 111);
 
+template <typename V>
+constexpr int dependent_variant_match_condition_return(V &&var) {
+  if (static_cast<V &&>(var) match case { auto &&value })
+    return sizeof(value);
+  return 0;
+}
+
+static_assert(dependent_variant_match_condition_return(Variant(0)) ==
+              sizeof(int));
+static_assert(dependent_variant_match_condition_return(Variant(0.0)) ==
+              sizeof(double));
+
+constexpr int variant_match_condition_break(const Variant &var) {
+  int count = 0;
+  while (++count != 4) {
+    if (var match case { int value } if (value == count))
+      break;
+  }
+  return count;
+}
+
+static_assert(variant_match_condition_break(Variant(2)) == 2);
+static_assert(variant_match_condition_break(Variant(0.0)) == 4);
+
+constexpr int variant_match_condition_continue(const Variant &var) {
+  int sum = 0;
+  for (int count = 0; count != 4; ++count) {
+    if (var match case { int value } if (value == count))
+      continue;
+    sum += count;
+  }
+  return sum;
+}
+
+static_assert(variant_match_condition_continue(Variant(2)) == 4);
+static_assert(variant_match_condition_continue(Variant(0.0)) == 6);
+
 struct PrvalueAlternative {
   int *destructions;
 };
