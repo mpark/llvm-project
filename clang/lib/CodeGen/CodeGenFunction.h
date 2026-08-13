@@ -5300,6 +5300,10 @@ public:
       const MatchTestExpr &S, JumpDest SuccessDest,
       llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
       JumpDest FailureDest, llvm::function_ref<void()> EmitFailure);
+  void EmitCaseConditionChain(
+      const Expr *Condition,
+      llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
+      JumpDest FailureDest);
   void EmitSelectedMatchTestInstantiation(
       const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
       llvm::function_ref<void()> EmitSuccess);

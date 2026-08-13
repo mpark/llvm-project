@@ -2781,8 +2781,19 @@ void CodeGenFunction::EmitMatchTestDispatch(
   else if (S.getSubject()->getType()->isVoidType())
     EmitIgnoredExpr(S.getSubject());
 
+  MatchTestInstantiation DirectInstantiation{
+      const_cast<MatchPattern *>(S.getPattern()),
+      S.getIfLoc(),
+      S.getGuard(),
+      const_cast<MatchPatternInstantiation *>(S.getPatternInstantiation()),
+      S.isPatternIrrefutable(),
+      nullptr,
+      nullptr,
+      nullptr,
+  };
   ArrayRef<MatchTestInstantiation> Instantiations = S.getInstantiations();
-  assert(!Instantiations.empty() && "semantic match-test dispatch required");
+  if (Instantiations.empty())
+    Instantiations = DirectInstantiation;
 
   for (auto [Index, Instantiation] : llvm::enumerate(Instantiations)) {
     llvm::BasicBlock *InitializePatternBB = createBasicBlock("match.test.init");
@@ -2856,8 +2867,7 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   }
 
   if (S.getInstantiations().empty()) {
-    bool NeedsCleanup =
-        !S.getHoldingVar() || !S.usesCaseConditionSyntax();
+    bool NeedsCleanup = !S.getHoldingVar() || !isa<CaseConditionExpr>(S);
     auto EmitTest = [&]() {
       if (S.getHoldingVar())
         EmitVarDecl(*S.getHoldingVar());

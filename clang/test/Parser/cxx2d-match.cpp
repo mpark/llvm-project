@@ -500,6 +500,41 @@ void test_case_condition(int value, const int (&pair)[2]) {
     first;
     second;
   }
+
+  if (value > 0 && case int copy = value && copy < 10) {
+    copy;
+  } else {
+    copy; // expected-error {{use of undeclared identifier 'copy'}}
+  }
+
+  if (case int first = value && case int second = first + 1 &&
+      second > first) {
+    first;
+    second;
+  }
+
+  while (value > 0 && case int copy = value && copy < 10) {
+    copy;
+    break;
+  }
+
+  for (int count = 0;
+       count < 1 && case int copy = value && copy < 10;
+       ++count, ++copy) {
+    copy;
+  }
+}
+
+void test_case_condition_subject_grammar(int lhs, int rhs) {
+  if (case int value = lhs | rhs && value > 0) {}
+  if (case auto value = (lhs || rhs) && value) {}
+  if (case int value = (lhs = rhs) && value > 0) {}
+  if (case int value = (lhs ? rhs : lhs) && value > 0) {}
+
+  if (case int value = lhs || rhs) {} // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  if (case int value = lhs = rhs) {} // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  if (case int value = lhs ? rhs : lhs) {} // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  if (lhs || rhs && case int value = lhs) {} // expected-error {{expected expression}}
 }
 
 void test_case_condition_is_direct_only(int value) {
