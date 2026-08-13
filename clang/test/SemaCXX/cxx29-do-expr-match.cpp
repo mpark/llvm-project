@@ -10,3 +10,6 @@ constexpr int match_handler_do_return(int value) {
     };
   };
 }
+
+static_assert(match_handler_do_return(0) == 42);
+static_assert(match_handler_do_return(1) == 7);
