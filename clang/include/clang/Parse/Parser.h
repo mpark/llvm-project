@@ -2025,6 +2025,7 @@ private:
       DeclSpec &DS, ImplicitTypenameContext AllowImplicitTypename,
       AccessSpecifier AS = AS_none,
       DeclSpecContext DSC = DeclSpecContext::DSC_normal);
+  void DiagnoseAndRemoveTypeNameDeclSpec(DeclSpec &DS, DeclSpecContext DSC);
 
   /// ParseEnumSpecifier
   /// \verbatim
@@ -4575,7 +4576,6 @@ private:
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *> ParseWildcardPattern();
   ActionResult<MatchPattern *> ParseDeclarationPattern();
-  ActionResult<MatchPattern *> ParseTypePattern();
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                          bool StopAtEqual,
@@ -9142,7 +9142,8 @@ public:
   /// \endverbatim
   ///
   TPResult TryParseInitDeclaratorList(bool MayHaveTrailingReturnType = false,
-                                      bool StopAfterFirstDeclarator = false);
+                                      bool StopAfterFirstDeclarator = false,
+                                      bool MayBeAbstract = false);
 
   /// \verbatim
   ///         declarator:
