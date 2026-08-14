@@ -3539,10 +3539,8 @@ static bool HandleLValueVectorElement(EvalInfo &Info, const Expr *E,
 }
 
 static bool isSyntheticDoExprDeclContext(const DeclContext *DC) {
-  const auto *FD = dyn_cast<FunctionDecl>(DC);
-  return FD && FD->isImplicit() && !FD->getIdentifier() &&
-         FD->getLexicalDeclContext() &&
-         FD->getLexicalDeclContext()->isFileContext();
+  return isDoExprBodyContext(
+      DC->getEnclosingNonExpansionStatementContext());
 }
 
 /// Try to evaluate the initializer for a variable declaration.
