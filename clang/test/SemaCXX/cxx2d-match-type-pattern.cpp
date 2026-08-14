@@ -21,6 +21,46 @@ bool incompatible_single_type_pattern(int value) {
 constexpr const int constant = 0;
 static_assert(constant match case int);
 static_assert(constant match case const int);
+static_assert(constant match case auto);
+static_assert(constant match case auto&&);
+
+template<class T>
+concept Integral = __is_integral(T);
+
+template<class T>
+concept LvalueReference = __is_lvalue_reference(T);
+
+constexpr int unnamed_constrained_pattern(auto&& value) {
+  return static_cast<decltype(value)>(value) match {
+    case Integral auto => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(unnamed_constrained_pattern(0) == 1);
+static_assert(unnamed_constrained_pattern(0.0) == 0);
+
+constexpr int unnamed_constrained_forwarding_pattern(auto&& value) {
+  return static_cast<decltype(value)>(value) match {
+    case LvalueReference auto&& => 1;
+    case _ => 0;
+  };
+}
+
+static_assert([] {
+  int value = 0;
+  return unnamed_constrained_forwarding_pattern(value);
+}() == 1);
+static_assert(unnamed_constrained_forwarding_pattern(0) == 0);
+
+void invalid_unnamed_decl_specifiers(int value) {
+  // expected-error@+1 {{type name does not allow storage class to be specified}}
+  bool storage = value match case static int;
+  // expected-error@+1 {{type name does not allow constexpr specifier to be specified}}
+  bool constant = value match case constexpr int;
+  // expected-error@+1 {{type name does not allow storage class to be specified}}
+  bool type_alias = value match case typedef int;
+}
 
 struct Pair {
   int first;
