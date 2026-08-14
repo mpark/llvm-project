@@ -2801,6 +2801,11 @@ void Parser::ParseSpecifierQualifierList(
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DSC, nullptr,
                              AllowImplicitTypename);
 
+  DiagnoseAndRemoveTypeNameDeclSpec(DS, DSC);
+}
+
+void Parser::DiagnoseAndRemoveTypeNameDeclSpec(DeclSpec &DS,
+                                               DeclSpecContext DSC) {
   // Validate declspec for type-name.
   unsigned Specs = DS.getParsedSpecifiers();
   if (isTypeSpecifier(DSC) && !DS.hasTypeSpecifier()) {
@@ -6872,7 +6877,8 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
 
   if (getLangOpts().CPlusPlus && D.mayHaveIdentifier()) {
     // This might be a C++17 structured binding.
-    if (Tok.is(tok::l_square) && !D.mayOmitIdentifier() &&
+    if (Tok.is(tok::l_square) &&
+        (!D.mayOmitIdentifier() || D.isIdentifierOmissionAllowed()) &&
         D.getCXXScopeSpec().isEmpty())
       return ParseDecompositionDeclarator(D);
 
