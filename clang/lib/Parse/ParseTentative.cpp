@@ -148,7 +148,7 @@ bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl,
   bool InvalidAsDeclaration = false;
   TPResult TPR = isCXXDeclarationSpecifier(
       ImplicitTypenameContext::No, TPResult::False, &InvalidAsDeclaration);
-  if (TPR != TPResult::Ambiguous && !AllowPatternDecl)
+  if (TPR != TPResult::Ambiguous)
     return TPR != TPResult::False; // Returns true for TPResult::True or
                                    // TPResult::Error.
 
@@ -276,7 +276,8 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
 
   TPResult TPR = TryParseInitDeclaratorList(
       /*MayHaveTrailingReturnType=*/DeclSpecifierIsAuto,
-      /*StopAfterFirstDeclarator=*/AllowPatternDecl);
+      /*StopAfterFirstDeclarator=*/AllowPatternDecl,
+      /*MayBeAbstract=*/AllowPatternDecl);
   if (TPR != TPResult::Ambiguous)
     return TPR;
 
@@ -291,11 +292,12 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
 
 Parser::TPResult
 Parser::TryParseInitDeclaratorList(bool MayHaveTrailingReturnType,
-                                   bool StopAfterFirstDeclarator) {
+                                   bool StopAfterFirstDeclarator,
+                                   bool MayBeAbstract) {
   while (true) {
     // declarator
     TPResult TPR = TryParseDeclarator(
-        /*mayBeAbstract=*/false,
+        /*mayBeAbstract=*/MayBeAbstract,
         /*mayHaveIdentifier=*/true,
         /*mayHaveDirectInit=*/false,
         /*mayHaveTrailingReturnType=*/MayHaveTrailingReturnType);
