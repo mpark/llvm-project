@@ -2040,6 +2040,11 @@ private:
   LLVM_PREFERRED_TYPE(bool)
   unsigned HasInitializer : 1;
 
+  /// Whether this declarator permits an otherwise-required identifier to be
+  /// omitted.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned IdentifierMayBeOmitted : 1;
+
   /// Attributes attached to the declarator.
   ParsedAttributes Attrs;
 
@@ -2111,7 +2116,8 @@ public:
                                    FunctionDefinitionKind::Declaration)),
         Redeclaration(false), Extension(false), ObjCIvar(false),
         ObjCWeakProperty(false), InlineStorageUsed(false),
-        HasInitializer(false), Attrs(DS.getAttributePool().getFactory()),
+        HasInitializer(false), IdentifierMayBeOmitted(false),
+        Attrs(DS.getAttributePool().getFactory()),
         DeclarationAttrs(DeclarationAttrs), AsmLabel(nullptr),
         TrailingRequiresClause(nullptr),
         InventedTemplateParameterList(nullptr) {
@@ -2206,6 +2212,7 @@ public:
     AsmLabel = nullptr;
     InlineStorageUsed = false;
     HasInitializer = false;
+    IdentifierMayBeOmitted = false;
     ObjCIvar = false;
     ObjCWeakProperty = false;
     CommaLoc = SourceLocation();
@@ -2217,6 +2224,8 @@ public:
   /// not allowed.  This is true for typenames, prototypes, and template
   /// parameter lists.
   bool mayOmitIdentifier() const {
+    if (IdentifierMayBeOmitted)
+      return true;
     switch (Context) {
     case DeclaratorContext::File:
     case DeclaratorContext::KNRTypeList:
@@ -2253,6 +2262,9 @@ public:
     }
     llvm_unreachable("unknown context kind!");
   }
+
+  void setIdentifierMayBeOmitted() { IdentifierMayBeOmitted = true; }
+  bool isIdentifierOmissionAllowed() const { return IdentifierMayBeOmitted; }
 
   /// mayHaveIdentifier - Return true if the identifier is either optional or
   /// required.  This is true for normal declarators and prototypes, but not

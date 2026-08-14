@@ -4527,12 +4527,6 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
                      bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
-  auto StartsPlaceholderDeclarationPattern = [&] {
-    return (Tok.is(tok::kw_auto) && NextToken().isNot(tok::colon)) ||
-           (Tok.isOneOf(tok::kw_const, tok::kw_volatile) &&
-            NextToken().is(tok::kw_auto));
-  };
-
   auto StartsAttributedDeclarationPattern = [&] {
     if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) !=
         CXX11AttributeKind::AttributeSpecifier)
@@ -4541,43 +4535,10 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     RevertingTentativeParsingAction TPA(*this);
     if (!TrySkipAttributes())
       return false;
-    return StartsPlaceholderDeclarationPattern() ||
-           isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
+    return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                   /*AllowPatternDecl=*/true);
   };
-
-  auto StartsConstrainedPlaceholderDeclarationPattern = [&] {
-    if (TryAnnotateTypeConstraint() || !isTypeConstraintAnnotation())
-      return false;
-    return Tok.is(tok::annot_cxxscope)
-                ? GetLookAheadToken(2).is(tok::kw_auto)
-                : NextToken().is(tok::kw_auto);
-  };
-
-  auto StartsTypePattern = [&] {
-    if (Tok.isOneOf(tok::kw_static, tok::kw_extern, tok::kw_register,
-                    tok::kw_thread_local, tok::kw_mutable, tok::kw_typedef,
-                    tok::kw_inline, tok::kw_virtual, tok::kw_explicit,
-                    tok::kw_friend, tok::kw_constexpr, tok::kw_consteval,
-                    tok::kw_constinit))
-      return false;
-
-    RevertingTentativeParsingAction TPA(*this, /*Unannotated=*/true);
-    if (!isCXXTypeId(TentativeCXXTypeIdContext::InMatchPattern))
-      return false;
-
-    TypeResult Type = ParseTypeName();
-    if (Type.isInvalid())
-      return false;
-
-    return Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi, tok::comma,
-                       tok::r_paren, tok::r_square, tok::r_brace, tok::eof) ||
-           (StopAtEqual && Tok.is(tok::equal));
-  };
   if (StartsAttributedDeclarationPattern())
-    return ParseDeclarationPattern();
-
-  if (StartsPlaceholderDeclarationPattern())
     return ParseDeclarationPattern();
 
   switch (Tok.getKind()) {
@@ -4595,13 +4556,6 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
     [[fallthrough]];
   }
   default: {
-    if (StartsConstrainedPlaceholderDeclarationPattern())
-      return ParseDeclarationPattern();
-    if (StartsTypePattern())
-      return ParseTypePattern();
-    if (StopAtEqual &&
-        isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false))
-      return ParseDeclarationPattern();
     if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                /*AllowPatternDecl=*/true))
       return ParseDeclarationPattern();
@@ -4617,20 +4571,49 @@ ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
 
 ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
   ParsedAttributes DeclAttrs(AttrFactory);
-  ParsedAttributes DeclSpecAttrs(AttrFactory);
   MaybeParseCXX11Attributes(DeclAttrs, /*MightBeObjCMessageSend=*/true);
 
-  SourceLocation DeclEnd;
-  DeclGroupPtrTy Group = ParseSimpleDeclaration(
-      DeclaratorContext::ForInit, DeclEnd, DeclAttrs, DeclSpecAttrs,
-      /*RequireSemi=*/false, /*FRI=*/nullptr, /*DeclSpecStart=*/nullptr,
-      /*IsPatternDecl=*/true);
+  ParsingDeclSpec DS(*this);
+  ParsedTemplateInfo TemplateInfo;
+  ParseDeclarationSpecifiers(DS, TemplateInfo, AS_none,
+                             DeclSpecContext::DSC_normal);
+
+  ParsingDeclarator D(*this, DS, DeclAttrs, DeclaratorContext::ForInit);
+  D.setIdentifierMayBeOmitted();
+  if (TemplateInfo.TemplateParams)
+    D.setTemplateParameterLists(*TemplateInfo.TemplateParams);
+  ParseDeclarator(D);
+  if (D.isInvalidType() || ParseAsmAttributesAfterDeclarator(D)) {
+    D.complete(nullptr);
+    return true;
+  }
+
+  if (!D.hasName()) {
+    DiagnoseAndRemoveTypeNameDeclSpec(DS, DeclSpecContext::DSC_normal);
+    TypeResult Type = Actions.ActOnTypeName(D);
+    D.complete(nullptr);
+    if (Type.isInvalid())
+      return true;
+
+    TypeSourceInfo *TInfo = nullptr;
+    Actions.GetTypeFromParser(Type.get(), &TInfo);
+    if (!TInfo)
+      return true;
+    return Actions.ActOnTypePattern(TInfo);
+  }
+
+  Decl *ThisDecl =
+      Actions.ActOnDeclarator(getCurScope(), D, /*IsPatternDecl=*/true);
+  Actions.ActOnCXXForRangeDecl(ThisDecl, /*InExpansionStmt=*/false);
+  D.complete(ThisDecl);
+  DeclGroupPtrTy Group =
+      Actions.FinalizeDeclaratorGroup(getCurScope(), DS, ThisDecl);
   if (!Group)
     return true;
 
   DeclGroupRef Decls = Group.get();
   if (!Decls.isSingleDecl()) {
-    Diag(DeclEnd, diag::err_for_range_decl_must_be_var) << false;
+    Diag(D.getEndLoc(), diag::err_for_range_decl_must_be_var) << false;
     return true;
   }
 
@@ -4638,17 +4621,6 @@ ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
   if (!VD)
     return true;
   return Actions.ActOnDeclarationPattern(VD, VD->getSourceRange());
-}
-
-ActionResult<MatchPattern *> Parser::ParseTypePattern() {
-  TypeSourceInfo *TInfo = nullptr;
-  TypeResult Type = ParseTypeName();
-  if (Type.isInvalid())
-    return true;
-  Actions.GetTypeFromParser(Type.get(), &TInfo);
-  if (!TInfo)
-    return true;
-  return Actions.ActOnTypePattern(TInfo);
 }
 
 ActionResult<MatchPattern *>

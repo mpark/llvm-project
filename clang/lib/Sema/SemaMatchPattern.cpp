@@ -1784,11 +1784,22 @@ bool Sema::CheckCompleteMatchPatternImpl(
   }
   case MatchPattern::TypePatternClass: {
     auto *P = static_cast<TypePattern *>(Pattern);
-    if (!Subject || Subject->isTypeDependent() ||
-        P->getType()->isDependentType())
+    if (!Subject || Subject->isTypeDependent())
       return false;
 
     QualType PatternType = P->getType();
+    if (PatternType->getContainedAutoType()) {
+      QualType DeducedType;
+      TemplateDeductionInfo DeductionInfo(Subject->getExprLoc());
+      if (DeduceAutoType(P->getTypeSourceInfo()->getTypeLoc(), Subject,
+                         DeducedType, DeductionInfo) !=
+          TemplateDeductionResult::Success)
+        return true;
+      PatternType = DeducedType;
+    } else if (PatternType->isDependentType()) {
+      return false;
+    }
+
     MatchPatternInfo &Info = State.get(P);
     if (Subject->getType()->isVoidType()) {
       if (!PatternType->isVoidType()) {
