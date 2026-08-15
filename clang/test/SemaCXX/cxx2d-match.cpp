@@ -547,6 +547,152 @@ constexpr int binding_pack_case_condition(BindingPackTriple value) {
 
 static_assert(binding_pack_case_condition({1, 2, 3}) == 6);
 
+struct DeclarationPackFour {
+  int first;
+  int second;
+  int third;
+  int fourth;
+};
+
+constexpr int declaration_subpattern_pack(DeclarationPackFour value) {
+  return value match {
+    case [auto&& first, auto&& ...middle, auto&& last] =>
+        int(sizeof...(middle)) + first + (... + middle) + last;
+  };
+}
+
+static_assert(declaration_subpattern_pack({1, 2, 3, 4}) == 12);
+
+constexpr int unnamed_declaration_subpattern_pack(DeclarationPackFour value) {
+  return match (value) {
+    case [auto&& ...] => 1;
+  };
+}
+
+static_assert(unnamed_declaration_subpattern_pack({1, 2, 3, 4}) == 1);
+
+constexpr int dependent_unnamed_declaration_subpattern_pack(auto value) {
+  return match (value) {
+    case [auto&& ...] => 1;
+    case _ => -1;
+  };
+}
+
+static_assert(
+    dependent_unnamed_declaration_subpattern_pack(DeclarationPackFour{}) == 1);
+static_assert(
+    dependent_unnamed_declaration_subpattern_pack(EmptyDecomposition{}) == 1);
+static_assert(dependent_unnamed_declaration_subpattern_pack(0) == -1);
+
+struct InitializationCounter {
+  mutable int copies = 0;
+
+  constexpr InitializationCounter() = default;
+  constexpr InitializationCounter(const InitializationCounter& other) {
+    ++other.copies;
+  }
+};
+
+struct InitializationCounterPair {
+  InitializationCounter first;
+  InitializationCounter second;
+};
+
+constexpr int unnamed_declaration_subpattern_pack_initializes() {
+  InitializationCounterPair value;
+  match (value) {
+    case [InitializationCounter ...] => ;
+  }
+  return value.first.copies + value.second.copies;
+}
+
+static_assert(unnamed_declaration_subpattern_pack_initializes() == 2);
+
+constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
+  return value match {
+    case [int first, int ...middle, int last] =>
+        first + (... + middle) + last;
+  };
+}
+
+static_assert(typed_declaration_subpattern_pack({1, 2, 3, 4}) == 10);
+
+constexpr int empty_declaration_subpattern_pack(Pair value) {
+  return value match {
+    case [auto&& first, auto&& ...middle, auto&& last] =>
+        int(sizeof...(middle)) + first + last;
+  };
+}
+
+static_assert(empty_declaration_subpattern_pack({1, 2}) == 3);
+
+struct NestedDeclarationPack {
+  int first;
+  DeclarationPackFour nested;
+  int last;
+};
+
+constexpr int nested_declaration_subpattern_pack(NestedDeclarationPack value) {
+  return value match {
+    case [auto&& first,
+          [auto&& nested_first, auto&& ...middle, auto&& nested_last],
+          auto&& last] => first + nested_first + (... + middle) + nested_last +
+                         last;
+  };
+}
+
+static_assert(
+    nested_declaration_subpattern_pack({1, {2, 3, 4, 5}, 6}) == 21);
+
+constexpr int declaration_subpattern_pack_guard(DeclarationPackFour value) {
+  return value match {
+    case [auto&& first, auto&& ...middle, auto&& last]
+        if ((... + middle) < 0) => -1;
+    case [auto&& first, auto&& ...middle, auto&& last] =>
+        first + (... + middle) + last;
+  };
+}
+
+static_assert(declaration_subpattern_pack_guard({1, 2, 3, 4}) == 10);
+
+constexpr int declaration_subpattern_pack_condition(DeclarationPackFour value) {
+  if (case [auto&& first, auto&& ...middle, auto&& last] = value)
+    return first + (... + middle) + last;
+  return 0;
+}
+
+static_assert(declaration_subpattern_pack_condition({1, 2, 3, 4}) == 10);
+
+template<class T>
+constexpr int dependent_declaration_subpattern_pack_size(T value) {
+  return value match -> int {
+    case [auto&& ...elements] => int(sizeof...(elements));
+    case _ => -1;
+  };
+}
+
+static_assert(
+    dependent_declaration_subpattern_pack_size(DeclarationPackFour{}) == 4);
+static_assert(dependent_declaration_subpattern_pack_size(1) == -1);
+
+int multiple_declaration_subpattern_packs(Pair value) {
+  return value match {
+    case [auto&& ...first, auto&& ...second] => 0; // expected-error {{multiple declaration packs in decomposition pattern}} expected-note {{previous binding pack specified here}}
+  };
+}
+
+int multiple_unnamed_declaration_subpattern_packs(Pair value) {
+  return match (value) {
+    case [auto&& ..., ...] => 0; // expected-error {{multiple arity-inferred packs in decomposition pattern}} expected-note {{previous binding pack specified here}}
+  };
+}
+
+int declaration_subpattern_pack_too_small(Pair value) {
+  return value match {
+    case [auto&& first, auto&& second, auto&& ...middle, auto&& last] => 0; // expected-error {{type 'Pair' decomposes into 2 elements, but decomposition pattern requires at least 3}}
+  };
+}
+
 void binding_pack_loop_conditions(BindingPackTriple value) {
   while (case auto [...elements] = value) {
     (void)sizeof...(elements);

@@ -4016,6 +4016,8 @@ static bool containsDeclarationBindingPack(MatchPattern *Pattern) {
       MatchPattern::DeclarationPatternClass) {
     auto *Declaration =
         static_cast<DeclarationPattern *>(Pattern)->getDeclaration();
+    if (Declaration->isParameterPack())
+      return true;
     if (auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
       return llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
         return Binding->isParameterPack();
@@ -4624,7 +4626,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                                   /*AllowPatternDecl=*/true);
   };
   if (StartsAttributedDeclarationPattern())
-    return ParseDeclarationPattern();
+    return ParseDeclarationPattern(Decomp);
 
   switch (Tok.getKind()) {
   case tok::l_paren:
@@ -4643,7 +4645,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   default: {
     if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                /*AllowPatternDecl=*/true))
-      return ParseDeclarationPattern();
+      return ParseDeclarationPattern(Decomp);
     return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
                                   CorrectionBehavior);
   }
@@ -4654,7 +4656,7 @@ ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
 }
 
-ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
+ActionResult<MatchPattern *> Parser::ParseDeclarationPattern(bool Decomp) {
   ParsedAttributes DeclAttrs(AttrFactory);
   MaybeParseCXX11Attributes(DeclAttrs, /*MightBeObjCMessageSend=*/true);
 
@@ -4665,6 +4667,8 @@ ActionResult<MatchPattern *> Parser::ParseDeclarationPattern() {
 
   ParsingDeclarator D(*this, DS, DeclAttrs, DeclaratorContext::ForInit);
   D.setIdentifierMayBeOmitted();
+  if (Decomp)
+    D.setPatternPackAllowed();
   if (TemplateInfo.TemplateParams)
     D.setTemplateParameterLists(*TemplateInfo.TemplateParams);
   ParseDeclarator(D);
