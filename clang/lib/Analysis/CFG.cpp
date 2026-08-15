@@ -3148,13 +3148,20 @@ CFGBlock *CFGBuilder::VisitConditionalOperator(AbstractConditionalOperator *C,
 }
 
 static SmallVector<VarDecl *, 4>
-collectMatchPatternDecls(MatchPattern *Pattern) {
+collectMatchPatternDecls(MatchPattern *Pattern,
+                         MatchPatternInstantiation *Instantiation) {
   SmallVector<VarDecl *, 4> Decls;
   auto Collect = [&](MatchPattern *P, auto &Recurse) -> void {
     if (auto *Declaration = dyn_cast<DeclarationPattern>(P))
       Decls.push_back(Declaration->getDeclaration());
-    for (MatchPattern *Child : P->children())
-      Recurse(Child, Recurse);
+    if (auto *Decomposition = dyn_cast<DecompositionPattern>(P)) {
+      for (MatchPattern *Child :
+           Instantiation->getDecompositionPatterns(Decomposition))
+        Recurse(Child, Recurse);
+    } else {
+      for (MatchPattern *Child : P->children())
+        Recurse(Child, Recurse);
+    }
   };
   Collect(Pattern, Collect);
   return Decls;
@@ -3286,9 +3293,10 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
     CFGBlock *FalseBlock, std::optional<unsigned> SelectedInstantiation) {
   TryResult KnownVal =
       SelectedInstantiation ? TryResult(true) : tryEvaluateBool(E);
-  auto BuildCandidate = [&](MatchPattern *Pattern, const MatchGuard &Guard,
-                            bool PatternIsIrrefutable, CFGBlock *TrueBlock,
-                            CFGBlock *CandidateFalseBlock,
+  auto BuildCandidate = [&](MatchPattern *Pattern,
+                            MatchPatternInstantiation *PatternInstantiation,
+                            const MatchGuard &Guard, bool PatternIsIrrefutable,
+                            CFGBlock *TrueBlock, CFGBlock *CandidateFalseBlock,
                             bool IsFinalCandidate) {
     CFGBlock *SuccessBlock = TrueBlock;
     if (Guard.hasGuard()) {
@@ -3314,7 +3322,9 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
 
     Succ = SuccessBlock;
     CFGBlock *PatternBodyBlock = SuccessBlock;
-    for (VarDecl *D : llvm::reverse(collectMatchPatternDecls(Pattern))) {
+    SmallVector<VarDecl *, 4> PatternDecls =
+        collectMatchPatternDecls(Pattern, PatternInstantiation);
+    for (VarDecl *D : llvm::reverse(PatternDecls)) {
       DeclStmt *DS = new (Context)
           DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
       Block = nullptr;
@@ -3343,8 +3353,9 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
       const MatchTestInstantiation &Instantiation =
           E->getInstantiations()[*SelectedInstantiation];
       CandidateEntry = PatternBlock = BuildCandidate(
-          Instantiation.Pattern, Instantiation.Guard,
-          Instantiation.PatternIsIrrefutable, TrueBlocks.front(), FalseBlock,
+          Instantiation.Pattern, Instantiation.PatternInstantiation,
+          Instantiation.Guard, Instantiation.PatternIsIrrefutable,
+          TrueBlocks.front(), FalseBlock,
           /*IsFinalCandidate=*/true);
     } else {
       assert((TrueBlocks.size() == 1 ||
@@ -3355,8 +3366,9 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
         CFGBlock *TrueBlock =
             TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
         CandidateEntry = PatternBlock = BuildCandidate(
-            Instantiation.Pattern, Instantiation.Guard,
-            Instantiation.PatternIsIrrefutable, TrueBlock, CandidateEntry,
+            Instantiation.Pattern, Instantiation.PatternInstantiation,
+            Instantiation.Guard, Instantiation.PatternIsIrrefutable, TrueBlock,
+            CandidateEntry,
             /* IsFinalCandidate = */
             I == E->getInstantiations().size() - 1);
       }
@@ -3364,8 +3376,9 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
   } else {
     assert(TrueBlocks.size() == 1);
     CandidateEntry = PatternBlock = BuildCandidate(
-        E->getPattern(), E->getGuard(), E->isPatternIrrefutable(),
-        TrueBlocks.front(), FalseBlock, /* IsFinalCandidate = */ true);
+        E->getPattern(), E->getPatternInstantiation(), E->getGuard(),
+        E->isPatternIrrefutable(), TrueBlocks.front(), FalseBlock,
+        /* IsFinalCandidate = */ true);
   }
 
   Succ = CandidateEntry;
@@ -3443,7 +3456,9 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
 
     Succ = CaseBodyBlock;
     CFGBlock *PatternBodyBlock = CaseBodyBlock;
-    for (VarDecl *D : llvm::reverse(collectMatchPatternDecls(Case.Pattern))) {
+    SmallVector<VarDecl *, 4> PatternDecls =
+        collectMatchPatternDecls(Case.Pattern, Case.PatternInstantiation);
+    for (VarDecl *D : llvm::reverse(PatternDecls)) {
       DeclStmt *DS = new (Context)
           DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
       Block = nullptr;

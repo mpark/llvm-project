@@ -2089,6 +2089,11 @@ private:
   LLVM_PREFERRED_TYPE(bool)
   unsigned IdentifierMayBeOmitted : 1;
 
+  /// Whether an ellipsis may declare a pack expanded by an enclosing
+  /// decomposition pattern.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned PatternPackAllowed : 1;
+
   /// Attributes attached to the declarator.
   ParsedAttributes Attrs;
 
@@ -2163,7 +2168,7 @@ public:
         Redeclaration(false), Extension(false), ObjCIvar(false),
         ObjCWeakProperty(false), InlineStorageUsed(false),
         HasInitializer(false), IdentifierMayBeOmitted(false),
-        Attrs(DS.getAttributePool().getFactory()),
+        PatternPackAllowed(false), Attrs(DS.getAttributePool().getFactory()),
         DeclarationAttrs(DeclarationAttrs),
         LateParsedAttrs(LateParsedAttrList::forTypeAttrs()), AsmLabel(nullptr),
         TrailingRequiresClause(nullptr),
@@ -2261,6 +2266,7 @@ public:
     InlineStorageUsed = false;
     HasInitializer = false;
     IdentifierMayBeOmitted = false;
+    PatternPackAllowed = false;
     ObjCIvar = false;
     ObjCWeakProperty = false;
     CommaLoc = SourceLocation();
@@ -2313,6 +2319,8 @@ public:
 
   void setIdentifierMayBeOmitted() { IdentifierMayBeOmitted = true; }
   bool isIdentifierOmissionAllowed() const { return IdentifierMayBeOmitted; }
+  void setPatternPackAllowed() { PatternPackAllowed = true; }
+  bool isPatternPackAllowed() const { return PatternPackAllowed; }
 
   /// mayHaveIdentifier - Return true if the identifier is either optional or
   /// required.  This is true for normal declarators and prototypes, but not

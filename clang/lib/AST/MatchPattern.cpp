@@ -43,6 +43,13 @@ MatchPatternInstantiation::find(const MatchPattern *P) const {
   return nullptr;
 }
 
+ArrayRef<MatchPattern *> MatchPatternInstantiation::getDecompositionPatterns(
+    const DecompositionPattern *P) const {
+  if (const MatchPatternInfo *Info = find(P); Info && Info->HasExpandedPatterns)
+    return Info->ExpandedPatterns;
+  return P->patterns();
+}
+
 void clang::visitMatchPatternEvaluation(
     const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     llvm::function_ref<void(const Decl *)> VisitDecl,
@@ -67,8 +74,15 @@ void clang::visitMatchPatternEvaluation(
       VisitStatement(Expression->getExpr());
     else if (const auto *Declaration = dyn_cast<DeclarationPattern>(P))
       VisitDeclaration(Declaration->getDeclaration());
-    for (const MatchPattern *Child : P->children())
-      Recurse(Child, Recurse);
+    if (const auto *Decomposition = dyn_cast<DecompositionPattern>(P);
+        Instantiation && Decomposition) {
+      for (const MatchPattern *Child :
+           Instantiation->getDecompositionPatterns(Decomposition))
+        Recurse(Child, Recurse);
+    } else {
+      for (const MatchPattern *Child : P->children())
+        Recurse(Child, Recurse);
+    }
   };
   VisitPattern(Pattern, VisitPattern);
 
@@ -181,8 +195,11 @@ SourceLocation ExpressionPattern::getEndLoc() const {
 }
 
 DeclarationPattern::DeclarationPattern(VarDecl *Declaration,
-                                       SourceRange WrittenRange)
+                                       SourceRange WrittenRange,
+                                       VarDecl *PackSourceDeclaration)
     : MatchPattern(DeclarationPatternClass), Declaration(Declaration),
+      PackSourceDeclaration(PackSourceDeclaration ? PackSourceDeclaration
+                                                  : Declaration),
       DeclarationRange(WrittenRange) {
   setDependence(toExprDependenceForImpliedType(
       Declaration->getType()->getDependence()));
