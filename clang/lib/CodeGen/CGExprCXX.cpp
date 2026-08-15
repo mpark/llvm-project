@@ -2498,16 +2498,19 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   if (!LocalDeclMap.count(D))
     EmitDecl(*D, /*EvaluateConditionDecl=*/true);
 
+  ArrayRef<MatchPattern *> Patterns =
+      Instantiation->getDecompositionPatterns(DecompPattern);
+
   // Sibling alternative discriminators have the decomposition declaration as
   // their common dependency. Emit them here so semantically specialized cases
   // can share one discriminator without initializing it in only one branch.
-  for (const MatchPattern *SubPattern : DecompPattern->children())
+  for (const MatchPattern *SubPattern : Patterns)
     if (SubPattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass)
       EmitAlternativeDiscriminator(
           static_cast<const AlternativePattern *>(SubPattern), Instantiation);
 
-  for (auto *SubPattern : DecompPattern->children()) {
+  for (auto *SubPattern : Patterns) {
     RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr);
     llvm::BasicBlock *NextPatternBB =
         createBasicBlock("match.decomp.next_pattern");
@@ -2605,8 +2608,14 @@ emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;
   }
-  for (const MatchPattern *Child : Pattern->children())
-    emitPatternDeclarations(CGF, Child, Instantiation);
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      emitPatternDeclarations(CGF, Child, Instantiation);
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      emitPatternDeclarations(CGF, Child, Instantiation);
+  }
 }
 
 void CodeGenFunction::EmitSharedDeclarationProjections(
@@ -2629,8 +2638,14 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     }
     return;
   }
-  for (const MatchPattern *Child : Pattern->children())
-    EmitSharedDeclarationProjections(Child, Instantiation);
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      EmitSharedDeclarationProjections(Child, Instantiation);
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      EmitSharedDeclarationProjections(Child, Instantiation);
+  }
 }
 
 static bool referencesDeclaration(const Stmt *S, const ValueDecl *D) {
@@ -2685,14 +2700,29 @@ void CodeGenFunction::EmitSelectedMatchPatternProjections(
       EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
   }
 
-  for (const MatchPattern *Child : Pattern->children())
-    EmitSelectedMatchPatternProjections(Child, Instantiation);
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      EmitSelectedMatchPatternProjections(Child, Instantiation);
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      EmitSelectedMatchPatternProjections(Child, Instantiation);
+  }
 }
 
-static bool hasPatternDeclarations(const MatchPattern *Pattern) {
+static bool
+hasPatternDeclarations(const MatchPattern *Pattern,
+                       const MatchPatternInstantiation *Instantiation) {
   if (isa<DeclarationPattern>(Pattern))
     return true;
-  return llvm::any_of(Pattern->children(), hasPatternDeclarations);
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
+                        [&](const MatchPattern *Child) {
+                          return hasPatternDeclarations(Child, Instantiation);
+                        });
+  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
+    return hasPatternDeclarations(Child, Instantiation);
+  });
 }
 
 RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
@@ -2850,7 +2880,8 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
         EmitIgnoredExpr(S.getSubject());
 
       const Expr *Subject = S.getSubject();
-      if (!hasPatternDeclarations(S.getPattern())) {
+      if (!hasPatternDeclarations(S.getPattern(),
+                                  S.getPatternInstantiation())) {
         RValue MatchResult = EmitMatchPattern(
             S.getPattern(), S.getPatternInstantiation(), Subject);
         if (hasMatchGuard(S.getGuard()))
@@ -2985,8 +3016,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   unsigned CasePatternIdx = 0;
   for (MatchCaseInstantiation MatchC : Cases) {
-    if (!hasPatternDeclarations(MatchC.Pattern) && !MatchC.Guard.Init &&
-        !MatchC.Guard.ConditionVariable) {
+    if (!hasPatternDeclarations(MatchC.Pattern, MatchC.PatternInstantiation) &&
+        !MatchC.Guard.Init && !MatchC.Guard.ConditionVariable) {
       RValue MatchResult = EmitMatchPattern(
           MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
       if (hasMatchGuard(MatchC.Guard))

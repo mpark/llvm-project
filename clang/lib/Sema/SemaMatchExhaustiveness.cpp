@@ -410,15 +410,17 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
 
   case MatchPattern::DecompositionPatternClass: {
     auto *P = static_cast<DecompositionPattern *>(Pattern);
+    ArrayRef<MatchPattern *> Patterns =
+        Instantiation->getDecompositionPatterns(P);
     CoveragePattern Initial = CoveragePattern::ctor(
-        CtorKey::productCtor(P->getNumPatterns()), P->getBeginLoc());
+        CtorKey::productCtor(Patterns.size()), P->getBeginLoc());
     CoveragePatterns Results = {std::move(Initial)};
     const MatchPatternInfo *Info = Instantiation->find(P);
     DecompositionDecl *DD = Info && Info->Projection
                                 ? Info->Projection->getDecomposedDecl()
                                 : nullptr;
     unsigned I = 0;
-    for (MatchPattern *Child : P->children()) {
+    for (MatchPattern *Child : Patterns) {
       QualType FieldType = S.Context.DependentTy;
       if (DD && I < DD->bindings().size())
         FieldType = DD->bindings()[I]->getBinding()->getType();

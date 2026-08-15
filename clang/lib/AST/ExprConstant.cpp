@@ -21284,7 +21284,7 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
                                  ProjectionCache))
       return false;
     Result = true;
-    for (const MatchPattern *C : P->children()) {
+    for (const MatchPattern *C : Instantiation->getDecompositionPatterns(P)) {
       if (!EvaluateMatchPattern(C, Instantiation, Result, Info,
                                 ProjectionCache)) {
         return false;
@@ -21320,9 +21320,16 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
             return false;
     return true;
   }
-  for (const MatchPattern *Child : Pattern->children())
-    if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
-      return false;
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
+        return false;
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
+        return false;
+  }
   return true;
 }
 
@@ -21336,10 +21343,18 @@ static bool EvaluateSharedDeclarationProjections(
     return !Projection ||
            EvaluateProjectionValue(Projection, Info, &ProjectionCache);
   }
-  for (const MatchPattern *Child : Pattern->children())
-    if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
-                                              ProjectionCache))
-      return false;
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
+                                                ProjectionCache))
+        return false;
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
+                                                ProjectionCache))
+        return false;
+  }
   return true;
 }
 

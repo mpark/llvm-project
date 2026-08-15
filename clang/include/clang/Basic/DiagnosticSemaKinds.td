@@ -664,6 +664,13 @@ def err_decomp_decl_wrong_number_bindings : Error<
   "type %0 binds to %3 %plural{1:element|:elements}2, but "
   "%select{%plural{0:no|:only %1}1|%1}4 "
   "%plural{1:name was|:names were}1 provided">;
+def err_decomp_pattern_multiple_packs : Error<
+  "multiple declaration packs in decomposition pattern">;
+def err_decomp_pattern_pack_too_small : Error<
+  "type %0 decomposes into %1 elements, but decomposition pattern requires "
+  "at least %2">;
+def err_decomp_pattern_unbindable_type : Error<
+  "cannot decompose type %0 in pattern">;
 def err_decomp_decl_unbindable_type : Error<
   "cannot bind %select{union|non-class, non-array}1 type %2">;
 def err_decomp_decl_multiple_bases_with_members : Error<

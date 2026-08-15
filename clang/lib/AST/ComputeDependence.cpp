@@ -1182,10 +1182,29 @@ static ExprDependence getMatchGuardDependence(const MatchGuard &Guard) {
   return D;
 }
 
+static ExprDependence
+getMatchPatternDependence(const MatchPattern *Pattern,
+                          const MatchPatternInstantiation *Instantiation) {
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    ExprDependence D = ExprDependence::None;
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      D |= getMatchPatternDependence(Child, Instantiation);
+    return D;
+  }
+  if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
+    if (const MatchPattern *SubPattern = Alternative->getSubPattern())
+      return getMatchPatternDependence(SubPattern, Instantiation);
+    return ExprDependence::None;
+  }
+  return Pattern->getDependence();
+}
+
 ExprDependence clang::computeDependence(MatchTestExpr *E) {
-  return turnTypeToValueDependence(E->getSubject()->getDependence() |
-                                   E->getPattern()->getDependence() |
-                                   getMatchGuardDependence(E->getGuard()));
+  return turnTypeToValueDependence(
+      E->getSubject()->getDependence() |
+      getMatchPatternDependence(E->getPattern(), E->getPatternInstantiation()) |
+      getMatchGuardDependence(E->getGuard()));
 }
 
 ExprDependence clang::computeDependence(MatchSelectExpr *E) {
@@ -1193,7 +1212,8 @@ ExprDependence clang::computeDependence(MatchSelectExpr *E) {
       toExprDependenceForImpliedType(E->getType()->getDependence());
   D |= turnTypeToValueDependence(E->getSubject()->getDependence());
   for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
-    D |= turnTypeToValueDependence(Case.Pattern->getDependence());
+    D |= turnTypeToValueDependence(
+        getMatchPatternDependence(Case.Pattern, Case.PatternInstantiation));
     D |= turnTypeToValueDependence(getMatchGuardDependence(Case.Guard));
     D |= turnTypeToValueDependence(getMatchStmtDependence(Case.Handler));
   }

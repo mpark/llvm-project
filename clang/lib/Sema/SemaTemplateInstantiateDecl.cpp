@@ -7339,10 +7339,11 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
   }
   // An implicit template region can rebuild a structured binding pack in an
   // otherwise non-dependent function.
-  bool IsMappedBinding =
-      isa<BindingDecl>(D) && CurrentInstantiationScope &&
+  bool IsMappedLocalPack =
+      isa<ValueDecl>(D) && cast<ValueDecl>(D)->isParameterPack() &&
+      CurrentInstantiationScope &&
       CurrentInstantiationScope->getInstantiationOfIfExists(D);
-  if (isa<ParmVarDecl>(D) || IsMappedBinding ||
+  if (isa<ParmVarDecl>(D) || IsMappedLocalPack ||
       isa<NonTypeTemplateParmDecl>(D) || isa<TemplateTypeParmDecl>(D) ||
       isa<TemplateTemplateParmDecl>(D) ||
       (ParentDependsOnArgs && (ParentDC->isFunctionOrMethod() ||

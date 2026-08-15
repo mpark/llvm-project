@@ -4442,6 +4442,23 @@ public:
     }
     case MatchPattern::DeclarationPatternClass: {
       auto *P = static_cast<DeclarationPattern *>(Pattern);
+      // A declaration subpattern pack is expanded after the enclosing
+      // decomposition's arity is known. Give each semantic candidate its own
+      // wrapper declaration while retaining the source declaration used to
+      // transform references into the resulting local declaration pack.
+      if (P->getDeclaration()->isParameterPack()) {
+        VarDecl *Old = P->getDeclaration();
+        VarDecl *VD = VarDecl::Create(
+            getSema().Context, getSema().CurContext, Old->getInnerLocStart(),
+            Old->getLocation(), Old->getIdentifier(), Old->getType(),
+            Old->getTypeSourceInfo(), Old->getStorageClass());
+        if (Old->isImplicit())
+          VD->setImplicit();
+        if (Old->hasAttrs())
+          VD->setAttrs(Old->getAttrs());
+        return getSema().ActOnDeclarationPattern(VD, P->getSourceRange(),
+                                                 P->getPackSourceDeclaration());
+      }
       // A declaration pattern has no source initializer. Its current
       // initializer was synthesized by semantic pattern checking and may
       // refer to projections from a previous instantiation. Transform only
@@ -4463,7 +4480,11 @@ public:
         return true;
       if (!Rebuild && VD == P->getDeclaration())
         return Pattern;
-      return getSema().ActOnDeclarationPattern(VD, P->getSourceRange());
+      VarDecl *PackSource = P->getPackSourceDeclaration();
+      if (PackSource == P->getDeclaration())
+        PackSource = nullptr;
+      return getSema().ActOnDeclarationPattern(VD, P->getSourceRange(),
+                                               PackSource);
     }
     case MatchPattern::TypePatternClass: {
       auto *P = static_cast<TypePattern *>(Pattern);
@@ -4497,6 +4518,10 @@ public:
       SmallVector<MatchPattern *, 4> Patterns;
       Patterns.reserve(P->getNumPatterns());
       auto Children = P->children();
+      bool HasDeclarationPack = llvm::any_of(Children, [](MatchPattern *Child) {
+        auto *Declaration = dyn_cast<DeclarationPattern>(Child);
+        return Declaration && Declaration->getDeclaration()->isParameterPack();
+      });
       for (MatchPattern *C : Children) {
         if (auto *EP = dyn_cast<ExpressionPattern>(C);
             EP && EP->isPackExpansion()) {
@@ -4515,7 +4540,7 @@ public:
             Patterns.push_back(NewEP.get());
           }
         } else {
-          auto Sub = TransformPattern(C, Rebuild);
+          auto Sub = TransformPattern(C, Rebuild || HasDeclarationPack);
           if (Sub.isInvalid())
             return true;
           Patterns.push_back(Sub.get());
