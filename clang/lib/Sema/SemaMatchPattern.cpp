@@ -892,12 +892,23 @@ Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
 }
 
 ActionResult<MatchPattern *>
-Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange) {
-  return new (Context) DeclarationPattern(Declaration, WrittenRange);
+Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
+                              VarDecl *PackSourceDeclaration) {
+  return new (Context)
+      DeclarationPattern(Declaration, WrittenRange, PackSourceDeclaration);
 }
 
 ActionResult<MatchPattern *> Sema::ActOnTypePattern(TypeSourceInfo *TInfo) {
   return new (Context) TypePattern(TInfo);
+}
+
+static bool isArityInferredDecompositionPack(MatchPattern *Pattern) {
+  Pattern = Pattern->IgnoreParens();
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
+    return Declaration->getDeclaration()->isParameterPack();
+  if (auto *Type = dyn_cast<TypePattern>(Pattern))
+    return isa<PackExpansionType>(Type->getType());
+  return false;
 }
 
 ActionResult<MatchPattern *>
@@ -921,6 +932,17 @@ Sema::ActOnEmptyAlternativePattern(SourceRange Braces) {
 ActionResult<MatchPattern *>
 Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares) {
+  MatchPattern *Pack = nullptr;
+  for (MatchPattern *Pattern : Patterns) {
+    if (!isArityInferredDecompositionPack(Pattern))
+      continue;
+    if (Pack) {
+      Diag(Pattern->getBeginLoc(), diag::err_decomp_pattern_multiple_packs);
+      Diag(Pack->getBeginLoc(), diag::note_previous_ellipsis);
+      return true;
+    }
+    Pack = Pattern;
+  }
   return DecompositionPattern::Create(Context, Patterns, Squares);
 }
 
@@ -1037,6 +1059,112 @@ static bool isDecompositionDeclarationPatternApplicable(
   });
   return HasPack ? *ElementCount >= Bindings.size() - 1
                  : *ElementCount == Bindings.size();
+}
+
+static MatchPattern *
+getDecompositionSubpatternPack(DecompositionPattern *Pattern) {
+  for (MatchPattern *Child : Pattern->children()) {
+    if (isArityInferredDecompositionPack(Child))
+      return Child;
+  }
+  return nullptr;
+}
+
+static ArrayRef<MatchPattern *>
+getDecompositionPatterns(DecompositionPattern *Pattern,
+                         const Sema::MatchPatternState &State) {
+  if (const MatchPatternInfo *Info = State.find(Pattern);
+      Info && Info->HasExpandedPatterns)
+    return Info->ExpandedPatterns;
+  return Pattern->patterns();
+}
+
+static DeclarationPattern *
+createDeclarationSubpatternPackElement(Sema &S, DeclarationPattern *Pattern) {
+  VarDecl *Source = Pattern->getDeclaration();
+  QualType Type = cast<PackExpansionType>(Source->getType())->getPattern();
+  TypeSourceInfo *TInfo =
+      S.Context.getTrivialTypeSourceInfo(Type, Source->getTypeSpecStartLoc());
+  VarDecl *Declaration = VarDecl::Create(
+      S.Context, S.CurContext, Source->getInnerLocStart(),
+      Source->getLocation(), Source->getIdentifier(), Type, TInfo, SC_None);
+  Declaration->setImplicit();
+  if (Source->hasAttrs())
+    Declaration->setAttrs(Source->getAttrs());
+  return cast<DeclarationPattern>(
+      S.ActOnDeclarationPattern(Declaration, Pattern->getSourceRange(),
+                                Pattern->getPackSourceDeclaration())
+          .get());
+}
+
+static TypePattern *createTypeSubpatternPackElement(Sema &S,
+                                                    TypePattern *Pattern) {
+  QualType Type = cast<PackExpansionType>(Pattern->getType())->getPattern();
+  TypeSourceInfo *TInfo =
+      S.Context.getTrivialTypeSourceInfo(Type, Pattern->getBeginLoc());
+  return cast<TypePattern>(S.ActOnTypePattern(TInfo).get());
+}
+
+static bool
+checkDecompositionSubpattern(Sema &S, Expr *Subject, MatchPattern *Pattern,
+                             Sema::MatchPatternState &State,
+                             Sema::MatchProjectionCache *ProjectionCache,
+                             bool InstantiateDeclarationPatterns) {
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern);
+      Declaration && (InstantiateDeclarationPatterns ||
+                      Declaration->getPackSourceDeclaration() !=
+                          Declaration->getDeclaration()))
+    return S.CheckCompleteMatchPatternImpl(Subject, Pattern, State,
+                                           ProjectionCache);
+  return S.CheckCompleteMatchPattern(Subject, Pattern, State, ProjectionCache);
+}
+
+static ArrayRef<MatchPattern *>
+expandDecompositionSubpatternPack(Sema &S, DecompositionPattern *Pattern,
+                                  MatchPattern *Pack, unsigned Arity,
+                                  Sema::MatchPatternState &State) {
+  MatchPattern *UnwrappedPack = Pack->IgnoreParens();
+  unsigned FixedPatterns = Pattern->getNumPatterns() - 1;
+  unsigned PackSize = Arity - FixedPatterns;
+  SmallVector<MatchPattern *, 8> Expanded;
+  Expanded.reserve(Arity);
+  SmallVector<VarDecl *, 8> ExpandedDeclarations;
+  ExpandedDeclarations.reserve(PackSize);
+  for (MatchPattern *Child : Pattern->children()) {
+    if (Child != Pack) {
+      Expanded.push_back(Child);
+      continue;
+    }
+    for (unsigned I = 0; I != PackSize; ++I) {
+      MatchPattern *Element;
+      if (auto *Declaration = dyn_cast<DeclarationPattern>(UnwrappedPack)) {
+        Element = createDeclarationSubpatternPackElement(S, Declaration);
+        ExpandedDeclarations.push_back(
+            cast<DeclarationPattern>(Element)->getDeclaration());
+      } else if (auto *Type = dyn_cast<TypePattern>(UnwrappedPack)) {
+        Element = createTypeSubpatternPackElement(S, Type);
+      } else {
+        llvm_unreachable("unknown arity-inferred decomposition pack");
+      }
+      Expanded.push_back(Element);
+    }
+  }
+
+  MatchPattern **Storage = S.Context.Allocate<MatchPattern *>(Expanded.size());
+  llvm::copy(Expanded, Storage);
+  MatchPatternInfo &Info = State.get(Pattern);
+  Info.ExpandedPatterns = {Storage, Expanded.size()};
+  Info.HasExpandedPatterns = true;
+
+  if (S.CurrentInstantiationScope && isa<DeclarationPattern>(UnwrappedPack)) {
+    VarDecl *Source =
+        cast<DeclarationPattern>(UnwrappedPack)->getPackSourceDeclaration();
+    S.CurrentInstantiationScope->MakeInstantiatedLocalArgPack(Source);
+    for (VarDecl *Declaration : ExpandedDeclarations)
+      S.CurrentInstantiationScope->InstantiatedLocalPackArg(Source,
+                                                            Declaration);
+  }
+  return Info.ExpandedPatterns;
 }
 
 static ExprResult buildMatchProjectionCondition(Sema &S,
@@ -1868,29 +1996,75 @@ bool Sema::CheckCompleteMatchPatternImpl(
   }
   case MatchPattern::DecompositionPatternClass: {
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
+    auto DiscardUninitializedDeclarations = [&](MatchPattern *Root) {
+      auto Discard = [&](MatchPattern *Current, auto &Recurse) -> void {
+        if (auto *Declaration = dyn_cast<DeclarationPattern>(Current)) {
+          VarDecl *VD = Declaration->getDeclaration();
+          ParsingInitForAutoVars.erase(VD);
+          if (auto *DD = dyn_cast<DecompositionDecl>(VD))
+            for (BindingDecl *Binding : DD->bindings())
+              ParsingInitForAutoVars.erase(Binding);
+        }
+        for (MatchPattern *Child : Current->children())
+          Recurse(Child, Recurse);
+      };
+      Discard(Root, Discard);
+    };
     size_t SavedProjectionPathSize =
         ProjectionCache ? ProjectionCache->CurrentProjectionPath.size() : 0;
     llvm::scope_exit RestoreProjectionPath([&] {
       if (ProjectionCache)
         ProjectionCache->CurrentProjectionPath.resize(SavedProjectionPathSize);
     });
+    MatchPattern *Pack = getDecompositionSubpatternPack(P);
+    auto *DeclarationPack =
+        Pack ? dyn_cast<DeclarationPattern>(Pack->IgnoreParens()) : nullptr;
+    if (DeclarationPack)
+      ParsingInitForAutoVars.erase(DeclarationPack->getDeclaration());
     if (!Subject) {
       for (MatchPattern *C : P->children()) {
+        if (C == Pack)
+          continue;
         if (CheckCompleteMatchPattern(nullptr, C, State))
           return true;
       }
       return false;
     }
-    if (MatchProjection *Projection =
-            findMatchProjection(*this, ProjectionCache, Subject,
-                                MatchProjection::DecompositionProjection,
-                                QualType(), P->getNumPatterns())) {
+
+    unsigned Arity = P->getNumPatterns();
+    ArrayRef<MatchPattern *> Patterns = P->patterns();
+    if (Pack) {
+      UnsignedOrNone ElementCount = GetDecompositionElementCount(
+          Subject->getType().getNonReferenceType(), P->getBeginLoc());
+      if (!ElementCount) {
+        Diag(P->getBeginLoc(), diag::err_decomp_pattern_unbindable_type)
+            << Subject->getType().getNonReferenceType();
+        DiscardUninitializedDeclarations(P);
+        return true;
+      }
+      unsigned FixedPatterns = P->getNumPatterns() - 1;
+      if (*ElementCount < FixedPatterns) {
+        Diag(P->getBeginLoc(), diag::err_decomp_pattern_pack_too_small)
+            << Subject->getType().getNonReferenceType() << *ElementCount
+            << FixedPatterns;
+        DiscardUninitializedDeclarations(P);
+        return true;
+      }
+      Arity = *ElementCount;
+      Patterns =
+          expandDecompositionSubpatternPack(*this, P, Pack, Arity, State);
+    }
+    if (MatchProjection *Projection = findMatchProjection(
+            *this, ProjectionCache, Subject,
+            MatchProjection::DecompositionProjection, QualType(), Arity)) {
       DecompositionDecl *Decomposed = Projection->getDecomposedDecl();
       State.get(P).Projection = Projection;
-      for (auto [Binding, Child] :
-           llvm::zip(Decomposed->bindings(), P->children())) {
+      SmallVector<BindingDecl *, 8> Bindings;
+      llvm::append_range(Bindings, Decomposed->flat_bindings());
+      for (auto [Binding, Child] : llvm::zip(Bindings, Patterns)) {
         Expr *Element = getDecompositionElement(*this, Subject, Binding);
-        if (CheckCompleteMatchPattern(Element, Child, State, ProjectionCache))
+        if (checkDecompositionSubpattern(*this, Element, Child, State,
+                                         ProjectionCache, Pack != nullptr))
           return true;
         if (ProjectionCache)
           appendProjectionPath(Child, ProjectionCache->CurrentProjectionPath,
@@ -1898,16 +2072,15 @@ bool Sema::CheckCompleteMatchPatternImpl(
       }
       return false;
     }
-    MatchProjection *Projection =
-        createMatchProjection(*this, ProjectionCache, Subject,
-                              MatchProjection::DecompositionProjection,
-                              QualType(), P->getNumPatterns());
+    MatchProjection *Projection = createMatchProjection(
+        *this, ProjectionCache, Subject,
+        MatchProjection::DecompositionProjection, QualType(), Arity);
     State.get(P).Projection = Projection;
     QualType Type = Context.getAutoRRefDeductType();
     TypeSourceInfo *TInfo = Context.getTrivialTypeSourceInfo(Type, Loc);
     SmallVector<BindingDecl *, 8> Bindings;
-    Bindings.reserve(P->getNumPatterns());
-    for (MatchPattern *C : P->children()) {
+    Bindings.reserve(Arity);
+    for (MatchPattern *C : Patterns) {
       BindingDecl *BD = BindingDecl::Create(
           Context, CurContext, C->getBeginLoc(), nullptr, QualType());
       BD->setImplicit();
@@ -1923,10 +2096,11 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return true;
     }
     unsigned I = 0;
-    for (MatchPattern *C : P->children()) {
+    for (MatchPattern *C : Patterns) {
       BindingDecl *BD = Bindings[I];
       Expr *Element = getDecompositionElement(*this, Subject, BD);
-      if (CheckCompleteMatchPattern(Element, C, State, ProjectionCache)) {
+      if (checkDecompositionSubpattern(*this, Element, C, State,
+                                       ProjectionCache, Pack != nullptr)) {
         return true;
       }
       if (ProjectionCache)
@@ -2015,7 +2189,8 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
     case MatchPattern::DecompositionPatternClass: {
       MatchPatternRefutability Decomposition =
           MatchPatternRefutability::Irrefutable;
-      for (MatchPattern *Child : P->children()) {
+      auto *Pattern = static_cast<DecompositionPattern *>(P);
+      for (MatchPattern *Child : getDecompositionPatterns(Pattern, State)) {
         MatchPatternRefutability ChildResult = Recurse(Child, Recurse);
         if (ChildResult == MatchPatternRefutability::Impossible)
           return MatchPatternRefutability::Impossible;

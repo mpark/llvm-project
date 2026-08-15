@@ -301,15 +301,21 @@ static void forEachDoExprResult(
 }
 
 static void collectTransparentMatchDeclarations(
-    const MatchPattern *Pattern,
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     llvm::SmallDenseSet<const Decl *, 8> &Declarations) {
   if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
     const VarDecl *Variable = Declaration->getDeclaration();
     if (Variable->getType()->isReferenceType())
       Declarations.insert(Variable);
   }
-  for (const MatchPattern *Child : Pattern->children())
-    collectTransparentMatchDeclarations(Child, Declarations);
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+    for (const MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      collectTransparentMatchDeclarations(Child, Instantiation, Declarations);
+  } else {
+    for (const MatchPattern *Child : Pattern->children())
+      collectTransparentMatchDeclarations(Child, Instantiation, Declarations);
+  }
 }
 
 static bool pathContainsInit(const IndirectLocalPath &Path) {
@@ -749,8 +755,8 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
         Holding && Holding->getType()->isReferenceType())
       TransparentDeclarations.insert(Holding);
     for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
-      collectTransparentMatchDeclarations(Case.Pattern,
-                                          TransparentDeclarations);
+      collectTransparentMatchDeclarations(
+          Case.Pattern, Case.PatternInstantiation, TransparentDeclarations);
     auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
                          ReferenceKind RK) {
       if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
@@ -1054,8 +1060,8 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
         Holding && Holding->getType()->isReferenceType())
       TransparentDeclarations.insert(Holding);
     for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
-      collectTransparentMatchDeclarations(Case.Pattern,
-                                          TransparentDeclarations);
+      collectTransparentMatchDeclarations(
+          Case.Pattern, Case.PatternInstantiation, TransparentDeclarations);
     auto VisitOnce = [&](IndirectLocalPath &Path, Local L,
                          ReferenceKind RK) {
       if (!VisitedLocations.insert(L->getExprLoc().getRawEncoding()).second)
