@@ -209,10 +209,12 @@ public:
 
 class DeclarationPattern final : public MatchPattern {
   VarDecl *Declaration;
+  VarDecl *PackSourceDeclaration;
   SourceRange DeclarationRange;
 
 public:
-  explicit DeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
+  explicit DeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
+                              VarDecl *PackSourceDeclaration = nullptr);
 
   static bool classof(const MatchPattern *P) {
     return P->getMatchPatternClass() == DeclarationPatternClass;
@@ -220,6 +222,7 @@ public:
 
   const VarDecl *getDeclaration() const { return Declaration; }
   VarDecl *getDeclaration() { return Declaration; }
+  VarDecl *getPackSourceDeclaration() const { return PackSourceDeclaration; }
 
   SourceLocation getBeginLoc() const;
   SourceLocation getEndLoc() const;
@@ -279,6 +282,10 @@ private:
   MatchPattern *Pattern = nullptr;
 
 public:
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == AlternativePatternClass;
+  }
+
   explicit AlternativePattern(SourceRange Braces, MatchPattern *Pattern)
       : MatchPattern(AlternativePatternClass), Kind(Generic), Braces(Braces),
         Pattern(Pattern) {
@@ -342,6 +349,10 @@ class DecompositionPattern final
   MatchPattern **getPatterns() { return getTrailingObjects(); }
 
 public:
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == DecompositionPatternClass;
+  }
+
   unsigned numTrailingObjects(OverloadToken<MatchPattern *>) const {
     return NumPatterns;
   }
@@ -354,6 +365,11 @@ public:
                                            unsigned NumPatterns);
 
   unsigned getNumPatterns() const { return NumPatterns; }
+
+  ArrayRef<MatchPattern *> patterns() { return {getPatterns(), NumPatterns}; }
+  ArrayRef<MatchPattern *> patterns() const {
+    return {const_cast<MatchPattern **>(getPatterns()), NumPatterns};
+  }
 
   SourceLocation getBeginLoc() const { return Squares.getBegin(); }
   SourceLocation getEndLoc() const { return Squares.getEnd(); }
@@ -382,6 +398,7 @@ struct MatchPatternInfo {
   ArrayRef<QualType> AlternativeTypes;
   ArrayRef<unsigned char> ProjectableAlternatives;
   ArrayRef<unsigned> SelectedAlternatives;
+  ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
   bool IsExhaustive = true;
   bool IsOpenAlternative = false;
@@ -389,6 +406,7 @@ struct MatchPatternInfo {
   bool OpenAlternativeProjectableWildcard = false;
   bool TypePatternResolved = false;
   bool TypePatternMatches = false;
+  bool HasExpandedPatterns = false;
 };
 
 class MatchPatternInstantiation final
@@ -417,6 +435,8 @@ public:
     return ArrayRef(getTrailingObjects(), NumInfos);
   }
   const MatchPatternInfo *find(const MatchPattern *P) const;
+  ArrayRef<MatchPattern *>
+  getDecompositionPatterns(const DecompositionPattern *P) const;
 };
 
 /// Visit the declarations and statements that implement one semantically
