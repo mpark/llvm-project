@@ -11194,7 +11194,8 @@ public:
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
                                                       bool IsPackExpansion = false);
   ActionResult<MatchPattern *>
-  ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange);
+  ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
+                          VarDecl *PackSourceDeclaration = nullptr);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
   ActionResult<MatchPattern *>
   ActOnBracedAlternativePattern(SourceRange Braces, MatchPattern *SubPattern);
