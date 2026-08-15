@@ -48,6 +48,25 @@ int sum_binding_pack(Triple triple) {
   };
 }
 
+struct Four {
+  int first;
+  int second;
+  int third;
+  int fourth;
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z27sum_declaration_pack_middle4Four
+// CHECK: add nsw i32
+// CHECK: add nsw i32
+// CHECK: add nsw i32
+// CHECK: ret i32
+int sum_declaration_pack_middle(Four value) {
+  return value match {
+    case [auto&& first, auto&& ...middle, auto&& last] =>
+        first + (... + middle) + last;
+  };
+}
+
 template<class T>
 T dependent(T value) {
   return value match { case auto &&ref => ref; };
