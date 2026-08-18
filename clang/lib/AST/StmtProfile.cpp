@@ -255,6 +255,7 @@ void StmtProfiler::VisitMatchPattern(const MatchPattern *P) {
   ID.AddInteger(P->getMatchPatternClass());
   switch (P->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
+    ID.AddBoolean(static_cast<const WildcardPattern *>(P)->isPackExpansion());
     return;
   case MatchPattern::ExpressionPatternClass: {
     const auto *EP = static_cast<const ExpressionPattern *>(P);
