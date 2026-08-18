@@ -11190,7 +11190,8 @@ public:
   ActOnMatchCaseAttributes(const ParsedAttributes &Attributes, Stmt *Handler);
   ExprResult ExpandDeferredMatchSelectExpr(MatchSelectExpr *E);
 
-  ActionResult<MatchPattern *> ActOnWildcardPattern(SourceLocation WildcardLoc);
+  ActionResult<MatchPattern *>
+  ActOnWildcardPattern(SourceLocation Loc, bool IsPackExpansion = false);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
                                                       bool IsPackExpansion = false);
   ActionResult<MatchPattern *>

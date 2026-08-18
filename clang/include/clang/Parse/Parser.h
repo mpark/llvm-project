@@ -4554,8 +4554,10 @@ private:
                bool Decomp = false,
                bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
-                   TypoCorrectionTypeBehavior::AllowNonTypes);
-  ActionResult<MatchPattern *> ParseWildcardPattern();
+                   TypoCorrectionTypeBehavior::AllowNonTypes,
+               bool AllowUnnamedPack = false);
+  ActionResult<MatchPattern *>
+  ParseWildcardPattern();
   ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);
   ActionResult<MatchPattern *>
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,

@@ -4548,7 +4548,14 @@ ActionResult<MatchPattern *>
 Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
                      bool StopAtEqual,
-                     TypoCorrectionTypeBehavior CorrectionBehavior) {
+                     TypoCorrectionTypeBehavior CorrectionBehavior,
+                     bool AllowUnnamedPack) {
+  if (AllowUnnamedPack && Tok.is(tok::ellipsis)) {
+    SourceLocation EllipsisLoc = ConsumeToken();
+    return Actions.ActOnWildcardPattern(EllipsisLoc,
+                                        /*IsPackExpansion=*/true);
+  }
+
   auto StartsAttributedDeclarationPattern = [&] {
     if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) !=
         CXX11AttributeKind::AttributeSpecifier)
@@ -4587,7 +4594,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   }
 }
 
-ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
+ActionResult<MatchPattern *>
+Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
 }
 
@@ -4738,8 +4746,10 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
 
   SmallVector<MatchPattern *, 4> Patterns;
   do {
-    ActionResult<MatchPattern *> Pattern =
-        ParsePattern(nullptr, /*Decomp=*/true);
+    ActionResult<MatchPattern *> Pattern = ParsePattern(
+        nullptr, /*Decomp=*/true, /*StopAtEqual=*/false,
+        TypoCorrectionTypeBehavior::AllowNonTypes,
+        /*AllowUnnamedPack=*/true);
     if (Pattern.isInvalid()) {
       T.skipToEnd();
       return true;

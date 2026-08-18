@@ -159,16 +159,24 @@ public:
 };
 
 class WildcardPattern final : public MatchPattern {
-  SourceLocation WildcardLoc;
+  SourceLocation Loc;
+  bool IsPackExpansion;
 
 public:
-  explicit WildcardPattern(SourceLocation WildcardLoc)
-      : MatchPattern(WildcardPatternClass), WildcardLoc(WildcardLoc) {
+  explicit WildcardPattern(SourceLocation Loc, bool IsPackExpansion = false)
+      : MatchPattern(WildcardPatternClass), Loc(Loc),
+        IsPackExpansion(IsPackExpansion) {
     setDependence(ExprDependence::None);
   }
 
-  SourceLocation getBeginLoc() const { return WildcardLoc; }
-  SourceLocation getEndLoc() const { return WildcardLoc; }
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == WildcardPatternClass;
+  }
+
+  bool isPackExpansion() const { return IsPackExpansion; }
+
+  SourceLocation getBeginLoc() const { return Loc; }
+  SourceLocation getEndLoc() const { return Loc; }
 
   llvm::iterator_range<MatchPattern **> children() {
     return {nullptr, nullptr};

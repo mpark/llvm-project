@@ -882,8 +882,8 @@ ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(
 }
 
 ActionResult<MatchPattern *>
-Sema::ActOnWildcardPattern(SourceLocation WildcardLoc) {
-  return new (Context) WildcardPattern(WildcardLoc);
+Sema::ActOnWildcardPattern(SourceLocation Loc, bool IsPackExpansion) {
+  return new (Context) WildcardPattern(Loc, IsPackExpansion);
 }
 
 ActionResult<MatchPattern *>
@@ -908,6 +908,8 @@ static bool isArityInferredDecompositionPack(MatchPattern *Pattern) {
     return Declaration->getDeclaration()->isParameterPack();
   if (auto *Type = dyn_cast<TypePattern>(Pattern))
     return isa<PackExpansionType>(Type->getType());
+  if (auto *Wildcard = dyn_cast<WildcardPattern>(Pattern))
+    return Wildcard->isPackExpansion();
   return false;
 }
 
@@ -1144,7 +1146,7 @@ expandDecompositionSubpatternPack(Sema &S, DecompositionPattern *Pattern,
       } else if (auto *Type = dyn_cast<TypePattern>(UnwrappedPack)) {
         Element = createTypeSubpatternPackElement(S, Type);
       } else {
-        llvm_unreachable("unknown arity-inferred decomposition pack");
+        Element = S.ActOnWildcardPattern(Pack->getEndLoc()).get();
       }
       Expanded.push_back(Element);
     }
@@ -2064,7 +2066,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
       for (auto [Binding, Child] : llvm::zip(Bindings, Patterns)) {
         Expr *Element = getDecompositionElement(*this, Subject, Binding);
         if (checkDecompositionSubpattern(*this, Element, Child, State,
-                                         ProjectionCache, Pack != nullptr))
+                                         ProjectionCache,
+                                         DeclarationPack != nullptr))
           return true;
         if (ProjectionCache)
           appendProjectionPath(Child, ProjectionCache->CurrentProjectionPath,
@@ -2100,7 +2103,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
       BindingDecl *BD = Bindings[I];
       Expr *Element = getDecompositionElement(*this, Subject, BD);
       if (checkDecompositionSubpattern(*this, Element, C, State,
-                                       ProjectionCache, Pack != nullptr)) {
+                                       ProjectionCache,
+                                       DeclarationPack != nullptr)) {
         return true;
       }
       if (ProjectionCache)
