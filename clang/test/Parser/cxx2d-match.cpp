@@ -241,6 +241,7 @@ void test_decomposition_pattern() {
   xs match case [_, _];
   xs match case [_, 3];
   xs match case [1, 2];
+  xs match case [...];
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
   xss match case [[_, _, _], [_, _, _]];
   xss match case [[1, _, _], [4, 5, _]];
@@ -260,6 +261,9 @@ void test_invalid_decomposition_pattern() {
   s match { case [0,,] => 0; case _ => 0; }; // expected-error {{expected expression}}
   s match { case [0 0] => 0; case _ => 0; }; // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
   s match { case [,] => 0; case _ => 0; }; // expected-error {{expected expression}}
+  s match { case [int first, ..._, int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  s match { case [int first, ...42, int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  s match { case [int first, ...[_, _], int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
 }
 
 void test_parenthesized_expression_pattern(int a, int b) {
