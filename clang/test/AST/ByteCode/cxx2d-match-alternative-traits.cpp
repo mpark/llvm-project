@@ -174,6 +174,12 @@ constexpr int match_generic_declaration_pack(TupleChoice choice) {
   };
 }
 
+constexpr int match_generic_wildcard_pack(TupleChoice choice) {
+  return choice match {
+    case { [auto&& first, ..._] } => first;
+  };
+}
+
 constexpr int multiple_views_cache_each_discriminator() {
   int primary_index_calls = 0;
   int nullable_index_calls = 0;
@@ -257,6 +263,8 @@ static_assert(match_generic_binding_pack({0, {3}, {4, 5}}) == 3);
 static_assert(match_generic_binding_pack({1, {3}, {4, 5}}) == 9);
 static_assert(match_generic_declaration_pack({0, {3}, {4, 5}}) == 4);
 static_assert(match_generic_declaration_pack({1, {3}, {4, 5}}) == 11);
+static_assert(match_generic_wildcard_pack({0, {3}, {4, 5}}) == 3);
+static_assert(match_generic_wildcard_pack({1, {3}, {4, 5}}) == 4);
 static_assert(multiple_views_cache_each_discriminator() == 112);
 constexpr Choice dependent_first{0, 3, 4};
 constexpr Choice dependent_second{1, 3, 4};

@@ -4529,6 +4529,14 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
                      bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
+  if (Decomp && Tok.is(tok::ellipsis)) {
+    SourceLocation EllipsisLoc = ConsumeToken();
+    if (Tok.is(tok::identifier) && Tok.getIdentifierInfo() == Ident_wildcard)
+      return ParseWildcardPattern(EllipsisLoc);
+    Diag(Tok, diag::err_expected) << tok::identifier;
+    return true;
+  }
+
   auto StartsAttributedDeclarationPattern = [&] {
     if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) !=
         CXX11AttributeKind::AttributeSpecifier)
@@ -4567,8 +4575,9 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   }
 }
 
-ActionResult<MatchPattern *> Parser::ParseWildcardPattern() {
-  return Actions.ActOnWildcardPattern(ConsumeToken());
+ActionResult<MatchPattern *>
+Parser::ParseWildcardPattern(SourceLocation EllipsisLoc) {
+  return Actions.ActOnWildcardPattern(ConsumeToken(), EllipsisLoc);
 }
 
 ActionResult<MatchPattern *> Parser::ParseDeclarationPattern(bool Decomp) {

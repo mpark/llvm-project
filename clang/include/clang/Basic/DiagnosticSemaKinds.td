@@ -665,7 +665,7 @@ def err_decomp_decl_wrong_number_bindings : Error<
   "%select{%plural{0:no|:only %1}1|%1}4 "
   "%plural{1:name was|:names were}1 provided">;
 def err_decomp_pattern_multiple_packs : Error<
-  "multiple declaration packs in decomposition pattern">;
+  "multiple arity-inferred packs in decomposition pattern">;
 def err_decomp_pattern_pack_too_small : Error<
   "type %0 decomposes into %1 elements, but decomposition pattern requires "
   "at least %2">;

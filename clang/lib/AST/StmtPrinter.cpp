@@ -3133,6 +3133,8 @@ void StmtPrinter::VisitHLSLOutArgExpr(HLSLOutArgExpr *Node) {
 void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
+    if (static_cast<const WildcardPattern *>(Pattern)->isPackExpansion())
+      OS << "...";
     OS << "_";
     return;
   case MatchPattern::ExpressionPatternClass: {
