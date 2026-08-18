@@ -572,6 +572,14 @@ constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
 
 static_assert(typed_declaration_subpattern_pack({1, 2, 3, 4}) == 10);
 
+constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
+  return value match {
+    case [auto&& first, ..._, auto&& last] => first + last;
+  };
+}
+
+static_assert(wildcard_subpattern_pack({1, 2, 3, 4}) == 5);
+
 constexpr int empty_declaration_subpattern_pack(Pair value) {
   return value match {
     case [auto&& first, auto&& ...middle, auto&& last] =>
@@ -580,6 +588,14 @@ constexpr int empty_declaration_subpattern_pack(Pair value) {
 }
 
 static_assert(empty_declaration_subpattern_pack({1, 2}) == 3);
+
+constexpr int empty_wildcard_subpattern_pack(Pair value) {
+  return value match {
+    case [auto&& first, ..._, auto&& last] => first + last;
+  };
+}
+
+static_assert(empty_wildcard_subpattern_pack({1, 2}) == 3);
 
 struct NestedDeclarationPack {
   int first;
@@ -598,6 +614,15 @@ constexpr int nested_declaration_subpattern_pack(NestedDeclarationPack value) {
 
 static_assert(
     nested_declaration_subpattern_pack({1, {2, 3, 4, 5}, 6}) == 21);
+
+constexpr int nested_wildcard_subpattern_pack(NestedDeclarationPack value) {
+  return value match {
+    case [auto&& first, [auto&& nested_first, ..._, auto&& nested_last],
+          auto&& last] => first + nested_first + nested_last + last;
+  };
+}
+
+static_assert(nested_wildcard_subpattern_pack({1, {2, 3, 4, 5}, 6}) == 14);
 
 constexpr int declaration_subpattern_pack_guard(DeclarationPackFour value) {
   return value match {
@@ -630,9 +655,26 @@ static_assert(
     dependent_declaration_subpattern_pack_size(DeclarationPackFour{}) == 4);
 static_assert(dependent_declaration_subpattern_pack_size(1) == -1);
 
+template<class T>
+constexpr int dependent_wildcard_subpattern_pack(T value) {
+  return value match -> int {
+    case [..._] => 0;
+    case _ => -1;
+  };
+}
+
+static_assert(dependent_wildcard_subpattern_pack(DeclarationPackFour{}) == 0);
+static_assert(dependent_wildcard_subpattern_pack(1) == -1);
+
 int multiple_declaration_subpattern_packs(Pair value) {
   return value match {
-    case [auto&& ...first, auto&& ...second] => 0; // expected-error {{multiple declaration packs in decomposition pattern}} expected-note {{previous binding pack specified here}}
+    case [auto&& ...first, auto&& ...second] => 0; // expected-error {{multiple arity-inferred packs in decomposition pattern}} expected-note {{previous binding pack specified here}}
+  };
+}
+
+int multiple_mixed_subpattern_packs(Pair value) {
+  return value match {
+    case [..._, auto&& ...middle] => 0; // expected-error {{multiple arity-inferred packs in decomposition pattern}} expected-note {{previous binding pack specified here}}
   };
 }
 

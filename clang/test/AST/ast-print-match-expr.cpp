@@ -16,6 +16,13 @@ struct Pair {
   long second;
 };
 
+struct Four {
+  int first;
+  int second;
+  int third;
+  int fourth;
+};
+
 struct Choice {
   unsigned state;
   int integer;
@@ -108,6 +115,17 @@ int packs(Pair pair) {
 // CHECK-NEXT: {{^    }}return pair match {
 // CHECK-NEXT: {{^        }}case [Values..., 0] => 1L;
 // CHECK-NEXT: {{^        }}case auto [...elements] => (... + elements);
+// CHECK-NEXT: {{^    }}};
+
+int wildcard_pack(Four value) {
+  return value match {
+    case [auto&& first, ..._, auto&& last] => first + last;
+  };
+}
+
+// CHECK-LABEL: int wildcard_pack(Four value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        }}case [auto &&first, ..._, auto &&last] => first + last;
 // CHECK-NEXT: {{^    }}};
 
 template<int I>
