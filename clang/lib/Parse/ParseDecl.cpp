@@ -7190,27 +7190,33 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
       ConsumeToken();
     }
 
-    if (Tok.isNot(tok::identifier)) {
-      Diag(Tok, diag::err_expected) << tok::identifier;
-      break;
-    }
-
-    IdentifierInfo *II = Tok.getIdentifierInfo();
-    SourceLocation Loc = Tok.getLocation();
-    ConsumeToken();
-
-    if (Tok.is(tok::ellipsis) && !PrevEllipsisLoc.isValid()) {
-      DiagnoseMisplacedEllipsis(Tok.getLocation(), Loc, EllipsisLoc.isValid(),
-                                true);
-      EllipsisLoc = Tok.getLocation();
-      ConsumeToken();
-    }
-
+    IdentifierInfo *II = nullptr;
+    SourceLocation Loc = EllipsisLoc;
     ParsedAttributes Attrs(AttrFactory);
-    if (isCXX11AttributeSpecifier() !=
-        CXX11AttributeKind::NotAttributeSpecifier) {
-      DiagCompat(Tok, diag_compat::attrs_on_binding);
-      MaybeParseCXX11Attributes(Attrs);
+    if (EllipsisLoc.isValid() && Tok.isOneOf(tok::comma, tok::r_square)) {
+      DiagCompat(EllipsisLoc, diag_compat::decomp_decl_unnamed_pack);
+    } else {
+      if (Tok.isNot(tok::identifier)) {
+        Diag(Tok, diag::err_expected) << tok::identifier;
+        break;
+      }
+
+      II = Tok.getIdentifierInfo();
+      Loc = Tok.getLocation();
+      ConsumeToken();
+
+      if (Tok.is(tok::ellipsis) && !PrevEllipsisLoc.isValid()) {
+        DiagnoseMisplacedEllipsis(Tok.getLocation(), Loc,
+                                  EllipsisLoc.isValid(), true);
+        EllipsisLoc = Tok.getLocation();
+        ConsumeToken();
+      }
+
+      if (isCXX11AttributeSpecifier() !=
+          CXX11AttributeKind::NotAttributeSpecifier) {
+        DiagCompat(Tok, diag_compat::attrs_on_binding);
+        MaybeParseCXX11Attributes(Attrs);
+      }
     }
 
     Bindings.push_back({II, Loc, std::move(Attrs), EllipsisLoc});

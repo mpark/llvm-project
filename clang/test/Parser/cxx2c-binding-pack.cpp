@@ -9,17 +9,8 @@ void decompose_array() {
 
   auto [y...] = arr; // expected-error{{'...' must immediately precede declared identifier}}
 
-  auto [...] = arr; // #2
-                    // expected-error@#2{{expected identifier}}
-                    // expected-error@#2{{{no names were provided}}}
-                    // expected-warning@#2{{empty structured bindings are a C++2d extension}}
-  auto [a, ..., b] = arr; // #3
-                          // expected-error@#3{{expected identifier}}
-                          // expected-error@#3{{{only 1 name was provided}}}
-  auto [a1, ...] = arr; // #4
-                        // expected-error@#4{{expected identifier}}
-                        // expected-error@#4{{{only 1 name was provided}}}
-  auto [..., b] = arr; // #5
-                       // expected-error@#5{{expected identifier}}
-                       // expected-error@#5{{{no names were provided}}}
+  auto [...] = arr; // expected-warning {{unnamed structured binding packs are a C++2d extension}}
+  auto [a, ..., b] = arr; // expected-warning {{unnamed structured binding packs are a C++2d extension}}
+  auto [a1, ...] = arr; // expected-warning {{unnamed structured binding packs are a C++2d extension}}
+  auto [..., b1] = arr; // expected-warning {{unnamed structured binding packs are a C++2d extension}}
 }

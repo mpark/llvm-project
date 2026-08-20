@@ -901,26 +901,11 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
 
   // Build the BindingDecls.
   for (auto &B : D.getDecompositionDeclarator().bindings()) {
-    // Check for name conflicts.
-    DeclarationNameInfo NameInfo(B.Name, B.NameLoc);
     IdentifierInfo *VarName = B.Name;
-    assert(VarName && "Cannot have an unnamed binding declaration");
-
-    LookupResult Previous(*this, NameInfo, LookupOrdinaryName,
-                          RedeclarationKind::ForVisibleRedeclaration);
-    LookupName(Previous, S,
-               /*CreateBuiltins*/DC->getRedeclContext()->isTranslationUnit());
-
-    // It's not permitted to shadow a template parameter name.
-    if (Previous.isSingleResult() &&
-        Previous.getFoundDecl()->isTemplateParameter()) {
-      DiagnoseTemplateParameterShadow(B.NameLoc, Previous.getFoundDecl());
-      Previous.clear();
-    }
 
     QualType QT;
     if (B.EllipsisLoc.isValid()) {
-      if (!cast<Decl>(DC)->isTemplated() && !IsPatternDecl)
+      if (VarName && !cast<Decl>(DC)->isTemplated() && !IsPatternDecl)
         Diag(B.EllipsisLoc, diag::err_pack_outside_template);
       QT = Context.getPackExpansionType(Context.DependentTy, std::nullopt,
                                         /*ExpectsPackInType=*/false);
@@ -934,6 +919,27 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
     }
 
     ProcessDeclAttributeList(S, BD, *B.Attrs);
+
+    if (!VarName) {
+      CurContext->addHiddenDecl(BD);
+      Bindings.push_back(BD);
+      ParsingInitForAutoVars.insert(BD);
+      continue;
+    }
+
+    // Check for name conflicts.
+    DeclarationNameInfo NameInfo(B.Name, B.NameLoc);
+    LookupResult Previous(*this, NameInfo, LookupOrdinaryName,
+                          RedeclarationKind::ForVisibleRedeclaration);
+    LookupName(Previous, S,
+               /*CreateBuiltins*/DC->getRedeclContext()->isTranslationUnit());
+
+    // It's not permitted to shadow a template parameter name.
+    if (Previous.isSingleResult() &&
+        Previous.getFoundDecl()->isTemplateParameter()) {
+      DiagnoseTemplateParameterShadow(B.NameLoc, Previous.getFoundDecl());
+      Previous.clear();
+    }
 
     // Find the shadowed declaration before filtering for scope.
     NamedDecl *ShadowedDecl = D.getCXXScopeSpec().isEmpty()
@@ -1037,8 +1043,11 @@ static bool CheckBindingsCount(Sema &S, DecompositionDecl *DD,
   if (IsValid)
     return false;
 
+  unsigned NumNames = Bindings.size();
+  if (HasPack && !(*BindingWithPackItr)->getIdentifier())
+    --NumNames;
   S.Diag(DD->getLocation(), diag::err_decomp_decl_wrong_number_bindings)
-      << DecompType << (unsigned)Bindings.size() << MemberCount << MemberCount
+      << DecompType << NumNames << MemberCount << MemberCount
       << (MemberCount < Bindings.size());
   return true;
 }
