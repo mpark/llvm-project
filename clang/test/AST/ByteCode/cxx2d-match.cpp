@@ -1159,6 +1159,17 @@ struct Pair {
   int second;
 };
 
+struct EmptyDecomposition {};
+
+constexpr int empty_decomposition_pattern(EmptyDecomposition value) {
+  return value match {
+    case [] => 42;
+  };
+}
+
+static_assert(empty_decomposition_pattern({}) == 42);
+static_assert(EmptyDecomposition{} match case []);
+
 static_assert([](int value) {
   return value match { case int copy => copy; };
 }(42) == 42);
