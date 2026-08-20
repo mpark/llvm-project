@@ -4726,15 +4726,17 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
     return true;
 
   SmallVector<MatchPattern *, 4> Patterns;
-  do {
-    ActionResult<MatchPattern *> Pattern =
-        ParsePattern(nullptr, /*Decomp=*/true);
-    if (Pattern.isInvalid()) {
-      T.skipToEnd();
-      return true;
-    }
-    Patterns.push_back(Pattern.get());
-  } while (TryConsumeToken(tok::comma));
+  if (Tok.isNot(tok::r_square)) {
+    do {
+      ActionResult<MatchPattern *> Pattern =
+          ParsePattern(nullptr, /*Decomp=*/true);
+      if (Pattern.isInvalid()) {
+        T.skipToEnd();
+        return true;
+      }
+      Patterns.push_back(Pattern.get());
+    } while (TryConsumeToken(tok::comma));
+  }
   T.consumeClose();
 
   return Actions.ActOnDecompositionPattern(Patterns, T.getRange());

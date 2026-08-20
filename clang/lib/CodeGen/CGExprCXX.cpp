@@ -2481,8 +2481,6 @@ RValue CodeGenFunction::EmitAlternativePattern(
 RValue CodeGenFunction::EmitDecompositionPattern(
     const DecompositionPattern *DecompPattern,
     const MatchPatternInstantiation *Instantiation) {
-  assert(DecompPattern->getNumPatterns() != 0 && "not implemented for empty.");
-
   RawAddress FinalDecompResultAddr = CreateTempAlloca(
       Builder.getInt1Ty(), getPointerAlign(), "match.decomp.result");
 

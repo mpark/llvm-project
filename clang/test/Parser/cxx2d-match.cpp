@@ -235,6 +235,9 @@ void test_constrained_declaration_pattern(int i) {
 }
 
 void test_decomposition_pattern() {
+  struct Empty {};
+  Empty empty;
+  empty match { case [] => 0; };
   int nested_single[1][1] = { { 1 } };
   nested_single match case [[_]];
   int xs[2] = { 1, 2 };
@@ -255,7 +258,6 @@ void test_attributed_declaration_pattern(int value) {
 void test_invalid_decomposition_pattern() {
   struct S { int a; int b; };
   S s{1, 2};
-  s match { case [] => 0; case _ => 0; }; // expected-error {{expected expression}}
   s match { case [0,] => 0; case _ => 0; }; // expected-error {{expected expression}}
   s match { case [0,,] => 0; case _ => 0; }; // expected-error {{expected expression}}
   s match { case [0 0] => 0; case _ => 0; }; // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
