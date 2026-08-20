@@ -1866,11 +1866,12 @@ struct DeclaratorChunk {
   }
 };
 
-/// A parsed C++17 decomposition declarator of the form
-///   '[' identifier-list ']'
+/// A parsed decomposition declarator of the form
+///   '[' structured-binding-list ']'
 class DecompositionDeclarator {
 public:
   struct Binding {
+    /// Null for an unnamed binding pack.
     IdentifierInfo *Name;
     SourceLocation NameLoc;
     std::optional<ParsedAttributes> Attrs;

@@ -117,6 +117,17 @@ int packs(Pair pair) {
 // CHECK-NEXT: {{^        }}case auto [...elements] => (... + elements);
 // CHECK-NEXT: {{^    }}};
 
+int unnamed_binding_pack(Four value) {
+  return value match {
+    case auto [first, ..., last] => first + last;
+  };
+}
+
+// CHECK-LABEL: int unnamed_binding_pack(Four value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        }}case auto [first, ..., last] => first + last;
+// CHECK-NEXT: {{^    }}};
+
 int wildcard_pack(Four value) {
   return value match {
     case [auto&& first, ..._, auto&& last] => first + last;

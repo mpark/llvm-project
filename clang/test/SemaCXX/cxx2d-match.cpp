@@ -565,6 +565,33 @@ constexpr int binding_pack_case_condition(BindingPackTriple value) {
 
 static_assert(binding_pack_case_condition({1, 2, 3}) == 6);
 
+constexpr int unnamed_binding_pack(BindingPackTriple value) {
+  return value match {
+    case auto [first, ..., last] => first + last;
+  };
+}
+
+static_assert(unnamed_binding_pack({1, 2, 3}) == 4);
+
+constexpr int fully_unnamed_binding_pack(BindingPackTriple value) {
+  return value match {
+    case auto [...] => 1;
+  };
+}
+
+static_assert(fully_unnamed_binding_pack({1, 2, 3}) == 1);
+
+template<class T>
+constexpr int dependent_unnamed_binding_pack(T value) {
+  return value match -> int {
+    case auto [first, ..., last] => first + last;
+    case _ => -1;
+  };
+}
+
+static_assert(dependent_unnamed_binding_pack(BindingPackTriple{1, 2, 3}) == 4);
+static_assert(dependent_unnamed_binding_pack(0) == -1);
+
 struct DeclarationPackFour {
   int first;
   int second;
