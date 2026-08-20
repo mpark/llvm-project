@@ -128,6 +128,19 @@ int wildcard_pack(Four value) {
 // CHECK-NEXT: {{^        }}case [auto &&first, ..._, auto &&last] => first + last;
 // CHECK-NEXT: {{^    }}};
 
+struct EmptyDecomposition {};
+
+int empty_decomposition(EmptyDecomposition value) {
+  return value match {
+    case [] => 42;
+  };
+}
+
+// CHECK-LABEL: int empty_decomposition(EmptyDecomposition value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        }}case [] => 42;
+// CHECK-NEXT: {{^    }}};
+
 template<int I>
 constexpr int constexpr_selection() {
   return I match constexpr -> int {

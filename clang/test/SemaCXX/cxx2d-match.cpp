@@ -68,6 +68,24 @@ struct Pair {
   int second;
 };
 
+struct EmptyDecomposition {};
+
+constexpr int empty_decomposition_pattern(EmptyDecomposition value) {
+  return value match {
+    case [] => 42;
+  };
+}
+
+static_assert(empty_decomposition_pattern({}) == 42);
+static_assert(EmptyDecomposition{} match case []);
+
+int nonempty_decomposition_pattern(Pair value) {
+  return value match {
+    case [] => 0; // expected-error {{type 'Pair' binds to 2 elements, but no names were provided}}
+    case _ => 1;
+  };
+}
+
 struct Guarded {
   int value;
 };
