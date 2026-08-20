@@ -7220,10 +7220,8 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
     // We've already diagnosed a problem here.
     T.skipToEnd();
   else {
-    // C++17 does not allow the identifier-list in a structured binding
-    // to be empty.
     if (Bindings.empty())
-      Diag(Tok.getLocation(), diag::ext_decomp_decl_empty);
+      DiagCompat(Tok.getLocation(), diag_compat::decomp_decl_empty);
 
     T.consumeClose();
   }
