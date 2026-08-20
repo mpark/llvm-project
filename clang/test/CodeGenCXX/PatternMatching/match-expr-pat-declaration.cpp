@@ -48,6 +48,15 @@ int sum_binding_pack(Triple triple) {
   };
 }
 
+// CHECK-LABEL: define{{.*}} i32 @_Z20unnamed_binding_pack6Triple
+// CHECK: add nsw i32
+// CHECK: ret i32
+int unnamed_binding_pack(Triple triple) {
+  return triple match {
+    case auto [first, ..., last] => first + last;
+  };
+}
+
 struct Four {
   int first;
   int second;

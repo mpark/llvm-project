@@ -3807,6 +3807,8 @@ void DecompositionDecl::printName(llvm::raw_ostream &OS,
   for (const auto *B : bindings()) {
     if (Comma)
       OS << ", ";
+    if (B->isParameterPack())
+      OS << "...";
     B->printName(OS, Policy);
     Comma = true;
   }
