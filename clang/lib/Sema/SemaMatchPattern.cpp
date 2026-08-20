@@ -832,6 +832,8 @@ ExprResult Sema::ActOnMatchSelectExpr(
                                       IsConstexpr,
                                       /*IsFullyCovered=*/false, OrigResultType,
                                       RetTy, SourceCases, {}, Braces);
+    if (CurContext->isDependentContext())
+      return E;
     return ExpandDeferredMatchSelectExpr(E);
   }
 
