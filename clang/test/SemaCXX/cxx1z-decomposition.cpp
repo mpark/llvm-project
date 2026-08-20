@@ -10,7 +10,7 @@ void num_elems() {
   struct A0 {} a0;
   int a1[1], a2[2];
 
-  auto [] = a0; // expected-warning {{does not allow a structured binding group to be empty}}
+  auto [] = a0; // expected-warning {{empty structured bindings are a C++2d extension}}
   auto [v1] = a0; // expected-error {{type 'struct A0' binds to 0 elements, but 1 name was provided}}
   auto [] = a1; // expected-error {{type 'int[1]' binds to 1 element, but no names were provided}} expected-warning {{empty}}
   auto [v2] = a1;
@@ -161,7 +161,7 @@ namespace lambdas {
         [n] {}; // expected-note {{lambda expression}}
   }
 
-  auto [] = []{}; // expected-warning {{ISO C++17 does not allow a structured binding group to be empty}}
+  auto [] = []{}; // expected-warning {{empty structured bindings are a C++2d extension}}
 
   int g() {
     int n = 0;
@@ -195,7 +195,7 @@ namespace lambdas {
   void j() {
     auto x = [] {};
     struct A : decltype(x) {};
-    auto &&[] = A{x}; // expected-warning {{ISO C++17 does not allow a structured binding group to be empty}}
+    auto &&[] = A{x}; // expected-warning {{empty structured bindings are a C++2d extension}}
   }
 }
 
