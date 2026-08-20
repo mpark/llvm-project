@@ -528,6 +528,8 @@ def err_expected_coloncolon_after_super : Error<
   "expected '::' after '__super'">;
 
 defm decomp_decl_empty : CXX29Compat<"empty structured bindings are">;
+defm decomp_decl_unnamed_pack : CXX29Compat<
+  "unnamed structured binding packs are">;
 
 def err_function_parameter_limit_exceeded : Error<
   "too many function parameters; subsequent parameters will be ignored">;
