@@ -79,6 +79,21 @@ struct std::alternative_traits<Choice> {
   static typename ChoiceAlternative<I>::type& get(Choice&);
 };
 
+// A generic projected arm in a dependent declaration context must not be
+// specialized until the enclosing template is instantiated. Otherwise,
+// references to non-dependent parameters can be cloned as internal globals.
+// CHECK-NOT: @_ZZ{{.*}}match_nondependent_subject_in_template{{.*}}5value = internal global
+// CHECK-LABEL: define{{.*}} i32 @_Z{{.*}}match_nondependent_subject_in_template
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+template<class = void>
+int match_nondependent_subject_in_template(Choice& value) {
+  return value match {
+    case { auto&& alternative } => static_cast<int>(alternative);
+  };
+}
+
+template int match_nondependent_subject_in_template<>(Choice&);
+
 template<class T>
 int match_dependent_alternative(T& value, int& guards) {
   return value match {
