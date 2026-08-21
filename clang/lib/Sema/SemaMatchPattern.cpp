@@ -1809,7 +1809,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
     auto *Decomposition = dyn_cast<DecompositionDecl>(VD);
     if (isReusableDecompositionDeclaration(VD)) {
       unsigned Arity = llvm::range_size(Decomposition->flat_bindings());
-      if (llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
+      if (!Subject->isTypeDependent() &&
+          llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
             return Binding->isParameterPack();
           }))
         if (UnsignedOrNone Count =
