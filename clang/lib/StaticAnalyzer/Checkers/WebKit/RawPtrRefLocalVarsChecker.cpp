@@ -320,7 +320,7 @@ public:
       return;
 
     if (auto *DD = dyn_cast<DecompositionDecl>(V)) {
-      for (auto *BD : DD->bindings()) {
+      for (auto *BD : DD->leaf_bindings()) {
         auto *Binding = BD->getBinding();
         if (!Binding)
           continue;

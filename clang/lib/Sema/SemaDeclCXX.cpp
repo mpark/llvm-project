@@ -52,6 +52,7 @@
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -896,11 +897,9 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
         << TemplRange << FixItHint::CreateRemoval(TemplRange);
   }
 
-  // Build the BindingDecls.
-  SmallVector<BindingDecl*, 8> Bindings;
-
-  // Build the BindingDecls.
-  for (auto &B : D.getDecompositionDeclarator().bindings()) {
+  auto BuildBinding =
+      [&](auto &&Self,
+          const DecompositionDeclarator::Binding &B) -> BindingDecl * {
     IdentifierInfo *VarName = B.Name;
 
     QualType QT;
@@ -912,70 +911,91 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
     }
 
     auto *BD = BindingDecl::Create(Context, DC, B.NameLoc, B.Name, QT);
+    if (B.Nested)
+      BD->setImplicit();
 
     if (BD->isParameterPack()) {
       if (sema::CapturingScopeInfo *CSI = getEnclosingLambdaOrBlock())
         CSI->LocalPacks.push_back(BD);
     }
 
-    ProcessDeclAttributeList(S, BD, *B.Attrs);
+    if (B.Attrs)
+      ProcessDeclAttributeList(S, BD, *B.Attrs);
 
     if (!VarName) {
       CurContext->addHiddenDecl(BD);
-      Bindings.push_back(BD);
       ParsingInitForAutoVars.insert(BD);
-      continue;
-    }
+    } else {
+      // Check for name conflicts.
+      DeclarationNameInfo NameInfo(B.Name, B.NameLoc);
+      LookupResult Previous(*this, NameInfo, LookupOrdinaryName,
+                            RedeclarationKind::ForVisibleRedeclaration);
+      LookupName(
+          Previous, S,
+          /*CreateBuiltins*/ DC->getRedeclContext()->isTranslationUnit());
 
-    // Check for name conflicts.
-    DeclarationNameInfo NameInfo(B.Name, B.NameLoc);
-    LookupResult Previous(*this, NameInfo, LookupOrdinaryName,
-                          RedeclarationKind::ForVisibleRedeclaration);
-    LookupName(Previous, S,
-               /*CreateBuiltins*/DC->getRedeclContext()->isTranslationUnit());
-
-    // It's not permitted to shadow a template parameter name.
-    if (Previous.isSingleResult() &&
-        Previous.getFoundDecl()->isTemplateParameter()) {
-      DiagnoseTemplateParameterShadow(B.NameLoc, Previous.getFoundDecl());
-      Previous.clear();
-    }
-
-    // Find the shadowed declaration before filtering for scope.
-    NamedDecl *ShadowedDecl = D.getCXXScopeSpec().isEmpty()
-                                  ? getShadowedDeclaration(BD, Previous)
-                                  : nullptr;
-
-    bool ConsiderLinkage = DC->isFunctionOrMethod() &&
-                           DS.getStorageClassSpec() == DeclSpec::SCS_extern;
-    FilterLookupForScope(Previous, DC, S, ConsiderLinkage,
-                         /*AllowInlineNamespace*/false);
-
-    bool IsPlaceholder = DS.getStorageClassSpec() != DeclSpec::SCS_static &&
-                         DC->isFunctionOrMethod() && VarName->isPlaceholder();
-    if (!Previous.empty()) {
-      if (IsPlaceholder) {
-        bool sameDC = (Previous.end() - 1)
-                          ->getDeclContext()
-                          ->getRedeclContext()
-                          ->Equals(DC->getRedeclContext());
-        if (sameDC &&
-            isDeclInScope(*(Previous.end() - 1), CurContext, S, false)) {
-          Previous.clear();
-          DiagPlaceholderVariableDefinition(B.NameLoc);
-        }
-      } else {
-        auto *Old = Previous.getRepresentativeDecl();
-        Diag(B.NameLoc, diag::err_redefinition) << B.Name;
-        Diag(Old->getLocation(), diag::note_previous_definition);
+      // It's not permitted to shadow a template parameter name.
+      if (Previous.isSingleResult() &&
+          Previous.getFoundDecl()->isTemplateParameter()) {
+        DiagnoseTemplateParameterShadow(B.NameLoc, Previous.getFoundDecl());
+        Previous.clear();
       }
-    } else if (ShadowedDecl && !D.isRedeclaration()) {
-      CheckShadow(BD, ShadowedDecl, Previous);
+
+      // Find the shadowed declaration before filtering for scope.
+      NamedDecl *ShadowedDecl = D.getCXXScopeSpec().isEmpty()
+                                    ? getShadowedDeclaration(BD, Previous)
+                                    : nullptr;
+
+      bool ConsiderLinkage = DC->isFunctionOrMethod() &&
+                             DS.getStorageClassSpec() == DeclSpec::SCS_extern;
+      FilterLookupForScope(Previous, DC, S, ConsiderLinkage,
+                           /*AllowInlineNamespace*/ false);
+
+      bool IsPlaceholder = DS.getStorageClassSpec() != DeclSpec::SCS_static &&
+                           DC->isFunctionOrMethod() && VarName->isPlaceholder();
+      if (!Previous.empty()) {
+        if (IsPlaceholder) {
+          bool sameDC = (Previous.end() - 1)
+                            ->getDeclContext()
+                            ->getRedeclContext()
+                            ->Equals(DC->getRedeclContext());
+          if (sameDC &&
+              isDeclInScope(*(Previous.end() - 1), CurContext, S, false)) {
+            Previous.clear();
+            DiagPlaceholderVariableDefinition(B.NameLoc);
+          }
+        } else {
+          auto *Old = Previous.getRepresentativeDecl();
+          Diag(B.NameLoc, diag::err_redefinition) << B.Name;
+          Diag(Old->getLocation(), diag::note_previous_definition);
+        }
+      } else if (ShadowedDecl && !D.isRedeclaration()) {
+        CheckShadow(BD, ShadowedDecl, Previous);
+      }
+      PushOnScopeChains(BD, S, true);
+      ParsingInitForAutoVars.insert(BD);
     }
-    PushOnScopeChains(BD, S, true);
-    Bindings.push_back(BD);
-    ParsingInitForAutoVars.insert(BD);
-  }
+
+    if (B.Nested) {
+      SmallVector<BindingDecl *, 8> NestedBindings;
+      for (const auto &NestedBinding : B.Nested->bindings())
+        NestedBindings.push_back(Self(Self, NestedBinding));
+      auto *NestedDD = DecompositionDecl::Create(
+          Context, DC, B.Nested->getLSquareLoc(), B.Nested->getLSquareLoc(),
+          B.Nested->getRSquareLoc(), Context.DependentTy, /*TInfo=*/nullptr,
+          SC_None, NestedBindings);
+      NestedDD->setImplicit();
+      NestedDD->setLexicalDeclContext(DC);
+      BD->setNestedDecomposition(NestedDD);
+    }
+
+    return BD;
+  };
+
+  // Build the BindingDecls.
+  SmallVector<BindingDecl *, 8> Bindings;
+  for (const auto &B : D.getDecompositionDeclarator().bindings())
+    Bindings.push_back(BuildBinding(BuildBinding, B));
 
   // There are no prior lookup results for the variable itself, because it
   // is unnamed.
@@ -1053,11 +1073,11 @@ static bool CheckBindingsCount(Sema &S, DecompositionDecl *DD,
 }
 
 static bool checkSimpleDecomposition(
-    Sema &S, ArrayRef<BindingDecl *> Bindings, ValueDecl *Src,
-    QualType DecompType, const llvm::APSInt &NumElemsAPS, QualType ElemType,
+    Sema &S, DecompositionDecl *DD, ArrayRef<BindingDecl *> Bindings,
+    ValueDecl *Src, QualType DecompType, const llvm::APSInt &NumElemsAPS,
+    QualType ElemType,
     llvm::function_ref<ExprResult(SourceLocation, Expr *, unsigned)> GetInit) {
   unsigned NumElems = (unsigned)NumElemsAPS.getLimitedValue(UINT_MAX);
-  auto *DD = cast<DecompositionDecl>(Src);
 
   if (CheckBindingsCount(S, DD, DecompType, Bindings, NumElems))
     return true;
@@ -1068,6 +1088,10 @@ static bool checkSimpleDecomposition(
     ExprResult E = S.BuildDeclRefExpr(Src, DecompType, VK_LValue, Loc);
     if (E.isInvalid())
       return true;
+    if (Src != DD && !DD->getType()->isLValueReferenceType())
+      E = ImplicitCastExpr::Create(S.Context, E.get()->getType(), CK_NoOp,
+                                   E.get(), nullptr, VK_XValue,
+                                   FPOptionsOverride());
     E = GetInit(Loc, E.get(), I++);
     if (E.isInvalid())
       return true;
@@ -1077,13 +1101,13 @@ static bool checkSimpleDecomposition(
   return false;
 }
 
-static bool checkArrayLikeDecomposition(Sema &S,
+static bool checkArrayLikeDecomposition(Sema &S, DecompositionDecl *DD,
                                         ArrayRef<BindingDecl *> Bindings,
                                         ValueDecl *Src, QualType DecompType,
                                         const llvm::APSInt &NumElems,
                                         QualType ElemType) {
   return checkSimpleDecomposition(
-      S, Bindings, Src, DecompType, NumElems, ElemType,
+      S, DD, Bindings, Src, DecompType, NumElems, ElemType,
       [&](SourceLocation Loc, Expr *Base, unsigned I) -> ExprResult {
         ExprResult E = S.ActOnIntegerConstant(Loc, I);
         if (E.isInvalid())
@@ -1092,29 +1116,31 @@ static bool checkArrayLikeDecomposition(Sema &S,
       });
 }
 
-static bool checkArrayDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
+static bool checkArrayDecomposition(Sema &S, DecompositionDecl *DD,
+                                    ArrayRef<BindingDecl *> Bindings,
                                     ValueDecl *Src, QualType DecompType,
                                     const ConstantArrayType *CAT) {
-  return checkArrayLikeDecomposition(S, Bindings, Src, DecompType,
+  return checkArrayLikeDecomposition(S, DD, Bindings, Src, DecompType,
                                      llvm::APSInt(CAT->getSize()),
                                      CAT->getElementType());
 }
 
-static bool checkVectorDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
+static bool checkVectorDecomposition(Sema &S, DecompositionDecl *DD,
+                                     ArrayRef<BindingDecl *> Bindings,
                                      ValueDecl *Src, QualType DecompType,
                                      const VectorType *VT) {
   return checkArrayLikeDecomposition(
-      S, Bindings, Src, DecompType, llvm::APSInt::get(VT->getNumElements()),
+      S, DD, Bindings, Src, DecompType, llvm::APSInt::get(VT->getNumElements()),
       S.Context.getQualifiedType(VT->getElementType(),
                                  DecompType.getQualifiers()));
 }
 
-static bool checkComplexDecomposition(Sema &S,
+static bool checkComplexDecomposition(Sema &S, DecompositionDecl *DD,
                                       ArrayRef<BindingDecl *> Bindings,
                                       ValueDecl *Src, QualType DecompType,
                                       const ComplexType *CT) {
   return checkSimpleDecomposition(
-      S, Bindings, Src, DecompType, llvm::APSInt::get(2),
+      S, DD, Bindings, Src, DecompType, llvm::APSInt::get(2),
       S.Context.getQualifiedType(CT->getElementType(),
                                  DecompType.getQualifiers()),
       [&](SourceLocation Loc, Expr *Base, unsigned I) -> ExprResult {
@@ -1329,11 +1355,11 @@ struct InitializingBinding {
 };
 }
 
-static bool checkTupleLikeDecomposition(Sema &S,
+static bool checkTupleLikeDecomposition(Sema &S, DecompositionDecl *DD,
                                         ArrayRef<BindingDecl *> Bindings,
-                                        VarDecl *Src, QualType DecompType,
+                                        ValueDecl *Src, DecompositionDecl *Root,
+                                        QualType DecompType,
                                         unsigned NumElems) {
-  auto *DD = cast<DecompositionDecl>(Src);
   if (CheckBindingsCount(S, DD, DecompType, Bindings, NumElems))
     return true;
 
@@ -1379,7 +1405,7 @@ static bool checkTupleLikeDecomposition(Sema &S,
 
     //   e is an lvalue if the type of the entity is an lvalue reference and
     //   an xvalue otherwise
-    if (!Src->getType()->isLValueReferenceType())
+    if (!DD->getType()->isLValueReferenceType())
       E = ImplicitCastExpr::Create(S.Context, E.get()->getType(), CK_NoOp,
                                    E.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
@@ -1433,17 +1459,30 @@ static bool checkTupleLikeDecomposition(Sema &S,
 
     // Don't give this VarDecl a TypeSourceInfo, since this is a synthesized
     // entity and this type was never written in source code.
-    auto *BindingVD =
-        VarDecl::Create(S.Context, Src->getDeclContext(), Loc, Loc,
-                        B->getDeclName().getAsIdentifierInfo(), U,
-                        /*TInfo=*/nullptr, Src->getStorageClass());
-    BindingVD->setLexicalDeclContext(Src->getLexicalDeclContext());
-    BindingVD->setTSCSpec(Src->getTSCSpec());
-    BindingVD->setConstexpr(Src->isConstexpr());
-    if (const auto *CIAttr = Src->getAttr<ConstInitAttr>())
+    IdentifierInfo *BindingName = B->getIdentifier();
+    if (!BindingName) {
+      llvm::SmallString<48> Name("__nested_structured_binding");
+      Name += '_';
+      unsigned Offset = Root->isFileVarDecl()
+                            ? B->getLocation().getRawEncoding()
+                            : S.SourceMgr.getFileOffset(
+                                  S.SourceMgr.getExpansionLoc(B->getLocation()));
+      Name += llvm::utostr(Offset);
+      BindingName = S.PP.getIdentifierInfo(Name);
+    }
+    StorageClass BindingStorage = Root->getStorageClass();
+    if (!B->getIdentifier() && Root->isFileVarDecl())
+      BindingStorage = SC_Static;
+    auto *BindingVD = VarDecl::Create(S.Context, Root->getDeclContext(), Loc,
+                                      Loc, BindingName, U,
+                                      /*TInfo=*/nullptr, BindingStorage);
+    BindingVD->setLexicalDeclContext(Root->getLexicalDeclContext());
+    BindingVD->setTSCSpec(Root->getTSCSpec());
+    BindingVD->setConstexpr(Root->isConstexpr());
+    if (const auto *CIAttr = Root->getAttr<ConstInitAttr>())
       BindingVD->addAttr(CIAttr->clone(S.Context));
     BindingVD->setImplicit();
-    if (Src->isInlineSpecified())
+    if (Root->isInlineSpecified())
       BindingVD->setInlineSpecified();
     BindingVD->getLexicalDeclContext()->addHiddenDecl(BindingVD);
 
@@ -1587,7 +1626,8 @@ static bool CheckMemberDecompositionFields(Sema &S, SourceLocation Loc,
   return false;
 }
 
-static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
+static bool checkMemberDecomposition(Sema &S, DecompositionDecl *DD,
+                                     ArrayRef<BindingDecl *> Bindings,
                                      ValueDecl *Src, QualType DecompType,
                                      const CXXRecordDecl *OrigRD) {
   if (S.RequireCompleteType(Src->getLocation(), DecompType,
@@ -1603,7 +1643,6 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
   QualType BaseType = S.Context.getQualifiedType(
       S.Context.getCanonicalTagType(RD), DecompType.getQualifiers());
 
-  auto *DD = cast<DecompositionDecl>(Src);
   unsigned NumFields = llvm::count_if(
       RD->fields(), [](FieldDecl *FD) { return !FD->isUnnamedBitField(); });
   if (CheckBindingsCount(S, DD, DecompType, Bindings, NumFields))
@@ -1633,8 +1672,12 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
     ExprResult E = S.BuildDeclRefExpr(Src, DecompType, VK_LValue, Loc);
     if (E.isInvalid())
       return true;
+    if (Src != DD && !DD->getType()->isLValueReferenceType())
+      E = ImplicitCastExpr::Create(S.Context, E.get()->getType(), CK_NoOp,
+                                   E.get(), nullptr, VK_XValue,
+                                   FPOptionsOverride());
     E = S.ImpCastExprToType(E.get(), BaseType, CK_UncheckedDerivedToBase,
-                            VK_LValue, &BasePath);
+                            E.get()->getValueKind(), &BasePath);
     if (E.isInvalid())
       return true;
     E = S.BuildFieldReferenceExpr(E.get(), /*IsArrow*/ false, Loc,
@@ -1658,7 +1701,44 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
   return false;
 }
 
-void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
+static ExprValueKind
+getNestedDecompositionValueKind(const BindingDecl *Binding) {
+  if (const VarDecl *HoldingVar = Binding->getHoldingVar())
+    return HoldingVar->getType()->isLValueReferenceType() ? VK_LValue
+                                                          : VK_XValue;
+
+  if (const auto *Member =
+          dyn_cast<MemberExpr>(Binding->getBinding()->IgnoreParenImpCasts()))
+    if (const auto *Field = dyn_cast<FieldDecl>(Member->getMemberDecl());
+        Field && Field->getType()->isReferenceType())
+      return VK_LValue;
+
+  return Binding->getDecomposedDecl()->getType()->isLValueReferenceType()
+             ? VK_LValue
+             : VK_XValue;
+}
+
+static bool CheckCompleteDecompositionDeclarationImpl(Sema &S,
+                                                      DecompositionDecl *DD,
+                                                      ValueDecl *Src,
+                                                      DecompositionDecl *Root);
+
+static bool CheckNestedDecompositionDeclarations(Sema &S, DecompositionDecl *DD,
+                                                 DecompositionDecl *Root) {
+  for (BindingDecl *Binding : DD->flat_bindings()) {
+    DecompositionDecl *Nested = Binding->getNestedDecomposition();
+    if (!Nested)
+      continue;
+    if (S.CheckCompleteNestedDecompositionDeclaration(Nested, Binding, Root))
+      return true;
+  }
+  return false;
+}
+
+static bool CheckCompleteDecompositionDeclarationImpl(Sema &S,
+                                                      DecompositionDecl *DD,
+                                                      ValueDecl *Src,
+                                                      DecompositionDecl *Root) {
   QualType DecompType = DD->getType();
 
   // If the type of the decomposition is dependent, then so is the type of
@@ -1668,9 +1748,13 @@ void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
     for (auto *B : DD->bindings()) {
       // Do not overwrite any pack type.
       if (B->getType().isNull())
-        B->setType(Context.DependentTy);
+        B->setType(S.Context.DependentTy);
+      if (DecompositionDecl *Nested = B->getNestedDecomposition()) {
+        Nested->setType(S.Context.DependentTy);
+        CheckCompleteDecompositionDeclarationImpl(S, Nested, B, Root);
+      }
     }
-    return;
+    return false;
   }
 
   DecompType = DecompType.getNonReferenceType();
@@ -1680,35 +1764,35 @@ void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
   //   If E is an array type [...]
   // As an extension, we also support decomposition of built-in complex and
   // vector types.
-  if (auto *CAT = Context.getAsConstantArrayType(DecompType)) {
-    if (checkArrayDecomposition(*this, Bindings, DD, DecompType, CAT))
-      DD->setInvalidDecl();
-    return;
+  if (auto *CAT = S.Context.getAsConstantArrayType(DecompType)) {
+    if (checkArrayDecomposition(S, DD, Bindings, Src, DecompType, CAT))
+      return true;
+    return CheckNestedDecompositionDeclarations(S, DD, Root);
   }
   if (auto *VT = DecompType->getAs<VectorType>()) {
-    if (checkVectorDecomposition(*this, Bindings, DD, DecompType, VT))
-      DD->setInvalidDecl();
-    return;
+    if (checkVectorDecomposition(S, DD, Bindings, Src, DecompType, VT))
+      return true;
+    return CheckNestedDecompositionDeclarations(S, DD, Root);
   }
   if (auto *CT = DecompType->getAs<ComplexType>()) {
-    if (checkComplexDecomposition(*this, Bindings, DD, DecompType, CT))
-      DD->setInvalidDecl();
-    return;
+    if (checkComplexDecomposition(S, DD, Bindings, Src, DecompType, CT))
+      return true;
+    return CheckNestedDecompositionDeclarations(S, DD, Root);
   }
 
   // C++1z [dcl.decomp]/3:
   //   if the expression std::tuple_size<E>::value is a well-formed integral
   //   constant expression, [...]
   unsigned TupleSize;
-  switch (isTupleLike(*this, DD->getLocation(), DecompType, TupleSize)) {
+  switch (isTupleLike(S, DD->getLocation(), DecompType, TupleSize)) {
   case IsTupleLike::Error:
-    DD->setInvalidDecl();
-    return;
+    return true;
 
   case IsTupleLike::TupleLike:
-    if (checkTupleLikeDecomposition(*this, Bindings, DD, DecompType, TupleSize))
-      DD->setInvalidDecl();
-    return;
+    if (checkTupleLikeDecomposition(S, DD, Bindings, Src, Root, DecompType,
+                                    TupleSize))
+      return true;
+    return CheckNestedDecompositionDeclarations(S, DD, Root);
 
   case IsTupleLike::NotTupleLike:
     break;
@@ -1718,17 +1802,40 @@ void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
   //   [E shall be of array or non-union class type]
   CXXRecordDecl *RD = DecompType->getAsCXXRecordDecl();
   if (!RD || RD->isUnion()) {
-    Diag(DD->getLocation(), diag::err_decomp_decl_unbindable_type)
+    S.Diag(DD->getLocation(), diag::err_decomp_decl_unbindable_type)
         << DD << !RD << DecompType;
-    DD->setInvalidDecl();
-    return;
+    return true;
   }
 
   // C++1z [dcl.decomp]/4:
   //   all of E's non-static data members shall be [...] direct members of
   //   E or of the same unambiguous public base class of E, ...
-  if (checkMemberDecomposition(*this, Bindings, DD, DecompType, RD))
+  if (checkMemberDecomposition(S, DD, Bindings, Src, DecompType, RD))
+    return true;
+  return CheckNestedDecompositionDeclarations(S, DD, Root);
+}
+
+void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
+  if (CheckCompleteDecompositionDeclarationImpl(*this, DD, DD, DD))
     DD->setInvalidDecl();
+}
+
+bool Sema::CheckCompleteNestedDecompositionDeclaration(
+    DecompositionDecl *DD, BindingDecl *Source, DecompositionDecl *Root) {
+  ExprValueKind ValueKind = getNestedDecompositionValueKind(Source);
+  QualType NestedType = BuildReferenceType(
+      Source->getBinding()->getType(), ValueKind == VK_LValue,
+      Source->getLocation(), DeclarationName());
+  if (NestedType.isNull()) {
+    DD->setInvalidDecl();
+    return true;
+  }
+  DD->setType(NestedType);
+  if (CheckCompleteDecompositionDeclarationImpl(*this, DD, Source, Root)) {
+    DD->setInvalidDecl();
+    return true;
+  }
+  return false;
 }
 
 UnsignedOrNone Sema::GetDecompositionElementCount(QualType T,

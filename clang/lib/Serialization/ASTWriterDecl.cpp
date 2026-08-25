@@ -1427,6 +1427,7 @@ void ASTDeclWriter::VisitDecompositionDecl(DecompositionDecl *D) {
 void ASTDeclWriter::VisitBindingDecl(BindingDecl *D) {
   VisitValueDecl(D);
   Record.AddStmt(D->getBinding());
+  Record.AddDeclRef(D->getNestedDecomposition());
   Code = serialization::DECL_BINDING;
 }
 
