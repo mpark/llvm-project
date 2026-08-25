@@ -1408,7 +1408,7 @@ void CIRGenFunction::emitAutoVarTypeCleanup(
 
 void CIRGenFunction::maybeEmitDeferredVarDeclInit(const VarDecl *vd) {
   if (auto *dd = dyn_cast_if_present<DecompositionDecl>(vd)) {
-    for (auto *b : dd->flat_bindings())
+    for (auto *b : dd->all_bindings())
       if (auto *hd = b->getHoldingVar())
         emitVarDecl(*hd);
   }
