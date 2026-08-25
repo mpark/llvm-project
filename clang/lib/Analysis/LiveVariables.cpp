@@ -77,7 +77,7 @@ bool LiveVariables::LivenessValues::isLive(const VarDecl *D) const {
     if (liveDecls.contains(DD))
       return true;
 
-    for (const BindingDecl *BD : DD->bindings()) {
+    for (const BindingDecl *BD : DD->all_bindings()) {
       if (liveBindings.contains(BD))
         return true;
     }
@@ -415,7 +415,7 @@ void TransferFunctions::VisitDeclRefExpr(DeclRefExpr *DR) {
 void TransferFunctions::VisitDeclStmt(DeclStmt *DS) {
   for (const auto *DI : DS->decls()) {
     if (const auto *DD = dyn_cast<DecompositionDecl>(DI)) {
-      for (const auto *BD : DD->bindings()) {
+      for (const auto *BD : DD->all_bindings()) {
         if (const auto *HV = BD->getHoldingVar())
           val.liveDecls = LV.DSetFact.remove(val.liveDecls, HV);
 

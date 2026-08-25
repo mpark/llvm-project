@@ -2102,7 +2102,7 @@ void CodeGenFunction::EmitAutoVarInit(const AutoVarEmission &emission) {
 
 void CodeGenFunction::MaybeEmitDeferredVarDeclInit(const VarDecl *VD) {
   if (auto *DD = dyn_cast_if_present<DecompositionDecl>(VD)) {
-    for (auto *B : DD->flat_bindings())
+    for (auto *B : DD->all_bindings())
       if (auto *HD = B->getHoldingVar())
         EmitVarDecl(*HD);
   }

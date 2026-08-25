@@ -2713,7 +2713,8 @@ private:
   void ParseTypeQualifierListOpt(
       DeclSpec &DS, unsigned AttrReqs = AR_AllAttributesParsed,
       bool AtomicOrPtrauthAllowed = true, bool IdentifierRequired = false,
-      llvm::function_ref<void()> CodeCompletionHandler = {});
+      llvm::function_ref<void()> CodeCompletionHandler = {},
+      bool StopAtNestedDecomposition = false);
 
   /// ParseDirectDeclarator
   /// \verbatim
@@ -3077,6 +3078,10 @@ private:
             isCXX11AttributeSpecifier(Disambiguate, OuterMightBeMessageSend) !=
                 CXX11AttributeKind::NotAttributeSpecifier);
   }
+
+  /// Determine whether a leading '[[' starts a nested structured-binding
+  /// declarator rather than an attribute-specifier-seq.
+  bool isNestedDecompositionDeclarator();
 
   /// Skip C++11 and C23 attributes and return the end location of the
   /// last one.
