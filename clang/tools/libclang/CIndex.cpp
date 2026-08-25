@@ -1323,7 +1323,7 @@ bool CursorVisitor::VisitFriendTemplateDecl(FriendTemplateDecl *D) {
 }
 
 bool CursorVisitor::VisitDecompositionDecl(DecompositionDecl *D) {
-  for (auto *B : D->bindings()) {
+  for (auto *B : D->source_leaf_bindings()) {
     if (Visit(MakeCXCursor(B, TU, RegionOfInterest)))
       return true;
   }

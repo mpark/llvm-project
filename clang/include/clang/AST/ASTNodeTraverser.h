@@ -595,6 +595,8 @@ public:
   }
 
   void VisitBindingDecl(const BindingDecl *D) {
+    if (const auto *Nested = D->getNestedDecomposition())
+      Visit(Nested);
     if (Traversal == TK_IgnoreUnlessSpelledInSource)
       return;
 

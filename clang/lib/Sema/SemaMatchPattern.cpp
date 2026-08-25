@@ -56,11 +56,13 @@ void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
       VarDecl *D = Declaration->getDeclaration();
       MoveDeclaration(D);
       if (auto *Decomposition = dyn_cast<DecompositionDecl>(D)) {
-        for (BindingDecl *Binding : Decomposition->bindings()) {
+        for (BindingDecl *Binding : Decomposition->all_source_bindings()) {
           MoveDeclaration(Binding);
           if (Binding->isParameterPack() && Binding->getBinding())
             for (BindingDecl *Expanded : Binding->getBindingPackDecls())
               MoveDeclaration(Expanded);
+          if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+            MoveDeclaration(Nested);
         }
       }
     }
@@ -78,7 +80,7 @@ collectPatternBindings(MatchPattern *Pattern,
     VarDecl *Variable = Declaration->getDeclaration();
     Bindings.insert(Variable);
     if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable))
-      for (BindingDecl *Binding : Decomposition->bindings())
+      for (BindingDecl *Binding : Decomposition->leaf_bindings())
         Bindings.insert(Binding);
   }
 
@@ -1854,7 +1856,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
       VarDecl *VD = P->getDeclaration();
       ParsingInitForAutoVars.erase(VD);
       if (auto *DD = dyn_cast<DecompositionDecl>(VD))
-        for (BindingDecl *Binding : DD->bindings())
+        for (BindingDecl *Binding : DD->all_bindings())
           ParsingInitForAutoVars.erase(Binding);
       if (VD->getType()->getContainedAutoType() && !VD->isParameterPack()) {
         VD->setType(SubstAutoTypeDependent(VD->getType()));
@@ -1882,6 +1884,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
               MatchProjection::DecompositionProjection, QualType(), Arity)) {
         State.get(P).Projection = Projection;
         DecompositionDecl *Canonical = Projection->getDecomposedDecl();
+        Decomposition->setType(Canonical->getType());
         for (auto [Alias, Binding] :
              llvm::zip(Decomposition->bindings(), Canonical->bindings())) {
           if (Alias->isParameterPack()) {
@@ -1900,12 +1903,16 @@ bool Sema::CheckCompleteMatchPatternImpl(
               AliasPackBinding->setDecomposedDecl(Canonical);
             }
             Alias->setDecomposedDecl(Canonical);
-            continue;
+          } else {
+            Expr *CanonicalRef = BuildDeclRefExpr(
+                Binding, Binding->getType(), VK_LValue, Alias->getLocation());
+            Alias->setBinding(Binding->getType(), CanonicalRef);
+            Alias->setDecomposedDecl(Canonical);
           }
-          Expr *CanonicalRef = BuildDeclRefExpr(
-              Binding, Binding->getType(), VK_LValue, Alias->getLocation());
-          Alias->setBinding(Binding->getType(), CanonicalRef);
-          Alias->setDecomposedDecl(Canonical);
+          if (DecompositionDecl *Nested = Alias->getNestedDecomposition())
+            if (CheckCompleteNestedDecompositionDeclaration(Nested, Alias,
+                                                            Decomposition))
+              return true;
         }
         FinalizeDeclaration(Decomposition);
         return false;
@@ -2054,7 +2061,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
           VarDecl *VD = Declaration->getDeclaration();
           ParsingInitForAutoVars.erase(VD);
           if (auto *DD = dyn_cast<DecompositionDecl>(VD))
-            for (BindingDecl *Binding : DD->bindings())
+            for (BindingDecl *Binding : DD->all_bindings())
               ParsingInitForAutoVars.erase(Binding);
         }
         for (MatchPattern *Child : Current->children())
@@ -2180,7 +2187,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
         bool HasBindingPack = VD->isParameterPack();
         if (auto *DD = dyn_cast<DecompositionDecl>(VD))
           HasBindingPack |=
-              llvm::any_of(DD->bindings(), [](BindingDecl *Binding) {
+              llvm::any_of(DD->all_source_bindings(), [](BindingDecl *Binding) {
                 return Binding->isParameterPack();
               });
         ProjectionCache->RequiresTemplateRegion |= HasBindingPack;
