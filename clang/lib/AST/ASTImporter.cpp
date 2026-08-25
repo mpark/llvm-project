@@ -2876,11 +2876,14 @@ ExpectedDecl ASTNodeImporter::VisitBindingDecl(BindingDecl *D) {
   Expr *ToBinding = importChecked(Err, D->getBinding());
   DecompositionDecl *ToDecomposedDecl =
       importChecked(Err, D->getDecomposedDecl());
+  DecompositionDecl *ToNestedDecomposition =
+      importChecked(Err, D->getNestedDecomposition());
   if (Err)
     return std::move(Err);
 
   ToD->setBinding(ToType, ToBinding);
   ToD->setDecomposedDecl(ToDecomposedDecl);
+  ToD->setNestedDecomposition(ToNestedDecomposition);
   addDeclToContexts(D, ToD);
 
   return ToD;
