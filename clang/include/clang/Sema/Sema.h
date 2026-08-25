@@ -6559,6 +6559,9 @@ public:
   UnsignedOrNone GetDecompositionElementCount(QualType DecompType,
                                               SourceLocation Loc);
   void CheckCompleteDecompositionDeclaration(DecompositionDecl *DD);
+  bool CheckCompleteNestedDecompositionDeclaration(DecompositionDecl *DD,
+                                                   BindingDecl *Source,
+                                                   DecompositionDecl *Root);
 
   /// Stack containing information needed when in C++2a an 'auto' is encountered
   /// in a function declaration parameter type specifier in order to invent a

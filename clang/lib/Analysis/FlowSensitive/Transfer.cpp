@@ -271,7 +271,7 @@ public:
       // VarDecl, as the bindings refer to them.
       // FIXME: Add support for ArraySubscriptExpr.
       // FIXME: Consider adding AST nodes used in BindingDecls to the CFG.
-      for (const auto *B : Decomp->bindings()) {
+      for (const auto *B : Decomp->all_bindings()) {
         if (auto *ME = dyn_cast_or_null<MemberExpr>(B->getBinding())) {
           auto *DE = dyn_cast_or_null<DeclRefExpr>(ME->getBase());
           if (DE == nullptr)

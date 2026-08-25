@@ -2600,8 +2600,15 @@ emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
     const MatchPatternInfo *Info = Instantiation->find(P);
     if (Info && Info->Projection &&
-        Info->Projection->getKind() == MatchProjection::DecompositionProjection)
+        Info->Projection->getKind() ==
+            MatchProjection::DecompositionProjection) {
+      const auto *Declaration = cast<DecompositionDecl>(P->getDeclaration());
+      if (Declaration != Info->Projection->getDecomposedDecl())
+        for (BindingDecl *Binding : Declaration->bindings())
+          if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+            CGF.MaybeEmitDeferredVarDeclInit(Nested);
       return;
+    }
     CGF.EmitVarDecl(*P->getDeclaration());
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;

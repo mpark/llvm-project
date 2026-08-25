@@ -1763,6 +1763,21 @@ Decl *TemplateDeclInstantiator::VisitBindingDecl(BindingDecl *D) {
   NewBD->setReferenced(D->isReferenced());
   SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, NewBD);
 
+  if (DecompositionDecl *OldNested = D->getNestedDecomposition()) {
+    SmallVector<BindingDecl *, 8> NewNestedBindings;
+    for (BindingDecl *OldNestedBinding : OldNested->bindings())
+      NewNestedBindings.push_back(
+          cast<BindingDecl>(VisitBindingDecl(OldNestedBinding)));
+    auto *NewNested = DecompositionDecl::Create(
+        SemaRef.Context, Owner, OldNested->getInnerLocStart(),
+        OldNested->getLocation(), OldNested->getRSquareLoc(),
+        SemaRef.Context.DependentTy, /*TInfo=*/nullptr, SC_None,
+        NewNestedBindings);
+    NewNested->setImplicit();
+    NewNested->setLexicalDeclContext(Owner);
+    NewBD->setNestedDecomposition(NewNested);
+  }
+
   return NewBD;
 }
 
@@ -1770,16 +1785,8 @@ Decl *TemplateDeclInstantiator::VisitDecompositionDecl(DecompositionDecl *D) {
   // Transform the bindings first.
   // The transformed DD will have all of the concrete BindingDecls.
   SmallVector<BindingDecl*, 16> NewBindings;
-  BindingDecl *OldBindingPack = nullptr;
-  for (auto *OldBD : D->bindings()) {
-    Expr *BindingExpr = OldBD->getBinding();
-    if (isa_and_present<FunctionParmPackExpr>(BindingExpr)) {
-      // We have a resolved pack.
-      assert(!OldBindingPack && "no more than one pack is allowed");
-      OldBindingPack = OldBD;
-    }
+  for (auto *OldBD : D->bindings())
     NewBindings.push_back(cast<BindingDecl>(VisitBindingDecl(OldBD)));
-  }
   ArrayRef<BindingDecl*> NewBindingArray = NewBindings;
 
   auto *NewDD = cast_if_present<DecompositionDecl>(
@@ -1788,20 +1795,24 @@ Decl *TemplateDeclInstantiator::VisitDecompositionDecl(DecompositionDecl *D) {
   if (!NewDD || NewDD->isInvalidDecl()) {
     for (auto *NewBD : NewBindings)
       NewBD->setInvalidDecl();
-  } else if (OldBindingPack) {
-    // Mark the bindings in the pack as instantiated.
-    auto Bindings = NewDD->bindings();
-    BindingDecl *NewBindingPack = *llvm::find_if(
-        Bindings, [](BindingDecl *D) -> bool { return D->isParameterPack(); });
-    assert(NewBindingPack != nullptr && "new bindings should also have a pack");
-    llvm::ArrayRef<BindingDecl *> OldDecls =
-        OldBindingPack->getBindingPackDecls();
-    llvm::ArrayRef<BindingDecl *> NewDecls =
-        NewBindingPack->getBindingPackDecls();
-    assert(OldDecls.size() == NewDecls.size());
-    for (unsigned I = 0; I < OldDecls.size(); I++)
-      SemaRef.CurrentInstantiationScope->InstantiatedLocal(OldDecls[I],
-                                                           NewDecls[I]);
+  } else {
+    auto MapExpandedBindings = [&](auto &&Self, DecompositionDecl *Old,
+                                   DecompositionDecl *New) -> void {
+      for (auto [OldBinding, NewBinding] :
+           llvm::zip(Old->bindings(), New->bindings())) {
+        if (OldBinding->isParameterPack() && OldBinding->getBinding()) {
+          ArrayRef<BindingDecl *> OldDecls = OldBinding->getBindingPackDecls();
+          ArrayRef<BindingDecl *> NewDecls = NewBinding->getBindingPackDecls();
+          assert(OldDecls.size() == NewDecls.size());
+          for (unsigned I = 0; I < OldDecls.size(); ++I)
+            SemaRef.CurrentInstantiationScope->InstantiatedLocal(OldDecls[I],
+                                                                 NewDecls[I]);
+        }
+        if (DecompositionDecl *OldNested = OldBinding->getNestedDecomposition())
+          Self(Self, OldNested, NewBinding->getNestedDecomposition());
+      }
+    };
+    MapExpandedBindings(MapExpandedBindings, D, NewDD);
   }
 
   return NewDD;

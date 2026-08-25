@@ -3609,6 +3609,10 @@ void Parser::ParseDeclarationSpecifiers(
       }
       [[fallthrough]];
     case tok::l_square:
+      if (!isTypeSpecifier(DSContext) &&
+          DS.getTypeSpecType() == DeclSpec::TST_auto &&
+          isNestedDecompositionDeclarator())
+        goto DoneWithDeclSpec;
       if (!isAllowedCXX11AttributeSpecifier())
         goto DoneWithDeclSpec;
 
@@ -3620,7 +3624,12 @@ void Parser::ParseDeclarationSpecifiers(
       attrs.clear();
       attrs.Range = SourceRange();
 
-      ParseCXX11Attributes(attrs);
+      if (!isTypeSpecifier(DSContext) &&
+          DS.getTypeSpecType() == DeclSpec::TST_auto && Tok.is(tok::l_square) &&
+          NextToken().is(tok::l_square))
+        ParseCXX11AttributeSpecifier(attrs);
+      else
+        ParseCXX11Attributes(attrs);
       AttrsLastTime = true;
       continue;
 
@@ -6316,11 +6325,16 @@ bool Parser::isConstructorDeclarator(bool IsUnqualified, bool DeductionGuide,
 
 void Parser::ParseTypeQualifierListOpt(
     DeclSpec &DS, unsigned AttrReqs, bool AtomicOrPtrauthAllowed,
-    bool IdentifierRequired, llvm::function_ref<void()> CodeCompletionHandler) {
-  if ((AttrReqs & AR_CXX11AttributesParsed) &&
-      isAllowedCXX11AttributeSpecifier()) {
+    bool IdentifierRequired, llvm::function_ref<void()> CodeCompletionHandler,
+    bool StopAtNestedDecomposition) {
+  while ((AttrReqs & AR_CXX11AttributesParsed) &&
+         isAllowedCXX11AttributeSpecifier() &&
+         !(StopAtNestedDecomposition && isNestedDecompositionDeclarator())) {
     ParsedAttributes Attrs(AttrFactory);
-    ParseCXX11Attributes(Attrs);
+    SourceLocation StartLoc = Tok.getLocation();
+    SourceLocation EndLoc = StartLoc;
+    ParseCXX11AttributeSpecifier(Attrs, &EndLoc);
+    Attrs.Range = SourceRange(StartLoc, EndLoc);
     DS.takeAttributesAppendingingFrom(Attrs);
   }
 
@@ -6500,6 +6514,28 @@ void Parser::ParseTypeQualifierListOpt(
     }
     EndLoc = ConsumeToken();
   }
+}
+
+bool Parser::isNestedDecompositionDeclarator() {
+  if (Tok.isNot(tok::l_square) || NextToken().isNot(tok::l_square))
+    return false;
+
+  RevertingTentativeParsingAction TPA(*this);
+  ConsumeBracket();
+  ConsumeBracket();
+  if (!SkipUntil(tok::r_square, StopBeforeMatch) || Tok.isNot(tok::r_square))
+    return true;
+  ConsumeBracket();
+
+  // A complete attribute-specifier-seq has a second closing bracket. If what
+  // follows can be a declarator, the brackets belong to that attribute. An
+  // adjacent attribute likewise means that this is not a nested binding.
+  if (Tok.is(tok::r_square)) {
+    ConsumeBracket();
+    if (Tok.is(tok::l_square))
+      return false;
+  }
+  return TryParseDeclarator(/*mayBeAbstract=*/false) == TPResult::False;
 }
 
 void Parser::ParseDeclarator(Declarator &D) {
@@ -6696,7 +6732,11 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
       DiagCompat(Loc, diag_compat::rvalue_reference);
 
     // GNU-style and C++11 attributes are allowed here, as is restrict.
-    ParseTypeQualifierListOpt(DS);
+    ParseTypeQualifierListOpt(
+        DS, AR_AllAttributesParsed, /*AtomicOrPtrauthAllowed=*/true,
+        /*IdentifierRequired=*/false, /*CodeCompletionHandler=*/{},
+        D.mayHaveDecompositionDeclarator() &&
+            D.getDeclSpec().getTypeSpecType() == DeclSpec::TST_auto);
     D.ExtendWithDeclSpec(DS);
 
     // C++ 8.3.2p1: cv-qualified references are ill-formed except when the
@@ -7131,111 +7171,136 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
   assert(Tok.is(tok::l_square));
 
   TentativeParsingAction PA(*this);
-  BalancedDelimiterTracker T(*this, tok::l_square);
-  T.consumeOpen();
-
-  if (isCXX11AttributeSpecifier() != CXX11AttributeKind::NotAttributeSpecifier)
-    DiagnoseAndSkipCXX11Attributes();
-
-  // If this doesn't look like a structured binding, maybe it's a misplaced
-  // array declarator.
-  if (!(Tok.isOneOf(tok::identifier, tok::ellipsis) &&
-        NextToken().isOneOf(tok::comma, tok::r_square, tok::kw_alignas,
-                            tok::identifier, tok::l_square, tok::ellipsis)) &&
-      !(Tok.is(tok::r_square) &&
-        NextToken().isOneOf(tok::equal, tok::l_brace))) {
-    PA.Revert();
-    return ParseMisplacedBracketDeclarator(D);
-  }
-
-  SourceLocation PrevEllipsisLoc;
-  SmallVector<DecompositionDeclarator::Binding, 32> Bindings;
-  while (Tok.isNot(tok::r_square)) {
-    if (!Bindings.empty()) {
-      if (Tok.is(tok::comma))
-        ConsumeToken();
-      else {
-        if (Tok.is(tok::identifier)) {
-          SourceLocation EndLoc = getEndOfPreviousToken();
-          Diag(EndLoc, diag::err_expected)
-              << tok::comma << FixItHint::CreateInsertion(EndLoc, ",");
-        } else {
-          Diag(Tok, diag::err_expected_comma_or_rsquare);
-        }
-
-        SkipUntil({tok::r_square, tok::comma, tok::identifier, tok::ellipsis},
-                  StopAtSemi | StopBeforeMatch);
-        if (Tok.is(tok::comma))
-          ConsumeToken();
-        else if (Tok.is(tok::r_square))
-          break;
-      }
-    }
+  auto ParseBindingList = [&](auto &&Self, DecompositionDeclarator *Nested,
+                              bool IsNested) -> bool {
+    BalancedDelimiterTracker T(*this, tok::l_square);
+    T.consumeOpen();
+    if (IsNested)
+      DiagCompat(T.getOpenLocation(), diag_compat::decomp_decl_nested);
 
     if (isCXX11AttributeSpecifier() !=
         CXX11AttributeKind::NotAttributeSpecifier)
       DiagnoseAndSkipCXX11Attributes();
 
-    SourceLocation EllipsisLoc;
+    // If the outermost list does not look like a structured binding, it may
+    // instead be a misplaced array declarator. Perform this check after
+    // diagnosing attributes in the binding position, matching the existing
+    // structured-binding recovery behavior.
+    if (!IsNested &&
+        !(Tok.isOneOf(tok::identifier, tok::ellipsis, tok::l_square) &&
+          (Tok.is(tok::l_square) ||
+           NextToken().isOneOf(tok::comma, tok::r_square, tok::kw_alignas,
+                               tok::identifier, tok::l_square,
+                               tok::ellipsis))) &&
+        !(Tok.is(tok::r_square) &&
+          NextToken().isOneOf(tok::equal, tok::l_brace)))
+      return false;
 
-    if (Tok.is(tok::ellipsis)) {
-      DiagCompat(Tok, diag_compat::binding_pack);
-      if (PrevEllipsisLoc.isValid()) {
-        Diag(Tok, diag::err_binding_multiple_ellipses);
-        Diag(PrevEllipsisLoc, diag::note_previous_ellipsis);
-        break;
-      }
-      EllipsisLoc = Tok.getLocation();
-      PrevEllipsisLoc = EllipsisLoc;
-      ConsumeToken();
-    }
+    SourceLocation PrevEllipsisLoc;
+    SmallVector<DecompositionDeclarator::Binding, 32> Bindings;
+    while (Tok.isNot(tok::r_square)) {
+      if (!Bindings.empty()) {
+        if (Tok.is(tok::comma))
+          ConsumeToken();
+        else {
+          if (Tok.isOneOf(tok::identifier, tok::l_square)) {
+            SourceLocation EndLoc = getEndOfPreviousToken();
+            Diag(EndLoc, diag::err_expected)
+                << tok::comma << FixItHint::CreateInsertion(EndLoc, ",");
+          } else {
+            Diag(Tok, diag::err_expected_comma_or_rsquare);
+          }
 
-    IdentifierInfo *II = nullptr;
-    SourceLocation Loc = EllipsisLoc;
-    ParsedAttributes Attrs(AttrFactory);
-    if (EllipsisLoc.isValid() && Tok.isOneOf(tok::comma, tok::r_square)) {
-      DiagCompat(EllipsisLoc, diag_compat::decomp_decl_unnamed_pack);
-    } else {
-      if (Tok.isNot(tok::identifier)) {
-        Diag(Tok, diag::err_expected) << tok::identifier;
-        break;
-      }
-
-      II = Tok.getIdentifierInfo();
-      Loc = Tok.getLocation();
-      ConsumeToken();
-
-      if (Tok.is(tok::ellipsis) && !PrevEllipsisLoc.isValid()) {
-        DiagnoseMisplacedEllipsis(Tok.getLocation(), Loc,
-                                  EllipsisLoc.isValid(), true);
-        EllipsisLoc = Tok.getLocation();
-        ConsumeToken();
+          SkipUntil({tok::r_square, tok::comma, tok::identifier, tok::l_square,
+                     tok::ellipsis},
+                    StopAtSemi | StopBeforeMatch);
+          if (Tok.is(tok::comma))
+            ConsumeToken();
+          else if (Tok.is(tok::r_square))
+            break;
+        }
       }
 
       if (isCXX11AttributeSpecifier() !=
-          CXX11AttributeKind::NotAttributeSpecifier) {
-        DiagCompat(Tok, diag_compat::attrs_on_binding);
-        MaybeParseCXX11Attributes(Attrs);
+          CXX11AttributeKind::NotAttributeSpecifier)
+        DiagnoseAndSkipCXX11Attributes();
+
+      SourceLocation EllipsisLoc;
+      if (Tok.is(tok::ellipsis)) {
+        DiagCompat(Tok, diag_compat::binding_pack);
+        if (PrevEllipsisLoc.isValid()) {
+          Diag(Tok, diag::err_binding_multiple_ellipses);
+          Diag(PrevEllipsisLoc, diag::note_previous_ellipsis);
+          break;
+        }
+        EllipsisLoc = Tok.getLocation();
+        PrevEllipsisLoc = EllipsisLoc;
+        ConsumeToken();
       }
+
+      IdentifierInfo *II = nullptr;
+      SourceLocation Loc = EllipsisLoc;
+      ParsedAttributes Attrs(AttrFactory);
+      std::unique_ptr<DecompositionDeclarator> Child;
+      if (Tok.is(tok::l_square)) {
+        if (EllipsisLoc.isValid())
+          Diag(EllipsisLoc, diag::err_decomp_decl_nested_pack);
+        Loc = Tok.getLocation();
+        Child = std::make_unique<DecompositionDeclarator>();
+        (void)Self(Self, Child.get(), /*IsNested=*/true);
+      } else if (EllipsisLoc.isValid() &&
+                 Tok.isOneOf(tok::comma, tok::r_square)) {
+        DiagCompat(EllipsisLoc, diag_compat::decomp_decl_unnamed_pack);
+      } else {
+        if (Tok.isNot(tok::identifier)) {
+          Diag(Tok, diag::err_expected) << tok::identifier;
+          break;
+        }
+
+        II = Tok.getIdentifierInfo();
+        Loc = Tok.getLocation();
+        ConsumeToken();
+
+        if (Tok.is(tok::ellipsis) && !PrevEllipsisLoc.isValid()) {
+          DiagnoseMisplacedEllipsis(Tok.getLocation(), Loc,
+                                    EllipsisLoc.isValid(), true);
+          EllipsisLoc = Tok.getLocation();
+          ConsumeToken();
+        }
+
+        if (isCXX11AttributeSpecifier() !=
+            CXX11AttributeKind::NotAttributeSpecifier) {
+          DiagCompat(Tok, diag_compat::attrs_on_binding);
+          MaybeParseCXX11Attributes(Attrs);
+        }
+      }
+
+      Bindings.emplace_back(II, Loc, std::move(Attrs), EllipsisLoc,
+                            std::move(Child));
     }
 
-    Bindings.push_back({II, Loc, std::move(Attrs), EllipsisLoc});
-  }
+    if (Tok.isNot(tok::r_square))
+      T.skipToEnd();
+    else {
+      if (Bindings.empty())
+        DiagCompat(Tok.getLocation(), diag_compat::decomp_decl_empty);
+      T.consumeClose();
+    }
 
-  if (Tok.isNot(tok::r_square))
-    // We've already diagnosed a problem here.
-    T.skipToEnd();
-  else {
-    if (Bindings.empty())
-      DiagCompat(Tok.getLocation(), diag_compat::decomp_decl_empty);
+    if (Nested)
+      Nested->setBindings(T.getOpenLocation(), Bindings, T.getCloseLocation());
+    else
+      D.setDecompositionBindings(T.getOpenLocation(), Bindings,
+                                 T.getCloseLocation());
+    return true;
+  };
 
-    T.consumeClose();
+  if (!ParseBindingList(ParseBindingList, nullptr, /*IsNested=*/false)) {
+    PA.Revert();
+    return ParseMisplacedBracketDeclarator(D);
   }
 
   PA.Commit();
-
-  return D.setDecompositionBindings(T.getOpenLocation(), Bindings,
-                                    T.getCloseLocation());
 }
 
 void Parser::ParseParenDeclarator(Declarator &D) {

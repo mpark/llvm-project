@@ -1413,7 +1413,8 @@ void StmtPrinter::VisitDeclRefExpr(DeclRefExpr *Node) {
       }
       case Decl::Decomposition:
         OS << "decomposition";
-        for (const auto &I : cast<DecompositionDecl>(VD)->bindings())
+        for (const auto &I :
+             cast<DecompositionDecl>(VD)->source_leaf_bindings())
           OS << '-' << I->getName();
         break;
       default:
@@ -3150,14 +3151,8 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
                                : D->getType();
     if (const auto *Decomposition = dyn_cast<DecompositionDecl>(D)) {
       WrittenType.print(OS, Policy);
-      OS << " [";
-      llvm::interleaveComma(Decomposition->bindings(), OS,
-                            [&](const BindingDecl *Binding) {
-                              if (Binding->isParameterPack())
-                                OS << "...";
-                              OS << Binding->getName();
-                            });
-      OS << "]";
+      OS << ' ';
+      Decomposition->printName(OS, Policy);
     } else {
       WrittenType.print(OS, Policy, D->getName());
     }

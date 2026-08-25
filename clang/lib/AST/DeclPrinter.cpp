@@ -1006,10 +1006,22 @@ void DeclPrinter::VisitVarDecl(VarDecl *D) {
     }
   }
 
-  printDeclType(T, (isa<ParmVarDecl>(D) && Policy.CleanUglifiedParameters &&
-                    D->getIdentifier())
-                       ? D->getIdentifier()->deuglifiedName()
-                       : D->getName());
+  const auto *Decomposition = dyn_cast<DecompositionDecl>(D);
+  bool HasNestedBinding =
+      Decomposition &&
+      llvm::any_of(Decomposition->bindings(), [](const BindingDecl *Binding) {
+        return Binding->isNestedDecomposition();
+      });
+  if (HasNestedBinding) {
+    printDeclType(T, StringRef());
+    Out << ' ';
+    Decomposition->printName(Out, Policy);
+  } else {
+    printDeclType(T, (isa<ParmVarDecl>(D) && Policy.CleanUglifiedParameters &&
+                      D->getIdentifier())
+                         ? D->getIdentifier()->deuglifiedName()
+                         : D->getName());
+  }
 
   if (std::optional<std::string> Attrs =
           prettyPrintAttributes(D, AttrPosAsWritten::Right))

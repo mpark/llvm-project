@@ -3775,6 +3775,60 @@ ArrayRef<BindingDecl *> BindingDecl::getBindingPackDecls() const {
                                  FP->getNumExpansions());
 }
 
+SmallVector<BindingDecl *, 8> DecompositionDecl::all_bindings() const {
+  SmallVector<BindingDecl *, 8> Result;
+  auto Collect = [&](auto &&Self, const DecompositionDecl *DD) -> void {
+    for (BindingDecl *Binding : DD->flat_bindings()) {
+      Result.push_back(Binding);
+      if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+        Self(Self, Nested);
+    }
+  };
+  Collect(Collect, this);
+  return Result;
+}
+
+SmallVector<BindingDecl *, 8> DecompositionDecl::leaf_bindings() const {
+  SmallVector<BindingDecl *, 8> Result;
+  auto Collect = [&](auto &&Self, const DecompositionDecl *DD) -> void {
+    for (BindingDecl *Binding : DD->flat_bindings()) {
+      if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+        Self(Self, Nested);
+      else
+        Result.push_back(Binding);
+    }
+  };
+  Collect(Collect, this);
+  return Result;
+}
+
+SmallVector<BindingDecl *, 8> DecompositionDecl::all_source_bindings() const {
+  SmallVector<BindingDecl *, 8> Result;
+  auto Collect = [&](auto &&Self, const DecompositionDecl *DD) -> void {
+    for (BindingDecl *Binding : DD->bindings()) {
+      Result.push_back(Binding);
+      if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+        Self(Self, Nested);
+    }
+  };
+  Collect(Collect, this);
+  return Result;
+}
+
+SmallVector<BindingDecl *, 8> DecompositionDecl::source_leaf_bindings() const {
+  SmallVector<BindingDecl *, 8> Result;
+  auto Collect = [&](auto &&Self, const DecompositionDecl *DD) -> void {
+    for (BindingDecl *Binding : DD->bindings()) {
+      if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+        Self(Self, Nested);
+      else if (Binding->getIdentifier())
+        Result.push_back(Binding);
+    }
+  };
+  Collect(Collect, this);
+  return Result;
+}
+
 void DecompositionDecl::anchor() {}
 
 DecompositionDecl *DecompositionDecl::Create(
@@ -3809,7 +3863,10 @@ void DecompositionDecl::printName(llvm::raw_ostream &OS,
       OS << ", ";
     if (B->isParameterPack())
       OS << "...";
-    B->printName(OS, Policy);
+    if (const DecompositionDecl *Nested = B->getNestedDecomposition())
+      Nested->printName(OS, Policy);
+    else
+      B->printName(OS, Policy);
     Comma = true;
   }
   OS << ']';

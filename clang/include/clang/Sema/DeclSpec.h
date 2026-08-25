@@ -39,6 +39,8 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <memory>
+#include <new>
 #include <optional>
 
 namespace clang {
@@ -1872,10 +1874,24 @@ class DecompositionDeclarator {
 public:
   struct Binding {
     /// Null for an unnamed binding pack.
-    IdentifierInfo *Name;
+    IdentifierInfo *Name = nullptr;
     SourceLocation NameLoc;
     std::optional<ParsedAttributes> Attrs;
     SourceLocation EllipsisLoc;
+    std::unique_ptr<DecompositionDeclarator> Nested;
+
+    Binding() = default;
+    Binding(IdentifierInfo *Name, SourceLocation NameLoc,
+            ParsedAttributes &&Attrs, SourceLocation EllipsisLoc,
+            std::unique_ptr<DecompositionDeclarator> Nested = nullptr);
+    Binding(Binding &&);
+    Binding &operator=(Binding &&);
+    ~Binding();
+
+    Binding(const Binding &) = delete;
+    Binding &operator=(const Binding &) = delete;
+
+    bool isNested() const { return Nested != nullptr; }
   };
 
 private:
@@ -1899,11 +1915,11 @@ public:
 
   void clear() {
     LSquareLoc = RSquareLoc = SourceLocation();
-    if (DeleteBindings)
-      delete[] Bindings;
-    else
-      for (Binding &B : llvm::MutableArrayRef(Bindings, NumBindings))
-        B.Attrs.reset();
+    if (Bindings) {
+      std::destroy_n(Bindings, NumBindings);
+      if (DeleteBindings)
+        ::operator delete[](Bindings);
+    }
     Bindings = nullptr;
     NumBindings = 0;
     DeleteBindings = false;
@@ -1912,6 +1928,9 @@ public:
   ArrayRef<Binding> bindings() const {
     return llvm::ArrayRef(Bindings, NumBindings);
   }
+
+  void setBindings(SourceLocation LSquareLoc, MutableArrayRef<Binding> Bindings,
+                   SourceLocation RSquareLoc);
 
   bool isSet() const { return LSquareLoc.isValid(); }
 

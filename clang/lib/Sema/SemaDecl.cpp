@@ -2041,7 +2041,7 @@ static bool ShouldDiagnoseUnusedDecl(const LangOptions &LangOpts,
     // referenced, instead of if the variable itself is referenced (which
     // it is, by the bindings' expressions).
     bool IsAllIgnored = true;
-    for (const auto *BD : DD->bindings()) {
+    for (const auto *BD : DD->source_leaf_bindings()) {
       if (BD->isReferenced())
         return false;
       IsAllIgnored = IsAllIgnored && (BD->isPlaceholderVar(LangOpts) ||
@@ -7823,7 +7823,19 @@ NamedDecl *Sema::ActOnVariableDeclarator(
     // purposes.
     auto &Decomp = D.getDecompositionDeclarator();
     if (!Decomp.bindings().empty()) {
-      II = Decomp.bindings()[0].Name;
+      auto FindFirstName =
+          [&](auto &&Self,
+              const DecompositionDeclarator &Current) -> IdentifierInfo * {
+        for (const auto &Binding : Current.bindings()) {
+          if (Binding.Name)
+            return Binding.Name;
+          if (Binding.Nested)
+            if (IdentifierInfo *NestedName = Self(Self, *Binding.Nested))
+              return NestedName;
+        }
+        return nullptr;
+      };
+      II = FindFirstName(FindFirstName, Decomp);
       Name = II;
     }
   } else if (!II) {
@@ -14598,7 +14610,7 @@ void Sema::ActOnInitializerError(Decl *D) {
 
   // Bindings are not usable if we can't make sense of the initializer.
   if (auto *DD = dyn_cast<DecompositionDecl>(D))
-    for (auto *BD : DD->bindings())
+    for (auto *BD : DD->all_source_bindings())
       BD->setInvalidDecl();
 
   // Auto types are meaningless if we can't make sense of the initializer.
@@ -15509,7 +15521,7 @@ void Sema::FinalizeDeclaration(Decl *ThisDecl) {
   }
 
   if (auto *DD = dyn_cast<DecompositionDecl>(ThisDecl)) {
-    for (auto *BD : DD->bindings()) {
+    for (auto *BD : DD->all_source_bindings()) {
       FinalizeDeclaration(BD);
     }
   }

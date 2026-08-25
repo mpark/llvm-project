@@ -3927,9 +3927,9 @@ static bool containsDeclarationBindingPack(MatchPattern *Pattern) {
     if (Declaration->isParameterPack())
       return true;
     if (auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
-      return llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
-        return Binding->isParameterPack();
-      });
+      return llvm::any_of(
+          Decomposition->all_source_bindings(),
+          [](BindingDecl *Binding) { return Binding->isParameterPack(); });
   }
   return llvm::any_of(Pattern->children(), containsDeclarationBindingPack);
 }

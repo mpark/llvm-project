@@ -2543,7 +2543,7 @@ void CIRGenModule::emitTopLevelDecl(Decl *decl) {
   case Decl::VarTemplateSpecialization: {
     emitGlobal(cast<VarDecl>(decl));
     if (auto *decomp = dyn_cast<DecompositionDecl>(decl))
-      for (auto *binding : decomp->flat_bindings())
+      for (auto *binding : decomp->all_bindings())
         if (auto *holdingVar = binding->getHoldingVar())
           emitGlobal(holdingVar);
     break;

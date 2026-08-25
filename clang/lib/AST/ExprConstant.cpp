@@ -5950,7 +5950,7 @@ static bool EvaluateDecl(EvalInfo &Info, const Decl *D,
 static bool EvaluateDecompositionDeclInit(EvalInfo &Info,
                                           const DecompositionDecl *DD) {
   bool OK = true;
-  for (auto *BD : DD->flat_bindings())
+  for (auto *BD : DD->all_bindings())
     if (auto *VD = BD->getHoldingVar()) {
       if (Info.MatchExprLocalVarDecls.contains(DD))
         Info.MatchExprLocalVarDecls.insert(VD);
@@ -21307,14 +21307,21 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);
     if (PatternInfo && PatternInfo->Projection &&
         PatternInfo->Projection->getKind() ==
-            MatchProjection::DecompositionProjection)
+            MatchProjection::DecompositionProjection) {
+      const auto *Declaration = cast<DecompositionDecl>(P->getDeclaration());
+      if (Declaration != PatternInfo->Projection->getDecomposedDecl())
+        for (BindingDecl *Binding : Declaration->bindings())
+          if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
+            if (!EvaluateDecompositionDeclInit(Info, Nested))
+              return false;
       return true;
+    }
     const VarDecl *Declaration = P->getDeclaration();
     Info.MatchExprLocalVarDecls.insert(Declaration);
     if (!EvaluateDecl(Info, Declaration))
       return false;
     if (const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
-      for (const BindingDecl *Binding : Decomposition->flat_bindings())
+      for (const BindingDecl *Binding : Decomposition->all_bindings())
         if (const VarDecl *HoldingVar = Binding->getHoldingVar())
           if (!EvaluateDecl(Info, HoldingVar))
             return false;
