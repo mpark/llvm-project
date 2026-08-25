@@ -197,6 +197,8 @@ void Decl::setInvalidDecl(bool Invalid) {
   if (auto *DD = dyn_cast<DecompositionDecl>(this)) {
     for (auto *Binding : DD->bindings()) {
       Binding->setInvalidDecl();
+      if (auto *Nested = Binding->getNestedDecomposition())
+        Nested->setInvalidDecl();
     }
   }
 }
