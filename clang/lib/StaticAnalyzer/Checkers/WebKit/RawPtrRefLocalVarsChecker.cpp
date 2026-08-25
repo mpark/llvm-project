@@ -394,29 +394,41 @@ public:
       return;
 
     if (auto *DD = dyn_cast<DecompositionDecl>(V)) {
-      const auto *InitList =
-          Value ? dyn_cast<InitListExpr>(Value->IgnoreParenCasts()) : nullptr;
-      if (InitList && InitList->getNumInits() != DD->bindings().size())
-        InitList = nullptr;
+      auto CheckBindings = [&](auto &&Self, const DecompositionDecl *Current,
+                               const Expr *Initializer) -> void {
+        const auto *InitList = Initializer
+                                   ? dyn_cast<InitListExpr>(
+                                         Initializer->IgnoreParenCasts())
+                                   : nullptr;
+        if (InitList &&
+            InitList->getNumInits() != Current->bindings().size())
+          InitList = nullptr;
 
-      unsigned BindingIndex = 0;
-      for (auto *BD : DD->bindings()) {
-        const unsigned Index = BindingIndex++;
-        auto *Binding = BD->getBinding();
-        if (!Binding)
-          continue;
-        std::optional<bool> IsUncountedPtr = isUnsafePtr(Binding->getType());
-        if (!IsUncountedPtr || !*IsUncountedPtr)
-          continue;
-
-        const Expr *Origin = nullptr;
-        if (Model->checksForInteriorDestruction()) {
-          const Expr *Source = InitList ? InitList->getInit(Index) : Value;
-          if (isPtrOriginSafe(V, Source, DeclWithIssue, Origin))
+        unsigned BindingIndex = 0;
+        for (auto *BD : Current->bindings()) {
+          const unsigned Index = BindingIndex++;
+          const Expr *Source = InitList ? InitList->getInit(Index) : Initializer;
+          if (auto *Nested = BD->getNestedDecomposition()) {
+            Self(Self, Nested, Source);
             continue;
+          }
+
+          auto *Binding = BD->getBinding();
+          if (!Binding)
+            continue;
+          std::optional<bool> IsUncountedPtr = isUnsafePtr(Binding->getType());
+          if (!IsUncountedPtr || !*IsUncountedPtr)
+            continue;
+
+          const Expr *Origin = nullptr;
+          if (Model->checksForInteriorDestruction()) {
+            if (isPtrOriginSafe(V, Source, DeclWithIssue, Origin))
+              continue;
+          }
+          reportBug(V, V->getType(), nullptr, BD, DeclWithIssue, Origin);
         }
-        reportBug(V, V->getType(), nullptr, BD, DeclWithIssue, Origin);
-      }
+      };
+      CheckBindings(CheckBindings, DD, Value);
     }
 
     std::optional<bool> IsUncountedPtr = isUnsafePtr(SinkType);

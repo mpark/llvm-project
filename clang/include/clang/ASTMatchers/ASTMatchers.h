@@ -8417,9 +8417,10 @@ AST_MATCHER_P(BindingDecl, forDecomposition, internal::Matcher<ValueDecl>,
 /// matches the decomposition decl with 'f' bound to "fBinding".
 AST_MATCHER_P2(DecompositionDecl, hasBinding, unsigned, N,
                internal::Matcher<BindingDecl>, InnerMatcher) {
-  if (Node.bindings().size() <= N)
+  auto Bindings = Node.source_leaf_bindings();
+  if (Bindings.size() <= N)
     return false;
-  return InnerMatcher.matches(*Node.bindings()[N], Finder, Builder);
+  return InnerMatcher.matches(*Bindings[N], Finder, Builder);
 }
 
 /// Matches any binding of a DecompositionDecl.
@@ -8441,7 +8442,7 @@ AST_MATCHER_P2(DecompositionDecl, hasBinding, unsigned, N,
 /// matches the decomposition decl with 'f' bound to "fBinding".
 AST_MATCHER_P(DecompositionDecl, hasAnyBinding, internal::Matcher<BindingDecl>,
               InnerMatcher) {
-  return llvm::any_of(Node.bindings(), [&](const auto *Binding) {
+  return llvm::any_of(Node.source_leaf_bindings(), [&](const auto *Binding) {
     return InnerMatcher.matches(*Binding, Finder, Builder);
   });
 }
