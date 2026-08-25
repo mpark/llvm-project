@@ -530,6 +530,9 @@ def err_expected_coloncolon_after_super : Error<
 defm decomp_decl_empty : CXX29Compat<"empty structured bindings are">;
 defm decomp_decl_unnamed_pack : CXX29Compat<
   "unnamed structured binding packs are">;
+defm decomp_decl_nested : CXX29Compat<"nested structured bindings are">;
+def err_decomp_decl_nested_pack : Error<
+  "a nested structured binding cannot be a pack expansion">;
 
 def err_function_parameter_limit_exceeded : Error<
   "too many function parameters; subsequent parameters will be ignored">;

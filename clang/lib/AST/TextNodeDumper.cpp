@@ -995,7 +995,7 @@ void TextNodeDumper::dumpBareDeclRef(const Decl *D) {
     else
       switch (ND->getKind()) {
       case Decl::Decomposition:
-        if (auto Bindings = cast<DecompositionDecl>(ND)->bindings();
+        if (auto Bindings = cast<DecompositionDecl>(ND)->source_leaf_bindings();
             !Bindings.empty())
           OS << " first_binding '" << Bindings[0]->getDeclName() << '\'';
         else

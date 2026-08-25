@@ -2937,7 +2937,7 @@ void Sema::ActOnDependentForRangeInitializer(VarDecl *LoopVar,
   // them in properly when we instantiate the loop.
   if (!LoopVar->isInvalidDecl() && BFRK != BFRK_Check) {
     if (auto *DD = dyn_cast<DecompositionDecl>(LoopVar))
-      for (auto *Binding : DD->bindings()) {
+      for (auto *Binding : DD->all_bindings()) {
         if (!Binding->isParameterPack())
           Binding->setType(Context.DependentTy);
       }

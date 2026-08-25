@@ -313,7 +313,8 @@ public:
 
   bool VisitDecompositionDecl(const DecompositionDecl *D) {
     for (const auto *Binding : D->bindings())
-      TRY_DECL(Binding, IndexCtx.handleDecl(Binding));
+      if (!Binding->isNestedDecomposition())
+        TRY_DECL(Binding, IndexCtx.handleDecl(Binding));
     return Base::VisitDecompositionDecl(D);
   }
 
