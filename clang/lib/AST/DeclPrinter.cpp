@@ -1065,6 +1065,15 @@ void DeclPrinter::printVarInitializer(VarDecl *D) {
 void DeclPrinter::VisitDecompositionDecl(DecompositionDecl *D) {
   printVarDeclSpecifiers(D);
 
+  if (llvm::any_of(D->bindings(), [](const BindingDecl *Binding) {
+        return Binding->isNestedDecomposition();
+      })) {
+    Out << ' ';
+    D->printName(Out, Policy);
+    printVarInitializer(D);
+    return;
+  }
+
   Out << " [";
   llvm::ListSeparator LS;
   for (BindingDecl *B : D->bindings()) {

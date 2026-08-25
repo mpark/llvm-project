@@ -187,7 +187,7 @@ struct S{
 };
 
 void err() {
-    auto [[]] = S{0}; // expected-error {{expected unqualified-id}}
+    auto [[]] = S{0}; // expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-warning {{nested structured bindings are a C++2d extension}} expected-warning {{empty structured bindings are a C++2d extension}}
     auto [ alignas(42) a, foo ] = S{0}; // expected-error {{an attribute list cannot appear here}}
     auto [ c, [[]] d ] = S{0}; // expected-error {{an attribute list cannot appear here}}
     auto [ e, alignas(42) f ] = S{0}; // expected-error {{an attribute list cannot appear here}}

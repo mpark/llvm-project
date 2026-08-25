@@ -2342,6 +2342,8 @@ DEF_TRAVERSE_DECL(DecompositionDecl, {
 })
 
 DEF_TRAVERSE_DECL(BindingDecl, {
+  if (auto *Nested = D->getNestedDecomposition())
+    TRY_TO(TraverseDecl(Nested));
   if (getDerived().shouldVisitImplicitCode()) {
     TRY_TO(TraverseStmt(D->getBinding()));
     if (const auto HoldingVar = D->getHoldingVar())
