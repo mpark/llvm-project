@@ -74,6 +74,9 @@ void clang::visitMatchPatternEvaluation(
       VisitStatement(Expression->getExpr());
     else if (const auto *Declaration = dyn_cast<DeclarationPattern>(P))
       VisitDeclaration(Declaration->getDeclaration());
+    if (const auto *Alternative = dyn_cast<AlternativePattern>(P))
+      if (const MatchPattern *Selector = Alternative->getSelector())
+        Recurse(Selector, Recurse);
     if (const auto *Decomposition = dyn_cast<DecompositionPattern>(P);
         Instantiation && Decomposition) {
       for (const MatchPattern *Child :

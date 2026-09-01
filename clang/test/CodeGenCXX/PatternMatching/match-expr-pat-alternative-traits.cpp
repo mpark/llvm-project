@@ -79,6 +79,30 @@ struct std::alternative_traits<Choice> {
   static typename ChoiceAlternative<I>::type& get(Choice&);
 };
 
+// CHECK-LABEL: define{{.*}} i32 @_Z19match_selected_typeR6Choice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm0E
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm1E
+// CHECK: ret i32
+int match_selected_type(Choice& value) {
+  return value match {
+    case { int: auto number } => number;
+    case { double: auto number } => static_cast<int>(number);
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z20match_selected_indexR6Choice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm0E
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm1E
+// CHECK: ret i32
+int match_selected_index(Choice& value) {
+  return value match {
+    case { .[0]: int number } => number;
+    case { .[1]: double number } => static_cast<int>(number);
+  };
+}
+
 // A generic projected arm in a dependent declaration context must not be
 // specialized until the enclosing template is instantiated. Otherwise,
 // references to non-dependent parameters can be cloned as internal globals.
