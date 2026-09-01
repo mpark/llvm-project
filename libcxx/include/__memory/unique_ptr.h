@@ -764,13 +764,13 @@ struct hash<__enable_hash_helper< unique_ptr<_Tp, _Dp>, typename unique_ptr<_Tp,
   }
 };
 
-#if _LIBCPP_STD_VER >= 26
+#if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 template <class _Tp, class _Dp>
   requires(!is_array_v<_Tp>)
 struct alternative_traits<unique_ptr<_Tp, _Dp>> : alternative_traits<_Tp*> {};
 
-#endif // _LIBCPP_STD_VER >= 26
+#endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 _LIBCPP_END_NAMESPACE_STD
 

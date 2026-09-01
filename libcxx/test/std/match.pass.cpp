@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23
+// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
 
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
@@ -536,10 +536,12 @@ struct Variant {
 namespace std {
   template <>
   struct alternative_traits<Variant> {
-    static constexpr size_t size = 3;
-
-    template <size_t I>
-    using type = __type_pack_element<I, int, double, float>;
+    static constexpr alternative_info alternatives[] = {
+      ^^int,
+      ^^double,
+      ^^float,
+    };
+    static constexpr bool has_residual_states = false;
 
     static constexpr size_t index(const Variant& value) noexcept {
       return value.index();
