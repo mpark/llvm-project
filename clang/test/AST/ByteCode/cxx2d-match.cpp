@@ -666,12 +666,20 @@ namespace std {
   template <typename T>
   struct alternative_traits;
 
+  struct alternative_info {
+    decltype(^^int) info = {};
+    bool empty = false;
+
+    consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+        : info(info), empty(empty) {}
+  };
+
   template <>
   struct alternative_traits<Variant> {
-    static constexpr __SIZE_TYPE__ size = 3;
-
-    template <__SIZE_TYPE__ I>
-    using type = __type_pack_element<I, int, double, float>;
+    static constexpr alternative_info alternatives[] = {
+      ^^int, ^^double, ^^float
+    };
+    static constexpr bool has_residual_states = false;
 
     static constexpr __SIZE_TYPE__ index(const Variant& value) noexcept {
       return value.index();
@@ -827,12 +835,10 @@ struct PrvalueProjection {
 
 template <>
 struct std::alternative_traits<PrvalueAlternative> {
-  static constexpr __SIZE_TYPE__ size = 1;
-  static constexpr bool is_exhaustive = true;
-
-  template <__SIZE_TYPE__ I>
-    requires(I == 0)
-  using type = PrvalueProjection;
+  static constexpr alternative_info alternatives[] = {
+    ^^PrvalueProjection
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const PrvalueAlternative &) noexcept {
     return 0;
@@ -1144,11 +1150,10 @@ struct tuple_element<I, SharedProjection> {
 
 template<>
 struct alternative_traits<SharedVariantProjection> {
-  static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = SharedProjection;
+  static constexpr alternative_info alternatives[] = {
+    ^^SharedProjection
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__
   index(const SharedVariantProjection& value) noexcept {

@@ -2,9 +2,19 @@
 // RUN:   -fpattern-matching -emit-llvm -O0 %s -o - \
 // RUN:   | FileCheck %s
 
+inline constexpr int empty_state = 0;
+
 namespace std {
 template<class T>
 struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 }
 
 struct MaybeInt {
@@ -14,11 +24,10 @@ struct MaybeInt {
 
 template<>
 struct std::alternative_traits<MaybeInt> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-    requires(I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   static __SIZE_TYPE__ index(const MaybeInt&) noexcept;
 
@@ -75,10 +84,10 @@ struct ChoiceAlternative<1> {
 
 template<>
 struct std::alternative_traits<Choice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = typename ChoiceAlternative<I>::type;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^double
+  };
+  static constexpr bool has_residual_states = false;
 
   static __SIZE_TYPE__ index(const Choice&) noexcept;
 

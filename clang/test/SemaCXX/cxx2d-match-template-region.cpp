@@ -2,6 +2,14 @@
 
 namespace std {
 template <class T> struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 }
 
 struct Choice {
@@ -10,14 +18,9 @@ struct Choice {
   double real;
 };
 
-template <unsigned I> struct ChoiceAlternative;
-template <> struct ChoiceAlternative<0> { using type = int; };
-template <> struct ChoiceAlternative<1> { using type = double; };
-
 template <> struct std::alternative_traits<Choice> {
-  static constexpr unsigned size = 2;
-  template <unsigned I>
-  using projection_type = typename ChoiceAlternative<I>::type;
+  static constexpr alternative_info alternatives[] = {^^int, ^^double};
+  static constexpr bool has_residual_states = false;
 
   static constexpr unsigned index(const Choice &value) noexcept {
     return value.active;

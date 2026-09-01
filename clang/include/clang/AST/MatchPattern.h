@@ -458,10 +458,13 @@ struct MatchPatternInfo {
   QualType AlternativeProviderType;
   ArrayRef<QualType> AlternativeTypes;
   ArrayRef<unsigned char> ProjectableAlternatives;
+  ArrayRef<unsigned char> EmptyAlternatives;
+  ArrayRef<Expr *> AlternativeValues;
   ArrayRef<unsigned> SelectedAlternatives;
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
   bool IsExhaustive = true;
+  bool IsAlternativeValuePattern = false;
   bool IsOpenAlternative = false;
   bool OpenAlternativeHasEmpty = false;
   bool OpenAlternativeProjectableWildcard = false;
