@@ -84,6 +84,10 @@ collectPatternBindings(MatchPattern *Pattern,
         Bindings.insert(Binding);
   }
 
+  if (auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
+    if (MatchPattern *Selector = Alternative->getSelector())
+      collectPatternBindings(Selector, Bindings);
+
   for (MatchPattern *Child : Pattern->children())
     collectPatternBindings(Child, Bindings);
 }
@@ -109,6 +113,10 @@ static bool checkPatternBindingReferences(
           Worklist.push_back(Child);
     }
   }
+
+  if (auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
+    if (MatchPattern *Selector = Alternative->getSelector())
+      Invalid |= checkPatternBindingReferences(S, Selector, Bindings);
 
   for (MatchPattern *Child : Pattern->children())
     Invalid |= checkPatternBindingReferences(S, Child, Bindings);
@@ -975,6 +983,13 @@ ActionResult<MatchPattern *> Sema::ActOnNamedAlternativePattern(
       AlternativePattern(Braces, NameRange, Name, ColonLoc, SubPattern);
 }
 
+ActionResult<MatchPattern *> Sema::ActOnSelectedAlternativePattern(
+    SourceRange Braces, MatchPattern *Selector, SourceLocation ColonLoc,
+    MatchPattern *SubPattern) {
+  return new (Context)
+      AlternativePattern(Braces, Selector, ColonLoc, SubPattern);
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnEmptyAlternativePattern(SourceRange Braces) {
   return new (Context) AlternativePattern(Braces);
@@ -1375,6 +1390,23 @@ static QualType getOpenAlternativeRequestedType(MatchPattern *Pattern) {
 }
 
 static bool
+checkAlternativeSubPattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
+                           Sema::MatchPatternState &State,
+                           Sema::MatchProjectionCache *ProjectionCache) {
+  Expr *SubPatternSubject = Subject;
+  if (TypePattern *Selector = Pattern->getTypeSelector()) {
+    if (S.CheckCompleteMatchPattern(Subject, Selector, State, ProjectionCache))
+      return true;
+    if (Subject)
+      if (MatchProjection *Projection = State.get(Selector).Projection)
+        SubPatternSubject = Projection->getProjectedExpr();
+  }
+  return S.CheckCompleteMatchPattern(SubPatternSubject,
+                                     Pattern->getSubPattern(), State,
+                                     ProjectionCache);
+}
+
+static bool
 checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                             const AlternativeTraitsInfo &Traits,
                             Sema::MatchPatternState &State,
@@ -1388,12 +1420,21 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
     return true;
   }
 
+  if (Pattern->isExpressionSelected()) {
+    S.Diag(Pattern->getDiscriminatorRange().getBegin(),
+           diag::err_open_alternative_index_selector)
+        << SubjectType;
+    return true;
+  }
+
   MatchPattern *SubPattern = Pattern->getSubPattern();
   bool IsProjectableWildcard =
-      SubPattern &&
+      !Pattern->isSelected() && SubPattern &&
       SubPattern->getMatchPatternClass() == MatchPattern::WildcardPatternClass;
   QualType RequestedType =
-      SubPattern ? getOpenAlternativeRequestedType(SubPattern) : QualType();
+      Pattern->isTypeSelected() ? Pattern->getTypeSelector()->getType()
+      : SubPattern              ? getOpenAlternativeRequestedType(SubPattern)
+                                : QualType();
   if (!Pattern->isEmpty() && !IsProjectableWildcard &&
       (RequestedType.isNull() || RequestedType->getContainedAutoType() ||
        RequestedType->isVoidType())) {
@@ -1483,8 +1524,8 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
       return true;
     if (Pattern->isEmpty())
       return false;
-    return S.CheckCompleteMatchPattern(nullptr, SubPattern, State,
-                                       ProjectionCache);
+    return checkAlternativeSubPattern(S, nullptr, Pattern, State,
+                                      ProjectionCache);
   }
 
   QualType CastType = RequestedType.getNonReferenceType().getUnqualifiedType();
@@ -1492,8 +1533,8 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
           S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
           CastType)) {
     PatternInfo.Projection = Projection;
-    return S.CheckCompleteMatchPattern(Projection->getProjectedExpr(),
-                                       SubPattern, State, ProjectionCache);
+    return checkAlternativeSubPattern(S, Projection->getProjectedExpr(),
+                                      Pattern, State, ProjectionCache);
   }
 
   MatchProjection *Projection =
@@ -1556,8 +1597,8 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
       Loc);
   ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
   Projection->setProjectedExpr(ProjectedRef);
-  return S.CheckCompleteMatchPattern(ProjectedRef, SubPattern, State,
-                                     ProjectionCache);
+  return checkAlternativeSubPattern(S, ProjectedRef, Pattern, State,
+                                    ProjectionCache);
 }
 
 static bool
@@ -1567,6 +1608,15 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
                               Sema::MatchProjectionCache *ProjectionCache) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType SubjectType = Subject->getType().getNonReferenceType();
+  if (MatchPattern *Selector = Pattern->getSelector();
+      Selector && static_cast<bool>(Selector->getDependence() &
+                                    ExprDependence::Instantiation)) {
+    if (Pattern->isTypeSelected() &&
+        S.CheckCompleteMatchPattern(nullptr, Selector, State, ProjectionCache))
+      return true;
+    return S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(), State,
+                                       ProjectionCache);
+  }
   AlternativeTraitsInfo Traits;
   if (lookupAlternativeTraits(S, Loc, SubjectType, Traits))
     return true;
@@ -1587,6 +1637,23 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   determineAlternativeProjections(S, Loc, Subject, Traits);
 
+  if (Pattern->isExpressionSelected()) {
+    Expr *Selector = Pattern->getExpressionSelector()->getExpr();
+    if (Selector->isValueDependent()) {
+      return checkAlternativeSubPattern(S, nullptr, Pattern, State,
+                                        ProjectionCache);
+    }
+    llvm::APSInt IndexValue(32);
+    if (S.VerifyIntegerConstantExpression(Selector, &IndexValue).isInvalid())
+      return true;
+    if (IndexValue.isNegative() || IndexValue.uge(Traits.Size)) {
+      S.Diag(Selector->getExprLoc(), diag::err_alternative_index_out_of_range)
+          << toString(IndexValue, 10) << Traits.Size;
+      return true;
+    }
+    Selected.push_back(IndexValue.getZExtValue());
+  }
+
   if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (!Traits.Projectable[I])
@@ -1595,7 +1662,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
       return true;
     }
-  } else if (!Pattern->isNamed()) {
+  } else if (!Pattern->isNamed() && !Pattern->isExpressionSelected()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (Traits.Projectable[I])
         Selected.push_back(I);
@@ -1614,8 +1681,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       ProjectionCache->RequiresTemplateRegion = true;
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
       ProjectionCache->HasDeferredAlternativeChoices = true;
-      return S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(),
-                                         State, ProjectionCache);
+      return checkAlternativeSubPattern(S, nullptr, Pattern, State,
+                                        ProjectionCache);
     }
     if (ProjectionCache->NextForcedAlternativeSelection <
         ProjectionCache->ForcedAlternativeSelections.size()) {
@@ -1674,9 +1741,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() +
                                                           1);
     }
-    return S.CheckCompleteMatchPattern(ProjectedSubject,
-                                       Pattern->getSubPattern(), State,
-                                       ProjectionCache);
+    return checkAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
+                                      ProjectionCache);
   };
 
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
@@ -2027,6 +2093,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject) {
+      if (P->isTypeSelected() &&
+          CheckCompleteMatchPattern(nullptr, P->getSelector(), State))
+        return true;
       if (!P->getSubPattern())
         return false;
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern(), State);
@@ -2216,6 +2285,8 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
       if (!Info)
         return MatchPatternRefutability::Refutable;
 
+      MatchPatternRefutability Refutability =
+          MatchPatternRefutability::Irrefutable;
       if (Info->IsOpenAlternative) {
         if (Info->OpenAlternativeProjectableWildcard &&
             !Info->OpenAlternativeHasEmpty)
@@ -2235,9 +2306,23 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
         Result.Domain.push_back(std::move(Constraint));
       }
 
+      if (Alternative->isTypeSelected()) {
+        MatchPatternRefutability Selector =
+            Recurse(Alternative->getSelector(), Recurse);
+        if (Selector == MatchPatternRefutability::Impossible)
+          return Selector;
+        if (Selector == MatchPatternRefutability::Refutable)
+          Refutability = Selector;
+      }
       if (!Alternative->getSubPattern())
-        return MatchPatternRefutability::Irrefutable;
-      return Recurse(Alternative->getSubPattern(), Recurse);
+        return Refutability;
+      MatchPatternRefutability SubPattern =
+          Recurse(Alternative->getSubPattern(), Recurse);
+      if (SubPattern == MatchPatternRefutability::Impossible)
+        return SubPattern;
+      if (SubPattern == MatchPatternRefutability::Refutable)
+        Refutability = SubPattern;
+      return Refutability;
     }
 
     case MatchPattern::DecompositionPatternClass: {

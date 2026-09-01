@@ -161,6 +161,37 @@ constexpr int match_generic(Choice choice) {
   };
 }
 
+constexpr int match_type_selector(Choice choice) {
+  return choice match {
+    case { int: 0 } => 20;
+    case { int: auto value } => value;
+    case { double: auto value } => static_cast<int>(value) + 10;
+  };
+}
+
+constexpr int match_expression_selector(Choice choice) {
+  return choice match {
+    case { .[0]: int value } => value;
+    case { .[1]: double value } => static_cast<int>(value) + 10;
+  };
+}
+
+template<class T>
+constexpr int match_dependent_type_selector(Choice choice) {
+  return choice match {
+    case { T: auto value } => static_cast<int>(value);
+    case _ => -1;
+  };
+}
+
+template<__SIZE_TYPE__ I>
+constexpr int match_dependent_expression_selector(Choice choice) {
+  return choice match {
+    case { .[I]: auto value } => static_cast<int>(value);
+    case _ => -1;
+  };
+}
+
 constexpr int match_generic_binding_pack(TupleChoice choice) {
   return choice match {
     case { auto [...elements] } => (... + elements);
@@ -259,6 +290,15 @@ static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
 static_assert(match_generic({0, 3, 4}) == 1);
 static_assert(match_generic({1, 3, 4}) == 2);
+static_assert(match_type_selector({0, 0, 4}) == 20);
+static_assert(match_type_selector({0, 3, 4}) == 3);
+static_assert(match_type_selector({1, 3, 4}) == 14);
+static_assert(match_expression_selector({0, 3, 4}) == 3);
+static_assert(match_expression_selector({1, 3, 4}) == 14);
+static_assert(match_dependent_type_selector<int>({0, 3, 4}) == 3);
+static_assert(match_dependent_type_selector<int>({1, 3, 4}) == -1);
+static_assert(match_dependent_expression_selector<0>({0, 3, 4}) == 3);
+static_assert(match_dependent_expression_selector<0>({1, 3, 4}) == -1);
 static_assert(match_generic_binding_pack({0, {3}, {4, 5}}) == 3);
 static_assert(match_generic_binding_pack({1, {3}, {4, 5}}) == 9);
 static_assert(match_generic_declaration_pack({0, {3}, {4, 5}}) == 4);

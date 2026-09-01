@@ -90,6 +90,33 @@ int alternatives(Choice choice) {
 // CHECK-NEXT: {{^        }}case { .real: double } => 0;
 // CHECK-NEXT: {{^    }}};
 
+int selected_alternatives(Choice choice) {
+  return choice match {
+    case { int: 0 } => 1;
+    case { .[1]: double value } => static_cast<int>(value);
+    case _ => 2;
+  };
+}
+
+// CHECK-LABEL: int selected_alternatives(Choice choice) {
+// CHECK-NEXT: {{^    }}return choice match {
+// CHECK-NEXT: {{^        }}case { int: 0 } => 1;
+// CHECK-NEXT: {{^        }}case { .[1]: double value } => static_cast<int>(value);
+// CHECK-NEXT: {{^        }}case _ => 2;
+// CHECK-NEXT: {{^    }}};
+
+int state_only_alternatives(Choice choice) {
+  return choice match {
+    case { .[0] } => 0;
+    case { .[1] } => 1;
+  };
+}
+
+// CHECK-LABEL: int state_only_alternatives(Choice choice) {
+// CHECK-NEXT: {{^    }}return choice match {
+// CHECK-NEXT: {{^        }}case { .[0] } => 0;
+// CHECK-NEXT: {{^        }}case { .[1] } => 1;
+// CHECK-NEXT: {{^    }}};
 int pointer(int *value) {
   return value match {
     case { int& projected } => projected;

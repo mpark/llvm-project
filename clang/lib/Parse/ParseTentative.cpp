@@ -607,8 +607,8 @@ bool Parser::isCXXTypeId(TentativeCXXTypeIdContext Context, bool &isAmbiguous) {
       TPR = TPResult::True;
       isAmbiguous = true;
     } else if (Context == TentativeCXXTypeIdContext::InMatchPattern &&
-               Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi,
-                           tok::comma, tok::r_paren, tok::r_square,
+               Tok.isOneOf(tok::equalgreater, tok::kw_if, tok::semi, tok::comma,
+                           tok::colon, tok::r_paren, tok::r_square,
                            tok::r_brace, tok::eof)) {
       TPR = TPResult::True;
       isAmbiguous = true;
