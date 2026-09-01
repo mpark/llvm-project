@@ -21,6 +21,11 @@ concept has_projection = requires(_Self&& __self) {
   _Traits::template get<_Ip>(std::forward<_Self>(__self));
 };
 
+template <class _Traits, std::size_t _Ip>
+concept has_alternative_type = requires {
+  typename _Traits::template type<_Ip>;
+};
+
 template <class _Tp>
 concept has_alternative_traits = requires { std::alternative_traits<_Tp>::size; };
 
@@ -36,6 +41,9 @@ constexpr bool test_pointer() {
   static_assert(std::is_same_v<decltype(Traits::index(std::declval<int* const&>())), bool>);
   static_assert(Traits::names::none.index == 0);
   static_assert(Traits::names::some.index == 1);
+  static_assert(!has_alternative_type<Traits, 0>);
+  static_assert(has_alternative_type<Traits, 1>);
+  static_assert(std::is_same_v<Traits::type<1>, int>);
   static_assert(!has_projection<Traits, 0, int*&>);
   static_assert(has_projection<Traits, 1, int*&>);
   static_assert(std::is_same_v<decltype(Traits::get<1>(std::declval<int*&>())), int&>);
@@ -61,6 +69,9 @@ constexpr bool test_optional() {
   static_assert(std::is_same_v<decltype(Traits::index(std::declval<const std::optional<int>&>())), bool>);
   static_assert(!has_projection<Traits, 0, std::optional<int>&>);
   static_assert(has_projection<Traits, 1, std::optional<int>&>);
+  static_assert(!has_alternative_type<Traits, 0>);
+  static_assert(has_alternative_type<Traits, 1>);
+  static_assert(std::is_same_v<Traits::type<1>, int>);
   static_assert(std::is_same_v<decltype(Traits::get<1>(std::declval<std::optional<int>&>())), int&>);
   static_assert(std::is_same_v<decltype(Traits::get<1>(std::declval<std::optional<int>&&>())), int&&>);
 
@@ -80,6 +91,8 @@ constexpr bool test_variant() {
   static_assert(noexcept(Traits::index(std::declval<const Variant&>())));
   static_assert(has_projection<Traits, 0, Variant&>);
   static_assert(has_projection<Traits, 1, Variant&>);
+  static_assert(std::is_same_v<Traits::type<0>, int>);
+  static_assert(std::is_same_v<Traits::type<1>, double>);
   static_assert(std::is_same_v<decltype(Traits::get<0>(std::declval<Variant&>())), int&>);
   static_assert(std::is_same_v<decltype(Traits::get<0>(std::declval<const Variant&>())), const int&>);
   static_assert(std::is_same_v<decltype(Traits::get<0>(std::declval<Variant&&>())), int&&>);
@@ -108,9 +121,12 @@ constexpr bool test_expected() {
   static_assert(Traits::names::error.index == 1);
   static_assert(Traits::names::none.index == 0);
   static_assert(Traits::names::some.index == 1);
+  static_assert(std::is_same_v<Traits::type<0>, int>);
+  static_assert(std::is_same_v<Traits::type<1>, long>);
   static_assert(std::is_same_v<decltype(Traits::get<0>(std::declval<Expected&>())), int&>);
   static_assert(std::is_same_v<decltype(Traits::get<1>(std::declval<Expected&&>())), long&&>);
   using VoidTraits = std::alternative_traits<std::expected<void, long>>;
+  static_assert(std::is_same_v<VoidTraits::type<0>, void>);
   static_assert(has_projection<VoidTraits, 0, std::expected<void, long>&>);
   using VoidNullableTraits = typename decltype(VoidTraits::names::some)::provider;
   static_assert(!has_projection<VoidNullableTraits, 1, std::expected<void, long>&>);
