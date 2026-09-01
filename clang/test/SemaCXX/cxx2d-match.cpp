@@ -181,32 +181,10 @@ int polymorphic_rvalue_reference(Shape &&shape) {
   };
 }
 
-int polymorphic_pointer(Shape *shape) {
+int polymorphic_pointer_is_not_refined(Shape *shape) {
   return shape match {
+    // expected-error@+1 {{declaration pattern of type 'Circle *' is not an exact match for subject of type 'Shape *'}}
     case Circle *circle => circle->radius;
-    case Square *square => square->width;
-    case _ => -1;
-  };
-}
-
-int polymorphic_pointer_const_reference(Shape *shape) {
-  return shape match {
-    case Circle *const &circle => circle->radius;
-    case _ => -1;
-  };
-}
-
-int polymorphic_pointer_rvalue_reference(Shape *shape) {
-  return shape match {
-    case Circle *&&circle => circle->radius;
-    case _ => -1;
-  };
-}
-
-int polymorphic_pointer_lvalue_reference(Shape *shape) {
-  return shape match {
-    // expected-error@+1 {{non-const lvalue reference to type 'Circle *' cannot bind to a temporary of type 'Circle *'}}
-    case Circle *&circle => circle->radius;
     case _ => -1;
   };
 }

@@ -18,6 +18,15 @@
 
 void check(bool b) { assert(b); }
 
+template <class T>
+constexpr int match_static_pointer(T* value) {
+  return value match {
+    case int* pointer => pointer ? 10 : 11;
+    case double* pointer => pointer ? 20 : 21;
+    case _ => 30;
+  };
+}
+
 void test_match_test_expr() {
   check(0 match case _);
   check(0 match case 0);
@@ -56,6 +65,10 @@ void test_match_test_expr() {
   check(![]() { int** pp = nullptr; return pp match case { _ }; }());
   check(![]() { int** pp = nullptr; return pp match case { { _ } }; }());
   check(![]() { int** pp = nullptr; return pp match case { { 0 } }; }());
+
+  check(match_static_pointer(static_cast<int*>(nullptr)) == 11);
+  check(match_static_pointer(static_cast<double*>(nullptr)) == 21);
+  check(match_static_pointer(static_cast<char*>(nullptr)) == 30);
 
   check([]() { return 0 match case auto&& _; }());
   check([]() { return 0 match case [[maybe_unused]] auto&& x; }());
