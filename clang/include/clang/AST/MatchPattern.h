@@ -280,7 +280,7 @@ public:
 
 class AlternativePattern final : public MatchPattern {
 public:
-  enum AlternativeKind { Generic, Named, Empty };
+  enum AlternativeKind { Generic, Named, Type, Expression, Empty };
 
 private:
   AlternativeKind Kind;
@@ -288,6 +288,7 @@ private:
   SourceRange Braces;
 
   IdentifierInfo *Name = nullptr;
+  MatchPattern *Selector = nullptr;
 
   SourceLocation ColonLoc;
   MatchPattern *Pattern = nullptr;
@@ -312,6 +313,17 @@ public:
     setDependence(computeDependence());
   }
 
+  explicit AlternativePattern(SourceRange Braces, MatchPattern *Selector,
+                              SourceLocation ColonLoc, MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass),
+        Kind(isa<TypePattern>(Selector) ? Type : Expression),
+        DiscriminatorRange(Selector->getSourceRange()), Braces(Braces),
+        Selector(Selector), ColonLoc(ColonLoc), Pattern(Pattern) {
+    assert((isa<TypePattern>(Selector) || isa<ExpressionPattern>(Selector)) &&
+           "alternative selector must be a type or expression pattern");
+    setDependence(computeDependence() | Selector->getDependence());
+  }
+
   explicit AlternativePattern(SourceRange Braces)
       : MatchPattern(AlternativePatternClass), Kind(Empty), Braces(Braces) {
     setDependence(ExprDependence::None);
@@ -319,11 +331,32 @@ public:
 
   AlternativeKind getAlternativeKind() const { return Kind; }
   bool isNamed() const { return Kind == Named; }
+  bool isTypeSelected() const { return Kind == Type; }
+  bool isExpressionSelected() const { return Kind == Expression; }
+  bool isSelected() const { return isTypeSelected() || isExpressionSelected(); }
   bool isEmpty() const { return Kind == Empty; }
 
   SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
   SourceRange getBraces() const { return Braces; }
   IdentifierInfo *getName() const { return Name; }
+  const MatchPattern *getSelector() const { return Selector; }
+  MatchPattern *getSelector() { return Selector; }
+  const TypePattern *getTypeSelector() const {
+    return isTypeSelected() ? static_cast<const TypePattern *>(Selector)
+                            : nullptr;
+  }
+  TypePattern *getTypeSelector() {
+    return isTypeSelected() ? static_cast<TypePattern *>(Selector) : nullptr;
+  }
+  const ExpressionPattern *getExpressionSelector() const {
+    return isExpressionSelected()
+               ? static_cast<const ExpressionPattern *>(Selector)
+               : nullptr;
+  }
+  ExpressionPattern *getExpressionSelector() {
+    return isExpressionSelected() ? static_cast<ExpressionPattern *>(Selector)
+                                  : nullptr;
+  }
   SourceLocation getColonLoc() const { return ColonLoc; }
   SourceLocation getBeginLoc() const { return Braces.getBegin(); }
   SourceLocation getEndLoc() const { return Braces.getEnd(); }
