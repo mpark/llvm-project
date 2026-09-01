@@ -11296,6 +11296,10 @@ public:
   ActOnNamedAlternativePattern(SourceRange Braces, SourceRange NameRange,
                                IdentifierInfo *Name, SourceLocation ColonLoc,
                                MatchPattern *SubPattern);
+  ActionResult<MatchPattern *>
+  ActOnSelectedAlternativePattern(SourceRange Braces, MatchPattern *Selector,
+                                  SourceLocation ColonLoc,
+                                  MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnEmptyAlternativePattern(SourceRange Braces);
   ActionResult<MatchPattern *>
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
