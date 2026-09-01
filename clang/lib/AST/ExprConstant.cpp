@@ -21404,6 +21404,8 @@ static bool EvaluateSharedDeclarationProjections(
     return !Projection ||
            EvaluateProjectionValue(Projection, Info, &ProjectionCache);
   }
+  if (isa<TypePattern>(Pattern))
+    return true;
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))

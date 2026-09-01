@@ -222,6 +222,33 @@ getTrivialTypeTemplateArgument(Sema &S, SourceLocation Loc, QualType T) {
   return S.getTrivialTemplateArgumentLoc(TemplateArgument(T), QualType(), Loc);
 }
 
+static std::optional<bool>
+satisfiesTypeConstraint(Sema &S, const ConceptReference *Constraint,
+                        QualType Type) {
+  TemplateArgumentListInfo Args;
+  Args.addArgument(
+      getTrivialTypeTemplateArgument(S, Constraint->getLocation(), Type));
+  if (const ASTTemplateArgumentListInfo *Written =
+          Constraint->getTemplateArgsAsWritten()) {
+    Args.setLAngleLoc(Written->getLAngleLoc());
+    Args.setRAngleLoc(Written->getRAngleLoc());
+    for (const TemplateArgumentLoc &Arg : Written->arguments())
+      Args.addArgument(Arg);
+  }
+
+  CXXScopeSpec SS;
+  SS.Adopt(Constraint->getNestedNameSpecifierLoc());
+  ExprResult Result = S.CheckConceptTemplateId(
+      SS, Constraint->getTemplateKWLoc(), Constraint->getConceptNameInfo(),
+      Constraint->getFoundDecl(), Constraint->getNamedConcept(), &Args);
+  if (Result.isInvalid())
+    return std::nullopt;
+  auto *Specialization = cast<ConceptSpecializationExpr>(Result.get());
+  if (Specialization->isValueDependent())
+    return std::nullopt;
+  return Specialization->isSatisfied();
+}
+
 namespace {
 struct AlternativeTraitsInfo {
   QualType Type;
@@ -482,9 +509,28 @@ static void determineAlternativeProjections(Sema &S, SourceLocation Loc,
   if (Info.IsBuiltinPointer)
     return;
 
+  LookupResult TypeLookup(S, S.PP.getIdentifierInfo("type"), Loc,
+                          Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(TypeLookup, Info.Record);
+  auto *TypeTemplate = TypeLookup.getAsSingle<TypeAliasTemplateDecl>();
+
   Info.Alternatives.reserve(Info.Size);
   Info.Projectable.reserve(Info.Size);
   for (unsigned I = 0; I < Info.Size; ++I) {
+    TemplateArgumentListInfo Args(Loc, Loc);
+    Args.addArgument(
+        getTrivialIntegralTemplateArgument(S, Loc, S.Context.getSizeType(), I));
+    QualType AlternativeType;
+    bool HasAlternativeType = false;
+    if (TypeTemplate) {
+      Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+      AlternativeType = S.CheckTemplateIdType(ElaboratedTypeKeyword::None,
+                                              TemplateName(TypeTemplate), Loc,
+                                              Args, nullptr, false);
+      HasAlternativeType =
+          !AlternativeType.isNull() && !Trap.hasErrorOccurred();
+    }
+
     auto *Probe = new (S.Context)
         OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
                         Subject->getObjectKind(), Subject);
@@ -493,8 +539,9 @@ static void determineAlternativeProjections(Sema &S, SourceLocation Loc,
     Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
     ExprResult GetCall =
         buildAlternativeTraitsCall(S, Loc, Info, "get", Probe, I);
-    bool IsProjectable = GetCall.isUsable() && !Trap.hasErrorOccurred();
-    Info.Alternatives.push_back(IsProjectable ? GetCall.get()->getType()
+    bool IsProjectable =
+        HasAlternativeType && GetCall.isUsable() && !Trap.hasErrorOccurred();
+    Info.Alternatives.push_back(IsProjectable ? AlternativeType
                                               : S.Context.VoidTy);
     Info.Projectable.push_back(IsProjectable);
   }
@@ -944,6 +991,14 @@ ActionResult<MatchPattern *> Sema::ActOnSelectedAlternativePattern(
       AlternativePattern(Braces, Selector, ColonLoc, SubPattern);
 }
 
+ActionResult<MatchPattern *> Sema::ActOnTypeConstraintAlternativePattern(
+    SourceRange Braces, SourceRange ConstraintRange,
+    ConceptReference *Constraint, SourceLocation ColonLoc,
+    MatchPattern *SubPattern) {
+  return new (Context) AlternativePattern(Braces, ConstraintRange, Constraint,
+                                          ColonLoc, SubPattern);
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnEmptyAlternativePattern(SourceRange Braces) {
   return new (Context) AlternativePattern(Braces);
@@ -1342,20 +1397,42 @@ static QualType getOpenAlternativeRequestedType(MatchPattern *Pattern) {
   return {};
 }
 
+static bool checkAlternativeTypeSelector(
+    Sema &S, Expr *Subject, TypePattern *Selector,
+    Sema::MatchPatternState &State,
+    Sema::MatchProjectionCache *ProjectionCache) {
+  if (!Subject || Subject->isTypeDependent())
+    return S.CheckCompleteMatchPattern(nullptr, Selector, State,
+                                       ProjectionCache);
+
+  QualType PatternType = Selector->getType();
+  if (PatternType->isDependentType())
+    return false;
+
+  MatchPatternInfo &Info = State.get(Selector);
+  bool Matches = Subject->getType()->isVoidType()
+                     ? PatternType->isVoidType()
+                     : isExactDeclarationPatternMatch(S, Subject, PatternType);
+  if (!Matches) {
+    S.Diag(Selector->getBeginLoc(), diag::err_type_pattern_not_exact_match)
+        << PatternType << Subject->getType();
+    return true;
+  }
+  Info.TypePatternResolved = true;
+  Info.TypePatternMatches = true;
+  Info.CheckedSubjectType = Subject->getType();
+  return false;
+}
+
 static bool
 checkAlternativeSubPattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                            Sema::MatchPatternState &State,
                            Sema::MatchProjectionCache *ProjectionCache) {
-  Expr *SubPatternSubject = Subject;
-  if (TypePattern *Selector = Pattern->getTypeSelector()) {
-    if (S.CheckCompleteMatchPattern(Subject, Selector, State, ProjectionCache))
+  if (TypePattern *Selector = Pattern->getTypeSelector())
+    if (checkAlternativeTypeSelector(S, Subject, Selector, State,
+                                     ProjectionCache))
       return true;
-    if (Subject)
-      if (MatchProjection *Projection = State.get(Selector).Projection)
-        SubPatternSubject = Projection->getProjectedExpr();
-  }
-  return S.CheckCompleteMatchPattern(SubPatternSubject,
-                                     Pattern->getSubPattern(), State,
+  return S.CheckCompleteMatchPattern(Subject, Pattern->getSubPattern(), State,
                                      ProjectionCache);
 }
 
@@ -1376,6 +1453,12 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   if (Pattern->isExpressionSelected()) {
     S.Diag(Pattern->getDiscriminatorRange().getBegin(),
            diag::err_open_alternative_index_selector)
+        << SubjectType;
+    return true;
+  }
+  if (Pattern->isTypeConstraintSelected()) {
+    S.Diag(Pattern->getDiscriminatorRange().getBegin(),
+           diag::err_open_alternative_type_constraint_selector)
         << SubjectType;
     return true;
   }
@@ -1561,9 +1644,10 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
                               Sema::MatchProjectionCache *ProjectionCache) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType SubjectType = Subject->getType().getNonReferenceType();
-  if (MatchPattern *Selector = Pattern->getSelector();
-      Selector && static_cast<bool>(Selector->getDependence() &
-                                    ExprDependence::Instantiation)) {
+  if ((Pattern->getSelector() || Pattern->isTypeConstraintSelected()) &&
+      static_cast<bool>(Pattern->getDependence() &
+                        ExprDependence::Instantiation)) {
+    MatchPattern *Selector = Pattern->getSelector();
     if (Pattern->isTypeSelected() &&
         S.CheckCompleteMatchPattern(nullptr, Selector, State, ProjectionCache))
       return true;
@@ -1692,6 +1776,20 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       ProjectionCache->CurrentProjectionPath.push_back(Selected.front() + 1);
       ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() +
                                                           1);
+    }
+    if (const ConceptReference *Constraint =
+            Pattern->getTypeConstraintSelector()) {
+      QualType DeclaredType = Traits.Alternatives[Selected.front()];
+      std::optional<bool> Satisfied =
+          satisfiesTypeConstraint(S, Constraint, DeclaredType);
+      if (!Satisfied)
+        return true;
+      if (!*Satisfied) {
+        S.Diag(Constraint->getLocation(),
+               diag::err_type_constraint_selector_not_satisfied)
+            << DeclaredType << Constraint->getNamedConcept();
+        return true;
+      }
     }
     return checkAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
                                       ProjectionCache);
@@ -1987,6 +2085,12 @@ bool Sema::CheckCompleteMatchPatternImpl(
     }
 
     MatchPatternInfo &Info = State.get(P);
+    auto CheckInitialization = [&](Expr *Initializer) {
+      NonSFINAEContext NonSFINAE(*this);
+      VarDecl *Declaration =
+          BuildVarDecl(*this, P->getBeginLoc(), PatternType, Initializer);
+      return hasFailedVariableInitialization(Declaration);
+    };
     if (Subject->getType()->isVoidType()) {
       if (!PatternType->isVoidType()) {
         Diag(P->getBeginLoc(), diag::err_type_pattern_not_exact_match)
@@ -2000,9 +2104,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
     }
 
     if (isExactDeclarationPatternMatch(*this, Subject, PatternType)) {
-      NonSFINAEContext NonSFINAE(*this);
-      if (hasFailedVariableInitialization(
-              BuildVarDecl(*this, P->getBeginLoc(), PatternType, Subject)))
+      if (CheckInitialization(Subject))
         return true;
       Info.TypePatternResolved = true;
       Info.TypePatternMatches = true;
@@ -2021,10 +2123,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
       }
       if (isExactDeclarationPatternMatch(
               *this, Info.Projection->getProjectedExpr(), PatternType)) {
-        NonSFINAEContext NonSFINAE(*this);
-        if (hasFailedVariableInitialization(
-                BuildVarDecl(*this, P->getBeginLoc(), PatternType,
-                             Info.Projection->getProjectedExpr())))
+        if (CheckInitialization(Info.Projection->getProjectedExpr()))
           return true;
         Info.TypePatternResolved = true;
         Info.TypePatternMatches = true;
