@@ -1,23 +1,32 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -Wno-unused-variable -Wno-unused-value -verify %s
 
+inline constexpr int empty_state = 0;
+
 namespace std {
 template <class T>
 struct alternative_traits;
 
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
+
 template <class T>
 struct alternative_traits<T *> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template <__SIZE_TYPE__ I>
-    requires(I == 0)
-  using type = T;
+  static constexpr alternative_info alternatives[] = {
+    {^^empty_state, true}, ^^T
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(T *pointer) noexcept {
-    return pointer ? 0 : 1;
+    return pointer ? 1 : 0;
   }
 
   template <__SIZE_TYPE__ I, class Self>
-    requires(I == 0)
+    requires(I == 1)
   static constexpr decltype(auto) get(Self &&self) {
     return *self;
   }
