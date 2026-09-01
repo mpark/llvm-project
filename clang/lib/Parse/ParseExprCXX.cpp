@@ -4794,8 +4794,7 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
                      : NestedNameSpecifierLoc{},
           Constraint->TemplateKWLoc,
           DeclarationNameInfo(Constraint->Name, Constraint->TemplateNameLoc),
-          FoundDecl, Constraint->Template.get().getAsTemplateDecl(),
-          ArgsAsWritten);
+          FoundDecl, Constraint->Template.get(), ArgsAsWritten);
 
       ColonLoc = ConsumeToken();
       ActionResult<MatchPattern *> SubPattern = ParsePattern();
