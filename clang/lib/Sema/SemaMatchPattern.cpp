@@ -1180,24 +1180,17 @@ static bool isReusableDecompositionDeclaration(const VarDecl *Declaration) {
 enum class CastProjectionResult { NotApplicable, Success, Error };
 
 static bool isDynamicCastDeclaration(Sema &S, SourceLocation Loc,
-                                     QualType SubjectType, QualType PatternType,
-                                     bool &ProjectsPointer) {
-  QualType SourceClass = SubjectType;
-  QualType TargetClass = PatternType;
-  ProjectsPointer = false;
-
-  if (SubjectType->isPointerType() && PatternType->isPointerType()) {
-    SourceClass = SubjectType->getPointeeType();
-    TargetClass = PatternType->getPointeeType();
-    ProjectsPointer = true;
-  } else if (!SubjectType->isRecordType() || !PatternType->isRecordType()) {
+                                     QualType SubjectType,
+                                     QualType PatternType) {
+  if (!SubjectType->isRecordType() || !PatternType->isRecordType())
     return false;
-  }
 
-  SourceClass = SourceClass.getUnqualifiedType();
-  TargetClass = TargetClass.getUnqualifiedType();
+  QualType SourceClass = SubjectType.getUnqualifiedType();
+  QualType TargetClass = PatternType.getUnqualifiedType();
   CXXRecordDecl *SourceRecord = SourceClass->getAsCXXRecordDecl();
   CXXRecordDecl *TargetRecord = TargetClass->getAsCXXRecordDecl();
+  SourceRecord = SourceRecord ? SourceRecord->getDefinition() : nullptr;
+  TargetRecord = TargetRecord ? TargetRecord->getDefinition() : nullptr;
   return SourceRecord && TargetRecord && SourceRecord->isPolymorphic() &&
          S.IsDerivedFrom(Loc, TargetClass, SourceClass);
 }
@@ -1243,29 +1236,21 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
   QualType SubjectType = HoldingVar->getType().getNonReferenceType();
   Expr *HoldingRef =
       S.BuildDeclRefExpr(HoldingVar, SubjectType, VK_LValue, Loc);
-  bool ProjectsPointer = false;
-  if (!isDynamicCastDeclaration(S, Loc, SubjectType, TargetType,
-                                ProjectsPointer))
+  if (!isDynamicCastDeclaration(S, Loc, SubjectType, TargetType))
     return CastProjectionResult::NotApplicable;
 
-  bool DereferenceResult = !ProjectsPointer;
-  QualType DynamicTargetType = TargetType;
-  Expr *CastOperand = HoldingRef;
-  if (!ProjectsPointer) {
-    DynamicTargetType =
-        DynamicTargetType.withCVRQualifiers(SubjectType.getCVRQualifiers());
-    DynamicTargetType = S.Context.getPointerType(DynamicTargetType);
-    ExprResult AddrOf =
-        S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::amp, HoldingRef);
-    if (AddrOf.isInvalid())
-      return CastProjectionResult::Error;
-    CastOperand = AddrOf.get();
-  }
+  QualType DynamicTargetType =
+      TargetType.withCVRQualifiers(SubjectType.getCVRQualifiers());
+  DynamicTargetType = S.Context.getPointerType(DynamicTargetType);
+  ExprResult AddrOf =
+      S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::amp, HoldingRef);
+  if (AddrOf.isInvalid())
+    return CastProjectionResult::Error;
 
   TypeSourceInfo *TSI =
       S.Context.getTrivialTypeSourceInfo(DynamicTargetType, Loc);
   ExprResult CastExpr =
-      S.BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, CastOperand, {}, {});
+      S.BuildCXXNamedCast({}, tok::kw_dynamic_cast, TSI, AddrOf.get(), {}, {});
   if (CastExpr.isInvalid())
     return CastProjectionResult::Error;
 
@@ -1297,15 +1282,11 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
   if (TargetType->isVoidType())
     return CastProjectionResult::Success;
 
-  ExprResult Projected = CastRef;
-  if (DereferenceResult) {
-    Projected =
-        S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::star, CastRef);
-    if (Projected.isInvalid())
-      return CastProjectionResult::Error;
-  }
-  ExprValueKind ProjectedValueKind =
-      DereferenceResult ? SubjectValueKind : CastExpr.get()->getValueKind();
+  ExprResult Projected =
+      S.ActOnUnaryOp(S.getCurScope(), Loc, tok::TokenKind::star, CastRef);
+  if (Projected.isInvalid())
+    return CastProjectionResult::Error;
+  ExprValueKind ProjectedValueKind = SubjectValueKind;
   Expr *ProjectedExpr =
       asValueKind(S, Projected.get(), ProjectedValueKind);
   QualType ProjectedType = ProjectedExpr->refersToBitField()
