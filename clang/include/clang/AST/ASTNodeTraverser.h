@@ -1113,6 +1113,11 @@ public:
                   ->getTypeSourceInfo()
                   ->getType());
         break;
+      case MatchPattern::AlternativePatternClass:
+        if (const MatchPattern *Selector =
+                static_cast<const AlternativePattern *>(Node)->getSelector())
+          VisitMatchPattern(Selector);
+        break;
       default:
         break;
       }

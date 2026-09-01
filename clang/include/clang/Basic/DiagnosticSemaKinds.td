@@ -14531,6 +14531,10 @@ def err_braced_alternative_void_pointer : Error<
 def err_open_alternative_pattern_not_type_directed : Error<
   "open alternative protocol for type %0 requires a declaration or type "
   "pattern with a non-placeholder, non-void type">;
+def err_open_alternative_index_selector : Error<
+  "expression alternative selector cannot be used with open alternative type %0">;
+def err_alternative_index_out_of_range : Error<
+  "alternative index %0 is outside the range [0, %1)">;
 def err_open_alternative_try_cast_result : Error<
   "invalid open alternative protocol for type %0; 'try_cast' must return a "
   "pointer">;

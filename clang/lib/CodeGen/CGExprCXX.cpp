@@ -2463,6 +2463,24 @@ RValue CodeGenFunction::EmitAlternativePattern(
   else if (!Projected && Projection->getProjectedExpr() &&
            Projection->getProjectedExpr()->getType()->isVoidType())
     EmitIgnoredExpr(Projection->getProjectedExpr());
+
+  if (const TypePattern *Selector = AltPattern->getTypeSelector()) {
+    const MatchPatternInfo *SelectorInfo = Instantiation->find(Selector);
+    const MatchProjection *SelectorProjection =
+        SelectorInfo ? SelectorInfo->Projection : nullptr;
+    if (SelectorProjection &&
+        SelectorProjection->getKind() == MatchProjection::CastProjection) {
+      RValue SelectorResult =
+          EmitMatchPattern(Selector, Instantiation, nullptr);
+      llvm::BasicBlock *SelectorPassBB =
+          createBasicBlock("match.alt.selector.pass");
+      Builder.CreateCondBr(SelectorResult.getScalarVal(), SelectorPassBB,
+                           AltTypeCheckFailBB);
+      EmitBlock(SelectorPassBB);
+      EmitSelectedMatchPatternProjections(Selector, Instantiation);
+    }
+  }
+
   RValue MatchResult = !AltPattern->getSubPattern()
                            ? RValue::get(Builder.getTrue())
                            : EmitMatchPattern(AltPattern->getSubPattern(),

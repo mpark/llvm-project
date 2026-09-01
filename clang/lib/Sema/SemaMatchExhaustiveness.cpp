@@ -496,8 +496,20 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       QualType FieldType = Info->AlternativeTypes[Index];
       if (Info->Projection && Info->Projection->getProjectedExpr())
         FieldType = Info->Projection->getProjectedExpr()->getType();
-      for (CoveragePattern &Child :
-           makePatterns(S, P->getSubPattern(), Instantiation, FieldType)) {
+      CoveragePatterns Children;
+      if (const TypePattern *Selector = P->getTypeSelector()) {
+        const MatchPatternInfo *SelectorInfo = Instantiation->find(Selector);
+        if (!SelectorInfo || !SelectorInfo->TypePatternResolved)
+          Children = {CoveragePattern::opaque(Selector->getBeginLoc())};
+        else if (!SelectorInfo->TypePatternMatches)
+          continue;
+        else if (SelectorInfo->Projection)
+          Children = {CoveragePattern::opaque(Selector->getBeginLoc())};
+      }
+      if (Children.empty())
+        Children =
+            makePatterns(S, P->getSubPattern(), Instantiation, FieldType);
+      for (CoveragePattern &Child : Children) {
         CoveragePattern Copy = Result;
         Copy.FieldTypes.push_back(FieldType);
         Copy.Fields.push_back(

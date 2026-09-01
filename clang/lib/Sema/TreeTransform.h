@@ -4498,18 +4498,32 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-      if (!P->getSubPattern())
+      if (!P->getSubPattern() && !P->getSelector())
         return Pattern;
 
-      auto Sub = TransformPattern(P->getSubPattern(), Rebuild);
-      if (Sub.isInvalid())
-        return true;
-      if (Sub.get() == P->getSubPattern())
+      MatchPattern *Selector = P->getSelector();
+      if (P->getSelector()) {
+        ActionResult<MatchPattern *> TransformedSelector =
+            TransformPattern(P->getSelector(), Rebuild);
+        if (TransformedSelector.isInvalid())
+          return true;
+        Selector = TransformedSelector.get();
+      }
+      ActionResult<MatchPattern *> Sub = P->getSubPattern();
+      if (P->getSubPattern()) {
+        Sub = TransformPattern(P->getSubPattern(), Rebuild);
+        if (Sub.isInvalid())
+          return true;
+      }
+      if (Selector == P->getSelector() && Sub.get() == P->getSubPattern())
         return Pattern;
       if (P->isNamed())
         return getSema().ActOnNamedAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), P->getName(),
             P->getColonLoc(), Sub.get());
+      if (P->isSelected())
+        return getSema().ActOnSelectedAlternativePattern(
+            P->getBraces(), Selector, P->getColonLoc(), Sub.get());
       return getSema().ActOnBracedAlternativePattern(P->getBraces(),
                                                      Sub.get());
     }
@@ -19327,7 +19341,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+          Alternative->isTypeSelected())
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
@@ -19569,7 +19584,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+          Alternative->isTypeSelected())
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {

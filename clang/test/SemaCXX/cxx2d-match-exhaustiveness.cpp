@@ -780,6 +780,31 @@ int generic_makes_typed_alternative_redundant(Choice choice) {
   };
 }
 
+int type_selectors_are_exhaustive(Choice choice) {
+  return choice match {
+    case { bool: _ } => 0;
+    case { int: _ } => 1;
+    case {} => 2;
+  };
+}
+
+int expression_selectors_are_exhaustive(Choice choice) {
+  return choice match {
+    case { .[0]: _ } => 0;
+    case { .[1]: _ } => 1;
+    case {} => 2;
+  };
+}
+
+int type_selector_makes_index_redundant(Choice choice) {
+  return choice match {
+    case { bool: _ } => 0;
+    case { .[0]: _ } => 1; // expected-error {{match case is redundant}}
+    case { int: _ } => 2;
+    case {} => 3;
+  };
+}
+
 struct ChoiceAndBool {
   Choice choice;
   bool flag;

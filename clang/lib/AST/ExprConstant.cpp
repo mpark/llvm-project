@@ -21269,11 +21269,28 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
                                        ProjectionCache) &&
            EvaluateAsBooleanCondition(
                PatternInfo->Projection->getConditionExpr(), Result, Info) &&
-           (!Result || (EvaluateProjectionValue(PatternInfo->Projection, Info,
-                                                ProjectionCache) &&
-                        (!P->getSubPattern() ||
-                         EvaluateMatchPattern(P->getSubPattern(), Instantiation,
-                                              Result, Info, ProjectionCache))));
+           (!Result ||
+            (EvaluateProjectionValue(PatternInfo->Projection, Info,
+                                     ProjectionCache) &&
+             ([&] {
+               if (const TypePattern *Selector = P->getTypeSelector()) {
+                 const MatchPatternInfo *SelectorInfo =
+                     Instantiation->find(Selector);
+                 if (SelectorInfo && SelectorInfo->Projection) {
+                   if (!EvaluateMatchPattern(Selector, Instantiation, Result,
+                                             Info, ProjectionCache))
+                     return false;
+                   if (!Result)
+                     return true;
+                   if (!EvaluateProjectionValue(SelectorInfo->Projection, Info,
+                                                ProjectionCache))
+                     return false;
+                 }
+               }
+               return !P->getSubPattern() ||
+                      EvaluateMatchPattern(P->getSubPattern(), Instantiation,
+                                           Result, Info, ProjectionCache);
+             })()));
   }
   case MatchPattern::DecompositionPatternClass: {
     const auto *P = static_cast<const DecompositionPattern *>(Pattern);

@@ -3912,7 +3912,8 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
   if (Pattern->getMatchPatternClass() ==
       MatchPattern::AlternativePatternClass) {
     auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-    if (Alternative->getAlternativeKind() == AlternativePattern::Generic)
+    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+        Alternative->isTypeSelected())
       return true;
   }
   return llvm::any_of(Pattern->children(),
@@ -4686,6 +4687,39 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
   SourceLocation ColonLoc;
   if (Tok.is(tok::period)) {
     SourceLocation PeriodLoc = ConsumeToken();
+    if (Tok.is(tok::l_square)) {
+      BalancedDelimiterTracker Index(*this, tok::l_square);
+      if (Index.expectAndConsume()) {
+        T.skipToEnd();
+        return true;
+      }
+      ExprResult IndexExpr = ParseConstantExpression();
+      if (IndexExpr.isInvalid() || Index.consumeClose()) {
+        T.skipToEnd();
+        return true;
+      }
+      ActionResult<MatchPattern *> Selector =
+          Actions.ActOnExpressionPattern(IndexExpr.get());
+      if (Selector.isInvalid()) {
+        T.skipToEnd();
+        return true;
+      }
+
+      MatchPattern *SubPattern = nullptr;
+      if (Tok.is(tok::colon)) {
+        ColonLoc = ConsumeToken();
+        ActionResult<MatchPattern *> ParsedSubPattern = ParsePattern();
+        if (ParsedSubPattern.isInvalid()) {
+          T.skipToEnd();
+          return true;
+        }
+        SubPattern = ParsedSubPattern.get();
+      }
+      if (T.consumeClose())
+        return true;
+      return Actions.ActOnSelectedAlternativePattern(
+          T.getRange(), Selector.get(), ColonLoc, SubPattern);
+    }
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected) << tok::identifier;
       T.skipToEnd();
@@ -4705,11 +4739,35 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
     ColonLoc = PrevTokLocation;
   }
 
-  ActionResult<MatchPattern *> Pattern = ParsePattern();
+  ActionResult<MatchPattern *> Pattern = [&] {
+    ColonProtectionRAIIObject ColonProtection(*this);
+    return ParsePattern();
+  }();
   if (Pattern.isInvalid()) {
     T.skipToEnd();
     return true;
   }
+
+  if (!Name && Tok.is(tok::colon)) {
+    auto *Selector = Pattern.get();
+    if (!isa<TypePattern>(Selector)) {
+      Diag(Selector->getBeginLoc(), diag::err_expected)
+          << "a type before ':' or an index selector of the form '.[expr]'";
+      T.skipToEnd();
+      return true;
+    }
+    ColonLoc = ConsumeToken();
+    Pattern = ParsePattern();
+    if (Pattern.isInvalid()) {
+      T.skipToEnd();
+      return true;
+    }
+    if (T.consumeClose())
+      return true;
+    return Actions.ActOnSelectedAlternativePattern(T.getRange(), Selector,
+                                                   ColonLoc, Pattern.get());
+  }
+
   if (T.consumeClose())
     return true;
 

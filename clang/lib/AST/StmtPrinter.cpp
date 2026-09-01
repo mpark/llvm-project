@@ -3170,6 +3170,20 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
       OS << " ." << P->getName()->getName() << ": ";
       PrintMatchPattern(P->getSubPattern());
       OS << " ";
+    } else if (P->isSelected()) {
+      OS << " ";
+      if (P->isExpressionSelected()) {
+        OS << ".[";
+        PrintMatchPattern(P->getSelector());
+        OS << "]";
+      } else {
+        PrintMatchPattern(P->getSelector());
+      }
+      if (P->getSubPattern()) {
+        OS << ": ";
+        PrintMatchPattern(P->getSubPattern());
+      }
+      OS << " ";
     } else if (!P->isEmpty()) {
       OS << " ";
       PrintMatchPattern(P->getSubPattern());

@@ -147,6 +147,50 @@ int generic_binding(Choice choice) {
   };
 }
 
+int type_selectors(Choice choice) {
+  return choice match {
+    case { int: 0 } => 10;
+    case { int: int value } => value;
+    case { double: auto value } => static_cast<int>(value);
+  };
+}
+
+int expression_selectors(Choice choice) {
+  return choice match {
+    case { .[0]: int value } => value;
+    case { .[1]: double value } => static_cast<int>(value);
+  };
+}
+
+int expression_selector_out_of_range(Choice choice) {
+  return choice match {
+    case { .[2]: _ } => 0; // expected-error {{alternative index 2 is outside the range [0, 2)}}
+    case _ => 1;
+  };
+}
+
+int expression_selector_negative(Choice choice) {
+  return choice match {
+    case { .[-1]: _ } => 0; // expected-error {{alternative index -1 is outside the range [0, 2)}}
+    case _ => 1;
+  };
+}
+
+int expression_selector_not_constant(Choice choice,
+                                     unsigned index) { // expected-note {{declared here}}
+  return choice match {
+    case { .[index]: _ } => 0; // expected-error {{expression is not an integral constant expression}} expected-note {{function parameter 'index' with unknown value cannot be used in a constant expression}}
+    case _ => 1;
+  };
+}
+
+int expression_selector_requires_projection(Choice choice) {
+  return choice match {
+    case { .[1]: _ } => 0;
+    case { .[0]: _ } => 1;
+  };
+}
+
 int projected_deleted_copy_does_not_fall_back(const CopyChoice& choice) {
   return choice match {
     case { auto copy } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
@@ -220,6 +264,24 @@ int no_viable_alternative(Choice choice) {
     case _ => 0;
   };
 }
+
+int no_viable_type_selector(Choice choice) {
+  return choice match {
+    case { char: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+    case _ => 1;
+  };
+}
+
+template<class T, unsigned I>
+int dependent_selectors(Choice choice) {
+  return choice match {
+    case { T: auto value } => static_cast<int>(value);
+    case { .[I]: auto value } => static_cast<int>(value);
+    case _ => 0;
+  };
+}
+
+template int dependent_selectors<int, 1>(Choice);
 
 int valid_single_alternative(SingleChoice choice) {
   return choice match {
@@ -358,6 +420,20 @@ int open_alternatives(OpenChoice choice) {
     case { double } => 2;
     case { _ } => 1;
     case {} => 0;
+  };
+}
+
+int open_type_selector(OpenChoice choice) {
+  return choice match {
+    case { int: auto value } => value;
+    case _ => 0;
+  };
+}
+
+int open_expression_selector(OpenChoice choice) {
+  return choice match {
+    case { .[0]: _ } => 1; // expected-error {{expression alternative selector cannot be used with open alternative type 'OpenChoice'}}
+    case _ => 0;
   };
 }
 
