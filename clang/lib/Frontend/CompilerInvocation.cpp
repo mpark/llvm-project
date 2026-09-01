@@ -590,12 +590,22 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
     LangOpts.NewAlignOverride = 0;
   }
 
-  if (!LangOpts.Reflection) {
-    if (LangOpts.ParameterReflection) {
+  // Pattern matching uses reflection-backed library protocols, while
+  // -freflection-latest is the umbrella spelling for the complete reflection
+  // prototype. Resolve all feature implications here so driver and direct
+  // cc1 invocations behave identically.
+  LangOpts.Reflection |=
+      LangOpts.PatternMatching || LangOpts.ReflectionLatest;
+  if (LangOpts.Reflection) {
+    LangOpts.ReflectionLatest = true;
+    LangOpts.ParameterReflection = true;
+    LangOpts.ExpansionStatements = true;
+    LangOpts.AnnotationAttributes = true;
+  } else {
+    if (LangOpts.ParameterReflection)
       Diags.Report(diag::err_fe_parameter_reflection_without_reflection);
-    } else if (LangOpts.EntityProxyReflection) {
+    else if (LangOpts.EntityProxyReflection)
       Diags.Report(diag::err_fe_entity_proxy_reflection_without_reflection);
-    }
   }
 
   // The -f[no-]raw-string-literals option is only valid in C and in C++

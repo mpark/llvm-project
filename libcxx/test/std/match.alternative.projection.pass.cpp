@@ -92,6 +92,14 @@ int match_variant_type_selectors(const std::variant<int, double>& value) {
   };
 }
 
+int match_variant_cv_qualified_type_selectors(
+    const std::variant<int, const int>& value) {
+  return match (value) {
+    case { int: auto integer } => integer + 10;
+    case { const int: auto integer } => integer + 20;
+  };
+}
+
 template<class T, class U>
 concept SameAs = std::same_as<T, U>;
 
@@ -463,6 +471,10 @@ int main(int, char**) {
   assert(match_variant_type_selectors(0) == 14);
   assert(match_variant_type_selectors(9) == 9);
   assert(match_variant_type_selectors(2.5) == 12);
+  assert(match_variant_cv_qualified_type_selectors(
+             std::variant<int, const int>(std::in_place_index<0>, 1)) == 11);
+  assert(match_variant_cv_qualified_type_selectors(
+             std::variant<int, const int>(std::in_place_index<1>, 2)) == 22);
   assert(match_variant_type_constraint_selectors(4) == 4);
   assert(match_variant_type_constraint_selectors(2.5) == 12);
   assert(match_dependent_type_constraint_selector(
