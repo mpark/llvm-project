@@ -11,6 +11,7 @@
 
 #include <__config>
 #include <__cstddef/size_t.h>
+#include <__meta/core.h>
 #include <__type_traits/is_void.h>
 #include <__utility/forward.h>
 
@@ -20,7 +21,26 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER >= 26
+#if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+
+static_assert(__has_feature(reflection), "pattern matching library support requires reflection");
+
+struct alternative_info {
+  meta::info info = {};
+  bool empty      = false;
+
+  _LIBCPP_HIDE_FROM_ABI consteval alternative_info() noexcept = default;
+
+  _LIBCPP_HIDE_FROM_ABI consteval alternative_info(meta::info __info, bool __empty = false)
+      : info(__info), empty(__empty) {
+    if (meta::is_type(info)) {
+      if (empty)
+        throw "a typed alternative cannot be empty";
+    } else {
+      info = meta::constant_of(info);
+    }
+  }
+};
 
 template <class _Tp>
 struct alternative_traits;
@@ -38,12 +58,11 @@ template <class _Tp>
 struct alternative_traits<_Tp*> {
   using _AT = alternative_traits;
 
-  static constexpr size_t size        = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template <size_t _Ip>
-    requires(_Ip == 1 && !is_void_v<_Tp>)
-  using type = _Tp;
+  static constexpr alternative_info alternatives[] = {
+      {meta::reflect_constant(nullptr), /*empty=*/true},
+      ^^_Tp,
+  };
+  static constexpr bool has_residual_states = false;
 
   // This provider is inherited by nullable types and also names a nullable
   // view of expected, so its operations act on the actual matching subject.
@@ -53,9 +72,12 @@ struct alternative_traits<_Tp*> {
   }
 
   template <bool _HasValue, class _Self>
-    requires(_HasValue && !is_void_v<_Tp>)
+    requires(_HasValue)
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
-    return *std::forward<_Self>(__self);
+    if constexpr (is_void_v<_Tp>)
+      return;
+    else
+      return *std::forward<_Self>(__self);
   }
 
   struct names {
@@ -63,7 +85,7 @@ struct alternative_traits<_Tp*> {
   };
 };
 
-#endif // _LIBCPP_STD_VER >= 26
+#endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 _LIBCPP_END_NAMESPACE_STD
 

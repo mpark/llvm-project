@@ -6,10 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23
+// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
 // REQUIRES: clang
 
-// RUN: %{cxx} %s %{flags} %{compile_flags} -O0 -stdlib=libc++ -S -emit-llvm -o %t.ll
+// RUN: %{cxx} %s %{flags} %{compile_flags} -fpattern-matching -O0 -stdlib=libc++ -S -emit-llvm -o %t.ll
 // RUN: ! grep "get_if" %t.ll
 // RUN: ! grep "variantIJidEE5index" %t.ll
 

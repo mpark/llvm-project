@@ -7,17 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
-// REQUIRES: clang
+// ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
-// RUN: %{cxx} %s %{flags} %{compile_flags} -fpattern-matching -O0 -stdlib=libc++ -S -emit-llvm -o %t.ll
-// RUN: ! grep "expectedIilE5value" %t.ll
-// RUN: ! grep "bad_expected_access" %t.ll
+#include <variant>
 
-#include <expected>
-
-using Expected = std::expected<int, long>;
-using Traits   = std::alternative_traits<Expected>;
-
-int& project_value(Expected& value) {
-  return Traits::get<0>(value);
-}
+constexpr std::alternative_info typed_empty{^^int, /*empty=*/true};
+// expected-error@-1 {{constexpr variable 'typed_empty' must be initialized by a constant expression}}

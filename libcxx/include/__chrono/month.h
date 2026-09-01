@@ -15,6 +15,7 @@
 #include <__config>
 #include <__cstddef/size_t.h>
 #include <__functional/hash.h>
+#include <__type_traits/alternative_traits.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -109,6 +110,33 @@ inline constexpr month November{11};
 inline constexpr month December{12};
 
 } // namespace chrono
+
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+
+template <>
+struct alternative_traits<chrono::month> {
+  static constexpr alternative_info alternatives[] = {
+      ^^chrono::January,
+      ^^chrono::February,
+      ^^chrono::March,
+      ^^chrono::April,
+      ^^chrono::May,
+      ^^chrono::June,
+      ^^chrono::July,
+      ^^chrono::August,
+      ^^chrono::September,
+      ^^chrono::October,
+      ^^chrono::November,
+      ^^chrono::December,
+  };
+  static constexpr bool has_residual_states = true;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(chrono::month __value) noexcept {
+    return static_cast<unsigned>(__value) - 1;
+  }
+};
+
+#  endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 #  if _LIBCPP_STD_VER >= 26
 
