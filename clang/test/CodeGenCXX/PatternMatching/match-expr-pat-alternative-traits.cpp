@@ -16,6 +16,10 @@ template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+    requires(I == 0)
+  using type = int;
+
   static __SIZE_TYPE__ index(const MaybeInt&) noexcept;
 
   template<__SIZE_TYPE__ I>
@@ -72,6 +76,9 @@ struct ChoiceAlternative<1> {
 template<>
 struct std::alternative_traits<Choice> {
   static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using type = typename ChoiceAlternative<I>::type;
 
   static __SIZE_TYPE__ index(const Choice&) noexcept;
 

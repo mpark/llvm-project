@@ -8,6 +8,10 @@ template <class T>
 struct alternative_traits<T *> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template <__SIZE_TYPE__ I>
+    requires(I == 0)
+  using type = T;
+
   static constexpr __SIZE_TYPE__ index(T *pointer) noexcept {
     return pointer ? 0 : 1;
   }

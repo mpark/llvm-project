@@ -208,6 +208,22 @@ DeclarationPattern::DeclarationPattern(VarDecl *Declaration,
       Declaration->getType()->getDependence()));
 }
 
+AlternativePattern::AlternativePattern(SourceRange Braces,
+                                       SourceRange ConstraintRange,
+                                       ConceptReference *Constraint,
+                                       SourceLocation ColonLoc,
+                                       MatchPattern *Pattern)
+    : MatchPattern(AlternativePatternClass), Kind(TypeConstraint),
+      DiscriminatorRange(ConstraintRange), Braces(Braces),
+      Constraint(Constraint), ColonLoc(ColonLoc), Pattern(Pattern) {
+  ExprDependence Dependence = computeDependence();
+  if (const ASTTemplateArgumentListInfo *Args =
+          Constraint->getTemplateArgsAsWritten())
+    for (const TemplateArgumentLoc &Arg : Args->arguments())
+      Dependence |= toExprDependence(Arg.getArgument().getDependence());
+  setDependence(Dependence);
+}
+
 SourceLocation DeclarationPattern::getBeginLoc() const {
   return DeclarationRange.getBegin();
 }

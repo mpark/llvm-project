@@ -41,6 +41,10 @@ struct alternative_traits<_Tp*> {
   static constexpr size_t size        = 2;
   static constexpr bool is_exhaustive = true;
 
+  template <size_t _Ip>
+    requires(_Ip == 1 && !is_void_v<_Tp>)
+  using type = _Tp;
+
   // This provider is inherited by nullable types and also names a nullable
   // view of expected, so its operations act on the actual matching subject.
   template <class _Self>

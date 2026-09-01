@@ -670,6 +670,9 @@ namespace std {
   struct alternative_traits<Variant> {
     static constexpr __SIZE_TYPE__ size = 3;
 
+    template <__SIZE_TYPE__ I>
+    using type = __type_pack_element<I, int, double, float>;
+
     static constexpr __SIZE_TYPE__ index(const Variant& value) noexcept {
       return value.index();
     }
@@ -826,6 +829,10 @@ template <>
 struct std::alternative_traits<PrvalueAlternative> {
   static constexpr __SIZE_TYPE__ size = 1;
   static constexpr bool is_exhaustive = true;
+
+  template <__SIZE_TYPE__ I>
+    requires(I == 0)
+  using type = PrvalueProjection;
 
   static constexpr __SIZE_TYPE__ index(const PrvalueAlternative &) noexcept {
     return 0;
@@ -1138,6 +1145,10 @@ struct tuple_element<I, SharedProjection> {
 template<>
 struct alternative_traits<SharedVariantProjection> {
   static constexpr __SIZE_TYPE__ size = 1;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = SharedProjection;
 
   static constexpr __SIZE_TYPE__
   index(const SharedVariantProjection& value) noexcept {
