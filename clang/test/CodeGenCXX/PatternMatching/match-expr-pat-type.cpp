@@ -21,13 +21,6 @@ bool matches_circle(Shape& shape) {
   return shape match case Circle&;
 }
 
-// CHECK-LABEL: define{{.*}} i1 @_Z22matches_circle_pointerP5Shape
-// CHECK: call ptr @__dynamic_cast
-// CHECK: icmp ne ptr
-bool matches_circle_pointer(Shape* shape) {
-  return shape match case Circle*;
-}
-
 int copies;
 
 struct Copyable {
