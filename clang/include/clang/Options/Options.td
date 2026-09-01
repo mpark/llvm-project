@@ -4139,7 +4139,7 @@ defm application_extension : BoolFOption<"application-extension",
 defm reflection : BoolFOption<"reflection",
   LangOpts<"Reflection">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable proposed C++26 reflection as described by P2996">,
+          "Enable proposed C++26 reflection and supported extensions">,
   NegFlag<SetFalse>>;
 defm parameter_reflection : BoolFOption<"parameter-reflection",
   LangOpts<"ParameterReflection">, DefaultFalse,
