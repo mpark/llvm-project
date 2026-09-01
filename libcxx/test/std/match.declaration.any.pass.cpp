@@ -22,6 +22,14 @@ int match_any(const std::any& a) {
   };
 }
 
+int match_any_type_selector(const std::any& a) {
+  return a match {
+    case { int: auto value } => value;
+    case { double: auto value } => static_cast<int>(value) + 4;
+    case _ => -1;
+  };
+}
+
 int match_rvalue_any(std::any&& a) {
   return static_cast<std::any&&>(a) match {
     case { int&& i } => i;
@@ -87,6 +95,9 @@ int main(int, char**) {
   assert(match_any(4.0) == 8);
   assert(match_any(0.0f) == -1);
   assert(match_any(std::any{}) == -1);
+  assert(match_any_type_selector(42) == 42);
+  assert(match_any_type_selector(3.0) == 7);
+  assert(match_any_type_selector(std::any{}) == -1);
   assert(match_rvalue_any(std::any(42)) == 42);
   assert(match_prvalue_any() == 43);
   assert(match_empty_any(std::any{}) == 0);
