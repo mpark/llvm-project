@@ -275,6 +275,8 @@ void StmtProfiler::VisitMatchPattern(const MatchPattern *P) {
     const auto *AP = static_cast<const AlternativePattern *>(P);
     ID.AddInteger(AP->getAlternativeKind());
     VisitIdentifierInfo(AP->getName());
+    if (AP->getSelector())
+      VisitMatchPattern(AP->getSelector());
     if (AP->getSubPattern())
       VisitMatchPattern(AP->getSubPattern());
     return;

@@ -1193,9 +1193,12 @@ getMatchPatternDependence(const MatchPattern *Pattern,
     return D;
   }
   if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
+    ExprDependence D = ExprDependence::None;
+    if (const MatchPattern *Selector = Alternative->getSelector())
+      D |= getMatchPatternDependence(Selector, Instantiation);
     if (const MatchPattern *SubPattern = Alternative->getSubPattern())
-      return getMatchPatternDependence(SubPattern, Instantiation);
-    return ExprDependence::None;
+      D |= getMatchPatternDependence(SubPattern, Instantiation);
+    return D;
   }
   return Pattern->getDependence();
 }
