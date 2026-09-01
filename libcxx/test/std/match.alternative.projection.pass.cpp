@@ -83,6 +83,36 @@ int match_variant_type_patterns(const std::variant<int, double>& value) {
   };
 }
 
+int match_variant_type_selectors(const std::variant<int, double>& value) {
+  return value match {
+    case { int: 0 } => 14;
+    case { int: auto integer } => integer;
+    case { double: auto real } => static_cast<int>(real) + 10;
+  };
+}
+
+int match_variant_index_selectors(const std::variant<int, int>& value) {
+  return value match {
+    case { .[0]: auto integer } => integer + 20;
+    case { .[1]: auto integer } => integer + 30;
+  };
+}
+
+int match_duplicate_type_selector(const std::variant<int, int>& value) {
+  return value match {
+    case { int: auto integer } => integer;
+  };
+}
+
+int match_recursive_type_selector(
+    const std::variant<std::tuple<int, int>, double>& value) {
+  return value match {
+    case { std::tuple<int, int>: [auto first, auto second] } =>
+        first * 10 + second;
+    case { double: auto real } => static_cast<int>(real);
+  };
+}
+
 int match_expected(const std::expected<int, long>& value) {
   return value match {
     case { .value: const int& result } => result;
@@ -382,6 +412,19 @@ int main(int, char**) {
   assert(match_variant(2.5) == 12);
   assert(match_variant_type_patterns(9) == 12);
   assert(match_variant_type_patterns(2.5) == 13);
+  assert(match_variant_type_selectors(0) == 14);
+  assert(match_variant_type_selectors(9) == 9);
+  assert(match_variant_type_selectors(2.5) == 12);
+  assert(match_variant_index_selectors(
+             std::variant<int, int>(std::in_place_index<0>, 1)) == 21);
+  assert(match_variant_index_selectors(
+             std::variant<int, int>(std::in_place_index<1>, 1)) == 31);
+  assert(match_duplicate_type_selector(
+             std::variant<int, int>(std::in_place_index<0>, 15)) == 15);
+  assert(match_duplicate_type_selector(
+             std::variant<int, int>(std::in_place_index<1>, 16)) == 16);
+  assert(match_recursive_type_selector(std::tuple(2, 3)) == 23);
+  assert(match_recursive_type_selector(4.0) == 4);
   assert(match_dependent_zero(0) == 84);
   assert(match_dependent_zero(1) == 85);
   assert(match_dependent_zero(0.0) == 84);
