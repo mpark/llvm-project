@@ -10,6 +10,7 @@
 #define _LIBCPP___COMPARE_ORDERING_H
 
 #include <__config>
+#include <__type_traits/alternative_traits.h>
 #include <__type_traits/enable_if.h>
 #include <__type_traits/is_same.h>
 
@@ -111,6 +112,10 @@ public:
   }
 
 private:
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+  friend struct alternative_traits<partial_ordering>;
+#  endif
+
   _PartialOrdResult __value_;
 };
 
@@ -182,6 +187,10 @@ public:
   }
 
 private:
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+  friend struct alternative_traits<weak_ordering>;
+#  endif
+
   _ValueT __value_;
 };
 
@@ -260,6 +269,10 @@ public:
   }
 
 private:
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+  friend struct alternative_traits<strong_ordering>;
+#  endif
+
   _ValueT __value_;
 };
 
@@ -267,6 +280,59 @@ inline constexpr strong_ordering strong_ordering::less(_OrdResult::__less);
 inline constexpr strong_ordering strong_ordering::equal(_OrdResult::__equiv);
 inline constexpr strong_ordering strong_ordering::equivalent(_OrdResult::__equiv);
 inline constexpr strong_ordering strong_ordering::greater(_OrdResult::__greater);
+
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+
+template <>
+struct alternative_traits<partial_ordering> {
+  static constexpr alternative_info alternatives[] = {
+      ^^partial_ordering::less,
+      ^^partial_ordering::equivalent,
+      ^^partial_ordering::greater,
+      ^^partial_ordering::unordered,
+  };
+  static constexpr bool has_residual_states = false;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(partial_ordering __value) noexcept {
+    return __value == partial_ordering::unordered ? 3 : int(__value.__value_) + 1;
+  }
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(_CmpUnspecifiedParam) noexcept { return 1; }
+};
+
+template <>
+struct alternative_traits<weak_ordering> {
+  static constexpr alternative_info alternatives[] = {
+      ^^weak_ordering::less,
+      ^^weak_ordering::equivalent,
+      ^^weak_ordering::greater,
+  };
+  static constexpr bool has_residual_states = false;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(weak_ordering __value) noexcept {
+    return __value.__value_ + 1;
+  }
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(_CmpUnspecifiedParam) noexcept { return 1; }
+};
+
+template <>
+struct alternative_traits<strong_ordering> {
+  static constexpr alternative_info alternatives[] = {
+      ^^strong_ordering::less,
+      ^^strong_ordering::equivalent,
+      ^^strong_ordering::greater,
+  };
+  static constexpr bool has_residual_states = false;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(strong_ordering __value) noexcept {
+    return __value.__value_ + 1;
+  }
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(_CmpUnspecifiedParam) noexcept { return 1; }
+};
+
+#  endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 /// [cmp.categories.pre]/1
 /// The types partial_ordering, weak_ordering, and strong_ordering are
