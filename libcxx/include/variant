@@ -1743,15 +1743,12 @@ _LIBCPP_HIDE_FROM_ABI constexpr auto&& __unchecked_get(variant<_Types...>& __v) 
   return std::__unchecked_get<__find_exactly_one_t<_Tp, _Types...>::value>(__v);
 }
 
-#    if _LIBCPP_STD_VER >= 26
+#    if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 template <class... _Types>
 struct alternative_traits<variant<_Types...>> {
-  static constexpr size_t size = sizeof...(_Types);
-  static constexpr bool is_exhaustive = false;
-
-  template <size_t _Ip>
-  using type = _Types...[_Ip];
+  static constexpr alternative_info alternatives[] = { ^^_Types... };
+  static constexpr bool has_residual_states = true;
 
   _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const variant<_Types...>& __value) noexcept {
     return __value.index();
@@ -1763,7 +1760,7 @@ struct alternative_traits<variant<_Types...>> {
   }
 };
 
-#    endif // _LIBCPP_STD_VER >= 26
+#    endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 _LIBCPP_END_NAMESPACE_STD
 

@@ -1433,13 +1433,13 @@ struct hash<shared_ptr<_Tp> > {
   }
 };
 
-#if _LIBCPP_STD_VER >= 26
+#if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 template <class _Tp>
   requires(!is_array_v<_Tp>)
 struct alternative_traits<shared_ptr<_Tp>> : alternative_traits<_Tp*> {};
 
-#endif // _LIBCPP_STD_VER >= 26
+#endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 template <class _CharT, class _Traits, class _Yp>
 inline _LIBCPP_HIDE_FROM_ABI basic_ostream<_CharT, _Traits>&

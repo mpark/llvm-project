@@ -17,6 +17,7 @@
 #include <__config>
 #include <__cstddef/size_t.h>
 #include <__functional/hash.h>
+#include <__type_traits/alternative_traits.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -169,6 +170,28 @@ inline constexpr weekday Friday{5};
 inline constexpr weekday Saturday{6};
 
 } // namespace chrono
+
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+
+template <>
+struct alternative_traits<chrono::weekday> {
+  static constexpr alternative_info alternatives[] = {
+      ^^chrono::Sunday,
+      ^^chrono::Monday,
+      ^^chrono::Tuesday,
+      ^^chrono::Wednesday,
+      ^^chrono::Thursday,
+      ^^chrono::Friday,
+      ^^chrono::Saturday,
+  };
+  static constexpr bool has_residual_states = true;
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr unsigned index(chrono::weekday __value) noexcept {
+    return __value.c_encoding();
+  }
+};
+
+#  endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 
 #  if _LIBCPP_STD_VER >= 26
 
