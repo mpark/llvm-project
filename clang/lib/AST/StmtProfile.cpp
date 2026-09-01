@@ -275,6 +275,12 @@ void StmtProfiler::VisitMatchPattern(const MatchPattern *P) {
     const auto *AP = static_cast<const AlternativePattern *>(P);
     ID.AddInteger(AP->getAlternativeKind());
     VisitIdentifierInfo(AP->getName());
+    if (const ConceptReference *Constraint = AP->getTypeConstraintSelector()) {
+      VisitDecl(Constraint->getNamedConcept());
+      if (const ASTTemplateArgumentListInfo *Args =
+              Constraint->getTemplateArgsAsWritten())
+        VisitTemplateArguments(Args->getTemplateArgs(), Args->NumTemplateArgs);
+    }
     if (AP->getSelector())
       VisitMatchPattern(AP->getSelector());
     if (AP->getSubPattern())

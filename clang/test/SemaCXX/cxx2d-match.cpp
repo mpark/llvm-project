@@ -621,7 +621,7 @@ struct InitializationCounterPair {
   InitializationCounter second;
 };
 
-constexpr int unnamed_declaration_subpattern_pack_initializes() {
+constexpr int unnamed_declaration_subpattern_pack_does_not_initialize() {
   InitializationCounterPair value;
   match (value) {
     case [InitializationCounter ...] => ;
@@ -629,7 +629,7 @@ constexpr int unnamed_declaration_subpattern_pack_initializes() {
   return value.first.copies + value.second.copies;
 }
 
-static_assert(unnamed_declaration_subpattern_pack_initializes() == 2);
+static_assert(unnamed_declaration_subpattern_pack_does_not_initialize() == 0);
 
 constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
   return value match {

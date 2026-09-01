@@ -4,8 +4,16 @@ void may_throw();
 bool throwing_bool();
 int throwing_int();
 
+struct ThrowingCopy {
+  ThrowingCopy(const ThrowingCopy&) noexcept(false);
+  ~ThrowingCopy() noexcept(false);
+};
+
+extern ThrowingCopy throwing_copy;
+
 static_assert(noexcept(0 match { case _ => 0; }));
 static_assert(noexcept(0 match case _));
+static_assert(noexcept(throwing_copy match case ThrowingCopy));
 
 static_assert(!noexcept(throwing_int() match { case _ => 0; }));
 static_assert(!noexcept(0 match {
