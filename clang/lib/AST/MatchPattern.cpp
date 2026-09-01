@@ -92,6 +92,7 @@ void clang::visitMatchPatternEvaluation(
   if (!Instantiation)
     return;
   for (const MatchPatternInfo &Info : Instantiation->infos()) {
+    VisitDeclaration(Info.TypePatternDeclaration);
     VisitStatement(Info.Condition);
     const MatchProjection *Projection = Info.Projection;
     if (!Projection)
@@ -206,6 +207,22 @@ DeclarationPattern::DeclarationPattern(VarDecl *Declaration,
       DeclarationRange(WrittenRange) {
   setDependence(toExprDependenceForImpliedType(
       Declaration->getType()->getDependence()));
+}
+
+AlternativePattern::AlternativePattern(SourceRange Braces,
+                                       SourceRange ConstraintRange,
+                                       ConceptReference *Constraint,
+                                       SourceLocation ColonLoc,
+                                       MatchPattern *Pattern)
+    : MatchPattern(AlternativePatternClass), Kind(TypeConstraint),
+      DiscriminatorRange(ConstraintRange), Braces(Braces),
+      Constraint(Constraint), ColonLoc(ColonLoc), Pattern(Pattern) {
+  ExprDependence Dependence = computeDependence();
+  if (const ASTTemplateArgumentListInfo *Args =
+          Constraint->getTemplateArgsAsWritten())
+    for (const TemplateArgumentLoc &Arg : Args->arguments())
+      Dependence |= toExprDependence(Arg.getArgument().getDependence());
+  setDependence(Dependence);
 }
 
 SourceLocation DeclarationPattern::getBeginLoc() const {
