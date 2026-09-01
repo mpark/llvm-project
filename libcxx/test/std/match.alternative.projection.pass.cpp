@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23
+// UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
 
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
@@ -25,6 +25,13 @@ int match_pointer(int* pointer) {
   return pointer match {
     case { int& value } => value;
     case {} => -1;
+  };
+}
+
+int match_void_pointer(void* pointer) {
+  return pointer match {
+    case { void } => 1;
+    case {} => 0;
   };
 }
 
@@ -197,7 +204,7 @@ int match_void_expected(const std::expected<void, std::string>& value) {
 int match_nullable_void_expected(
     const std::expected<void, std::string>& value) {
   return value match {
-    case { .some } => 42;
+    case { .some: void } => 42;
     case { .none } => 43;
   };
 }
@@ -405,12 +412,10 @@ struct PrvalueProjection {
 
 template<>
 struct std::alternative_traits<PrvalueAlternative> {
-  static constexpr std::size_t size = 1;
-  static constexpr bool is_exhaustive = true;
-
-  template<std::size_t I>
-    requires(I == 0)
-  using type = PrvalueProjection;
+  static constexpr alternative_info alternatives[] = {
+    ^^PrvalueProjection,
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr std::size_t index(const PrvalueAlternative&) noexcept {
     return 0;
@@ -434,6 +439,9 @@ void test_prvalue_projection_initialization() {
 }
 
 int main(int, char**) {
+  int pointee = 0;
+  assert(match_void_pointer(&pointee) == 1);
+  assert(match_void_pointer(nullptr) == 0);
   int value = 42;
   assert(match_pointer(&value) == 42);
   assert(match_pointer(nullptr) == -1);
