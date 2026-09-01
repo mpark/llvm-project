@@ -14511,23 +14511,37 @@ def err_guarded_declaration_pattern_move : Error<
   "instead">;
 def err_alternative_traits_missing : Error<
   "type %0 does not provide a usable 'std::alternative_traits' specialization">;
-def err_alternative_traits_size_not_constant : Error<
-  "invalid alternative protocol; 'std::alternative_traits<%0>::size' "
-  "is not a valid integral constant expression">;
+def err_alternative_traits_alternatives_invalid : Error<
+  "invalid alternative protocol; 'std::alternative_traits<%0>::alternatives' "
+  "must be a constant array of 'std::alternative_info'">;
+def err_alternative_info_invalid : Error<
+  "invalid alternative protocol; state %1 of type %0 has an invalid %2 "
+  "in its 'alternative_info' descriptor">;
+def err_alternative_info_conflicting_kind : Error<
+  "invalid alternative protocol; state %1 of type %0 is both "
+  "%select{empty and typed|empty and projectable|represented by a value and "
+  "projectable}2">;
+def err_alternative_info_empty_without_value : Error<
+  "invalid alternative protocol; empty state %1 of type %0 is not represented "
+  "by a value">;
+def err_alternative_type_without_projection : Error<
+  "invalid alternative protocol; state %1 of type %0 advertises type %2, "
+  "but 'get<%1>' does not provide a compatible projection">;
 def err_alternative_traits_member_missing : Error<
   "invalid alternative protocol; 'std::alternative_traits<%0>' does not "
   "provide a usable %1 member">;
 def err_alternative_traits_index_not_noexcept : Error<
   "invalid alternative protocol; 'std::alternative_traits<%0>::index' "
   "must be noexcept">;
+def err_alternative_state_not_projectable : Error<
+  "alternative state %1 of type %0 has no projected value; omit the "
+  "': pattern'">;
 def err_alternative_name_not_found : Error<
   "alternative name %0 is not defined by 'std::alternative_traits<%1>::names'">;
 def err_braced_alternative_no_viable_state : Error<
   "braced alternative pattern does not match any projectable state of %0">;
 def err_empty_alternative_not_found : Error<
   "type %0 has no non-projectable alternative state">;
-def err_braced_alternative_void_pointer : Error<
-  "braced alternative patterns do not support pointers to void">;
 def err_open_alternative_pattern_not_type_directed : Error<
   "open alternative protocol for type %0 requires a declaration or type "
   "pattern with a non-placeholder, non-void type">;

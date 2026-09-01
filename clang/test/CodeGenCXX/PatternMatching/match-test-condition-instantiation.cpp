@@ -5,6 +5,14 @@
 namespace std {
 template<class T>
 struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 }
 
 struct Choice {
@@ -15,10 +23,10 @@ struct Choice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, int, double>;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^double
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
     return choice.active;

@@ -1,5 +1,8 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching %s -verify
 
+enum class EmptyState { first, second };
+inline constexpr int nullable_empty_state = 0;
+
 int missing_bool(bool b) {
   return b match { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
     case true => 1;
@@ -380,6 +383,14 @@ namespace std {
 template<class T>
 struct alternative_traits;
 
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
+
 template<class Provider>
 struct alternative_name {
   using provider = Provider;
@@ -389,7 +400,9 @@ struct alternative_name {
 
 template<>
 struct alternative_traits<int*> {
-  static constexpr __SIZE_TYPE__ size = 1;
+  static constexpr alternative_info alternatives[] = {
+    ^^double
+  };
 
   static constexpr __SIZE_TYPE__ index(int*) noexcept { return 0; }
 
@@ -426,9 +439,248 @@ int named_pointer_states_are_builtin(int *pointer) {
   };
 }
 
-int void_pointer_has_no_alternative_protocol(void *pointer) {
+int null_pointer_constant_covers_empty_state(int *pointer) {
   return pointer match {
-    case {} => 0; // expected-error {{braced alternative patterns do not support pointers to void}}
+    case nullptr => 0;
+    case { int &value } => value;
+  };
+}
+
+int empty_pointer_state_redundant_after_nullptr(int *pointer) {
+  return pointer match {
+    case nullptr => 0;
+    case {} => 1; // expected-error {{match case is redundant}}
+    case { int &value } => value;
+  };
+}
+
+int exhaustive_void_pointer(void *pointer) {
+  return pointer match {
+    case {} => 0;
+    case { void } => 1;
+  };
+}
+
+int null_void_pointer_constant_covers_empty_state(void *pointer) {
+  return pointer match {
+    case nullptr => 0;
+    case { void } => 1;
+  };
+}
+
+struct FiniteChoice {
+  unsigned state;
+  friend constexpr bool operator==(FiniteChoice, FiniteChoice) = default;
+};
+
+inline constexpr FiniteChoice FiniteFirst{0};
+inline constexpr FiniteChoice FiniteFirstAlias{0};
+inline constexpr FiniteChoice FiniteSecond{1};
+inline constexpr FiniteChoice FiniteThird{2};
+
+template<>
+struct std::alternative_traits<FiniteChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^FiniteFirst,
+    ^^FiniteSecond,
+    ^^FiniteThird
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr __SIZE_TYPE__ index(FiniteChoice value) noexcept {
+    return value.state;
+  }
+
+};
+
+int exhaustive_singleton_states(FiniteChoice value) {
+  return value match {
+    case FiniteFirst => 0;
+    case FiniteSecond => 1;
+    case FiniteThird => 2;
+  };
+}
+
+template<class T>
+int dependent_singleton_states(T value) {
+  return value match {
+    case FiniteFirst => 0;
+    case FiniteSecond => 1;
+    case FiniteThird => 2;
+  };
+}
+
+int instantiate_dependent_singleton_states(FiniteChoice value) {
+  return dependent_singleton_states(value);
+}
+
+int missing_singleton_state(FiniteChoice value) {
+  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: FiniteThird}}
+    case FiniteFirst => 0;
+    case FiniteSecond => 1;
+  };
+}
+
+int singleton_alias_is_redundant(FiniteChoice value) {
+  return value match {
+    case FiniteFirst => 0;
+    case FiniteFirstAlias => 1; // expected-error {{match case is redundant}}
+    case FiniteSecond => 2;
+    case FiniteThird => 3;
+  };
+}
+
+int singleton_states_are_not_empty(FiniteChoice value) {
+  return value match {
+    case {} => 0; // expected-error {{type 'FiniteChoice' has no non-projectable alternative state}}
+    case _ => 1;
+  };
+}
+
+struct ClassifiedChoice {
+  unsigned state;
+  friend constexpr bool operator==(ClassifiedChoice,
+                                   ClassifiedChoice) = default;
+};
+
+inline constexpr ClassifiedChoice ClassifiedFirst{0};
+inline constexpr ClassifiedChoice ClassifiedSecond{1};
+
+template<>
+struct std::alternative_traits<ClassifiedChoice> {
+  static constexpr alternative_info alternatives[] = {
+    {}, {}
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr __SIZE_TYPE__ index(ClassifiedChoice value) noexcept {
+    return value.state;
+  }
+
+};
+
+int unrepresented_values_do_not_contribute_to_exhaustiveness(
+    ClassifiedChoice value) {
+  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
+    case ClassifiedFirst => 0;
+    case ClassifiedSecond => 1;
+  };
+}
+
+int index_selectors_cover_unrepresented_states(ClassifiedChoice value) {
+  return value match {
+    case { .[0] } => 0;
+    case { .[1] } => 1;
+  };
+}
+
+struct FiniteChoiceAndBool {
+  FiniteChoice choice;
+  bool flag;
+};
+
+int singleton_state_coverage_is_recursive(FiniteChoiceAndBool value) {
+  return value match {
+    case [FiniteFirst, _] => 0;
+    case [FiniteSecond, _] => 1;
+    case [FiniteThird, false] => 2;
+    case [FiniteThird, true] => 3;
+  };
+}
+
+struct ResidualFiniteChoice {
+  unsigned state;
+  friend constexpr bool operator==(ResidualFiniteChoice,
+                                   ResidualFiniteChoice) = default;
+};
+
+inline constexpr ResidualFiniteChoice ResidualFirst{0};
+inline constexpr ResidualFiniteChoice ResidualSecond{1};
+
+template<>
+struct std::alternative_traits<ResidualFiniteChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^ResidualFirst,
+    ^^ResidualSecond
+  };
+  static constexpr bool has_residual_states = true;
+
+  static constexpr __SIZE_TYPE__ index(ResidualFiniteChoice value) noexcept {
+    return value.state < 2 ? value.state : 2;
+  }
+};
+
+int singleton_required_domain_is_exhaustive(ResidualFiniteChoice value) {
+  return value match {
+    case ResidualFirst => 0;
+    case ResidualSecond => 1;
+  };
+}
+
+int singleton_residual_state_is_useful(ResidualFiniteChoice value) {
+  return value match {
+    case ResidualFirst => 0;
+    case ResidualSecond => 1;
+    case _ => 2;
+  };
+}
+
+struct InaccessibleChoice {
+  unsigned state;
+  int payload;
+};
+
+template<>
+struct std::alternative_traits<InaccessibleChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^int, {}
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr __SIZE_TYPE__ index(InaccessibleChoice value) noexcept {
+    return value.state;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& value) {
+    return (static_cast<Self&&>(value).payload);
+  }
+
+};
+
+int inaccessible_alternative_state_can_fall_back(InaccessibleChoice value) {
+  return value match {
+    case { int payload } => payload;
+    case _ => 1;
+  };
+}
+
+struct NamedOnlyChoice {
+  unsigned state;
+};
+
+template<>
+struct std::alternative_traits<NamedOnlyChoice> {
+  using AT = alternative_traits;
+  static constexpr alternative_info alternatives[] = {
+    {}, {}
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr __SIZE_TYPE__ index(NamedOnlyChoice value) noexcept {
+    return value.state;
+  }
+
+  struct names {
+    static constexpr alternative_name<AT> first = 0, second = 1;
+  };
+};
+
+int named_only_alternative_states_are_accessible(NamedOnlyChoice value) {
+  return value match {
+    case { .first } => 0;
+    case { .second } => 1;
   };
 }
 
@@ -523,11 +775,11 @@ struct Choice {
 template<>
 struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 4;
-
-  template<__SIZE_TYPE__ I>
-    requires (I < 2)
-  using type = __type_pack_element<I, bool, int>;
+  static constexpr alternative_info alternatives[] = {
+    ^^bool, ^^int, {^^EmptyState::first, true},
+    {^^EmptyState::second, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   struct names {
     static constexpr alternative_name<AT> flag = 0, number = 1;
@@ -626,12 +878,10 @@ struct NullableChoice {
 };
 
 struct NullableChoiceView {
-  static constexpr __SIZE_TYPE__ size = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 1)
-  using type = int;
+  static constexpr std::alternative_info alternatives[] = {
+    {^^nullable_empty_state, true}, ^^int
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
     return choice.engaged ? 1 : 0;
@@ -647,11 +897,10 @@ struct NullableChoiceView {
 template<>
 struct std::alternative_traits<NullableChoice> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template<__SIZE_TYPE__ I>
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^int
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
     return choice.engaged ? 0 : 1;
@@ -721,11 +970,10 @@ struct ResidualChoice {
 
 template<>
 struct std::alternative_traits<ResidualChoice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-  static constexpr bool is_exhaustive = false;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, bool, int>;
+  static constexpr alternative_info alternatives[] = {
+    ^^bool, ^^int
+  };
+  static constexpr bool has_residual_states = true;
 
   static constexpr __SIZE_TYPE__ index(const ResidualChoice& choice) noexcept {
     return choice.state;

@@ -4324,6 +4324,7 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
                    HasConvergentOperations);
 
   Opts.PatternMatching = Args.hasArg(OPT_fpattern_matching);
+  Opts.Reflection |= Opts.PatternMatching;
 
   Opts.NoBuiltin = Args.hasArg(OPT_fno_builtin) || Opts.Freestanding;
   if (!Opts.NoBuiltin)

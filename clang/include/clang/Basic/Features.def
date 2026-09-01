@@ -383,6 +383,7 @@ FEATURE(cxx_abi_relative_vtable, LangOpts.CPlusPlus && LangOpts.RelativeCXXABIVT
 FEATURE(clang_atomic_attributes, true)
 
 FEATURE(reflection, LangOpts.Reflection)
+FEATURE(pattern_matching, LangOpts.PatternMatching)
 FEATURE(parameter_reflection, LangOpts.ParameterReflection)
 FEATURE(expansion_statements, LangOpts.ExpansionStatements)
 FEATURE(annotation_attributes, LangOpts.AnnotationAttributes)

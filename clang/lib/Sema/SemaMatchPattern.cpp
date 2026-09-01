@@ -259,8 +259,12 @@ struct AlternativeTraitsInfo {
   bool IsBuiltinPointer = false;
   bool IsOpen = false;
   bool OpenHasValue = false;
-  llvm::SmallVector<QualType, 4> Alternatives;
+  llvm::SmallVector<QualType, 4> AdvertisedTypes;
+  llvm::SmallVector<bool, 4> HasAlternativeType;
+  llvm::SmallVector<QualType, 4> ProjectionTypes;
   llvm::SmallVector<bool, 4> Projectable;
+  llvm::SmallVector<bool, 4> Empty;
+  llvm::SmallVector<Expr *, 4> Values;
 };
 
 struct NamedAlternativeInfo {
@@ -269,22 +273,151 @@ struct NamedAlternativeInfo {
 };
 } // namespace
 
-static bool initializeAlternativeTraitsInfo(
-    Sema &S, SourceLocation Loc, QualType SubjectType, QualType TraitType,
-    LookupResult &SizeLookup, bool AllowOpen, AlternativeTraitsInfo &Info) {
+static ExprResult buildAlternativeValueFromReflection(Sema &S,
+                                                      SourceLocation Loc,
+                                                      const APValue &Value) {
+  auto *Reflection =
+      CXXReflectExpr::Create(S.Context, Loc, SourceRange(Loc, Loc), Value);
+  SpliceResult Splice = S.BuildSpliceSpecifier(Loc, Reflection, Loc, nullptr);
+  if (Splice.isInvalid())
+    return ExprError();
+  ExprResult Result = S.BuildReflectionSpliceExpr(
+      SourceLocation(), Splice.get(), /*AllowMemberReference=*/false);
+  if (Result.isInvalid())
+    return ExprError();
+  return cast<CXXSpliceExpr>(Result.get())->getModel();
+}
+
+static const APValue &getAlternativeDescriptor(const APValue &Array,
+                                               unsigned Index) {
+  if (Index < Array.getArrayInitializedElts())
+    return Array.getArrayInitializedElt(Index);
+  return Array.getArrayFiller();
+}
+
+static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
+                                       QualType SubjectType,
+                                       Expr *AlternativesExpr,
+                                       AlternativeTraitsInfo &Info) {
+  QualType AlternativesType = S.getCompletedType(AlternativesExpr);
+  const auto *ArrayType = S.Context.getAsConstantArrayType(AlternativesType);
+  if (!ArrayType || ArrayType->getSize().getActiveBits() > 32) {
+    S.Diag(Loc, diag::err_alternative_traits_alternatives_invalid)
+        << SubjectType;
+    return true;
+  }
+
+  const auto *Descriptor = ArrayType->getElementType()->getAsCXXRecordDecl();
+  if (!Descriptor || !Descriptor->isInStdNamespace() ||
+      Descriptor->getName() != "alternative_info") {
+    S.Diag(Loc, diag::err_alternative_traits_alternatives_invalid)
+        << SubjectType;
+    return true;
+  }
+
+  unsigned InfoField = UINT_MAX;
+  unsigned EmptyField = UINT_MAX;
+  unsigned FieldIndex = 0;
+  for (FieldDecl *Field : Descriptor->fields()) {
+    if (Field->getName() == "info")
+      InfoField = FieldIndex;
+    else if (Field->getName() == "empty")
+      EmptyField = FieldIndex;
+    ++FieldIndex;
+  }
+  if (InfoField == UINT_MAX || EmptyField == UINT_MAX) {
+    S.Diag(Loc, diag::err_alternative_traits_alternatives_invalid)
+        << SubjectType;
+    return true;
+  }
+
+  auto *AlternativesDecl =
+      dyn_cast<VarDecl>(cast<DeclRefExpr>(AlternativesExpr)->getDecl());
+  const APValue *Array =
+      AlternativesDecl ? AlternativesDecl->evaluateValue() : nullptr;
+  if (!Array || !Array->isArray()) {
+    S.Diag(Loc, diag::err_alternative_traits_alternatives_invalid)
+        << SubjectType;
+    return true;
+  }
+
+  Info.Size = ArrayType->getSize().getLimitedValue(UINT_MAX);
+  Info.AdvertisedTypes.reserve(Info.Size);
+  Info.HasAlternativeType.reserve(Info.Size);
+  Info.Values.reserve(Info.Size);
+  Info.Empty.reserve(Info.Size);
+  for (unsigned I = 0; I < Info.Size; ++I) {
+    const APValue &Element = getAlternativeDescriptor(*Array, I);
+    if (!Element.isStruct() ||
+        Element.getStructNumFields() <= std::max(InfoField, EmptyField)) {
+      S.Diag(Loc, diag::err_alternative_traits_alternatives_invalid)
+          << SubjectType;
+      return true;
+    }
+
+    const APValue &ReflectedInfo = Element.getStructField(InfoField);
+    bool HasType = ReflectedInfo.isReflectedType();
+    Info.AdvertisedTypes.push_back(HasType ? ReflectedInfo.getReflectedType()
+                                           : S.Context.VoidTy);
+    Info.HasAlternativeType.push_back(HasType);
+
+    Expr *ValueExpr = nullptr;
+    if (!ReflectedInfo.isNullReflection() && !HasType) {
+      if (!ReflectedInfo.isReflectedDecl() &&
+          !ReflectedInfo.isReflectedObject() &&
+          !ReflectedInfo.isReflectedValue()) {
+        S.Diag(Loc, diag::err_alternative_info_invalid)
+            << SubjectType << I << "reflection";
+        return true;
+      }
+      ExprResult Result =
+          buildAlternativeValueFromReflection(S, Loc, ReflectedInfo);
+      if (Result.isInvalid()) {
+        S.Diag(Loc, diag::err_alternative_info_invalid)
+            << SubjectType << I << "reflection";
+        return true;
+      }
+      ValueExpr = Result.get();
+    }
+    Info.Values.push_back(ValueExpr);
+
+    const APValue &Empty = Element.getStructField(EmptyField);
+    if (!Empty.isInt()) {
+      S.Diag(Loc, diag::err_alternative_info_invalid)
+          << SubjectType << I << "empty flag";
+      return true;
+    }
+    bool IsEmpty = Empty.getInt().getBoolValue();
+    if (IsEmpty && !HasType && !ValueExpr) {
+      S.Diag(Loc, diag::err_alternative_info_empty_without_value)
+          << SubjectType << I;
+      return true;
+    }
+    Info.Empty.push_back(IsEmpty);
+  }
+  return false;
+}
+
+static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
+                                            QualType SubjectType,
+                                            QualType TraitType,
+                                            LookupResult &AlternativesLookup,
+                                            bool AllowOpen,
+                                            AlternativeTraitsInfo &Info) {
   Info.Type = TraitType;
   Info.Record = TraitType->getAsCXXRecordDecl();
   if (!Info.Record)
     return true;
 
-  if (SizeLookup.empty()) {
+  if (AlternativesLookup.empty()) {
     LookupResult TryCastLookup(S, S.PP.getIdentifierInfo("try_cast"), Loc,
                                Sema::LookupOrdinaryName);
     S.LookupQualifiedName(TryCastLookup, Info.Record);
     if (!AllowOpen || TryCastLookup.empty()) {
       S.Diag(Loc, diag::err_alternative_traits_member_missing)
           << SubjectType
-          << (AllowOpen ? "either 'size' or 'try_cast'" : "'size'");
+          << (AllowOpen ? "either 'alternatives' or 'try_cast'"
+                        : "'alternatives'");
       return true;
     }
     LookupResult HasValueLookup(S, S.PP.getIdentifierInfo("has_value"), Loc,
@@ -296,40 +429,35 @@ static bool initializeAlternativeTraitsInfo(
     return false;
   }
 
-  ExprResult SizeExpr =
-      S.BuildDeclarationNameExpr(CXXScopeSpec(), SizeLookup, false);
-  if (SizeExpr.isInvalid())
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      S, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+  ExprResult AlternativesExpr =
+      S.BuildDeclarationNameExpr(CXXScopeSpec(), AlternativesLookup, false);
+  if (AlternativesExpr.isInvalid() ||
+      !isa<DeclRefExpr>(AlternativesExpr.get()->IgnoreParenImpCasts()))
     return true;
-  llvm::APSInt SizeValue(32);
-  struct SizeDiagnoser : Sema::VerifyICEDiagnoser {
-    QualType Type;
-    explicit SizeDiagnoser(QualType Type) : Type(Type) {}
-    Sema::SemaDiagnosticBuilder diagnoseNotICE(Sema &S,
-                                               SourceLocation Loc) override {
-      return S.Diag(Loc, diag::err_alternative_traits_size_not_constant)
-             << Type;
-    }
-  } Diagnoser(SubjectType);
-  if (S.VerifyIntegerConstantExpression(SizeExpr.get(), &SizeValue, Diagnoser)
+  AlternativesExpr = AlternativesExpr.get()->IgnoreParenImpCasts();
+  if (readAlternativeDescriptors(S, Loc, SubjectType, AlternativesExpr.get(),
+                                 Info))
+    return true;
+
+  LookupResult ResidualLookup(S, S.PP.getIdentifierInfo("has_residual_states"),
+                              Loc, Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(ResidualLookup, Info.Record);
+  if (ResidualLookup.empty()) {
+    S.Diag(Loc, diag::err_alternative_traits_member_missing)
+        << SubjectType << "'has_residual_states'";
+    return true;
+  }
+  ExprResult ResidualExpr =
+      S.BuildDeclarationNameExpr(CXXScopeSpec(), ResidualLookup, false);
+  if (ResidualExpr.isInvalid())
+    return true;
+  llvm::APSInt ResidualValue(1);
+  if (S.VerifyIntegerConstantExpression(ResidualExpr.get(), &ResidualValue)
           .isInvalid())
     return true;
-  Info.Size = SizeValue.getLimitedValue(UINT_MAX);
-
-  LookupResult ExhaustiveLookup(S, S.PP.getIdentifierInfo("is_exhaustive"), Loc,
-                                Sema::LookupOrdinaryName);
-  S.LookupQualifiedName(ExhaustiveLookup, Info.Record);
-  if (!ExhaustiveLookup.empty()) {
-    ExprResult ExhaustiveExpr =
-        S.BuildDeclarationNameExpr(CXXScopeSpec(), ExhaustiveLookup, false);
-    if (ExhaustiveExpr.isInvalid())
-      return true;
-    llvm::APSInt ExhaustiveValue(1);
-    if (S.VerifyIntegerConstantExpression(ExhaustiveExpr.get(),
-                                          &ExhaustiveValue)
-            .isInvalid())
-      return true;
-    Info.IsExhaustive = !ExhaustiveValue.isZero();
-  }
+  Info.IsExhaustive = ResidualValue.isZero();
   return false;
 }
 
@@ -338,29 +466,30 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
                                     AlternativeTraitsInfo &Info) {
   SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
   if (const auto *Pointer = SubjectType->getAs<PointerType>()) {
-    if (Pointer->getPointeeType()->isVoidType()) {
-      S.Diag(Loc, diag::err_braced_alternative_void_pointer);
-      return true;
-    }
     Info.Type = SubjectType;
     Info.Size = 2;
     Info.IsBuiltinPointer = true;
-    Info.Alternatives = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Info.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Info.HasAlternativeType = {false, true};
+    Info.ProjectionTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
     Info.Projectable = {false, true};
+    Info.Empty = {true, false};
+    Info.Values = {nullptr, nullptr};
     return false;
   }
 
   TemplateArgumentListInfo TraitArgs(Loc, Loc);
   TraitArgs.addArgument(getTrivialTypeTemplateArgument(S, Loc, SubjectType));
 
-  LookupResult SizeLookup(S, S.PP.getIdentifierInfo("size"), Loc,
-                          Sema::LookupOrdinaryName);
-  if (lookupStdTypeTraitMember(S, SizeLookup, Loc, "alternative_traits",
+  LookupResult AlternativesLookup(S, S.PP.getIdentifierInfo("alternatives"),
+                                  Loc, Sema::LookupOrdinaryName);
+  if (lookupStdTypeTraitMember(S, AlternativesLookup, Loc, "alternative_traits",
                                TraitArgs, diag::err_alternative_traits_missing,
                                &Info.Type))
     return true;
   return initializeAlternativeTraitsInfo(S, Loc, SubjectType, Info.Type,
-                                         SizeLookup, /*AllowOpen=*/true, Info);
+                                         AlternativesLookup,
+                                         /*AllowOpen=*/true, Info);
 }
 
 static std::optional<NamedAlternativeInfo>
@@ -452,12 +581,12 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
   CXXRecordDecl *ProviderRecord = ProviderType->getAsCXXRecordDecl();
   if (!ProviderRecord)
     return std::nullopt;
-  LookupResult SizeLookup(S, S.PP.getIdentifierInfo("size"), Loc,
-                          Sema::LookupOrdinaryName);
-  S.LookupQualifiedName(SizeLookup, ProviderRecord);
+  LookupResult AlternativesLookup(S, S.PP.getIdentifierInfo("alternatives"),
+                                  Loc, Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(AlternativesLookup, ProviderRecord);
   AlternativeTraitsInfo ProviderInfo;
   if (initializeAlternativeTraitsInfo(S, Loc, SubjectType, ProviderType,
-                                      SizeLookup, /*AllowOpen=*/false,
+                                      AlternativesLookup, /*AllowOpen=*/false,
                                       ProviderInfo))
     return std::nullopt;
 
@@ -478,6 +607,8 @@ static ExprResult buildAlternativeTraitsCall(
       return S.PerformContextuallyConvertToBool(Subject);
     assert(Member == "get" && AlternativeIndex == 1 &&
            "unexpected built-in pointer alternative operation");
+    if (Subject->getType()->getPointeeType()->isVoidType())
+      return S.ImpCastExprToType(Subject, S.Context.VoidTy, CK_ToVoid);
     return S.CreateBuiltinUnaryOp(Loc, UO_Deref, Subject);
   }
 
@@ -504,48 +635,226 @@ static ExprResult buildAlternativeTraitsCall(
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
 }
 
-static void determineAlternativeProjections(Sema &S, SourceLocation Loc,
+static QualType getAlternativeProjectionBindingType(Sema &S, SourceLocation Loc,
+                                                    QualType AdvertisedType,
+                                                    Expr *Projection) {
+  if (AdvertisedType->isVoidType())
+    return AdvertisedType;
+
+  // alternative_traits is selected using the unqualified subject type, so
+  // carry the cv-qualification supplied by get<I> onto its advertised type.
+  // As with a tuple-like structured binding, the initializer's value category
+  // then determines whether the synthesized binding is a value, T&, or T&&.
+  if (!AdvertisedType->isReferenceType())
+    AdvertisedType = AdvertisedType.withCVRQualifiers(
+        AdvertisedType.getCVRQualifiers() |
+        Projection->getType().getCVRQualifiers());
+  if (Projection->isPRValue())
+    return AdvertisedType;
+  return S.BuildReferenceType(AdvertisedType, Projection->isLValue(), Loc,
+                              DeclarationName());
+}
+
+static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
                                             Expr *Subject,
                                             AlternativeTraitsInfo &Info) {
   if (Info.IsBuiltinPointer)
-    return;
+    return false;
 
-  LookupResult TypeLookup(S, S.PP.getIdentifierInfo("type"), Loc,
-                          Sema::LookupOrdinaryName);
-  S.LookupQualifiedName(TypeLookup, Info.Record);
-  auto *TypeTemplate = TypeLookup.getAsSingle<TypeAliasTemplateDecl>();
-
-  Info.Alternatives.reserve(Info.Size);
+  Info.ProjectionTypes.clear();
+  Info.ProjectionTypes.reserve(Info.Size);
+  Info.Projectable.clear();
   Info.Projectable.reserve(Info.Size);
   for (unsigned I = 0; I < Info.Size; ++I) {
-    TemplateArgumentListInfo Args(Loc, Loc);
-    Args.addArgument(
-        getTrivialIntegralTemplateArgument(S, Loc, S.Context.getSizeType(), I));
-    QualType AlternativeType;
-    bool HasAlternativeType = false;
-    if (TypeTemplate) {
+    QualType ProjectionType = S.Context.VoidTy;
+    bool IsProjectable = false;
+    {
+      auto *Probe = new (S.Context)
+          OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
+                          Subject->getObjectKind(), Subject);
+      EnterExpressionEvaluationContext Unevaluated(
+          S, Sema::ExpressionEvaluationContext::Unevaluated);
       Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
-      AlternativeType = S.CheckTemplateIdType(ElaboratedTypeKeyword::None,
-                                              TemplateName(TypeTemplate), Loc,
-                                              Args, nullptr, false);
-      HasAlternativeType =
-          !AlternativeType.isNull() && !Trap.hasErrorOccurred();
+      ExprResult GetCall =
+          buildAlternativeTraitsCall(S, Loc, Info, "get", Probe, I);
+      IsProjectable = GetCall.isUsable() && !Trap.hasErrorOccurred();
+      if (IsProjectable)
+        ProjectionType = GetCall.get()->getType();
+    }
+    Info.ProjectionTypes.push_back(ProjectionType);
+    Info.Projectable.push_back(IsProjectable);
+
+    unsigned ConflictKind = UINT_MAX;
+    if (Info.Empty[I] && Info.HasAlternativeType[I])
+      ConflictKind = 0;
+    else if (Info.Empty[I] && IsProjectable)
+      ConflictKind = 1;
+    else if (Info.Values[I] && IsProjectable)
+      ConflictKind = 2;
+    if (ConflictKind != UINT_MAX) {
+      S.Diag(Loc, diag::err_alternative_info_conflicting_kind)
+          << Subject->getType().getNonReferenceType().getUnqualifiedType() << I
+          << ConflictKind;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool
+validateAdvertisedAlternativeProjections(Sema &S, SourceLocation Loc,
+                                         Expr *Subject,
+                                         const AlternativeTraitsInfo &Info) {
+  for (unsigned I = 0; I < Info.Size; ++I) {
+    if (!Info.HasAlternativeType[I])
+      continue;
+
+    bool IsCompatible = false;
+    {
+      auto *Probe = new (S.Context)
+          OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
+                          Subject->getObjectKind(), Subject);
+      EnterExpressionEvaluationContext Unevaluated(
+          S, Sema::ExpressionEvaluationContext::Unevaluated);
+      Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+      ExprResult GetCall =
+          buildAlternativeTraitsCall(S, Loc, Info, "get", Probe, I);
+      if (GetCall.isUsable() && !Trap.hasErrorOccurred()) {
+        QualType AdvertisedType = Info.AdvertisedTypes[I];
+        if (AdvertisedType->isVoidType()) {
+          IsCompatible = GetCall.get()->getType()->isVoidType();
+        } else if (!GetCall.get()->getType()->isVoidType()) {
+          QualType BindingType = getAlternativeProjectionBindingType(
+              S, Loc, AdvertisedType, GetCall.get());
+          VarDecl *Binding = BuildVarDecl(S, Loc, BindingType, GetCall.get());
+          IsCompatible = !hasFailedVariableInitialization(Binding) &&
+                         !Trap.hasErrorOccurred();
+        }
+      }
     }
 
-    auto *Probe = new (S.Context)
-        OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
-                        Subject->getObjectKind(), Subject);
-    EnterExpressionEvaluationContext Unevaluated(
-        S, Sema::ExpressionEvaluationContext::Unevaluated);
-    Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
-    ExprResult GetCall =
-        buildAlternativeTraitsCall(S, Loc, Info, "get", Probe, I);
-    bool IsProjectable =
-        HasAlternativeType && GetCall.isUsable() && !Trap.hasErrorOccurred();
-    Info.Alternatives.push_back(IsProjectable ? AlternativeType
-                                              : S.Context.VoidTy);
-    Info.Projectable.push_back(IsProjectable);
+    if (!IsCompatible) {
+      S.Diag(Loc, diag::err_alternative_type_without_projection)
+          << Subject->getType().getNonReferenceType().getUnqualifiedType() << I
+          << Info.AdvertisedTypes[I];
+      return true;
+    }
   }
+  return false;
+}
+
+static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
+                                       const AlternativeTraitsInfo &Traits,
+                                       ArrayRef<unsigned> Selected,
+                                       bool IsAlternativeValuePattern = false) {
+  QualType *AlternativeTypes =
+      S.Context.Allocate<QualType>(Traits.ProjectionTypes.size());
+  std::uninitialized_copy(Traits.ProjectionTypes.begin(),
+                          Traits.ProjectionTypes.end(), AlternativeTypes);
+  auto CopyFlags = [&](ArrayRef<bool> Flags) {
+    auto *Storage = S.Context.Allocate<unsigned char>(Flags.size());
+    llvm::transform(Flags, Storage, [](bool Value) {
+      return static_cast<unsigned char>(Value);
+    });
+    return ArrayRef<unsigned char>(Storage, Flags.size());
+  };
+  Expr **Values = S.Context.Allocate<Expr *>(Traits.Values.size());
+  std::uninitialized_copy(Traits.Values.begin(), Traits.Values.end(), Values);
+  unsigned *SelectedAlternatives =
+      S.Context.Allocate<unsigned>(Selected.size());
+  std::uninitialized_copy(Selected.begin(), Selected.end(),
+                          SelectedAlternatives);
+
+  PatternInfo.AlternativeProviderType = Traits.Type;
+  PatternInfo.AlternativeTypes =
+      ArrayRef(AlternativeTypes, Traits.ProjectionTypes.size());
+  PatternInfo.ProjectableAlternatives = CopyFlags(Traits.Projectable);
+  PatternInfo.EmptyAlternatives = CopyFlags(Traits.Empty);
+  PatternInfo.AlternativeValues = ArrayRef(Values, Traits.Values.size());
+  PatternInfo.SelectedAlternatives =
+      ArrayRef(SelectedAlternatives, Selected.size());
+  PatternInfo.IsExhaustive = Traits.IsExhaustive;
+  PatternInfo.IsAlternativeValuePattern = IsAlternativeValuePattern;
+}
+
+static bool
+tryLookupAlternativeTraitsForValuePattern(Sema &S, SourceLocation Loc,
+                                          QualType SubjectType,
+                                          AlternativeTraitsInfo &Info) {
+  SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
+  if (!SubjectType->isRecordType())
+    return false;
+
+  TemplateArgumentListInfo TraitArgs(Loc, Loc);
+  TraitArgs.addArgument(getTrivialTypeTemplateArgument(S, Loc, SubjectType));
+
+  LookupResult AlternativesLookup(S, S.PP.getIdentifierInfo("alternatives"),
+                                  Loc, Sema::LookupOrdinaryName);
+  Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+  if (lookupStdTypeTraitMember(S, AlternativesLookup, Loc, "alternative_traits",
+                               TraitArgs, /*DiagID=*/0, &Info.Type) ||
+      AlternativesLookup.empty())
+    return false;
+  return !Trap.hasErrorOccurred() &&
+         !initializeAlternativeTraitsInfo(S, Loc, SubjectType, Info.Type,
+                                          AlternativesLookup,
+                                          /*AllowOpen=*/false, Info);
+}
+
+static bool alternativeValueMatchesPattern(Sema &S, SourceLocation Loc,
+                                           Expr *Pattern, Expr *Value) {
+  Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+  ExprResult Equal = S.ActOnBinOp(S.getCurScope(), Loc,
+                                  tok::TokenKind::equalequal, Pattern, Value);
+  bool Matches = false;
+  return Equal.isUsable() && !Trap.hasErrorOccurred() &&
+         Equal.get()->EvaluateAsBooleanCondition(Matches, S.Context) && Matches;
+}
+
+static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
+                                            ExpressionPattern *Pattern,
+                                            MatchPatternInfo &PatternInfo) {
+  if (Subject->isTypeDependent() || Pattern->getExpr()->isValueDependent())
+    return false;
+
+  AlternativeTraitsInfo Traits;
+  SmallVector<unsigned, 1> Selected;
+  QualType SubjectType =
+      Subject->getType().getNonReferenceType().getUnqualifiedType();
+  if (SubjectType->isPointerType()) {
+    if (Pattern->getExpr()->isNullPointerConstant(
+            S.Context, Expr::NPC_ValueDependentIsNotNull) == Expr::NPCK_NotNull)
+      return false;
+    const auto *Pointer = SubjectType->castAs<PointerType>();
+    Traits.Type = SubjectType;
+    Traits.Size = 2;
+    Traits.IsBuiltinPointer = true;
+    Traits.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Traits.HasAlternativeType = {false, true};
+    Traits.ProjectionTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Traits.Projectable = {false, true};
+    Traits.Empty = {true, false};
+    Traits.Values = {Pattern->getExpr(), nullptr};
+    Selected.push_back(0);
+  } else {
+    if (!tryLookupAlternativeTraitsForValuePattern(S, Pattern->getBeginLoc(),
+                                                   SubjectType, Traits))
+      return false;
+    if (determineAlternativeProjections(S, Pattern->getBeginLoc(), Subject,
+                                        Traits))
+      return true;
+    for (unsigned I = 0; I < Traits.Size; ++I)
+      if (Traits.Values[I] &&
+          alternativeValueMatchesPattern(S, Pattern->getBeginLoc(),
+                                         Pattern->getExpr(), Traits.Values[I]))
+        Selected.push_back(I);
+    if (Selected.empty())
+      return false;
+  }
+
+  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected,
+                             /*IsAlternativeValuePattern=*/true);
+  return false;
 }
 
 static ExprResult buildOpenAlternativeTraitsTryCastCall(
@@ -1405,6 +1714,41 @@ checkAlternativeSubPattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
 }
 
 static bool
+checkClosedAlternativeSubPattern(Sema &S, Expr *Subject,
+                                 AlternativePattern *Pattern,
+                                 Sema::MatchPatternState &State,
+                                 Sema::MatchProjectionCache *ProjectionCache) {
+  if (TypePattern *Selector = Pattern->getTypeSelector()) {
+    if (!Subject || Subject->isTypeDependent()) {
+      if (S.CheckCompleteMatchPattern(nullptr, Selector, State,
+                                      ProjectionCache))
+        return true;
+    } else {
+      QualType PatternType = Selector->getType();
+      if (PatternType->isDependentType())
+        return false;
+
+      MatchPatternInfo &Info = State.get(Selector);
+      bool Matches =
+          Subject->getType()->isVoidType()
+              ? PatternType->isVoidType()
+              : isExactDeclarationPatternMatch(S, Subject, PatternType);
+      if (!Matches) {
+        S.Diag(Selector->getBeginLoc(), diag::err_type_pattern_not_exact_match)
+            << PatternType << Subject->getType();
+        return true;
+      }
+      Info.TypePatternResolved = true;
+      Info.TypePatternMatches = true;
+      Info.CheckedSubjectType = Subject->getType();
+    }
+  }
+
+  return S.CheckCompleteMatchPattern(Subject, Pattern->getSubPattern(), State,
+                                     ProjectionCache);
+}
+
+static bool
 checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                             const AlternativeTraitsInfo &Traits,
                             Sema::MatchPatternState &State,
@@ -1619,7 +1963,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (Pattern->isTypeSelected() &&
         S.CheckCompleteMatchPattern(nullptr, Selector, State, ProjectionCache))
       return true;
-    return S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(), State,
+    return Pattern->getSubPattern() &&
+           S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(), State,
                                        ProjectionCache);
   }
   AlternativeTraitsInfo Traits;
@@ -1640,7 +1985,14 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     Traits = std::move(Named->Traits);
   }
 
-  determineAlternativeProjections(S, Loc, Subject, Traits);
+  if (determineAlternativeProjections(S, Loc, Subject, Traits))
+    return true;
+
+  bool UsesAdvertisedTypes =
+      Pattern->isTypeSelected() || Pattern->isTypeConstraintSelected();
+  if (UsesAdvertisedTypes &&
+      validateAdvertisedAlternativeProjections(S, Loc, Subject, Traits))
+    return true;
 
   if (Pattern->isExpressionSelected()) {
     Expr *Selector = Pattern->getExpressionSelector()->getExpr();
@@ -1661,7 +2013,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
-      if (!Traits.Projectable[I])
+      if (Traits.Empty[I])
         Selected.push_back(I);
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
@@ -1669,7 +2021,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     }
   } else if (!Pattern->isNamed() && !Pattern->isExpressionSelected()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
-      if (Traits.Projectable[I])
+      if (Traits.Projectable[I] &&
+          (!UsesAdvertisedTypes || Traits.HasAlternativeType[I]))
         Selected.push_back(I);
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_braced_alternative_no_viable_state) << SubjectType;
@@ -1685,8 +2038,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (ProjectionCache->DeferAlternativeChoices) {
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
       ProjectionCache->HasDeferredAlternativeChoices = true;
-      return checkAlternativeSubPattern(S, nullptr, Pattern, State,
-                                        ProjectionCache);
+      return checkClosedAlternativeSubPattern(S, nullptr, Pattern, State,
+                                              ProjectionCache);
     }
     if (ProjectionCache->NextForcedAlternativeSelection <
         ProjectionCache->ForcedAlternativeSelections.size()) {
@@ -1700,32 +2053,13 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   }
 
   if (Pattern->getSubPattern() && !Traits.Projectable[Selected.front()]) {
-    S.Diag(Loc, diag::err_alternative_traits_member_missing)
-        << SubjectType << "projectable selected state";
+    S.Diag(Loc, diag::err_alternative_state_not_projectable)
+        << SubjectType << Selected.front();
     return true;
   }
 
-  QualType *AlternativeTypes =
-      S.Context.Allocate<QualType>(Traits.Alternatives.size());
-  std::uninitialized_copy(Traits.Alternatives.begin(),
-                          Traits.Alternatives.end(), AlternativeTypes);
-  auto *Projectable =
-      S.Context.Allocate<unsigned char>(Traits.Projectable.size());
-  llvm::transform(Traits.Projectable, Projectable,
-                  [](bool Value) { return static_cast<unsigned char>(Value); });
-  unsigned *SelectedAlternatives =
-      S.Context.Allocate<unsigned>(Selected.size());
-  std::uninitialized_copy(Selected.begin(), Selected.end(),
-                          SelectedAlternatives);
   MatchPatternInfo &PatternInfo = State.get(Pattern);
-  PatternInfo.AlternativeProviderType = Traits.Type;
-  PatternInfo.AlternativeTypes =
-      ArrayRef(AlternativeTypes, Traits.Alternatives.size());
-  PatternInfo.ProjectableAlternatives =
-      ArrayRef(Projectable, Traits.Projectable.size());
-  PatternInfo.SelectedAlternatives =
-      ArrayRef(SelectedAlternatives, Selected.size());
-  PatternInfo.IsExhaustive = Traits.IsExhaustive;
+  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
 
   auto CheckSubPattern = [&](Expr *ProjectedSubject) {
     size_t SavedProjectionPathSize =
@@ -1734,20 +2068,18 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         ProjectionCache ? ProjectionCache->CurrentDiscriminatorPath.size() : 0;
     llvm::scope_exit RestoreProjectionPath([&] {
       if (ProjectionCache) {
-        ProjectionCache->CurrentProjectionPath.resize(
-            SavedProjectionPathSize);
+        ProjectionCache->CurrentProjectionPath.resize(SavedProjectionPathSize);
         ProjectionCache->CurrentDiscriminatorPath.resize(
             SavedDiscriminatorPathSize);
       }
     });
     if (ProjectionCache) {
       ProjectionCache->CurrentProjectionPath.push_back(Selected.front() + 1);
-      ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() +
-                                                          1);
+      ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() + 1);
     }
     if (const ConceptReference *Constraint =
             Pattern->getTypeConstraintSelector()) {
-      QualType DeclaredType = Traits.Alternatives[Selected.front()];
+      QualType DeclaredType = Traits.AdvertisedTypes[Selected.front()];
       std::optional<bool> Satisfied =
           satisfiesTypeConstraint(S, Constraint, DeclaredType);
       if (!Satisfied)
@@ -1759,8 +2091,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         return true;
       }
     }
-    return checkAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
-                                      ProjectionCache);
+    return checkClosedAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
+                                            ProjectionCache);
   };
 
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
@@ -1865,13 +2197,21 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     return CheckSubPattern(GetCall.get());
   }
   ExprValueKind ProjectedValueKind = GetCall.get()->getValueKind();
-  if (ProjectedValueKind == VK_PRValue) {
+  if (ProjectedValueKind == VK_PRValue && !UsesAdvertisedTypes) {
     Projection->setProjectedExpr(GetCall.get());
     return CheckSubPattern(GetCall.get());
   }
-  QualType ProjectedType = GetCall.get()->refersToBitField()
-                               ? S.Context.getAutoDeductType()
-                               : S.Context.getAutoRRefDeductType();
+  QualType ProjectedType;
+  if (UsesAdvertisedTypes) {
+    ProjectedType = getAlternativeProjectionBindingType(
+        S, Loc, Traits.AdvertisedTypes[Index], GetCall.get());
+    if (ProjectedValueKind == VK_PRValue)
+      ProjectedValueKind = VK_XValue;
+  } else {
+    ProjectedType = GetCall.get()->refersToBitField()
+                        ? S.Context.getAutoDeductType()
+                        : S.Context.getAutoRRefDeductType();
+  }
   VarDecl *ProjectedVar = BuildVarDecl(S, Loc, ProjectedType, GetCall.get());
   if (ProjectedVar->isInvalidDecl())
     return true;
@@ -1912,7 +2252,10 @@ bool Sema::CheckCompleteMatchPatternImpl(
     if (Cond.isInvalid()) {
       return true;
     }
-    State.get(P).Condition = Cond.get();
+    MatchPatternInfo &PatternInfo = State.get(P);
+    PatternInfo.Condition = Cond.get();
+    if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo))
+      return true;
     break;
   }
   case MatchPattern::DeclarationPatternClass: {
