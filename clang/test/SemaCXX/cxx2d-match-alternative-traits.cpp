@@ -1,5 +1,10 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -verify %s
 
+static_assert(__has_feature(pattern_matching));
+static_assert(__has_feature(reflection));
+
+inline constexpr int empty_state = 0;
+
 namespace std {
 class type_info {
 public:
@@ -8,6 +13,14 @@ public:
 
 template<class T>
 struct alternative_traits; // expected-note {{template is declared here}}
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 
 template<class Provider>
 struct alternative_name {
@@ -26,10 +39,10 @@ struct Choice {
 template<>
 struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, int, double>;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^double
+  };
+  static constexpr bool has_residual_states = false;
 
   struct names {
     static constexpr alternative_name<AT> integer = 0, real = 1;
@@ -60,11 +73,10 @@ struct CopyChoice {
 
 template<>
 struct std::alternative_traits<CopyChoice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = ProjectedNonCopyable;
+  static constexpr alternative_info alternatives[] = {
+    ^^ProjectedNonCopyable, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const CopyChoice& choice) noexcept {
     return choice.engaged ? 0 : 1;
@@ -83,11 +95,10 @@ struct SingleChoice {
 
 template<>
 struct std::alternative_traits<SingleChoice> {
-  static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const SingleChoice&) noexcept {
     return 0;
@@ -107,11 +118,10 @@ struct MaybeInt {
 
 template<>
 struct std::alternative_traits<MaybeInt> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
@@ -131,11 +141,10 @@ struct ThrowingIndex {
 template<>
 struct std::alternative_traits<ThrowingIndex> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int
+  };
+  static constexpr bool has_residual_states = false;
   struct names {
     static constexpr alternative_name<AT> value = 0;
   };
@@ -150,6 +159,169 @@ struct std::alternative_traits<ThrowingIndex> {
 
 bool throwing_index(ThrowingIndex choice) {
   return choice match case { .value: int value }; // expected-error {{invalid alternative protocol; 'std::alternative_traits<'ThrowingIndex'>::index' must be noexcept}}
+}
+
+struct MissingResidualStates {
+  int value;
+};
+
+template<>
+struct std::alternative_traits<MissingResidualStates> {
+  static constexpr alternative_info alternatives[] = {
+    ^^int
+  };
+
+  static constexpr __SIZE_TYPE__
+  index(const MissingResidualStates&) noexcept {
+    return 0;
+  }
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  static int& get(MissingResidualStates& choice) {
+    return choice.value;
+  }
+};
+
+int missing_residual_states(MissingResidualStates choice) {
+  return choice match {
+    case { int value } => value; // expected-error {{does not provide a usable 'has_residual_states' member}}
+  };
+}
+
+struct NonArrayDescriptors {};
+
+template<>
+struct std::alternative_traits<NonArrayDescriptors> {
+  static constexpr alternative_info alternatives = {};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(NonArrayDescriptors) noexcept { return 0; }
+};
+
+int non_array_descriptors(NonArrayDescriptors value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{'std::alternative_traits<'NonArrayDescriptors'>::alternatives' must be a constant array of 'std::alternative_info'}}
+  };
+}
+
+struct WrongDescriptorType {};
+
+template<>
+struct std::alternative_traits<WrongDescriptorType> {
+  static constexpr int alternatives[] = {0};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(WrongDescriptorType) noexcept { return 0; }
+};
+
+int wrong_descriptor_type(WrongDescriptorType value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{'std::alternative_traits<'WrongDescriptorType'>::alternatives' must be a constant array of 'std::alternative_info'}}
+  };
+}
+
+namespace NotASelector {}
+struct InvalidSelectorDescriptor {};
+
+template<>
+struct std::alternative_traits<InvalidSelectorDescriptor> {
+  static constexpr alternative_info alternatives[] = {
+    ^^NotASelector
+  };
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(InvalidSelectorDescriptor) noexcept {
+    return 0;
+  }
+};
+
+int invalid_selector_descriptor(InvalidSelectorDescriptor value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{state 0 of type 'InvalidSelectorDescriptor' has an invalid reflection in its 'alternative_info' descriptor}}
+  };
+}
+
+struct EmptyTypedChoice {};
+
+template<>
+struct std::alternative_traits<EmptyTypedChoice> {
+  static constexpr alternative_info alternatives[] = {
+    {^^int, true}
+  };
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(EmptyTypedChoice) noexcept { return 0; }
+};
+
+int empty_state_cannot_be_typed(EmptyTypedChoice value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyTypedChoice' is both empty and typed}}
+  };
+}
+
+struct EmptyProjectedChoice {
+  int value;
+};
+
+template<>
+struct std::alternative_traits<EmptyProjectedChoice> {
+  static constexpr alternative_info alternatives[] = {
+    {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(EmptyProjectedChoice) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  static constexpr int& get(EmptyProjectedChoice& choice) {
+    return choice.value;
+  }
+};
+
+int empty_state_cannot_be_projected(EmptyProjectedChoice value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyProjectedChoice' is both empty and projectable}}
+  };
+}
+
+struct EmptyWithoutValueChoice {};
+
+template<>
+struct std::alternative_traits<EmptyWithoutValueChoice> {
+  static constexpr alternative_info alternatives[] = {{{}, true}};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(EmptyWithoutValueChoice) noexcept { return 0; }
+};
+
+int empty_state_requires_value(EmptyWithoutValueChoice value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{empty state 0 of type 'EmptyWithoutValueChoice' is not represented by a value}}
+  };
+}
+
+inline constexpr int ProjectedSingleton = 0;
+struct SingletonProjectedChoice {
+  int value;
+};
+
+template<>
+struct std::alternative_traits<SingletonProjectedChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^ProjectedSingleton
+  };
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(SingletonProjectedChoice) noexcept {
+    return 0;
+  }
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  static constexpr int& get(SingletonProjectedChoice& choice) {
+    return choice.value;
+  }
+};
+
+int singleton_state_cannot_be_projected(SingletonProjectedChoice value) {
+  return value match {
+    case { .[0] } => 0; // expected-error {{state 0 of type 'SingletonProjectedChoice' is both represented by a value and projectable}}
+  };
 }
 
 int named(Choice choice) {
@@ -265,6 +437,134 @@ int expression_selector_requires_projection(Choice choice) {
   };
 }
 
+struct IndexOnlyChoice {
+  unsigned state;
+};
+
+template<>
+struct std::alternative_traits<IndexOnlyChoice> {
+  static constexpr alternative_info alternatives[] = {{}, {}};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(IndexOnlyChoice choice) noexcept {
+    return choice.state;
+  }
+};
+
+int index_only_states(IndexOnlyChoice choice) {
+  return choice match {
+    case { .[0] } => 0;
+    case { .[1] } => 1;
+  };
+}
+
+int index_only_state_cannot_be_projected(IndexOnlyChoice choice) {
+  return choice match {
+    case { .[0]: int value } => value; // expected-error {{alternative state 0 of type 'IndexOnlyChoice' has no projected value; omit the ': pattern'}}
+    case _ => 0;
+  };
+}
+
+struct AnonymousProjection {
+  int value;
+};
+
+template<>
+struct std::alternative_traits<AnonymousProjection> {
+  static constexpr alternative_info alternatives[] = {{}};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(AnonymousProjection) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+int anonymous_projection_by_index(AnonymousProjection choice) {
+  return choice match {
+    case { .[0]: int value } => value;
+  };
+}
+
+int anonymous_projection_is_generic(AnonymousProjection choice) {
+  return choice match {
+    case { int value } => value;
+  };
+}
+
+int anonymous_projection_has_no_type_selector(AnonymousProjection choice) {
+  return choice match {
+    case { int: _ } => 1; // expected-error {{braced alternative pattern does not match any projectable state of 'AnonymousProjection'}}
+    case _ => 0;
+  };
+}
+
+struct TypedWithoutProjection {};
+
+template<>
+struct std::alternative_traits<TypedWithoutProjection> {
+  static constexpr alternative_info alternatives[] = {^^int};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(TypedWithoutProjection) noexcept { return 0; }
+};
+
+int advertised_type_requires_projection(TypedWithoutProjection choice) {
+  return choice match {
+    case { int: _ } => 0; // expected-error {{invalid alternative protocol; state 0 of type 'TypedWithoutProjection' advertises type 'int', but 'get<0>' does not provide a compatible projection}}
+  };
+}
+
+struct IncompatibleProjection {
+  double value;
+};
+
+template<>
+struct std::alternative_traits<IncompatibleProjection> {
+  static constexpr alternative_info alternatives[] = {^^int};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(IncompatibleProjection) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+int advertised_type_requires_compatible_projection(IncompatibleProjection choice) {
+  return choice match {
+    case { int: _ } => 0; // expected-error {{invalid alternative protocol; state 0 of type 'IncompatibleProjection' advertises type 'int', but 'get<0>' does not provide a compatible projection}}
+  };
+}
+
+double index_selector_ignores_advertised_type(IncompatibleProjection choice) {
+  return choice match {
+    case { .[0]: double value } => value;
+  };
+}
+
+struct VoidProjection {};
+
+template<>
+struct std::alternative_traits<VoidProjection> {
+  static constexpr alternative_info alternatives[] = {^^void};
+  static constexpr bool has_residual_states = false;
+  static constexpr unsigned index(VoidProjection) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr void get(Self&&) {}
+};
+
+int advertised_void_projection(VoidProjection choice) {
+  return choice match {
+    case { void: _ } => 0;
+  };
+}
+
 int projected_deleted_copy_does_not_fall_back(const CopyChoice& choice) {
   return choice match {
     case { auto copy } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
@@ -276,6 +576,13 @@ int projected_deleted_hypothetical_copy_is_invalid(const CopyChoice& choice) {
   return choice match {
     case { ProjectedNonCopyable } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
     case _ => 0;
+  };
+}
+
+int type_selector_does_not_initialize(const CopyChoice& choice) {
+  return choice match {
+    case { ProjectedNonCopyable: _ } => 1;
+    case {} => 0;
   };
 }
 
@@ -600,7 +907,7 @@ struct std::alternative_traits<IncompleteOpen> {};
 
 int incomplete_open_protocol(IncompleteOpen choice) {
   return choice match {
-    case { int } => 1; // expected-error {{does not provide a usable either 'size' or 'try_cast' member}}
+    case { int } => 1; // expected-error {{does not provide a usable either 'alternatives' or 'try_cast' member}}
     case _ => 0;
   };
 }
