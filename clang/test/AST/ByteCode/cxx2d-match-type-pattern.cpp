@@ -31,6 +31,67 @@ static_assert(declaration_equivalent_types());
 void function_subject() noexcept;
 static_assert(function_subject match case void (*)());
 
+struct CopyCounter {
+  int* copies;
+
+  constexpr explicit CopyCounter(int& copies) : copies(&copies) {}
+  constexpr CopyCounter(const CopyCounter& other) : copies(other.copies) {
+    ++*copies;
+  }
+};
+
+constexpr bool unnamed_value_pattern_initializes() {
+  int copies = 0;
+  CopyCounter value(copies);
+  bool matched = value match case CopyCounter;
+  return matched && copies == 1;
+}
+
+constexpr bool unnamed_reference_pattern_does_not_copy() {
+  int copies = 0;
+  CopyCounter value(copies);
+  bool matched = value match case CopyCounter&;
+  return matched && copies == 0;
+}
+
+constexpr bool nested_unnamed_value_pattern_initializes() {
+  int copies = 0;
+  Pair<CopyCounter, int> value{CopyCounter(copies), 0};
+  bool matched = value match case [CopyCounter, int&];
+  return matched && copies == 1;
+}
+
+struct MoveCounter {
+  int* moves;
+
+  constexpr explicit MoveCounter(int& moves) : moves(&moves) {}
+  MoveCounter(const MoveCounter&) = delete;
+  constexpr MoveCounter(MoveCounter&& other) : moves(other.moves) { ++*moves; }
+};
+
+constexpr bool unnamed_value_pattern_moves_from_xvalue() {
+  int moves = 0;
+  MoveCounter value(moves);
+  bool matched = static_cast<MoveCounter&&>(value) match case MoveCounter;
+  return matched && moves == 1;
+}
+
+constexpr int each_selected_arm_initializes() {
+  int copies = 0;
+  CopyCounter value(copies);
+  int result = value match {
+    case CopyCounter if (false) => 0;
+    case CopyCounter => copies;
+  };
+  return result * 10 + copies;
+}
+
+static_assert(unnamed_value_pattern_initializes());
+static_assert(unnamed_reference_pattern_does_not_copy());
+static_assert(nested_unnamed_value_pattern_initializes());
+static_assert(unnamed_value_pattern_moves_from_xvalue());
+static_assert(each_selected_arm_initializes() == 22);
+
 struct Constructed {
   friend constexpr bool operator==(Constructed, Constructed) = default;
 };
@@ -117,6 +178,9 @@ struct VoidOrInt {
 template<>
 struct std::alternative_traits<VoidOrInt> {
   static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, void, int>;
 
   static constexpr __SIZE_TYPE__ index(const VoidOrInt& value) noexcept {
     return value.has_value ? 0 : 1;

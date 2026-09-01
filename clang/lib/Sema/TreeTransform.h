@@ -4498,7 +4498,8 @@ public:
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
-      if (!P->getSubPattern() && !P->getSelector())
+      if (!P->getSubPattern() && !P->getSelector() &&
+          !P->getTypeConstraintSelector())
         return Pattern;
 
       MatchPattern *Selector = P->getSelector();
@@ -4509,17 +4510,46 @@ public:
           return true;
         Selector = TransformedSelector.get();
       }
+      ConceptReference *Constraint = P->getTypeConstraintSelector();
+      if (Constraint) {
+        NestedNameSpecifierLoc NNS =
+            getDerived().TransformNestedNameSpecifierLoc(
+                Constraint->getNestedNameSpecifierLoc());
+        if (Constraint->getNestedNameSpecifierLoc() && !NNS)
+          return true;
+
+        const ASTTemplateArgumentListInfo *TransformedArgs = nullptr;
+        if (const ASTTemplateArgumentListInfo *Args =
+                Constraint->getTemplateArgsAsWritten()) {
+          TemplateArgumentListInfo NewArgs(Args->getLAngleLoc(),
+                                           Args->getRAngleLoc());
+          if (getDerived().TransformTemplateArguments(
+                  Args->getTemplateArgs(), Args->NumTemplateArgs, NewArgs))
+            return true;
+          TransformedArgs =
+              ASTTemplateArgumentListInfo::Create(getSema().Context, NewArgs);
+        }
+        Constraint = ConceptReference::Create(
+            getSema().Context, NNS, Constraint->getTemplateKWLoc(),
+            Constraint->getConceptNameInfo(), Constraint->getFoundDecl(),
+            Constraint->getNamedConcept(), TransformedArgs);
+      }
       ActionResult<MatchPattern *> Sub = P->getSubPattern();
       if (P->getSubPattern()) {
         Sub = TransformPattern(P->getSubPattern(), Rebuild);
         if (Sub.isInvalid())
           return true;
       }
-      if (Selector == P->getSelector() && Sub.get() == P->getSubPattern())
+      if (!Constraint && Selector == P->getSelector() &&
+          Sub.get() == P->getSubPattern())
         return Pattern;
       if (P->isNamed())
         return getSema().ActOnNamedAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), P->getName(),
+            P->getColonLoc(), Sub.get());
+      if (P->isTypeConstraintSelected())
+        return getSema().ActOnTypeConstraintAlternativePattern(
+            P->getBraces(), P->getDiscriminatorRange(), Constraint,
             P->getColonLoc(), Sub.get());
       if (P->isSelected())
         return getSema().ActOnSelectedAlternativePattern(
@@ -19342,7 +19372,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
       if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->isTypeSelected())
+          Alternative->isTypeSelected() ||
+          Alternative->isTypeConstraintSelected())
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
@@ -19585,7 +19616,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
       if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->isTypeSelected())
+          Alternative->isTypeSelected() ||
+          Alternative->isTypeConstraintSelected())
         return true;
     }
     return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {

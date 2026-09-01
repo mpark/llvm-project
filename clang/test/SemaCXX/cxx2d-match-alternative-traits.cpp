@@ -28,6 +28,9 @@ struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, int, double>;
+
   struct names {
     static constexpr alternative_name<AT> integer = 0, real = 1;
   };
@@ -59,6 +62,10 @@ template<>
 struct std::alternative_traits<CopyChoice> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = ProjectedNonCopyable;
+
   static constexpr __SIZE_TYPE__ index(const CopyChoice& choice) noexcept {
     return choice.engaged ? 0 : 1;
   }
@@ -77,6 +84,10 @@ struct SingleChoice {
 template<>
 struct std::alternative_traits<SingleChoice> {
   static constexpr __SIZE_TYPE__ size = 1;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
 
   static constexpr __SIZE_TYPE__ index(const SingleChoice&) noexcept {
     return 0;
@@ -98,6 +109,10 @@ template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
+
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
   }
@@ -117,6 +132,10 @@ template<>
 struct std::alternative_traits<ThrowingIndex> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 1;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
   struct names {
     static constexpr alternative_name<AT> value = 0;
   };
@@ -154,6 +173,61 @@ int type_selectors(Choice choice) {
     case { double: auto value } => static_cast<int>(value);
   };
 }
+
+template<class T>
+concept Integral = __is_integral(T);
+
+template<class T, class U>
+concept SameAs = __is_same(T, U);
+
+template<class T>
+constexpr bool is_lvalue_reference = false;
+
+template<class T>
+constexpr bool is_lvalue_reference<T&> = true;
+
+template<class T>
+concept LvalueReference = is_lvalue_reference<T>;
+
+int type_constraint_selectors(Choice choice) {
+  return choice match {
+    case { Integral: auto value } => value;
+    case { SameAs<double>: auto value } => static_cast<int>(value);
+  };
+}
+
+int no_viable_type_constraint_selector(Choice choice) {
+  return choice match {
+    case { SameAs<char>: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+    case { _ } => 1;
+  };
+}
+
+int type_constraint_uses_declared_alternative_type(Choice& choice) {
+  return choice match {
+    case { LvalueReference: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+    case { _ } => 1;
+  };
+}
+
+int redundant_after_type_constraint_selector(Choice choice) {
+  return choice match {
+    case { Integral: _ } => 0;
+    case { int: _ } => 1; // expected-error {{match case is redundant}}
+    case { _ } => 2;
+  };
+}
+
+template<class T>
+int dependent_type_constraint_selector(Choice choice) {
+  return choice match {
+    case { SameAs<T>: auto value } => static_cast<int>(value);
+    case { _ } => -1;
+  };
+}
+
+template int dependent_type_constraint_selector<int>(Choice);
+template int dependent_type_constraint_selector<double>(Choice);
 
 int expression_selectors(Choice choice) {
   return choice match {
@@ -434,6 +508,13 @@ int open_expression_selector(OpenChoice choice) {
   return choice match {
     case { .[0]: _ } => 1; // expected-error {{expression alternative selector cannot be used with open alternative type 'OpenChoice'}}
     case _ => 0;
+  };
+}
+
+int open_type_constraint_selector(OpenChoice choice) {
+  return choice match {
+    case { Integral: _ } => 1; // expected-error {{type-constraint alternative selector cannot be used with open alternative type 'OpenChoice'}}
+    case { _ } => 0;
   };
 }
 

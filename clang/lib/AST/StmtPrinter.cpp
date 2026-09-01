@@ -3171,6 +3171,13 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
       OS << " ." << P->getName()->getName() << ": ";
       PrintMatchPattern(P->getSubPattern());
       OS << " ";
+    } else if (const ConceptReference *Constraint =
+                   P->getTypeConstraintSelector()) {
+      OS << " ";
+      Constraint->print(OS, Policy);
+      OS << ": ";
+      PrintMatchPattern(P->getSubPattern());
+      OS << " ";
     } else if (P->isSelected()) {
       OS << " ";
       if (P->isExpressionSelected()) {

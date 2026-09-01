@@ -52,6 +52,7 @@ namespace std {
 #    if _LIBCPP_STD_VER >= 26
 #      include <__cstddef/size_t.h>
 #      include <__type_traits/alternative_traits.h>
+#      include <__type_traits/conditional.h>
 #      include <__utility/forward.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
@@ -62,6 +63,10 @@ struct alternative_traits<expected<_Tp, _Ep>> {
 
   static constexpr size_t size = 2;
   static constexpr bool is_exhaustive = true;
+
+  template <size_t _Ip>
+    requires(_Ip < size)
+  using type = conditional_t<_Ip == 0, _Tp, _Ep>;
 
   struct names : alternative_traits<_Tp*>::names {
     static constexpr alternative_name<_AT> value = 0, error = 1;

@@ -1194,6 +1194,12 @@ getMatchPatternDependence(const MatchPattern *Pattern,
   }
   if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
     ExprDependence D = ExprDependence::None;
+    if (const ConceptReference *Constraint =
+            Alternative->getTypeConstraintSelector())
+      if (const ASTTemplateArgumentListInfo *Args =
+              Constraint->getTemplateArgsAsWritten())
+        for (const TemplateArgumentLoc &Arg : Args->arguments())
+          D |= toExprDependence(Arg.getArgument().getDependence());
     if (const MatchPattern *Selector = Alternative->getSelector())
       D |= getMatchPatternDependence(Selector, Instantiation);
     if (const MatchPattern *SubPattern = Alternative->getSubPattern())

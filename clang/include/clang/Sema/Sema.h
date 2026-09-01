@@ -11212,6 +11212,10 @@ public:
   ActOnSelectedAlternativePattern(SourceRange Braces, MatchPattern *Selector,
                                   SourceLocation ColonLoc,
                                   MatchPattern *SubPattern);
+  ActionResult<MatchPattern *> ActOnTypeConstraintAlternativePattern(
+      SourceRange Braces, SourceRange ConstraintRange,
+      ConceptReference *Constraint, SourceLocation ColonLoc,
+      MatchPattern *SubPattern);
   ActionResult<MatchPattern *> ActOnEmptyAlternativePattern(SourceRange Braces);
   ActionResult<MatchPattern *>
   ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
