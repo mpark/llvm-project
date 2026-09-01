@@ -55,6 +55,8 @@ struct CtorKey {
   unsigned AlternativeIndex = 0;
   SmallVector<QualType, 4> AlternativeTypes;
   SmallVector<unsigned char, 4> ProjectableAlternatives;
+  SmallVector<unsigned char, 4> EmptyAlternatives;
+  SmallVector<Expr *, 4> AlternativeValues;
   bool IsExhaustive = true;
   QualType OpenAlternativeType;
   bool OpenAlternativeHasEmpty = false;
@@ -113,13 +115,16 @@ struct CtorKey {
   static CtorKey alternativeCtor(QualType OwnerType, unsigned Index,
                                  ArrayRef<QualType> Types,
                                  ArrayRef<unsigned char> Projectable,
-                                 bool IsExhaustive) {
+                                 ArrayRef<unsigned char> Empty,
+                                 ArrayRef<Expr *> Values, bool IsExhaustive) {
     CtorKey C;
     C.K = Alternative;
     C.AlternativeOwnerType = OwnerType;
     C.AlternativeIndex = Index;
     C.AlternativeTypes.append(Types.begin(), Types.end());
     C.ProjectableAlternatives.append(Projectable.begin(), Projectable.end());
+    C.EmptyAlternatives.append(Empty.begin(), Empty.end());
+    C.AlternativeValues.append(Values.begin(), Values.end());
     C.IsExhaustive = IsExhaustive;
     return C;
   }
@@ -402,6 +407,17 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
   case MatchPattern::ExpressionPatternClass: {
     auto *P = static_cast<ExpressionPattern *>(Pattern);
     const MatchPatternInfo *Info = Instantiation->find(P);
+    if (Info && Info->IsAlternativeValuePattern) {
+      CoveragePatterns Results;
+      for (unsigned Index : Info->SelectedAlternatives)
+        Results.push_back(CoveragePattern::ctor(
+            CtorKey::alternativeCtor(
+                Info->AlternativeProviderType, Index, Info->AlternativeTypes,
+                Info->ProjectableAlternatives, Info->EmptyAlternatives,
+                Info->AlternativeValues, Info->IsExhaustive),
+            P->getBeginLoc()));
+      return Results;
+    }
     if (auto Constants = constantPatternsFor(
             S, Info ? Info->Condition : nullptr, Type, P->getBeginLoc()))
       return std::move(*Constants);
@@ -485,7 +501,8 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
     for (unsigned Index : Info->SelectedAlternatives) {
       CtorKey C = CtorKey::alternativeCtor(
           Info->AlternativeProviderType, Index, Info->AlternativeTypes,
-          Info->ProjectableAlternatives, Info->IsExhaustive);
+          Info->ProjectableAlternatives, Info->EmptyAlternatives,
+          Info->AlternativeValues, Info->IsExhaustive);
       CoveragePattern Result =
           CoveragePattern::ctor(std::move(C), P->getBeginLoc());
       if (!Info->ProjectableAlternatives[Index] || !P->getSubPattern()) {
@@ -772,7 +789,8 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
     for (unsigned I = 0; I < P.C.AlternativeTypes.size(); ++I)
       Ctors.push_back(CtorKey::alternativeCtor(
           P.C.AlternativeOwnerType, I, P.C.AlternativeTypes,
-          P.C.ProjectableAlternatives, P.C.IsExhaustive));
+          P.C.ProjectableAlternatives, P.C.EmptyAlternatives,
+          P.C.AlternativeValues, P.C.IsExhaustive));
     // A protocol can advertise an out-of-range state, such as a valueless
     // variant, without making that state required for exhaustiveness.
     if (Domain == ConstructorDomain::RequiredAndResidual && !P.C.IsExhaustive)
@@ -1017,6 +1035,13 @@ std::string printTypePattern(ASTContext &Context, QualType Type) {
   return Type.getAsString(Context.getPrintingPolicy());
 }
 
+std::string printExpressionPattern(ASTContext &Context, const Expr *E) {
+  std::string Result;
+  llvm::raw_string_ostream OS(Result);
+  E->printPretty(OS, nullptr, Context.getPrintingPolicy());
+  return Result;
+}
+
 std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
                                 unsigned &Offset) {
   if (Offset == Witness.size())
@@ -1024,6 +1049,12 @@ std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
 
   const CtorKey &C = Witness[Offset++];
   if (C.K == CtorKey::Alternative) {
+    if (C.EmptyAlternatives[C.AlternativeIndex])
+      return "{}";
+    if (C.AlternativeIndex < C.AlternativeValues.size() &&
+        C.AlternativeValues[C.AlternativeIndex])
+      return printExpressionPattern(Context,
+                                    C.AlternativeValues[C.AlternativeIndex]);
     if (C.ProjectableAlternatives[C.AlternativeIndex]) {
       if (Offset < Witness.size() && Witness[Offset].K == CtorKey::Wildcard) {
         ++Offset;
@@ -1034,7 +1065,7 @@ std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
       }
       return "{ " + printWitnessPattern(Context, Witness, Offset) + " }";
     }
-    return "{}";
+    return "{ .[" + llvm::utostr(C.AlternativeIndex) + "] }";
   }
   if (C.K == CtorKey::OpenAlternative) {
     if (Offset < Witness.size() && Witness[Offset].K == CtorKey::Wildcard) {
