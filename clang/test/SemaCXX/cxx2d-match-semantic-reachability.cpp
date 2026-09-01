@@ -32,6 +32,9 @@ template<>
 struct std::alternative_traits<Choice> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, int, Sized>;
+
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
     return choice.state;
   }
@@ -80,6 +83,10 @@ struct One {
 template<>
 struct std::alternative_traits<One> {
   static constexpr __SIZE_TYPE__ size = 1;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
 
   static constexpr __SIZE_TYPE__ index(const One&) noexcept { return 0; }
 
