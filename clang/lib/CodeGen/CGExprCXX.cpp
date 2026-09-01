@@ -2631,6 +2631,12 @@ emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;
   }
+  if (const auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *Info = Instantiation->find(P);
+    if (Info && Info->TypePatternDeclaration)
+      CGF.EmitVarDecl(*Info->TypePatternDeclaration);
+    return;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
@@ -2659,6 +2665,17 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
           EmitVarDecl(*Projection->getProjectedVar());
       }
     }
+    return;
+  }
+  if (const auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *Info = Instantiation->find(P);
+    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+    const VarDecl *Projected =
+        Projection ? Projection->getProjectedVar() : nullptr;
+    if (Info && Info->TypePatternDeclaration && Projection &&
+        Projection->getKind() == MatchProjection::CastProjection && Projected &&
+        !LocalDeclMap.count(Projected))
+      EmitVarDecl(*Projected);
     return;
   }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
@@ -2738,6 +2755,10 @@ hasPatternDeclarations(const MatchPattern *Pattern,
                        const MatchPatternInstantiation *Instantiation) {
   if (isa<DeclarationPattern>(Pattern))
     return true;
+  if (const auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *Info = Instantiation->find(P);
+    return Info && Info->TypePatternDeclaration;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
     return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
                         [&](const MatchPattern *Child) {

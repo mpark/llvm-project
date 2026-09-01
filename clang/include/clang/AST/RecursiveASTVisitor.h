@@ -3308,7 +3308,10 @@ bool RecursiveASTVisitor<Derived>::TraverseMatchPattern(MatchPattern *P) {
         static_cast<TypePattern *>(P)->getTypeSourceInfo()->getTypeLoc());
   case MatchPattern::AlternativePatternClass: {
     auto *Alternative = static_cast<AlternativePattern *>(P);
-    if (Alternative->getSelector())
+    if (Alternative->getTypeConstraintSelector())
+      TRY_TO(getDerived().TraverseConceptReference(
+          Alternative->getTypeConstraintSelector()));
+    else if (Alternative->getSelector())
       TRY_TO(getDerived().TraverseMatchPattern(Alternative->getSelector()));
     for (MatchPattern *Child : P->children())
       TRY_TO(getDerived().TraverseMatchPattern(Child));

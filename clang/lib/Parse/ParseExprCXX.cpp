@@ -3913,7 +3913,8 @@ static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
       MatchPattern::AlternativePatternClass) {
     auto *Alternative = static_cast<AlternativePattern *>(Pattern);
     if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-        Alternative->isTypeSelected())
+        Alternative->isTypeSelected() ||
+        Alternative->isTypeConstraintSelected())
       return true;
   }
   return llvm::any_of(Pattern->children(),
@@ -4737,6 +4738,76 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
       return true;
     }
     ColonLoc = PrevTokLocation;
+  }
+
+  if (!Name) {
+    bool InvalidTypeConstraint;
+    {
+      ColonProtectionRAIIObject ColonProtection(*this);
+      InvalidTypeConstraint = TryAnnotateTypeConstraint();
+    }
+    if (InvalidTypeConstraint) {
+      T.skipToEnd();
+      return true;
+    }
+    unsigned AfterConstraint = Tok.is(tok::annot_cxxscope) ? 2 : 1;
+    if (isTypeConstraintAnnotation() &&
+        GetLookAheadToken(AfterConstraint).is(tok::colon)) {
+      SourceLocation ConstraintBegin = Tok.getLocation();
+      CXXScopeSpec SS;
+      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                     /*ObjectHasErrors=*/false,
+                                     /*EnteringContext=*/false);
+      auto *Constraint =
+          static_cast<TemplateIdAnnotation *>(Tok.getAnnotationValue());
+      assert(Constraint->Kind == TNK_Concept_template &&
+             "expected a type-constraint annotation");
+      SourceRange ConstraintNameRange = ConsumeAnnotationToken();
+      SourceRange ConstraintRange(ConstraintBegin,
+                                  ConstraintNameRange.getEnd());
+      if (Actions.CheckTypeConstraint(Constraint)) {
+        T.skipToEnd();
+        return true;
+      }
+
+      const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
+      if (Constraint->LAngleLoc.isValid()) {
+        TemplateArgumentListInfo Args(Constraint->LAngleLoc,
+                                      Constraint->RAngleLoc);
+        ASTTemplateArgsPtr ParsedArgs(Constraint->getTemplateArgs(),
+                                      Constraint->NumArgs);
+        Actions.translateTemplateArguments(ParsedArgs, Args);
+        ArgsAsWritten =
+            ASTTemplateArgumentListInfo::Create(Actions.Context, Args);
+      }
+
+      NamedDecl *FoundDecl;
+      if (UsingShadowDecl *USD =
+              Constraint->Template.get().getAsUsingShadowDecl())
+        FoundDecl = USD;
+      else
+        FoundDecl = cast_if_present<NamedDecl>(
+            Constraint->Template.get().getAsTemplateDecl());
+      ConceptReference *CR = ConceptReference::Create(
+          Actions.Context,
+          SS.isSet() ? SS.getWithLocInContext(Actions.Context)
+                     : NestedNameSpecifierLoc{},
+          Constraint->TemplateKWLoc,
+          DeclarationNameInfo(Constraint->Name, Constraint->TemplateNameLoc),
+          FoundDecl, Constraint->Template.get().getAsTemplateDecl(),
+          ArgsAsWritten);
+
+      ColonLoc = ConsumeToken();
+      ActionResult<MatchPattern *> SubPattern = ParsePattern();
+      if (SubPattern.isInvalid()) {
+        T.skipToEnd();
+        return true;
+      }
+      if (T.consumeClose())
+        return true;
+      return Actions.ActOnTypeConstraintAlternativePattern(
+          T.getRange(), ConstraintRange, CR, ColonLoc, SubPattern.get());
+    }
   }
 
   ActionResult<MatchPattern *> Pattern = [&] {

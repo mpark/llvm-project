@@ -21344,6 +21344,15 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
             return false;
     return true;
   }
+  if (const auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    const VarDecl *Declaration =
+        PatternInfo ? PatternInfo->TypePatternDeclaration : nullptr;
+    if (!Declaration)
+      return true;
+    Info.MatchExprLocalVarDecls.insert(Declaration);
+    return EvaluateDecl(Info, Declaration);
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
@@ -21365,6 +21374,14 @@ static bool EvaluateSharedDeclarationProjections(
     const MatchProjection *Projection =
         PatternInfo ? PatternInfo->Projection : nullptr;
     return !Projection ||
+           EvaluateProjectionValue(Projection, Info, &ProjectionCache);
+  }
+  if (const auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *PatternInfo = Instantiation->find(P);
+    const MatchProjection *Projection =
+        PatternInfo ? PatternInfo->Projection : nullptr;
+    return !PatternInfo || !PatternInfo->TypePatternDeclaration ||
+           !Projection ||
            EvaluateProjectionValue(Projection, Info, &ProjectionCache);
   }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {

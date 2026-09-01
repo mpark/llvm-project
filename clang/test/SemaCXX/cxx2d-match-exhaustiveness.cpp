@@ -525,6 +525,10 @@ struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 4;
 
+  template<__SIZE_TYPE__ I>
+    requires (I < 2)
+  using type = __type_pack_element<I, bool, int>;
+
   struct names {
     static constexpr alternative_name<AT> flag = 0, number = 1;
   };
@@ -625,6 +629,10 @@ struct NullableChoiceView {
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = true;
 
+  template<__SIZE_TYPE__ I>
+    requires (I == 1)
+  using type = int;
+
   static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
     return choice.engaged ? 1 : 0;
   }
@@ -641,6 +649,9 @@ struct std::alternative_traits<NullableChoice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = true;
+
+  template<__SIZE_TYPE__ I>
+  using type = int;
 
   static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
     return choice.engaged ? 0 : 1;
@@ -712,6 +723,9 @@ template<>
 struct std::alternative_traits<ResidualChoice> {
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = false;
+
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, bool, int>;
 
   static constexpr __SIZE_TYPE__ index(const ResidualChoice& choice) noexcept {
     return choice.state;

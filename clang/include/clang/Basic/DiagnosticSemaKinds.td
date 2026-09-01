@@ -14533,6 +14533,10 @@ def err_open_alternative_pattern_not_type_directed : Error<
   "pattern with a non-placeholder, non-void type">;
 def err_open_alternative_index_selector : Error<
   "expression alternative selector cannot be used with open alternative type %0">;
+def err_open_alternative_type_constraint_selector : Error<
+  "type-constraint alternative selector cannot be used with open alternative type %0">;
+def err_type_constraint_selector_not_satisfied : Error<
+  "projected type %0 does not satisfy type constraint %1">;
 def err_alternative_index_out_of_range : Error<
   "alternative index %0 is outside the range [0, %1)">;
 def err_open_alternative_try_cast_result : Error<

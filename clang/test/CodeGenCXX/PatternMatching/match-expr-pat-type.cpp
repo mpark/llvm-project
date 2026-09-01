@@ -3,7 +3,9 @@
 // RUN:   | FileCheck %s
 
 // CHECK-LABEL: define{{.*}} i1 @_Z11matches_inti
-// CHECK: ret i1 true
+// CHECK: load i32
+// CHECK: store i32
+// CHECK: ret i1 %{{.*}}
 bool matches_int(int value) {
   return value match case int;
 }
@@ -28,11 +30,18 @@ struct Copyable {
   Copyable(const Copyable&) { ++copies; }
 };
 
-// CHECK-LABEL: define{{.*}} i1 @_Z24checks_but_does_not_copyR8Copyable
-// CHECK-NOT: call{{.*}}CopyableC
-// CHECK: ret i1 true
-bool checks_but_does_not_copy(Copyable& value) {
+// CHECK-LABEL: define{{.*}} i1 @_Z17checks_and_copiesR8Copyable
+// CHECK: call void @_ZN8CopyableC
+// CHECK: ret i1 %{{.*}}
+bool checks_and_copies(Copyable& value) {
   return value match case Copyable;
+}
+
+// CHECK-LABEL: define{{.*}} i1 @_Z23reference_does_not_copyR8Copyable
+// CHECK-NOT: call{{.*}}CopyableC
+// CHECK: ret i1 %{{.*}}
+bool reference_does_not_copy(Copyable& value) {
+  return value match case Copyable&;
 }
 
 int void_evaluations;

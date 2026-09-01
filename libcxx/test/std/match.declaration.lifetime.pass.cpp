@@ -73,6 +73,53 @@ bool indirect_subject_lives_through_controlled_statement(int value) {
   return observed && alive == 0;
 }
 
+struct UnnamedTracked {
+  UnnamedTracked(int* alive, int* copies) : alive(alive), copies(copies) {
+    ++*alive;
+  }
+  UnnamedTracked(const UnnamedTracked& other)
+      : alive(other.alive), copies(other.copies) {
+    ++*alive;
+    ++*copies;
+  }
+  ~UnnamedTracked() { --*alive; }
+
+  int* alive;
+  int* copies;
+};
+
+bool unnamed_value_pattern_initializes() {
+  int alive = 0;
+  int copies = 0;
+  UnnamedTracked subject(&alive, &copies);
+  int observed = subject match {
+    case UnnamedTracked if (alive == 2) => alive;
+    default => -1;
+  };
+  return observed == 2 && alive == 1 && copies == 1;
+}
+
+bool unnamed_reference_pattern_does_not_copy() {
+  int alive = 0;
+  int copies = 0;
+  UnnamedTracked subject(&alive, &copies);
+  int observed = subject match {
+    case UnnamedTracked& => alive;
+  };
+  return observed == 1 && alive == 1 && copies == 0;
+}
+
+bool failed_guard_destroys_unnamed_value_before_next_arm() {
+  int alive = 0;
+  int copies = 0;
+  UnnamedTracked subject(&alive, &copies);
+  int observed = subject match {
+    case UnnamedTracked if (false) => 0;
+    case UnnamedTracked => alive;
+  };
+  return observed == 2 && alive == 1 && copies == 2;
+}
+
 int main(int, char**) {
   if (declaration_lifetime_in_if(0) != 2)
     return 1;
@@ -86,5 +133,11 @@ int main(int, char**) {
     return 5;
   if (!indirect_subject_lives_through_controlled_statement(2))
     return 6;
+  if (!unnamed_value_pattern_initializes())
+    return 7;
+  if (!unnamed_reference_pattern_does_not_copy())
+    return 8;
+  if (!failed_guard_destroys_unnamed_value_before_next_arm())
+    return 9;
   return 0;
 }

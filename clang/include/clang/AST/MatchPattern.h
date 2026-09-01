@@ -280,7 +280,14 @@ public:
 
 class AlternativePattern final : public MatchPattern {
 public:
-  enum AlternativeKind { Generic, Named, Type, Expression, Empty };
+  enum AlternativeKind {
+    Generic,
+    Named,
+    Type,
+    TypeConstraint,
+    Expression,
+    Empty
+  };
 
 private:
   AlternativeKind Kind;
@@ -289,6 +296,7 @@ private:
 
   IdentifierInfo *Name = nullptr;
   MatchPattern *Selector = nullptr;
+  ConceptReference *Constraint = nullptr;
 
   SourceLocation ColonLoc;
   MatchPattern *Pattern = nullptr;
@@ -324,6 +332,10 @@ public:
     setDependence(computeDependence() | Selector->getDependence());
   }
 
+  explicit AlternativePattern(SourceRange Braces, SourceRange ConstraintRange,
+                              ConceptReference *Constraint,
+                              SourceLocation ColonLoc, MatchPattern *Pattern);
+
   explicit AlternativePattern(SourceRange Braces)
       : MatchPattern(AlternativePatternClass), Kind(Empty), Braces(Braces) {
     setDependence(ExprDependence::None);
@@ -332,8 +344,12 @@ public:
   AlternativeKind getAlternativeKind() const { return Kind; }
   bool isNamed() const { return Kind == Named; }
   bool isTypeSelected() const { return Kind == Type; }
+  bool isTypeConstraintSelected() const { return Kind == TypeConstraint; }
   bool isExpressionSelected() const { return Kind == Expression; }
-  bool isSelected() const { return isTypeSelected() || isExpressionSelected(); }
+  bool isSelected() const {
+    return isTypeSelected() || isTypeConstraintSelected() ||
+           isExpressionSelected();
+  }
   bool isEmpty() const { return Kind == Empty; }
 
   SourceRange getDiscriminatorRange() const { return DiscriminatorRange; }
@@ -341,6 +357,10 @@ public:
   IdentifierInfo *getName() const { return Name; }
   const MatchPattern *getSelector() const { return Selector; }
   MatchPattern *getSelector() { return Selector; }
+  const ConceptReference *getTypeConstraintSelector() const {
+    return Constraint;
+  }
+  ConceptReference *getTypeConstraintSelector() { return Constraint; }
   const TypePattern *getTypeSelector() const {
     return isTypeSelected() ? static_cast<const TypePattern *>(Selector)
                             : nullptr;
@@ -444,6 +464,7 @@ struct MatchPatternInfo {
   ArrayRef<unsigned> SelectedAlternatives;
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
+  VarDecl *TypePatternDeclaration = nullptr;
   bool IsExhaustive = true;
   bool IsOpenAlternative = false;
   bool OpenAlternativeHasEmpty = false;

@@ -76,6 +76,9 @@ struct Choice {
 template <> struct std::alternative_traits<Choice> {
   static constexpr unsigned size = 2;
 
+  template <unsigned I>
+  using type = Object;
+
   static constexpr unsigned index(const Choice &choice) noexcept {
     return choice.active;
   }

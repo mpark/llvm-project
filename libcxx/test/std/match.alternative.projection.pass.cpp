@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -91,6 +92,24 @@ int match_variant_type_selectors(const std::variant<int, double>& value) {
   };
 }
 
+template<class T, class U>
+concept SameAs = std::same_as<T, U>;
+
+int match_variant_type_constraint_selectors(
+    const std::variant<int, double>& value) {
+  return value match {
+    case { std::integral: const auto& integer } => integer;
+    case { SameAs<double>: const auto& real } => static_cast<int>(real) + 10;
+  };
+}
+
+int match_dependent_type_constraint_selector(const auto& value) {
+  return value match {
+    case { std::integral: const auto& integer } => integer;
+    case { _ } => -1;
+  };
+}
+
 int match_variant_index_selectors(const std::variant<int, int>& value) {
   return value match {
     case { .[0]: auto integer } => integer + 20;
@@ -110,6 +129,31 @@ int match_recursive_type_selector(
     case { std::tuple<int, int>: [auto first, auto second] } =>
         first * 10 + second;
     case { double: auto real } => static_cast<int>(real);
+  };
+}
+
+int selector_copies;
+
+struct SelectorValue {
+  int value;
+
+  explicit SelectorValue(int value) : value(value) {}
+  SelectorValue(const SelectorValue& other) : value(other.value) {
+    ++selector_copies;
+  }
+};
+
+int match_type_selector_does_not_initialize(
+    const std::variant<SelectorValue>& value) {
+  return value match {
+    case { SelectorValue: const auto& selected } => selected.value;
+  };
+}
+
+int match_projected_unnamed_type_pattern_initializes(
+    const std::variant<SelectorValue>& value) {
+  return value match {
+    case { SelectorValue } => selector_copies;
   };
 }
 
@@ -364,6 +408,10 @@ struct std::alternative_traits<PrvalueAlternative> {
   static constexpr std::size_t size = 1;
   static constexpr bool is_exhaustive = true;
 
+  template<std::size_t I>
+    requires(I == 0)
+  using type = PrvalueProjection;
+
   static constexpr std::size_t index(const PrvalueAlternative&) noexcept {
     return 0;
   }
@@ -415,6 +463,12 @@ int main(int, char**) {
   assert(match_variant_type_selectors(0) == 14);
   assert(match_variant_type_selectors(9) == 9);
   assert(match_variant_type_selectors(2.5) == 12);
+  assert(match_variant_type_constraint_selectors(4) == 4);
+  assert(match_variant_type_constraint_selectors(2.5) == 12);
+  assert(match_dependent_type_constraint_selector(
+             std::variant<int, double>(5)) == 5);
+  assert(match_dependent_type_constraint_selector(
+             std::variant<int, double>(2.5)) == -1);
   assert(match_variant_index_selectors(
              std::variant<int, int>(std::in_place_index<0>, 1)) == 21);
   assert(match_variant_index_selectors(
@@ -425,6 +479,12 @@ int main(int, char**) {
              std::variant<int, int>(std::in_place_index<1>, 16)) == 16);
   assert(match_recursive_type_selector(std::tuple(2, 3)) == 23);
   assert(match_recursive_type_selector(4.0) == 4);
+  std::variant<SelectorValue> selector_value(std::in_place_index<0>, 19);
+  selector_copies = 0;
+  assert(match_type_selector_does_not_initialize(selector_value) == 19);
+  assert(selector_copies == 0);
+  assert(match_projected_unnamed_type_pattern_initializes(selector_value) == 1);
+  assert(selector_copies == 1);
   assert(match_dependent_zero(0) == 84);
   assert(match_dependent_zero(1) == 85);
   assert(match_dependent_zero(0.0) == 84);
