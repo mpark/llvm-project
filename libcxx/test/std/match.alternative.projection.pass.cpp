@@ -182,10 +182,18 @@ struct Shape {
 
 struct Circle : Shape {};
 
+int match_pointer_downcast(Shape* value) {
+  return value match {
+    case { Circle& } => 74;
+    case {} => 75;
+    case _ => 76;
+  };
+}
+
 int match_projected_downcast(const std::variant<Shape*, int>& value) {
   return value match {
-    case { Circle* } => 76;
-    case { _ } => 77;
+    case { { Circle& } } => 77;
+    case { _ } => 78;
   };
 }
 
@@ -419,9 +427,12 @@ int main(int, char**) {
              std::variant<int, int>(std::in_place_index<1>, 14)) == 75);
   Circle circle;
   Shape shape;
-  assert(match_projected_downcast(std::variant<Shape*, int>(&circle)) == 76);
-  assert(match_projected_downcast(std::variant<Shape*, int>(&shape)) == 77);
-  assert(match_projected_downcast(std::variant<Shape*, int>(0)) == 77);
+  assert(match_pointer_downcast(&circle) == 74);
+  assert(match_pointer_downcast(nullptr) == 75);
+  assert(match_pointer_downcast(&shape) == 76);
+  assert(match_projected_downcast(std::variant<Shape*, int>(&circle)) == 77);
+  assert(match_projected_downcast(std::variant<Shape*, int>(&shape)) == 78);
+  assert(match_projected_downcast(std::variant<Shape*, int>(0)) == 78);
   assert(match_repeated_value(
              std::variant<int, int>(std::in_place_index<0>, 0)) == 100);
   assert(match_repeated_value(
