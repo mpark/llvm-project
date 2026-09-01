@@ -1,8 +1,18 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching %s
 
+inline constexpr int empty_state = 0;
+
 namespace std {
 template<class T>
 struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 
 template<class Provider>
 struct alternative_name {
@@ -36,10 +46,10 @@ struct TupleChoice {
 template<>
 struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, int, double>;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^double
+  };
+  static constexpr bool has_residual_states = false;
 
   struct names {
     static constexpr alternative_name<AT> first = 0, second = 1;
@@ -60,10 +70,10 @@ struct std::alternative_traits<Choice> {
 
 template<>
 struct std::alternative_traits<TupleChoice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, OneElement, TwoElements>;
+  static constexpr alternative_info alternatives[] = {
+    ^^OneElement, ^^TwoElements
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const TupleChoice& choice) noexcept {
     return choice.state;
@@ -83,6 +93,16 @@ struct MaybeInt {
   int value;
 };
 
+struct IndexOnlyChoice {
+  unsigned state;
+};
+
+struct AnonymousProjection {
+  int value;
+};
+
+struct VoidProjection {};
+
 struct MultiViewChoice {
   bool engaged;
   int value;
@@ -91,12 +111,10 @@ struct MultiViewChoice {
 };
 
 struct NullableChoiceView {
-  static constexpr __SIZE_TYPE__ size = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 1)
-  using type = int;
+  static constexpr std::alternative_info alternatives[] = {
+    {^^empty_state, true}, ^^int
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
     ++*choice.nullable_index_calls;
@@ -112,11 +130,10 @@ struct NullableChoiceView {
 
 template<>
 struct std::alternative_traits<MaybeInt> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
@@ -130,14 +147,48 @@ struct std::alternative_traits<MaybeInt> {
 };
 
 template<>
+struct std::alternative_traits<IndexOnlyChoice> {
+  static constexpr alternative_info alternatives[] = {{}, {}};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(IndexOnlyChoice value) noexcept {
+    return value.state;
+  }
+};
+
+template<>
+struct std::alternative_traits<AnonymousProjection> {
+  static constexpr alternative_info alternatives[] = {{}};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(AnonymousProjection) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+template<>
+struct std::alternative_traits<VoidProjection> {
+  static constexpr alternative_info alternatives[] = {^^void};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(VoidProjection) noexcept { return 0; }
+
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I == 0)
+  static constexpr void get(Self&&) {}
+};
+
+template<>
 struct std::alternative_traits<MultiViewChoice> {
   using AT = alternative_traits;
-  static constexpr __SIZE_TYPE__ size = 2;
-  static constexpr bool is_exhaustive = true;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
     ++*choice.primary_index_calls;
@@ -347,6 +398,40 @@ static_assert(match_choice({0, 3, 4}) == 3);
 static_assert(match_choice({1, 3, 4}) == 14);
 static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
+static_assert(IndexOnlyChoice{0} match {
+  case { .[0] } => true;
+  case { .[1] } => false;
+});
+static_assert(IndexOnlyChoice{1} match {
+  case { .[0] } => false;
+  case { .[1] } => true;
+});
+
+template<unsigned I>
+constexpr bool index_only_state(IndexOnlyChoice choice) {
+  return choice match case { .[I] };
+}
+
+static_assert(index_only_state<0>({0}));
+static_assert(!index_only_state<0>({1}));
+static_assert(index_only_state<1>({1}));
+constexpr int match_anonymous_by_index(AnonymousProjection choice) {
+  return choice match {
+    case { .[0]: int value } => value;
+  };
+}
+
+constexpr int match_anonymous_generically(AnonymousProjection choice) {
+  return choice match {
+    case { int value } => value;
+  };
+}
+
+static_assert(match_anonymous_by_index({42}) == 42);
+static_assert(match_anonymous_generically({42}) == 42);
+static_assert(VoidProjection{} match {
+  case { void: _ } => true;
+});
 static_assert(match_generic({0, 3, 4}) == 1);
 static_assert(match_generic({1, 3, 4}) == 2);
 static_assert(match_type_selector({0, 0, 4}) == 20);

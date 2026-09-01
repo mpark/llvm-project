@@ -3,6 +3,14 @@
 namespace std {
 template<class T>
 struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
 }
 
 struct Sized {
@@ -30,10 +38,10 @@ struct Choice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  static constexpr __SIZE_TYPE__ size = 2;
-
-  template<__SIZE_TYPE__ I>
-  using type = __type_pack_element<I, int, Sized>;
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^Sized
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
     return choice.state;
@@ -82,11 +90,10 @@ struct One {
 
 template<>
 struct std::alternative_traits<One> {
-  static constexpr __SIZE_TYPE__ size = 1;
-
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
-  using type = int;
+  static constexpr alternative_info alternatives[] = {
+    ^^int
+  };
+  static constexpr bool has_residual_states = false;
 
   static constexpr __SIZE_TYPE__ index(const One&) noexcept { return 0; }
 
