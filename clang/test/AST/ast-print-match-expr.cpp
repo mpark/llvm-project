@@ -34,6 +34,9 @@ struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, int, double>;
+
   struct names {
     static constexpr alternative_name<AT> integer = 0, real = 1;
   };
@@ -50,6 +53,9 @@ struct std::alternative_traits<Choice> {
       return (static_cast<Self&&>(value).real);
   }
 };
+
+template<class T>
+concept Integral = __is_integral(T);
 
 int select(Pair pair) {
   return pair match -> int {
@@ -117,6 +123,20 @@ int state_only_alternatives(Choice choice) {
 // CHECK-NEXT: {{^        }}case { .[0] } => 0;
 // CHECK-NEXT: {{^        }}case { .[1] } => 1;
 // CHECK-NEXT: {{^    }}};
+
+int constrained_alternative(Choice choice) {
+  return choice match {
+    case { Integral: auto value } => value;
+    case { _ } => 0;
+  };
+}
+
+// CHECK-LABEL: int constrained_alternative(Choice choice) {
+// CHECK-NEXT: {{^    }}return choice match {
+// CHECK-NEXT: {{^        }}case { Integral: auto value } => value;
+// CHECK-NEXT: {{^        }}case { _ } => 0;
+// CHECK-NEXT: {{^    }}};
+
 int pointer(int *value) {
   return value match {
     case { int& projected } => projected;

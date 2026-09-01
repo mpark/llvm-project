@@ -1112,8 +1112,11 @@ public:
                   ->getType());
         break;
       case MatchPattern::AlternativePatternClass:
-        if (const MatchPattern *Selector =
-                static_cast<const AlternativePattern *>(Node)->getSelector())
+        if (const auto *Alternative =
+                static_cast<const AlternativePattern *>(Node);
+            Alternative->getTypeConstraintSelector())
+          Visit(Alternative->getTypeConstraintSelector());
+        else if (const MatchPattern *Selector = Alternative->getSelector())
           VisitMatchPattern(Selector);
         break;
       default:

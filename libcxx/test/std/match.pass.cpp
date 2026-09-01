@@ -538,6 +538,9 @@ namespace std {
   struct alternative_traits<Variant> {
     static constexpr size_t size = 3;
 
+    template <size_t I>
+    using type = __type_pack_element<I, int, double, float>;
+
     static constexpr size_t index(const Variant& value) noexcept {
       return value.index();
     }

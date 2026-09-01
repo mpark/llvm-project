@@ -114,6 +114,9 @@ template<>
 struct std::alternative_traits<Choice> {
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, int, double>;
+
   static constexpr __SIZE_TYPE__ index(const Choice& value) noexcept {
     return value.active;
   }

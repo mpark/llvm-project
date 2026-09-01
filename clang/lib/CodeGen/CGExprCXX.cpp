@@ -2696,6 +2696,9 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     }
     return;
   }
+  if (isa<TypePattern>(Pattern)) {
+    return;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))

@@ -38,6 +38,9 @@ struct std::alternative_traits<Choice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
 
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, int, double>;
+
   struct names {
     static constexpr alternative_name<AT> first = 0, second = 1;
   };
@@ -58,6 +61,9 @@ struct std::alternative_traits<Choice> {
 template<>
 struct std::alternative_traits<TupleChoice> {
   static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+  using type = __type_pack_element<I, OneElement, TwoElements>;
 
   static constexpr __SIZE_TYPE__ index(const TupleChoice& choice) noexcept {
     return choice.state;
@@ -88,6 +94,10 @@ struct NullableChoiceView {
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = true;
 
+  template<__SIZE_TYPE__ I>
+    requires (I == 1)
+  using type = int;
+
   static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
     ++*choice.nullable_index_calls;
     return choice.engaged ? 1 : 0;
@@ -103,6 +113,10 @@ struct NullableChoiceView {
 template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr __SIZE_TYPE__ size = 2;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
 
   static constexpr __SIZE_TYPE__ index(const MaybeInt& value) noexcept {
     return value.engaged ? 0 : 1;
@@ -120,6 +134,10 @@ struct std::alternative_traits<MultiViewChoice> {
   using AT = alternative_traits;
   static constexpr __SIZE_TYPE__ size = 2;
   static constexpr bool is_exhaustive = true;
+
+  template<__SIZE_TYPE__ I>
+    requires (I == 0)
+  using type = int;
 
   static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
     ++*choice.primary_index_calls;
@@ -169,12 +187,53 @@ constexpr int match_type_selector(Choice choice) {
   };
 }
 
+template<class T>
+concept Integral = __is_integral(T);
+
+template<class T, class U>
+concept SameAs = __is_same(T, U);
+
+constexpr int match_type_constraint_selector(Choice choice) {
+  return choice match {
+    case { Integral: auto value } => value;
+    case { SameAs<double>: auto value } => static_cast<int>(value) + 10;
+  };
+}
+
+template<class T>
+constexpr int match_dependent_type_constraint_selector(Choice choice) {
+  return choice match {
+    case { SameAs<T>: auto value } => static_cast<int>(value);
+    case { _ } => -1;
+  };
+}
+
+struct ChoiceWithTail {
+  Choice choice;
+  int tail;
+};
+
+constexpr int match_nested_type_constraint_selector(ChoiceWithTail value) {
+  return value match {
+    case [{ Integral: auto head }, auto tail] => head + tail;
+    case _ => -1;
+  };
+}
+
 constexpr int match_expression_selector(Choice choice) {
   return choice match {
     case { .[0]: int value } => value;
     case { .[1]: double value } => static_cast<int>(value) + 10;
   };
 }
+
+static_assert(match_type_constraint_selector({0, 4, 0.0}) == 4);
+static_assert(match_type_constraint_selector({1, 0, 2.5}) == 12);
+static_assert(match_dependent_type_constraint_selector<int>({0, 5, 0.0}) == 5);
+static_assert(match_dependent_type_constraint_selector<int>({1, 0, 3.0}) == -1);
+static_assert(match_dependent_type_constraint_selector<double>({1, 0, 3.0}) == 3);
+static_assert(match_nested_type_constraint_selector({{0, 4, 0.0}, 5}) == 9);
+static_assert(match_nested_type_constraint_selector({{1, 0, 2.5}, 5}) == -1);
 
 template<class T>
 constexpr int match_dependent_type_selector(Choice choice) {
