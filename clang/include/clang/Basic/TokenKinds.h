@@ -18,11 +18,12 @@
 #include "llvm/Support/Compiler.h"
 
 #include <cassert>
+#include <cstdint>
 
 namespace clang {
 
 /// Constants for TokenKinds.def
-enum TokenKey : unsigned {
+enum TokenKey : uint64_t {
 #define EMIT_TOKENKEY
 #include "clang/Basic/BuiltinTraits.inc"
 };
