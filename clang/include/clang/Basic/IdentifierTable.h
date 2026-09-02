@@ -58,7 +58,7 @@ enum KeywordStatus {
 
 /// Translates flags as specified in TokenKinds.def into keyword status
 /// in the given language standard.
-KeywordStatus getKeywordStatus(const LangOptions &LangOpts, unsigned Flags);
+KeywordStatus getKeywordStatus(const LangOptions &LangOpts, uint64_t Flags);
 
 enum class ReservedIdentifierStatus {
   NotReserved = 0,
