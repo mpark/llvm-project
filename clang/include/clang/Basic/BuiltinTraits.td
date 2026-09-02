@@ -41,7 +41,7 @@ def KEYHLSL : TokenKey<0x8000000>;
 def KEYFIXEDPOINT : TokenKey<0x10000000>;
 def KEYDEFERTS : TokenKey<0x20000000>;
 def KEYNOHLSL : TokenKey<0x40000000>;
-def KEYREFLECT : TokenKey<0x80000000>;
+def KEYREFLECT : TokenKey<0x100000000>;
 
 def KEYMAX : TokenKey<KEYREFLECT.Value>;
 def KEYALLCXX : TokenKey<!or(KEYCXX.Value, KEYCXX11.Value, KEYCXX20.Value)>;
