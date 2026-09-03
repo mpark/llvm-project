@@ -4798,15 +4798,12 @@ static bool interp_builtin_ia32_cvt_vector_to_int(InterpState &S, CodePtr OpPC,
   return true;
 }
 
-static bool interp__builtin_meta_is_type(InterpState &S, CodePtr OpPC,
-                                         const CallExpr *) {
-  const Reflect &R = S.Stk.pop<Reflect>();
-  S.Stk.push<Boolean>(Boolean::from(R.getKind() == ReflectionKind::Type));
-  return true;
-}
-
 bool InterpretBuiltin(InterpState &S, CodePtr OpPC, const CallExpr *Call,
                       uint32_t BuiltinID) {
+  // The prototype's reflection values are not represented in the bytecode VM.
+  if (S.getASTContext().BuiltinInfo.isReflectionMetafunctionBuiltin(BuiltinID))
+    return false;
+
   const InterpFrame *Frame = S.Current;
   switch (BuiltinID) {
   case Builtin::BI__builtin_is_constant_evaluated:
@@ -6962,9 +6959,6 @@ bool InterpretBuiltin(InterpState &S, CodePtr OpPC, const CallExpr *Call,
   case X86::BI__builtin_ia32_cvttpd2dq256:
   case X86::BI__builtin_ia32_cvttps2dq256:
     return interp_builtin_ia32_cvt_vector_to_int(S, OpPC, Call);
-
-  case Builtin::BI__builtin_meta_is_type:
-    return interp__builtin_meta_is_type(S, OpPC, Call);
 
   default:
     return Invalid(S, OpPC);
