@@ -2393,6 +2393,7 @@ Decl *TemplateDeclInstantiator::VisitCXXExpansionStmtDecl(
   // already expanded it, as in that case we no longer want to treat its
   // content as dependent.
   Sema::ContextRAII Context(SemaRef, NewESD, /*NewThis=*/false);
+  Sema::ExpansionStmtSynthesisRAII ExpansionGuard(SemaRef);
 
   StmtResult Expansion =
       SemaRef.SubstStmt(OldESD->getExpansionPattern(), TemplateArgs);

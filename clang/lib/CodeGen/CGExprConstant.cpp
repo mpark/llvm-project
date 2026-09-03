@@ -2628,6 +2628,12 @@ ConstantEmitter::tryEmitPrivate(const APValue &Value, QualType DestType,
         llvm::StructType::get(Complex[0]->getType(), Complex[1]->getType());
     return llvm::ConstantStruct::get(STy, Complex);
   }
+  case APValue::Reflection:
+    // Reflection values have no meaningful runtime representation. They can
+    // nevertheless occur as subobjects of constexpr values that reach
+    // CodeGen, so emit a placeholder with the correct storage type.
+    return llvm::ConstantInt::get(
+        cast<llvm::IntegerType>(CGM.getTypes().ConvertType(DestType)), 1);
   case APValue::Float:
     return llvm::ConstantFP::get(CGM.getLLVMContext(), Value.getFloat());
   case APValue::ComplexFloat: {
