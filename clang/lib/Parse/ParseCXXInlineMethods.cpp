@@ -668,7 +668,8 @@ void Parser::ParseLexedMemberInitializer(LateParsedMemberInitializer &MI) {
   // The initializer isn't actually potentially evaluated unless it is
   // used.
   EnterExpressionEvaluationContext Eval(
-      Actions, Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed);
+      Actions, Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed,
+      MI.Field);
 
   ExprResult Init = ParseCXXMemberInitializer(MI.Field, /*IsFunction=*/false,
                                               EqualLoc);

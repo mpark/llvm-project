@@ -3369,6 +3369,17 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
         ParseCXXNonStaticMemberInitializer(ThisDecl);
     } else if (HasStaticInitializer) {
       // Normal initializer.
+      auto Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluated;
+      if (auto *VD = dyn_cast_or_null<VarDecl>(ThisDecl);
+          VD && getLangOpts().CPlusPlus23) {
+        if (VD->isConstexpr())
+          Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+        else if (auto *CIA = VD->getAttr<ConstInitAttr>();
+                 CIA && CIA->isConstinit())
+          Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+      }
+      EnterExpressionEvaluationContext Context(Actions, Ctx, ThisDecl);
+
       ExprResult Init = ParseCXXMemberInitializer(
           ThisDecl, DeclaratorInfo.isDeclarationOfFunction(), EqualLoc);
 
@@ -3468,27 +3479,11 @@ ExprResult Parser::ParseCXXMemberInitializer(Decl *D, bool IsFunction,
   assert(Tok.isOneOf(tok::equal, tok::l_brace) &&
          "Data member initializer not starting with '=' or '{'");
 
-  bool IsFieldInitialization = isa_and_present<FieldDecl>(D);
-
-  auto Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluated;
-  if (IsFieldInitialization)
-    Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed;
-  else if (auto *VD = dyn_cast_or_null<VarDecl>(D);
-           VD && getLangOpts().CPlusPlus23) {
-    if (VD->isConstexpr())
-      Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
-    else if (auto *CIA = VD->getAttr<ConstInitAttr>();
-             CIA && CIA->isConstinit())
-      Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
-  }
-
-  EnterExpressionEvaluationContext Context(Actions, Ctx, D);
-
   // CWG2760
   // Default member initializers used to initialize a base or member subobject
   // [...] are considered to be part of the function body
   Actions.ExprEvalContexts.back().InImmediateEscalatingFunctionContext =
-      IsFieldInitialization;
+      isa_and_present<FieldDecl>(D);
 
   if (TryConsumeToken(tok::equal, EqualLoc)) {
     if (Tok.is(tok::kw_delete)) {
