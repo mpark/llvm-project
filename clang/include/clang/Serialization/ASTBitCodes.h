@@ -44,7 +44,7 @@ namespace serialization {
 /// Version 4 of AST files also requires that the version control branch and
 /// revision match exactly, since there is no backward compatibility of
 /// AST files at this time.
-const unsigned VERSION_MAJOR = 39;
+const unsigned VERSION_MAJOR = 40;
 
 /// AST file minor version number supported by this version of
 /// Clang.
@@ -747,6 +747,9 @@ enum ASTRecordTypes {
   /// Record that encodes the number of submodules, their base ID in the AST
   /// file, and for each module the relative bit offset into the stream.
   SUBMODULE_METADATA = 80,
+
+  /// Record code for the OpenMP 'requires' directives seen in the TU.
+  OMP_REQUIRES_DECLS = 81,
 };
 
 /// Record types used within a source manager block.

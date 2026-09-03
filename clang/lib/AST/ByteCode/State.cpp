@@ -95,6 +95,11 @@ OptionalDiagnostic State::Note(SourceInfo SI, diag::kind DiagId) {
   return OptionalDiagnostic(&addDiag(SI.getLoc(), DiagId));
 }
 
+void State::addNotes(ArrayRef<PartialDiagnosticAt> Diags) {
+  if (hasActiveDiagnostic())
+    llvm::append_range(*EvalStatus.Diag, Diags);
+}
+
 DiagnosticBuilder State::report(SourceLocation Loc, diag::kind DiagId) {
   return Ctx.getDiagnostics().Report(Loc, DiagId);
 }

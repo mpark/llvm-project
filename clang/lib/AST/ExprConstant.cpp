@@ -66,6 +66,7 @@
 #include "llvm/Support/CRC.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/SipHash.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -9463,8 +9464,14 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
     if (!CheckLiteralType(Info, E))
       return false;
 
-    if (Info.EnableNewConstInterp) {
-      if (!Info.Ctx.getInterpContext().evaluateAsRValue(Info, E, Result))
+    if (Info.Ctx.getLangOpts().EnableNewConstInterp) {
+      interp::EvalSettings Settings(Info.EvalMode, Info.EvalStatus);
+      Settings.InConstantContext = Info.InConstantContext;
+      Settings.CheckingPotentialConstantExpression =
+          Info.CheckingPotentialConstantExpression;
+      Settings.CheckingForUndefinedBehavior =
+          Info.CheckingForUndefinedBehavior;
+      if (!Info.Ctx.getInterpContext().evaluateAsRValue(Settings, E, Result))
         return false;
     } else {
       if (!::Evaluate(Result, Info, E))
@@ -21880,6 +21887,55 @@ public:
 
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
+
+    case Builtin::BIstdc_memreverse8:
+    case Builtin::BI__builtin_stdc_memreverse8: {
+      APSInt N;
+      if (!EvaluateInteger(E->getArg(0), N, Info))
+        return false;
+      uint64_t NElems = N.getZExtValue();
+
+      LValue Ptr;
+      if (!EvaluatePointer(E->getArg(1), Ptr, Info))
+        return false;
+
+      if (!Ptr.checkNullPointerForFoldAccess(Info, E, AK_Assign) ||
+          Ptr.Designator.Invalid)
+        return false;
+
+      QualType CharTy = Ptr.Designator.getType(Info.Ctx);
+      uint64_t RemainingElems = Ptr.Designator.validIndexAdjustments().second;
+      if (NElems > RemainingElems) {
+        uint64_t ArrayIndex =
+            Ptr.Designator.MostDerivedIsArrayElement
+                ? Ptr.Designator.Entries.back().getAsArrayIndex()
+                : (uint64_t)Ptr.Designator.IsOnePastTheEnd;
+        APSInt Index =
+            APSInt::getUnsigned(llvm::SaturatingAdd(ArrayIndex, NElems - 1));
+        Ptr.Designator.diagnosePointerArithmetic(Info, E, Index);
+        return false;
+      }
+
+      if (NElems <= 1)
+        return true;
+
+      LValue Lo = Ptr;
+      LValue Hi = Ptr;
+      if (!HandleLValueArrayAdjustment(Info, E, Hi, CharTy, NElems - 1))
+        return false;
+
+      for (uint64_t I = 0, Half = NElems / 2; I < Half; ++I) {
+        APValue LoVal, HiVal;
+        if (!handleLValueToRValueConversion(Info, E, CharTy, Lo, LoVal) ||
+            !handleLValueToRValueConversion(Info, E, CharTy, Hi, HiVal) ||
+            !handleAssignment(Info, E, Lo, CharTy, HiVal) ||
+            !handleAssignment(Info, E, Hi, CharTy, LoVal) ||
+            !HandleLValueArrayAdjustment(Info, E, Lo, CharTy, 1) ||
+            !HandleLValueArrayAdjustment(Info, E, Hi, CharTy, -1))
+          return false;
+      }
+      return true;
+    }
 
     default:
       return false;

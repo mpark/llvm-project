@@ -118,25 +118,34 @@ struct String {
 template <__SIZE_TYPE__ n>
 String(const char (&str)[n]) -> String<n>;
 
-// Note: Remove this test once we do support them.
-int iterating_expansion_stmts_unsupported() {
+constexpr int iterating_expansion_stmts() {
   static constexpr String s{"abcd"};
   int count = 0;
-  template for (constexpr auto x : s) count++; // expected-error {{iterating expansion statements are not yet supported}}
+  template for (constexpr auto x : s) {
+    (void)x;
+    ++count;
+  }
   return count;
+}
+
+static_assert(iterating_expansion_stmts() == 4);
+
+template <typename F>
+constexpr int invoke_expansion_lambda(F f) {
+  return f(1);
 }
 
 template <typename T>
-int iterating_expansion_stmts_unsupported_dependent() {
-  static constexpr String s{"abcd"};
-  int count = 0;
-  template for (auto x : T(s)) count++; // expected-error {{iterating expansion statements are not yet supported}}
-  return count;
+constexpr int iterating_expansion_stmts_dependent() {
+  static constexpr T s{"12"};
+  int sum = 0;
+  template for (constexpr auto x : s)
+    sum += invoke_expansion_lambda(
+        [](int arg) { return arg + x - '0'; });
+  return sum;
 }
 
-void iterating_expansion_stmts_unsupported_dependent_instantiate() {
-  iterating_expansion_stmts_unsupported_dependent<String<5>>(); // expected-note {{in instantiation of}}
-}
+static_assert(iterating_expansion_stmts_dependent<String<3>>() == 5);
 
 #if 0 // Disabled until we support iterating expansion statements.
 constexpr int f3() {
