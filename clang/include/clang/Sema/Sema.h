@@ -16119,6 +16119,27 @@ public:
 
   std::optional<uint64_t>
   ComputeExpansionSize(CXXExpansionStmtPattern *Expansion);
+
+private:
+  bool IsSynthesizingExpansionStmt = false;
+
+public:
+  bool isSynthesizingExpansionStmt() const {
+    return IsSynthesizingExpansionStmt;
+  }
+
+  class ExpansionStmtSynthesisRAII {
+    Sema &S;
+    bool OldValue;
+
+  public:
+    explicit ExpansionStmtSynthesisRAII(Sema &S, bool Enable = true)
+        : S(S), OldValue(S.IsSynthesizingExpansionStmt) {
+      S.IsSynthesizingExpansionStmt = Enable;
+    }
+
+    ~ExpansionStmtSynthesisRAII() { S.IsSynthesizingExpansionStmt = OldValue; }
+  };
   ///@}
 };
 
