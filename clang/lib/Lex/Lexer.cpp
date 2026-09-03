@@ -4892,8 +4892,10 @@ bool Lexer::validateIdentifier(const std::string &In) {
   };
   static const llvm::sys::UnicodeCharSet DigitChars(DigitRanges);
   static const llvm::sys::UnicodeCharSet NondigitChars(NondigitRanges);
-  static const llvm::sys::UnicodeCharSet XIDStartChars(XIDStartRanges);
-  static const llvm::sys::UnicodeCharSet XIDContinueChars(XIDContinueRanges);
+  static const llvm::sys::UnicodeCharSet XIDStartChars(
+      GeneratedXIDStartRanges);
+  static const llvm::sys::UnicodeCharSet XIDContinueChars(
+      GeneratedXIDContinueRanges);
 
   if (In.size() == 0)
     return false;

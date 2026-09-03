@@ -76,6 +76,47 @@ static auto InitListContainsPack(const InitListExpr *ILE) {
                       [](const Expr *E) { return isa<PackExpansionExpr>(E); });
 }
 
+static ExprResult BuildIterableExpansionSizeExpr(Sema &S, VarDecl *RangeVar) {
+  auto Ctx = Sema::ExpressionEvaluationContext::PotentiallyEvaluated;
+  if (RangeVar->isConstexpr())
+    Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+  EnterExpressionEvaluationContext ExprEvalCtx(S, Ctx);
+
+  SourceLocation RangeLoc = RangeVar->getBeginLoc();
+  DeclarationNameInfo BeginName(&S.PP.getIdentifierTable().get("begin"),
+                                RangeLoc);
+  DeclarationNameInfo EndName(&S.PP.getIdentifierTable().get("end"), RangeLoc);
+  LookupResult BeginLookup(S, BeginName, Sema::LookupMemberName);
+  LookupResult EndLookup(S, EndName, Sema::LookupMemberName);
+
+  QualType RangeType = RangeVar->getType().getNonReferenceType();
+  if (auto *Record = RangeType->getAsCXXRecordDecl()) {
+    S.LookupQualifiedName(BeginLookup, Record);
+    S.LookupQualifiedName(EndLookup, Record);
+  }
+
+  auto BuildRangeRef = [&]() {
+    return S.BuildDeclRefExpr(RangeVar, RangeType, VK_LValue, RangeLoc);
+  };
+
+  ExprResult Begin;
+  OverloadCandidateSet Candidates(RangeLoc, OverloadCandidateSet::CSK_Normal);
+  if (S.BuildForRangeBeginEndCall(RangeLoc, RangeLoc, BeginName, BeginLookup,
+                                  &Candidates, BuildRangeRef(),
+                                  &Begin) != Sema::FRS_Success)
+    return ExprError();
+
+  ExprResult End;
+  Candidates.clear(OverloadCandidateSet::CSK_Normal);
+  if (S.BuildForRangeBeginEndCall(RangeLoc, RangeLoc, EndName, EndLookup,
+                                  &Candidates, BuildRangeRef(),
+                                  &End) != Sema::FRS_Success)
+    return ExprError();
+
+  return S.BuildBinOp(S.getCurScope(), RangeLoc, BO_Sub, End.get(),
+                      Begin.get());
+}
+
 static bool HasDependentSize(const DeclContext *CurContext,
                              const CXXExpansionStmtPattern *Pattern) {
   switch (Pattern->getKind()) {
@@ -203,11 +244,30 @@ static IterableExpansionStmtData TryBuildIterableExpansionStmtInitializer(
   if (BeginStmt.isInvalid())
     return Data;
 
-  // TODO: Build 'constexpr auto iter = begin + decltype(begin - begin){i};'.
-  S.Diag(ColonLoc, diag::err_iterating_expansion_stmt_unsupported);
-  return Data;
+  auto BuildBeginRef = [&]() {
+    return S.BuildDeclRefExpr(Info.BeginVar, Info.BeginVar->getType(),
+                              VK_LValue, ColonLoc);
+  };
 
-#if 0 // This will be used once we support iterating expansion statements.
+  ExprResult Difference =
+      S.BuildBinOp(Scope, ColonLoc, BO_Sub, BuildBeginRef(), BuildBeginRef());
+  if (Difference.isInvalid())
+    return Data;
+
+  QualType DifferenceType = S.BuildDecltypeType(Difference.get());
+  TypeSourceInfo *DifferenceTSI =
+      S.Context.getTrivialTypeSourceInfo(DifferenceType, ColonLoc);
+  ExprResult ConvertedIndex =
+      S.BuildCXXTypeConstructExpr(DifferenceTSI, ColonLoc, Index, ColonLoc,
+                                  /*ListInitialization=*/true);
+  if (ConvertedIndex.isInvalid())
+    return Data;
+
+  ExprResult BeginPlusI = S.BuildBinOp(Scope, ColonLoc, BO_Add, BuildBeginRef(),
+                                       ConvertedIndex.get());
+  if (BeginPlusI.isInvalid())
+    return Data;
+
   // Store it in a variable.
   // See also Sema::BuildCXXForRangeBeginEndVars().
   const auto DepthStr = std::to_string(Scope->getDepth() / 2);
@@ -233,7 +293,6 @@ static IterableExpansionStmtData TryBuildIterableExpansionStmtInitializer(
   Data.IterDecl = IterVarStmt.getAs<DeclStmt>();
   Data.TheState = IterableExpansionStmtData::IsIterableResult::Iterable;
   return Data;
-#endif
 }
 
 static StmtResult BuildDestructuringDecompositionDecl(
@@ -373,6 +432,10 @@ StmtResult Sema::BuildNonEnumeratingCXXExpansionStmtPattern(
     SourceLocation ColonLoc, SourceLocation RParenLoc,
     ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
   VarDecl *ExpansionVar = cast<VarDecl>(ExpansionVarStmt->getSingleDecl());
+  auto Ctx = ExpressionEvaluationContext::PotentiallyEvaluated;
+  if (ExpansionVar->isConstexpr())
+    Ctx = ExpressionEvaluationContext::ImmediateFunctionContext;
+  EnterExpressionEvaluationContext ExprEvalCtx(*this, Ctx);
 
   // Reject lambdas early.
   if (auto *RD = ExpansionInitializer->getType()->getAsCXXRecordDecl();
@@ -562,6 +625,8 @@ StmtResult Sema::FinishCXXExpansionStmt(Stmt *Exp, Stmt *Body) {
   unsigned PtrDiffTWidth = Context.getIntWidth(PtrDiffT);
   bool PtrDiffTIsUnsigned = PtrDiffT->isUnsignedIntegerType();
   for (uint64_t I = 0; I < *NumInstantiations; ++I) {
+    ExpansionStmtSynthesisRAII ExpansionGuard(
+        *this, !CurContext->isDependentContext());
     llvm::APInt IVal{PtrDiffTWidth, I};
     TemplateArgument Arg{
         Context, llvm::APSInt{std::move(IVal), PtrDiffTIsUnsigned}, PtrDiffT};
@@ -622,26 +687,23 @@ Sema::ComputeExpansionSize(CXXExpansionStmtPattern *Expansion) {
     EnterExpressionEvaluationContext ExprEvalCtx(
         *this, ExpressionEvaluationContext::ConstantEvaluated);
 
-    // TODO: Build the lambda and evaluate it.
-    Diag(Loc, diag::err_iterating_expansion_stmt_unsupported);
-    return std::nullopt;
+    ExprResult Size =
+        BuildIterableExpansionSizeExpr(*this, Expansion->getRangeVar());
+    if (Size.isInvalid())
+      return std::nullopt;
 
-#if 0 // This will be used once we support iterating expansion statements.
     Expr::EvalResult ER;
     SmallVector<PartialDiagnosticAt, 4> Notes;
     ER.Diag = &Notes;
-    if (!Call.get()->EvaluateAsInt(ER, Context)) {
+    if (!Size.get()->EvaluateAsInt(ER, Context) ||
+        ER.Val.getInt().isNegative()) {
       Diag(Loc, diag::err_expansion_size_expr_not_ice);
       for (const auto &[Location, PDiag] : Notes)
         Diag(Location, PDiag);
       return std::nullopt;
     }
 
-    // It shouldn't be possible for this to be negative since we compute this
-    // via the built-in '++' on a ptrdiff_t.
-    assert(ER.Val.getInt().isNonNegative());
     return ER.Val.getInt().getZExtValue();
-#endif
   }
 
   assert(Expansion->isDestructuring());
