@@ -18,7 +18,6 @@
 #include "Pointer.h"
 #include "PrimType.h"
 #include "Record.h"
-#include "Reflect.h"
 #include "Source.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/Basic/TargetInfo.h"
