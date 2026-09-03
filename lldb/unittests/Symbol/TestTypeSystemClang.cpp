@@ -684,6 +684,10 @@ TEST_F(TestTypeSystemClang, TestRecordHasFields) {
       TypeSystemClang::GetAsRecordDecl(empty_derived);
   EXPECT_EQ(1u, m_ast->GetNumBaseClasses(
                     empty_derived_non_empty_base_cxx_decl, false));
+  EXPECT_EQ(empty_derived_non_empty_base_cxx_decl,
+            empty_derived_non_empty_base_cxx_decl->bases_begin()->getDerived());
+  EXPECT_FALSE(
+      empty_derived_non_empty_base_cxx_decl->bases_begin()->isBaseOfClass());
   EXPECT_TRUE(m_ast->RecordHasFields(empty_derived_non_empty_base_decl));
 
   // Test that a record with no direct fields, but fields in a virtual base
@@ -707,6 +711,10 @@ TEST_F(TestTypeSystemClang, TestRecordHasFields) {
       TypeSystemClang::GetAsRecordDecl(empty_derived2);
   EXPECT_EQ(1u, m_ast->GetNumBaseClasses(
                     empty_derived_non_empty_vbase_cxx_decl, false));
+  EXPECT_EQ(empty_derived_non_empty_vbase_cxx_decl,
+            empty_derived_non_empty_vbase_cxx_decl->bases_begin()->getDerived());
+  EXPECT_FALSE(
+      empty_derived_non_empty_vbase_cxx_decl->bases_begin()->isBaseOfClass());
   EXPECT_TRUE(
       m_ast->RecordHasFields(empty_derived_non_empty_vbase_decl));
 }

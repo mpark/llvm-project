@@ -17,7 +17,6 @@
 #include "IntegralAP.h"
 #include "MemberPointer.h"
 #include "PrimType.h"
-#include "Reflect.h"
 
 namespace clang {
 namespace interp {
@@ -224,8 +223,6 @@ private:
       return PT_MemberPtr;
     else if constexpr (std::is_same_v<T, FixedPoint>)
       return PT_FixedPoint;
-    else if constexpr (std::is_same_v<T, Reflect>)
-      return PT_Reflect;
 
     llvm_unreachable("unknown type push()'ed into InterpStack");
   }

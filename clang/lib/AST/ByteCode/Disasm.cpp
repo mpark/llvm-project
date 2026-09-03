@@ -314,8 +314,6 @@ static const char *primTypeToString(PrimType T) {
     return "MemberPtr";
   case PT_FixedPoint:
     return "FixedPoint";
-  case PT_Reflect:
-    return "Reflect";
   }
   llvm_unreachable("Unhandled PrimType");
 }

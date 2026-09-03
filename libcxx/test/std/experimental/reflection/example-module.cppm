@@ -84,7 +84,7 @@ void test() {
   template for (constexpr auto i : sequence) { (void) i; }
 
   // Destructurable expansion statement.
-  constexpr auto tup = std::make_tuple(1, true, 'c');
+  static constexpr auto tup = std::make_tuple(1, true, 'c');
   template for (constexpr auto i : tup) { (void) i; }
 
   // Enumerating expansion statement.

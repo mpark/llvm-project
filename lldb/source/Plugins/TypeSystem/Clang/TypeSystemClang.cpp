@@ -7953,10 +7953,10 @@ TypeSystemClang::CreateBaseClassSpecifier(lldb::opaque_compiler_type_t type,
     return nullptr;
 
   return std::make_unique<clang::CXXBaseSpecifier>(
-      clang::SourceRange(), is_virtual, base_of_class,
+      clang::SourceRange(), is_virtual,
       TypeSystemClang::ConvertAccessTypeToAccessSpecifier(access),
       getASTContext().getTrivialTypeSourceInfo(GetQualType(type)),
-      clang::SourceLocation());
+      nullptr, clang::SourceLocation());
 }
 
 bool TypeSystemClang::TransferBaseClasses(
@@ -7972,8 +7972,10 @@ bool TypeSystemClang::TransferBaseClasses(
 
   // Clang will make a copy of them, so it's ok that we pass pointers that we're
   // about to destroy.
-  for (auto &b : bases)
+  for (auto &b : bases) {
+    b->setDerived(cxx_record_decl);
     raw_bases.push_back(b.get());
+  }
   cxx_record_decl->setBases(raw_bases.data(), raw_bases.size());
   return true;
 }

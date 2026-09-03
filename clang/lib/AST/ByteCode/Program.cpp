@@ -10,7 +10,6 @@
 #include "Context.h"
 #include "Function.h"
 #include "PrimType.h"
-#include "Reflect.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"

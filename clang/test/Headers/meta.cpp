@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 %s -triple x86_64-unknown-linux -std=c++26 -freflection -fsyntax-only -verify=expected,std
-// RUN: %clang_cc1 %s -triple x86_64-unknown-linux -std=c++26 -freflection -fexperimental-new-constant-interpreter -fsyntax-only -verify=expected,std
 // RUN: %clang_cc1 %s -triple x86_64-unknown-linux -std=c++26 -freflection -fsyntax-only -verify=expected,builtin -DUSE_BUILTIN
-// RUN: %clang_cc1 %s -triple x86_64-unknown-linux -std=c++26 -freflection -fexperimental-new-constant-interpreter -fsyntax-only -verify=expected,builtin -DUSE_BUILTIN
+
+// The prototype uses the legacy evaluator for reflection values.
 
 #include <meta>
 #include <stdint.h>
@@ -102,13 +102,15 @@ auto *fp = &meta_is_type;
 // std-note@*:* {{declared here}}
 // builtin-error@-3 {{builtin functions must be directly called}}
 // builtin-error@-4 {{cannot take address of consteval function '__builtin_meta_is_type' outside of an immediate invocation}}
+// std-error@-5 {{variable 'fp' of consteval-only type must either be constexpr or in a constant-evaluated context}}
+// builtin-error@-6 {{expressions of consteval-only type are only allowed in constant-evaluated contexts}}
 
-consteval void test_fail() {
-  static_assert(meta_is_type(^^S)); // expected-error {{unknown or unimplemented reflectable entity}}
-  static_assert(!meta_is_type(^^A)); // expected-error {{unknown or unimplemented reflectable entity}}
-  static_assert(meta_is_type(^^int*)); // expected-error {{unknown or unimplemented reflectable entity}}
-  static_assert(meta_is_type(^^int&)); // expected-error {{unknown or unimplemented reflectable entity}}
-  static_assert(meta_is_type(^^int[3])); // expected-error {{unknown or unimplemented reflectable entity}}
+consteval void test_compound_types() {
+  static_assert(meta_is_type(^^S));
+  static_assert(!meta_is_type(^^A));
+  static_assert(meta_is_type(^^int*));
+  static_assert(meta_is_type(^^int&));
+  static_assert(meta_is_type(^^int[3]));
 }
 
 consteval bool test_with_no_arg() {
@@ -127,7 +129,7 @@ consteval bool test_with_more_than_args_needed() {
 
 consteval bool test_with_wrong_type() {
   return meta_is_type(42);
-  // std-error@-1 {{cannot initialize a parameter of type 'info' (aka 'std::meta::info') with an rvalue of type 'int'}}
+  // std-error@-1 {{cannot initialize a parameter of type 'info' (aka 'meta::info') with an rvalue of type 'int'}}
   // std-note@*:* {{passing argument to parameter '__r' here}}
-  // builtin-error@-3 {{cannot initialize a parameter of type 'std::meta::info' with an rvalue of type 'int'}}
+  // builtin-error@-3 {{cannot initialize a parameter of type 'meta::info' with an rvalue of type 'int'}}
 }

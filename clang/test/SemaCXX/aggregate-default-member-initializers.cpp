@@ -1,7 +1,9 @@
-// RUN: %clang_cc1 -std=c++20 -Wno-unused-value -verify %s
-// RUN: %clang_cc1 -std=c++23 -Wno-unused-value -verify %s
-// RUN: %clang_cc1 -std=c++20 -Wno-unused-value -verify %s -fexperimental-new-constant-interpreter
-// RUN: %clang_cc1 -std=c++23 -Wno-unused-value -verify %s -fexperimental-new-constant-interpreter
+// RUN: %clang_cc1 -std=c++20 -Wno-unused-value -verify=expected %s
+// RUN: %clang_cc1 -std=c++23 -Wno-unused-value -verify=cxx23 %s
+// RUN: %clang_cc1 -std=c++20 -Wno-unused-value -verify=expected %s -fexperimental-new-constant-interpreter
+// RUN: %clang_cc1 -std=c++23 -Wno-unused-value -verify=cxx23 %s -fexperimental-new-constant-interpreter
+
+// cxx23-no-diagnostics
 
 namespace lifetime {
 
