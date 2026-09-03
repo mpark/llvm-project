@@ -21,6 +21,28 @@ namespace valid_cases {
 constexpr info r1 = ^^int;
 static constexpr info r2 = ^^int;
 
+struct member_arrays {
+  struct element {
+    info type;
+  };
+
+  static constexpr info direct[] = {^^int, ^^double};
+  static constexpr element aggregate[] = {{^^int}, {^^double}};
+};
+
+template <class T>
+struct dependent_member_array {
+  static constexpr member_arrays::element value[] = {{^^T}};
+};
+
+struct constinit_member_array {
+  inline static constinit info value[] = {^^long};
+};
+
+static_assert(member_arrays::direct[0] == ^^int);
+static_assert(member_arrays::aggregate[1].type == ^^double);
+static_assert(dependent_member_array<char>::value[0].type == ^^char);
+
 constexpr S s1;
 constexpr S s2{};
 constexpr S s3 = {^^int};
