@@ -767,7 +767,7 @@ public:
     return ((const StructData *)(const char *)&Data)->NumFields;
   }
   unsigned getStructNumVirtualBases() const {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     return ((const StructData *)(const char *)&Data)->NumVirtualBases;
   }
   APValue &getStructBase(unsigned i) {
@@ -781,7 +781,7 @@ public:
     return ((StructData *)(char *)&Data)->Elts[getStructNumBases() + i];
   }
   APValue &getStructVirtualBase(unsigned i) {
-    assert(isStruct() && "Invalid accessor");
+    assert(Kind == Struct && "Invalid accessor");
     assert(i < getStructNumVirtualBases() && "virtual base class index OOB");
     return ((StructData *)(char *)&Data)
         ->Elts[getStructNumBases() + getStructNumFields() + i];

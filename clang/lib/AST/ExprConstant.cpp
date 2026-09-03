@@ -152,37 +152,6 @@ namespace {
     return E && E->getType()->isPointerType() && tryUnwrapAllocSizeCall(E);
   }
 
-  /// Determines whether the given kind of constant expression is only ever
-  /// used for name mangling. If so, it's permitted to reference things that we
-  /// can't generate code for (in particular, dllimported functions).
-  static bool isForManglingOnly(ConstantExprKind Kind) {
-    switch (Kind) {
-    case ConstantExprKind::Normal:
-    case ConstantExprKind::ClassTemplateArgument:
-    case ConstantExprKind::ImmediateInvocation:
-      // Note that non-type template arguments of class type are emitted as
-      // template parameter objects.
-      return false;
-
-    case ConstantExprKind::NonClassTemplateArgument:
-      return true;
-    }
-    llvm_unreachable("unknown ConstantExprKind");
-  }
-
-  static bool isTemplateArgument(ConstantExprKind Kind) {
-    switch (Kind) {
-    case ConstantExprKind::Normal:
-    case ConstantExprKind::ImmediateInvocation:
-      return false;
-
-    case ConstantExprKind::ClassTemplateArgument:
-    case ConstantExprKind::NonClassTemplateArgument:
-      return true;
-    }
-    llvm_unreachable("unknown ConstantExprKind");
-  }
-
   /// The bound to claim that an array of unknown bound has.
   /// The value in MostDerivedArraySize is undefined in this case. So, set it
   /// to an arbitrary value that's likely to loudly break things if it's used.

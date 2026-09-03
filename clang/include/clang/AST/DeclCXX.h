@@ -1581,10 +1581,13 @@ public:
   /// If the class is a local class [class.local], returns
   /// the enclosing function declaration.
   const FunctionDecl *isLocalClass() const {
-    if (const auto *RD = dyn_cast<CXXRecordDecl>(getDeclContext()))
+    const DeclContext *DC = getDeclContext();
+    while (DC->isExpansionStmt())
+      DC = DC->getParent();
+    if (const auto *RD = dyn_cast<CXXRecordDecl>(DC))
       return RD->isLocalClass();
 
-    return getDeclContext()->getEnclosingFunction();
+    return dyn_cast<FunctionDecl>(DC);
   }
 
   FunctionDecl *isLocalClass() {

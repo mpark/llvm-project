@@ -172,6 +172,8 @@ public:
   OptionalDiagnostic Note(SourceLocation Loc, diag::kind DiagId);
   OptionalDiagnostic Note(SourceInfo Loc, diag::kind DiagId);
 
+  void addNotes(ArrayRef<PartialDiagnosticAt> Diags);
+
   /// Directly reports a diagnostic message.
   DiagnosticBuilder report(SourceLocation Loc, diag::kind DiagId);
 
