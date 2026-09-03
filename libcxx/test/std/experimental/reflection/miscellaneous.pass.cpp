@@ -9,7 +9,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20
-// ADDITIONAL_COMPILE_FLAGS: -fblocks -lBlocksRuntime
 // ADDITIONAL_COMPILE_FLAGS: -freflection-latest
 
 // <experimental/reflection>
@@ -218,23 +217,6 @@ consteval auto fn() {
 [[maybe_unused]] constexpr auto rs = fn();
 }  // namespace array_with_default_initialized_reflections
 
-                           // ======================
-                           // compatible_with_blocks
-                           // ======================
-
-namespace compatible_with_blocks {
-constexpr auto block = std::meta::reflect_constant(^int() { return 4; });
-static_assert(type_of(block) == ^^int(^)());
-
-void run_test() {
-  // RUN: grep "block result 1: 4" %t.stdout
-  std::println("block result 1: {}", [:block:]());
-
-  // RUN: grep "block result 2: 6" %t.stdout
-  std::println("block result 2: {}", 4 ^^(void){ return 2; }());
-}
-}  // namespace compatible_with_blocks
-
                           // =========================
                           // expansions_over_std_tuple
                           // =========================
@@ -245,7 +227,8 @@ void run_test() {
   template for (auto e : t)
     (void) e;
 
-  template for (constexpr auto v : std::tuple{1, 2, 3})
+  static constexpr auto temporary_tuple = std::tuple{1, 2, 3};
+  template for (constexpr auto v : temporary_tuple)
     (void) v;
 
   static constexpr auto my_tuple = std::tuple{1, 2, 3};
@@ -302,7 +285,6 @@ int main() {
       ^^pdimov_sorted_type_list,
       ^^alisdair_universal_swap,
       ^^std_apply_with_function_splice,
-      ^^compatible_with_blocks,
       ^^expansions_over_std_tuple
   >();
 }

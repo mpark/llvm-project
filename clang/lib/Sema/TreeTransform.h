@@ -9862,8 +9862,10 @@ StmtResult TreeTransform<Derived>::TransformCXXExpansionStmtPattern(
   StmtResult Range;
   SmallVector<MaterializeTemporaryExpr *, 8> LifetimeExtendTemps;
   if (S->isDependent() || S->isIterating()) {
-    EnterExpressionEvaluationContext ExprEvalCtx(
-        SemaRef, SemaRef.currentEvaluationContext().Context);
+    auto Ctx = SemaRef.currentEvaluationContext().Context;
+    if (S->getExpansionVariable()->isConstexpr())
+      Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+    EnterExpressionEvaluationContext ExprEvalCtx(SemaRef, Ctx);
     SemaRef.currentEvaluationContext().InLifetimeExtendingContext = true;
     SemaRef.currentEvaluationContext().RebuildDefaultArgOrDefaultInit = true;
 
@@ -16575,6 +16577,8 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   CXXRecordDecl::LambdaDependencyKind DependencyKind =
       CXXRecordDecl::LDK_Unknown;
   DeclContext *DC = getSema().CurContext;
+  if (DC->isExpansionStmt())
+    DependencyKind = CXXRecordDecl::LDK_AlwaysDependent;
   // A RequiresExprBodyDecl is not interesting for dependencies.
   // For the following case,
   //
@@ -16592,9 +16596,10 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   // will be deemed as dependent even if there are no dependent template
   // arguments.
   // (A ClassTemplateSpecializationDecl is always a dependent context.)
-  while (DC->isRequiresExprBody() || isa<CXXExpansionStmtDecl>(DC))
+  while (DC->isRequiresExprBody())
     DC = DC->getParent();
-  if ((getSema().isUnevaluatedContext() ||
+  if (DependencyKind == CXXRecordDecl::LDK_Unknown &&
+      (getSema().isUnevaluatedContext() ||
        getSema().isConstantEvaluatedContext()) &&
       !(dyn_cast_or_null<CXXRecordDecl>(DC->getParent()) &&
         cast<CXXRecordDecl>(DC->getParent())->isGenericLambda()) &&
