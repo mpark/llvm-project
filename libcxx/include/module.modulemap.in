@@ -74,6 +74,8 @@ module std_core {
     module trigonometric_functions          { header "__math/trigonometric_functions.h" }
   }
 
+  module meta_core { header "__meta/core.h" }
+
   module type_traits {
     module add_cv_quals                               { header "__type_traits/add_cv_quals.h" }
     module add_pointer                                { header "__type_traits/add_pointer.h" }

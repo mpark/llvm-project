@@ -716,7 +716,7 @@ static bool reflect_invoke(APValue &Result, ASTContext &C, MetaActions &Meta,
 // Metafunction table
 //
 // Order of entries MUST be kept in sync with order of declarations in the
-//   libcxx/include/meta
+//   libcxx/include/__meta/core.h
 // header file.
 // -----------------------------------------------------------------------------
 
