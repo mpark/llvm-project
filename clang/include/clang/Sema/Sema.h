@@ -11249,6 +11249,7 @@ public:
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
   bool CheckMatchSubjectBindingReferences(Expr *Subject,
                                           MatchPattern *Pattern);
+  struct MatchPatternState;
   void CheckGuardedMatchPattern(MatchPattern *Pattern);
 
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
