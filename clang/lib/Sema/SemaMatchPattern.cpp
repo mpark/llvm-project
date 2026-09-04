@@ -1061,17 +1061,17 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
 
 namespace {
 
-static void forEachDeclarationPattern(
+static void forEachPatternDeclaration(
     MatchPattern *Pattern,
-    llvm::function_ref<void(DeclarationPattern *)> Callback) {
+    llvm::function_ref<void(MatchPattern *, VarDecl *)> Callback) {
   if (!Pattern)
     return;
   if (auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    Callback(P);
+    Callback(P, P->getDeclaration());
     return;
   }
   for (MatchPattern *Child : Pattern->children())
-    forEachDeclarationPattern(Child, Callback);
+    forEachPatternDeclaration(Child, Callback);
 }
 
 static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
@@ -1101,12 +1101,13 @@ static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
 } // namespace
 
 void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
-  forEachDeclarationPattern(Pattern, [&](DeclarationPattern *P) {
-    VarDecl *Declaration = P->getDeclaration();
-    if (isNonTriviallyMoveInitialized(Declaration))
-      Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
-          << Declaration->getType();
-  });
+  forEachPatternDeclaration(
+      Pattern,
+      [&](MatchPattern *P, VarDecl *Declaration) {
+        if (isNonTriviallyMoveInitialized(Declaration))
+          Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
+              << Declaration->getType();
+      });
 }
 
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
@@ -2671,8 +2672,7 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
     if (checkPatternBindingReferences(*this, Pattern))
       return true;
     if (ProjectionCache && ProjectionCache->DeferAlternativeChoices) {
-      forEachDeclarationPattern(Pattern, [&](DeclarationPattern *P) {
-        VarDecl *VD = P->getDeclaration();
+      forEachPatternDeclaration(Pattern, [&](MatchPattern *, VarDecl *VD) {
         bool HasBindingPack = VD->isParameterPack();
         if (auto *DD = dyn_cast<DecompositionDecl>(VD))
           HasBindingPack |=
