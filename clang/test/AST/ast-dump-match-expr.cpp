@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++2c -fsyntax-only -fpattern-matching \
+// RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching \
 // RUN:   -fcxx-exceptions -Wno-unused-value -ast-dump %s \
 // RUN:   | FileCheck -strict-whitespace %s
 
