@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++2b -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -std=c++2d -fpattern-matching -fcxx-exceptions -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 auto decomposition_pattern(const int (&xs)[2]) {

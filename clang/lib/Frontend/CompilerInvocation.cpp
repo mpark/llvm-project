@@ -621,6 +621,14 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
         << Args.getLastArg(options::OPT_freflection)->getAsString(Args);
   }
 
+  // As with reflection above, a precompiled input's language standard was
+  // checked when the module was built rather than by this invocation.
+  if (Args.hasArg(OPT_fpattern_matching) && !LangOpts.CPlusPlus29 &&
+      IK.getFormat() != InputKind::Precompiled) {
+    Diags.Report(diag::err_drv_pattern_matching_requires_cxx29)
+        << Args.getLastArg(options::OPT_fpattern_matching)->getAsString(Args);
+  }
+
   LangOpts.NamedLoops =
       Args.hasFlag(OPT_fnamed_loops, OPT_fno_named_loops, LangOpts.C2y);
 

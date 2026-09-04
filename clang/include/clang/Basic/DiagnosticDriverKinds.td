@@ -995,4 +995,6 @@ def warn_drv_gcc_install_dir_libstdcxx : Warning<
 
 def err_drv_reflection_requires_cxx26 : Error<
   "option '%0' is only supported when compiling in C++26 mode">;
+def err_drv_pattern_matching_requires_cxx29 : Error<
+  "option '%0' is only supported when compiling in C++29 mode">;
 }
