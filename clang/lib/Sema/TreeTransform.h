@@ -19437,7 +19437,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
           return ExprError();
       }
       if (E->getGuard().hasGuard())
-        getSema().CheckGuardedMatchPattern(TransformedPattern);
+        getSema().CheckGuardedMatchPattern(TransformedPattern,
+                                           &PatternState);
       Sema::ConditionResult Guard = getDerived().TransformCondition(
           E->getIfLoc(), E->getGuard().ConditionVariable,
           E->getGuard().Condition, Sema::ConditionKind::Boolean);
@@ -19692,7 +19693,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         return TransformCaseResult::Error;
     }
     if (Case.Guard.hasGuard())
-      getSema().CheckGuardedMatchPattern(TransformedPattern);
+      getSema().CheckGuardedMatchPattern(TransformedPattern,
+                                         &PatternState);
     Sema::ConditionResult Guard = getDerived().TransformCondition(
         Case.IfLoc, Case.Guard.ConditionVariable, Case.Guard.Condition,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf

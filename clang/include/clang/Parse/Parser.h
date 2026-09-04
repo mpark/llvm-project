@@ -4551,7 +4551,8 @@ private:
                       bool DeferHandlerChecking);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
                                         MatchPattern *Pattern,
-                                        StmtResult &InitStmt);
+                                        StmtResult &InitStmt,
+                                        const Sema::MatchPatternState *State);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
                                bool DeferSemanticChecking = false);
   ActionResult<MatchPattern *>

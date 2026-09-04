@@ -11153,7 +11153,10 @@ public:
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
   bool CheckMatchSubjectBindingReferences(Expr *Subject,
                                           MatchPattern *Pattern);
-  void CheckGuardedMatchPattern(MatchPattern *Pattern);
+  struct MatchPatternState;
+  void CheckGuardedMatchPattern(
+      MatchPattern *Pattern,
+      const MatchPatternState *PatternState);
 
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);

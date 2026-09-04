@@ -301,6 +301,20 @@ int guarded_move(Movable &&value) {
   };
 }
 
+int guarded_unnamed_move(Movable &&value) {
+  return match (static_cast<Movable &&>(value)) {
+    case Movable if (true) => 1; // expected-error {{guarded declaration pattern of type 'Movable' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
+    case _ => 0;
+  };
+}
+
+int guarded_nested_unnamed_move(MovePair &&value) {
+  return match (static_cast<MovePair &&>(value)) {
+    case [Movable, _] if (true) => 1; // expected-error {{guarded declaration pattern of type 'Movable' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
+    case _ => 0;
+  };
+}
+
 int guarded_trivial_move(TriviallyMovable &&value) {
   return static_cast<TriviallyMovable &&>(value) match {
     case TriviallyMovable moved if (moved.value > 0) => moved.value;

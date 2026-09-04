@@ -4055,7 +4055,7 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
     Diag(Tok, diag::err_case_condition_guard);
     SourceLocation IfLoc;
     StmtResult GuardInit;
-    ParseMatchGuard(IfLoc, Pattern, GuardInit);
+    ParseMatchGuard(IfLoc, Pattern, GuardInit, &PatternState);
     return Sema::ConditionError();
   }
 
@@ -4324,7 +4324,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
     SourceLocation IfLoc;
     StmtResult GuardInit;
     Sema::ConditionResult Guard =
-        ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
+        ParseMatchGuard(IfLoc, Pattern.get(), GuardInit, &PatternState);
     if (Guard.isInvalid()) {
       SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
       return true;
@@ -4433,7 +4433,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard =
-      ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
+      ParseMatchGuard(IfLoc, Pattern.get(), GuardInit, &PatternState);
   if (Guard.isInvalid()) {
     SkipUntil(tok::equalgreater, tok::r_brace, StopAtSemi | StopBeforeMatch);
     if (Tok.isOneOf(tok::semi, tok::r_brace))
@@ -4458,9 +4458,10 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
 
 Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
                                               MatchPattern *Pattern,
-                                              StmtResult &InitStmt) {
+                                              StmtResult &InitStmt,
+                                              const Sema::MatchPatternState *State) {
   if (TryConsumeToken(tok::kw_if, IfLoc)) {
-    Actions.CheckGuardedMatchPattern(Pattern);
+    Actions.CheckGuardedMatchPattern(Pattern, State);
     BalancedDelimiterTracker T(*this, tok::l_paren);
     if (T.expectAndConsume(diag::err_expected_after, "if"))
       return Sema::ConditionError();

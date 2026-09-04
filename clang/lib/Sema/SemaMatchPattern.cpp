@@ -1014,17 +1014,24 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
 
 namespace {
 
-static void forEachDeclarationPattern(
-    MatchPattern *Pattern,
-    llvm::function_ref<void(DeclarationPattern *)> Callback) {
+static void forEachPatternDeclaration(
+    MatchPattern *Pattern, const Sema::MatchPatternState *PatternState,
+    llvm::function_ref<void(MatchPattern *, VarDecl *)> Callback) {
   if (!Pattern)
     return;
   if (auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
-    Callback(P);
+    Callback(P, P->getDeclaration());
+    return;
+  }
+  if (auto *P = dyn_cast<TypePattern>(Pattern)) {
+    const MatchPatternInfo *Info =
+        PatternState ? PatternState->find(P) : nullptr;
+    if (Info && Info->TypePatternDeclaration)
+      Callback(P, Info->TypePatternDeclaration);
     return;
   }
   for (MatchPattern *Child : Pattern->children())
-    forEachDeclarationPattern(Child, Callback);
+    forEachPatternDeclaration(Child, PatternState, Callback);
 }
 
 static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
@@ -1053,13 +1060,15 @@ static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
 
 } // namespace
 
-void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
-  forEachDeclarationPattern(Pattern, [&](DeclarationPattern *P) {
-    VarDecl *Declaration = P->getDeclaration();
-    if (isNonTriviallyMoveInitialized(Declaration))
-      Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
-          << Declaration->getType();
-  });
+void Sema::CheckGuardedMatchPattern(
+    MatchPattern *Pattern, const MatchPatternState *PatternState) {
+  forEachPatternDeclaration(
+      Pattern, PatternState,
+      [&](MatchPattern *P, VarDecl *Declaration) {
+        if (isNonTriviallyMoveInitialized(Declaration))
+          Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
+              << Declaration->getType();
+      });
 }
 
 StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
