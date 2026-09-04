@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -Wno-c++20-extensions -O0 -emit-llvm %s -o %t.ll
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -fcxx-exceptions -Wno-c++20-extensions -O0 -emit-llvm %s -o %t.ll
 // RUN: FileCheck --input-file=%t.ll %s
 
 enum Color { Red, Blue };
