@@ -102,6 +102,30 @@ constexpr bool test_optional() {
   assert(Traits::get<1>(value) == 42);
   value.reset();
   assert(Traits::index(value) == 0);
+
+  using RefTraits = std::alternative_traits<std::optional<int&>>;
+  static_assert(alternative_count<RefTraits> == 2);
+  static_assert(!RefTraits::has_residual_states);
+  static_assert(RefTraits::alternatives[1].info == ^^int&);
+  static_assert(RefTraits::names::none.index == 0);
+  static_assert(RefTraits::names::some.index == 1);
+  static_assert(std::is_same_v<typename decltype(RefTraits::names::some)::provider, RefTraits>);
+  static_assert(std::is_same_v<decltype(RefTraits::get<1>(std::declval<std::optional<int&>&>())), int&>);
+  static_assert(std::is_same_v<decltype(RefTraits::get<1>(std::declval<const std::optional<int&>&>())), int&>);
+  static_assert(std::is_same_v<decltype(RefTraits::get<1>(std::declval<std::optional<int&>&&>())), int&>);
+
+  using ConstRefTraits = std::alternative_traits<std::optional<const int&>>;
+  static_assert(ConstRefTraits::alternatives[1].info == ^^const int&);
+  static_assert(
+      std::is_same_v<decltype(ConstRefTraits::get<1>(std::declval<std::optional<const int&>&&>())), const int&>);
+
+  int referred = 7;
+  std::optional<int&> reference = referred;
+  assert(RefTraits::index(reference) == 1);
+  RefTraits::get<1>(std::move(reference)) = 8;
+  assert(referred == 8);
+  reference.reset();
+  assert(RefTraits::index(reference) == 0);
   return true;
 }
 
