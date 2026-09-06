@@ -49,6 +49,27 @@ int match_named_optional(const std::optional<int>& value) {
   };
 }
 
+int match_optional_reference(const std::optional<int&>& value) {
+  return value match {
+    case { int& number } => ++number;
+    case {} => -7;
+  };
+}
+
+int match_named_optional_reference(std::optional<int&>&& value) {
+  return static_cast<std::optional<int&>&&>(value) match {
+    case { .some: int& number } => ++number;
+    case { .none } => -8;
+  };
+}
+
+int match_const_optional_reference(const std::optional<const int&>& value) {
+  return value match {
+    case { const int& number } => number;
+    case {} => -9;
+  };
+}
+
 int match_unique_ptr(const std::unique_ptr<int>& value) {
   return value match {
     case { int& number } => number;
@@ -449,6 +470,15 @@ int main(int, char**) {
   assert(match_optional(std::nullopt) == -1);
   assert(match_named_optional(7) == 7);
   assert(match_named_optional(std::nullopt) == -2);
+  int optional_referent = 20;
+  assert(match_optional_reference(std::optional<int&>(optional_referent)) == 21);
+  assert(optional_referent == 21);
+  assert(match_optional_reference(std::nullopt) == -7);
+  assert(match_named_optional_reference(std::optional<int&>(optional_referent)) == 22);
+  assert(optional_referent == 22);
+  assert(match_named_optional_reference(std::nullopt) == -8);
+  assert(match_const_optional_reference(std::optional<const int&>(optional_referent)) == 22);
+  assert(match_const_optional_reference(std::nullopt) == -9);
   assert(match_unique_ptr(std::make_unique<int>(8)) == 8);
   assert(match_unique_ptr(nullptr) == -3);
   assert(match_shared_ptr(std::make_shared<int>(9)) == 9);
