@@ -518,9 +518,9 @@ public:
 
     // Exit - Exit the scope associated with this object now, rather
     // than waiting until the object is destroyed.
-    void Exit() {
+    void Exit(bool DiagnoseDecls = true) {
       if (Self) {
-        Self->ExitScope();
+        Self->ExitScope(DiagnoseDecls);
         Self = nullptr;
       }
     }
@@ -555,7 +555,7 @@ public:
   void EnterScope(unsigned ScopeFlags);
 
   /// ExitScope - Pop a scope off the scope stack.
-  void ExitScope();
+  void ExitScope(bool DiagnoseDecls = true);
 
   //===--------------------------------------------------------------------===//
   // Diagnostic Emission and Error recovery.
@@ -4560,6 +4560,10 @@ private:
                bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
+  ActionResult<MatchPattern *>
+  ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                      bool StopAtEqual,
+                      TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *>
   ParseWildcardPattern(SourceLocation EllipsisLoc = {});
   ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);

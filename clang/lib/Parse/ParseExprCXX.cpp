@@ -4551,6 +4551,60 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                      bool Decomp,
                      bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior) {
+  auto ParseAlternative = [&](ExprResult *LHS,
+                              SmallVectorImpl<Decl *> &Declarations) {
+    ParseScope AlternativeScope(this, Scope::DeclScope);
+    ActionResult<MatchPattern *> Result =
+        ParsePrimaryPattern(LHS, Decomp, StopAtEqual, CorrectionBehavior);
+    if (Result.isUsable())
+      llvm::append_range(Declarations, getCurScope()->decls());
+    AlternativeScope.Exit(/*DiagnoseDecls=*/false);
+    return Result;
+  };
+  auto InjectDeclarations = [&](auto Declarations) {
+    for (Decl *D : Declarations) {
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.PushOnScopeChains(ND, getCurScope(), /*AddToContext=*/false);
+      else
+        getCurScope()->AddDecl(D);
+    }
+  };
+
+  SmallVector<Decl *, 4> FirstDeclarations;
+  ActionResult<MatchPattern *> First =
+      ParseAlternative(LHSOfMatchTestExpr, FirstDeclarations);
+  if (First.isInvalid())
+    return First;
+  if (Tok.isNot(tok::pipepipe)) {
+    InjectDeclarations(FirstDeclarations);
+    return First;
+  }
+
+  SmallVector<MatchPattern *, 4> Alternatives = {First.get()};
+  SmallVector<SourceLocation, 4> OrLocs;
+  do {
+    OrLocs.push_back(ConsumeToken());
+    SmallVector<Decl *, 4> Declarations;
+    ActionResult<MatchPattern *> Next =
+        ParseAlternative(/*LHS=*/nullptr, Declarations);
+    if (Next.isInvalid())
+      return true;
+    Alternatives.push_back(Next.get());
+  } while (Tok.is(tok::pipepipe));
+
+  ActionResult<MatchPattern *> Result =
+      Actions.ActOnOrPattern(Alternatives, OrLocs);
+  if (Result.isUsable())
+    InjectDeclarations(Result.getAs<OrPattern>()->bindings());
+  else
+    InjectDeclarations(FirstDeclarations);
+  return Result;
+}
+
+ActionResult<MatchPattern *>
+Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                            bool StopAtEqual,
+                            TypoCorrectionTypeBehavior CorrectionBehavior) {
   if (Decomp && Tok.is(tok::ellipsis)) {
     SourceLocation EllipsisLoc = ConsumeToken();
     if (Tok.is(tok::identifier) && Tok.getIdentifierInfo() == Ident_wildcard)
@@ -4666,8 +4720,10 @@ Parser::ParseExpressionPattern(
     TypoCorrectionTypeBehavior CorrectionBehavior) {
   ExprResult Expr = [&] {
     if (!LHSOfMatchTestExpr) {
-      return StopAtEqual ? ParseConditionalExpression()
-                         : ParseAssignmentExpression(CorrectionBehavior);
+      ExprResult LHS =
+          ParseCastExpression(CastParseKind::AnyCastExpr,
+                              /*isAddressOfOperand=*/false, CorrectionBehavior);
+      return ParseRHSOfBinaryExpression(LHS, prec::LogicalAnd);
     }
     bool RHSIsInitList = false;
     prec::Level NextTokPrec;

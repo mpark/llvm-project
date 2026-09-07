@@ -1549,6 +1549,14 @@ namespace {
         SemaRef.PerformDependentDiagnostics(DC, TemplateArgs);
     }
 
+    void remapTransformedLocalDecl(Decl *Old, Decl *New) {
+      SemaRef.CurrentInstantiationScope->ReInstantiatedLocal(Old, New);
+    }
+
+    void remapTransformedLocalDeclPack(Decl *Old, ArrayRef<ValueDecl *> New) {
+      SemaRef.CurrentInstantiationScope->ReInstantiatedLocalPack(Old, New);
+    }
+
     /// Transform the definition of the given declaration by
     /// instantiating it.
     Decl *TransformDefinition(SourceLocation Loc, Decl *D);
@@ -4941,6 +4949,39 @@ void LocalInstantiationScope::InstantiatedLocal(const Decl *D, Decl *Inst) {
   } else {
     assert(cast<Decl *>(Stored) == Inst && "Already instantiated this local");
   }
+}
+
+void LocalInstantiationScope::ReInstantiatedLocal(const Decl *D, Decl *Inst) {
+  D = getCanonicalParmVarDecl(D);
+  for (LocalInstantiationScope *Current = this; Current;
+       Current = Current->CombineWithOuterScope ? Current->Outer : nullptr) {
+    auto Found = Current->LocalDecls.find(D);
+    if (Found == Current->LocalDecls.end())
+      continue;
+    assert(isa<Decl *>(Found->second) &&
+           "cannot replace a local declaration pack");
+    Found->second = Inst;
+    return;
+  }
+  LocalDecls[D] = Inst;
+}
+
+void LocalInstantiationScope::ReInstantiatedLocalPack(
+    const Decl *D, ArrayRef<ValueDecl *> Instantiations) {
+  D = getCanonicalParmVarDecl(D);
+  auto Replace = [&](LocalInstantiationScope *Scope) {
+    DeclArgumentPack *Pack = new DeclArgumentPack(Instantiations);
+    Scope->ArgumentPacks.push_back(Pack);
+    Scope->LocalDecls[D] = Pack;
+  };
+  for (LocalInstantiationScope *Current = this; Current;
+       Current = Current->CombineWithOuterScope ? Current->Outer : nullptr) {
+    if (Current->LocalDecls.contains(D)) {
+      Replace(Current);
+      return;
+    }
+  }
+  Replace(this);
 }
 
 void LocalInstantiationScope::InstantiatedLocalPackArg(const Decl *D,

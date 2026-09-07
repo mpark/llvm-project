@@ -14498,6 +14498,14 @@ def err_declaration_pattern_not_exact_match : Error<
   "declaration pattern of type %0 is not an exact match for subject of type %1">;
 def err_type_pattern_not_exact_match : Error<
   "type pattern of type %0 is not an exact match for subject of type %1">;
+def err_or_pattern_binding_mismatch : Error<
+  "all alternatives in an or-pattern must introduce the same bindings">;
+def note_or_pattern_binding_interface : Note<
+  "binding interface established by this alternative">;
+def err_or_pattern_no_viable_alternative : Error<
+  "no alternative in the or-pattern can match a subject of type %0">;
+def err_or_pattern_alternative_redundant : Error<
+  "or-pattern alternative is redundant">;
 def err_guarded_declaration_pattern_move : Error<
   "guarded declaration pattern of type %0 invokes a non-trivial move "
   "constructor before its guard; bind a reference and move in the handler "

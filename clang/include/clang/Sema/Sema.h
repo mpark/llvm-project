@@ -4310,7 +4310,7 @@ public:
   TopLevelStmtDecl *ActOnStartTopLevelStmtDecl(Scope *S);
   void ActOnFinishTopLevelStmtDecl(TopLevelStmtDecl *D, Stmt *Statement);
 
-  void ActOnPopScope(SourceLocation Loc, Scope *S);
+  void ActOnPopScope(SourceLocation Loc, Scope *S, bool DiagnoseDecls = true);
 
   /// ParsedFreeStandingDeclSpec - This method is invoked when a declspec with
   /// no declarator (e.g. "struct foo;") is parsed.
@@ -11202,6 +11202,9 @@ public:
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
                           VarDecl *PackSourceDeclaration = nullptr);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
+  ActionResult<MatchPattern *>
+  ActOnOrPattern(ArrayRef<MatchPattern *> Alternatives,
+                 ArrayRef<SourceLocation> OrLocs);
   ActionResult<MatchPattern *>
   ActOnBracedAlternativePattern(SourceRange Braces, MatchPattern *SubPattern);
   ActionResult<MatchPattern *>

@@ -449,12 +449,12 @@ void Parser::EnterScope(unsigned ScopeFlags) {
   }
 }
 
-void Parser::ExitScope() {
+void Parser::ExitScope(bool DiagnoseDecls) {
   assert(getCurScope() && "Scope imbalance!");
 
   // Inform the actions module that this scope is going away if there are any
   // decls in it.
-  Actions.ActOnPopScope(Tok.getLocation(), getCurScope());
+  Actions.ActOnPopScope(Tok.getLocation(), getCurScope(), DiagnoseDecls);
 
   Scope *OldScope = getCurScope();
   Actions.CurScope = OldScope->getParent();
