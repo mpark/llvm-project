@@ -1193,6 +1193,13 @@ static ExprDependence getMatchGuardDependence(const MatchGuard &Guard) {
 static ExprDependence
 getMatchPatternDependence(const MatchPattern *Pattern,
                           const MatchPatternInstantiation *Instantiation) {
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    ExprDependence D = ExprDependence::None;
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I))
+        D |= getMatchPatternDependence(Alternative, Instantiation);
+    return D;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     ExprDependence D = ExprDependence::None;
     for (const MatchPattern *Child :

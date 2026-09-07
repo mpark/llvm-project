@@ -541,6 +541,12 @@ enum class TemplateSubstitutionKind : char {
     getInstantiationOfIfExists(const Decl *D);
 
     void InstantiatedLocal(const Decl *D, Decl *Inst);
+    /// Replace the instantiation associated with a local declaration. Pattern
+    /// alternatives use this after selecting which sibling binding supplies
+    /// the common source-level name.
+    void ReInstantiatedLocal(const Decl *D, Decl *Inst);
+    void ReInstantiatedLocalPack(const Decl *D,
+                                 ArrayRef<ValueDecl *> Instantiations);
     void InstantiatedLocalPackArg(const Decl *D, VarDecl *Inst);
     void MakeInstantiatedLocalArgPack(const Decl *D);
 
