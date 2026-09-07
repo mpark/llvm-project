@@ -88,6 +88,7 @@ public:
     ExpressionPatternClass,
     DeclarationPatternClass,
     TypePatternClass,
+    OrPatternClass,
     AlternativePatternClass,
     DecompositionPatternClass,
   };
@@ -272,6 +273,44 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<TypePattern *>(this)->children();
+  }
+};
+
+class OrPattern final : public MatchPattern {
+  MutableArrayRef<MatchPattern *> Alternatives;
+  ArrayRef<SourceLocation> OrLocs;
+  ArrayRef<VarDecl *> Bindings;
+
+public:
+  explicit OrPattern(MutableArrayRef<MatchPattern *> Alternatives,
+                     ArrayRef<SourceLocation> OrLocs,
+                     ArrayRef<VarDecl *> Bindings)
+      : MatchPattern(OrPatternClass), Alternatives(Alternatives),
+        OrLocs(OrLocs), Bindings(Bindings) {
+    assert(Alternatives.size() >= 2 &&
+           OrLocs.size() + 1 == Alternatives.size());
+    setDependence(computeDependence());
+  }
+
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == OrPatternClass;
+  }
+
+  ArrayRef<MatchPattern *> alternatives() const { return Alternatives; }
+  ArrayRef<SourceLocation> orLocations() const { return OrLocs; }
+  ArrayRef<VarDecl *> bindings() const { return Bindings; }
+
+  SourceLocation getBeginLoc() const {
+    return Alternatives.front()->getBeginLoc();
+  }
+  SourceLocation getEndLoc() const { return Alternatives.back()->getEndLoc(); }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {Alternatives.begin(), Alternatives.end()};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<OrPattern *>(this)->children();
   }
 };
 
@@ -461,6 +500,7 @@ struct MatchPatternInfo {
   ArrayRef<unsigned char> EmptyAlternatives;
   ArrayRef<Expr *> AlternativeValues;
   ArrayRef<unsigned> SelectedAlternatives;
+  ArrayRef<unsigned char> ViableOrAlternatives;
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
   bool IsExhaustive = true;
@@ -501,6 +541,7 @@ public:
   const MatchPatternInfo *find(const MatchPattern *P) const;
   ArrayRef<MatchPattern *>
   getDecompositionPatterns(const DecompositionPattern *P) const;
+  bool isViableOrAlternative(const OrPattern *P, unsigned Index) const;
 };
 
 /// Visit the declarations and statements that implement one semantically
