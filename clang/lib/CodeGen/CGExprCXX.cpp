@@ -2590,6 +2590,43 @@ RValue CodeGenFunction::EmitMatchPattern(
   MatchPattern::MatchPatternClass PatternStyle =
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
+  case MatchPattern::MatchPatternClass::OrPatternClass: {
+    const auto *Or = static_cast<const OrPattern *>(Pattern);
+    SmallVector<const MatchPattern *, 4> Viable;
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I))
+        Viable.push_back(Alternative);
+    assert(!Viable.empty() && "or-pattern has no viable alternatives");
+    if (Viable.size() == 1)
+      return EmitMatchPattern(Viable.front(), Instantiation, Subject);
+
+    RawAddress Result = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
+                                         "match.or.result");
+    llvm::BasicBlock *PassBB = createBasicBlock("match.or.pass");
+    llvm::BasicBlock *EndBB = createBasicBlock("match.or.end");
+    for (auto [I, Alternative] : llvm::enumerate(Viable)) {
+      RValue AlternativeResult =
+          EmitMatchPattern(Alternative, Instantiation, Subject);
+      llvm::BasicBlock *FailBB =
+          I + 1 == Viable.size() ? nullptr : createBasicBlock("match.or.next");
+      if (FailBB) {
+        Builder.CreateCondBr(AlternativeResult.getScalarVal(), PassBB, FailBB);
+        EmitBlock(FailBB);
+      } else {
+        llvm::BasicBlock *FinalFailBB = createBasicBlock("match.or.fail");
+        Builder.CreateCondBr(AlternativeResult.getScalarVal(), PassBB,
+                             FinalFailBB);
+        EmitBlock(FinalFailBB);
+        Builder.CreateStore(Builder.getFalse(), Result);
+        EmitBranch(EndBB);
+      }
+    }
+    EmitBlock(PassBB);
+    Builder.CreateStore(Builder.getTrue(), Result);
+    EmitBranch(EndBB);
+    EmitBlock(EndBB);
+    return RValue::get(Builder.CreateLoad(Result));
+  }
   case MatchPattern::MatchPatternClass::AlternativePatternClass: {
     auto *AltExpr = static_cast<const AlternativePattern *>(Pattern);
     return EmitAlternativePattern(AltExpr, Instantiation);
@@ -2666,6 +2703,12 @@ emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
     CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;
   }
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I))
+        emitPatternDeclarations(CGF, Alternative, Instantiation);
+    return;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
@@ -2697,6 +2740,12 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
     return;
   }
   if (isa<TypePattern>(Pattern)) {
+    return;
+  }
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I))
+        EmitSharedDeclarationProjections(Alternative, Instantiation);
     return;
   }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
@@ -2761,7 +2810,12 @@ void CodeGenFunction::EmitSelectedMatchPatternProjections(
       EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
   }
 
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I))
+        EmitSelectedMatchPatternProjections(Alternative, Instantiation);
+  } else if (const auto *Decomposition =
+                 dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
       EmitSelectedMatchPatternProjections(Child, Instantiation);
@@ -2776,6 +2830,14 @@ hasPatternDeclarations(const MatchPattern *Pattern,
                        const MatchPatternInstantiation *Instantiation) {
   if (isa<DeclarationPattern>(Pattern))
     return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::any_of(llvm::enumerate(Or->alternatives()),
+                        [&](auto IndexedAlternative) {
+                          return Instantiation->isViableOrAlternative(
+                                     Or, IndexedAlternative.index()) &&
+                                 hasPatternDeclarations(
+                                     IndexedAlternative.value(), Instantiation);
+                        });
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
     return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
                         [&](const MatchPattern *Child) {
@@ -2861,6 +2923,7 @@ void CodeGenFunction::EmitMatchTestDispatch(
   if (Instantiations.empty())
     Instantiations = DirectInstantiation;
 
+  llvm::BasicBlock *NoMatchBB = createBasicBlock("match.test.no_match");
   for (auto [Index, Instantiation] : llvm::enumerate(Instantiations)) {
     llvm::BasicBlock *InitializePatternBB = createBasicBlock("match.test.init");
     llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.test.action");
@@ -2871,7 +2934,7 @@ void CodeGenFunction::EmitMatchTestDispatch(
         createBasicBlock("match.test.succeeded");
     llvm::BasicBlock *NextPatternBB =
         Index + 1 == Instantiations.size()
-            ? createBasicBlock("match.test.no_match")
+            ? NoMatchBB
             : createBasicBlock("match.test.next_pattern");
 
     RValue PatternResult =
@@ -2909,7 +2972,7 @@ void CodeGenFunction::EmitMatchTestDispatch(
     EmitBlock(CleanupBB);
     CaseScope.ForceCleanup();
     Builder.CreateCondBr(Builder.CreateLoad(CaseSelected), CaseSucceededBB,
-                         NextPatternBB);
+                         NoMatchBB);
 
     EmitBlock(CaseSucceededBB);
     EmitBranchThroughCleanup(SuccessDest);
@@ -3075,83 +3138,91 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   llvm::BasicBlock *NoMatchBB =
       IgnoreResult ? SelectEndBB : createBasicBlock("match.select.no_match");
 
-  unsigned CasePatternIdx = 0;
-  for (MatchCaseInstantiation MatchC : Cases) {
-    if (!hasPatternDeclarations(MatchC.Pattern, MatchC.PatternInstantiation) &&
-        !MatchC.Guard.Init && !MatchC.Guard.ConditionVariable) {
+  for (unsigned CaseBegin = 0; CaseBegin != Cases.size();) {
+    unsigned CaseEnd = CaseBegin + 1;
+    while (CaseEnd != Cases.size() &&
+           Cases[CaseEnd].CaseIndex == Cases[CaseBegin].CaseIndex)
+      ++CaseEnd;
+    llvm::BasicBlock *NextSourceCaseBB =
+        CaseEnd == Cases.size() ? NoMatchBB
+                                : createBasicBlock("match.select.next_case");
+
+    for (unsigned I = CaseBegin; I != CaseEnd; ++I) {
+      MatchCaseInstantiation MatchC = Cases[I];
+      llvm::BasicBlock *NextPatternBB =
+          I + 1 == CaseEnd ? NextSourceCaseBB
+                           : createBasicBlock("match.select.next_pattern");
+
+      if (!hasPatternDeclarations(MatchC.Pattern,
+                                  MatchC.PatternInstantiation) &&
+          !MatchC.Guard.Init && !MatchC.Guard.ConditionVariable &&
+          !hasMatchGuard(MatchC.Guard)) {
+        RValue MatchResult = EmitMatchPattern(
+            MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
+
+        llvm::BasicBlock *ExecuteActionBB =
+            createBasicBlock("match.select.action");
+        llvm::Value *Condition =
+            ApplyCaseLikelihood(MatchResult.getScalarVal(), MatchC);
+        Builder.CreateCondBr(Condition, ExecuteActionBB, NextPatternBB);
+
+        EmitBlock(ExecuteActionBB);
+        EmitCaseHandler(MatchC);
+        EmitBranch(SelectEndBB);
+        EmitBlock(NextPatternBB);
+        continue;
+      }
+
       RValue MatchResult = EmitMatchPattern(
           MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
-      if (hasMatchGuard(MatchC.Guard))
-        MatchResult = EmitMatchGuard(MatchC.Guard, MatchResult.getScalarVal());
-
+      RawAddress CaseSelected = CreateTempAlloca(
+          Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
+      llvm::BasicBlock *InitializePatternBB =
+          createBasicBlock("match.select.init");
       llvm::BasicBlock *ExecuteActionBB =
           createBasicBlock("match.select.action");
-      llvm::BasicBlock *NextPatternBB =
-          (CasePatternIdx == (Cases.size() - 1))
-              ? NoMatchBB
-              : createBasicBlock("match.select.next_pattern");
-      llvm::Value *Condition =
+      llvm::BasicBlock *GuardFailedBB =
+          createBasicBlock("match.select.guard_failed");
+      llvm::BasicBlock *CleanupBB = createBasicBlock("match.select.cleanup");
+      llvm::Value *PatternCondition =
           ApplyCaseLikelihood(MatchResult.getScalarVal(), MatchC);
-      Builder.CreateCondBr(Condition, ExecuteActionBB, NextPatternBB);
+      Builder.CreateCondBr(PatternCondition, InitializePatternBB,
+                           NextPatternBB);
+
+      EmitBlock(InitializePatternBB);
+      EmitSharedDeclarationProjections(MatchC.Pattern,
+                                       MatchC.PatternInstantiation);
+      RunCleanupsScope CaseScope(*this);
+      emitPatternDeclarations(*this, MatchC.Pattern,
+                              MatchC.PatternInstantiation);
+      RValue GuardResult = RValue::get(Builder.getTrue());
+      if (hasMatchGuard(MatchC.Guard)) {
+        GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());
+        GuardResult = RValue::get(
+            ApplyCaseLikelihood(GuardResult.getScalarVal(), MatchC));
+      }
+      llvm::Value *GuardCondition = GuardResult.getScalarVal();
+      Builder.CreateCondBr(GuardCondition, ExecuteActionBB, GuardFailedBB);
 
       EmitBlock(ExecuteActionBB);
       EmitCaseHandler(MatchC);
-      EmitBranch(SelectEndBB);
-      EmitBlock(NextPatternBB);
-      CasePatternIdx++;
-      continue;
-    }
+      if (HaveInsertPoint()) {
+        Builder.CreateStore(Builder.getTrue(), CaseSelected);
+        EmitBranch(CleanupBB);
+      }
 
-    RValue PatternResult = EmitMatchPattern(
-        MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
-    RawAddress CaseSelected = CreateTempAlloca(
-        Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
-    llvm::BasicBlock *InitializePatternBB =
-        createBasicBlock("match.select.init");
-    llvm::BasicBlock *ExecuteActionBB = createBasicBlock("match.select.action");
-    llvm::BasicBlock *GuardFailedBB =
-        createBasicBlock("match.select.guard_failed");
-    llvm::BasicBlock *CleanupBB = createBasicBlock("match.select.cleanup");
-    llvm::BasicBlock *NextPatternBB =
-        (CasePatternIdx == (Cases.size() - 1))
-            ? NoMatchBB
-            : createBasicBlock("match.select.next_pattern");
-    llvm::Value *PatternCondition =
-        ApplyCaseLikelihood(PatternResult.getScalarVal(), MatchC);
-    Builder.CreateCondBr(PatternCondition, InitializePatternBB, NextPatternBB);
-
-    EmitBlock(InitializePatternBB);
-    EmitSharedDeclarationProjections(MatchC.Pattern,
-                                     MatchC.PatternInstantiation);
-    RunCleanupsScope CaseScope(*this);
-    emitPatternDeclarations(*this, MatchC.Pattern, MatchC.PatternInstantiation);
-    RValue GuardResult = RValue::get(Builder.getTrue());
-    if (hasMatchGuard(MatchC.Guard)) {
-      GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());
-      GuardResult = RValue::get(
-          ApplyCaseLikelihood(GuardResult.getScalarVal(), MatchC));
-    }
-    llvm::Value *GuardCondition = GuardResult.getScalarVal();
-    Builder.CreateCondBr(GuardCondition, ExecuteActionBB, GuardFailedBB);
-
-    EmitBlock(ExecuteActionBB);
-    EmitCaseHandler(MatchC);
-    if (HaveInsertPoint()) {
-      Builder.CreateStore(Builder.getTrue(), CaseSelected);
+      EmitBlock(GuardFailedBB);
+      Builder.CreateStore(Builder.getFalse(), CaseSelected);
       EmitBranch(CleanupBB);
+
+      EmitBlock(CleanupBB);
+      CaseScope.ForceCleanup();
+      llvm::Value *Selected = Builder.CreateLoad(CaseSelected);
+      Builder.CreateCondBr(Selected, SelectEndBB, NextSourceCaseBB);
+
+      EmitBlock(NextPatternBB);
     }
-
-    EmitBlock(GuardFailedBB);
-    Builder.CreateStore(Builder.getFalse(), CaseSelected);
-    EmitBranch(CleanupBB);
-
-    EmitBlock(CleanupBB);
-    CaseScope.ForceCleanup();
-    llvm::Value *Selected = Builder.CreateLoad(CaseSelected);
-    Builder.CreateCondBr(Selected, SelectEndBB, NextPatternBB);
-
-    EmitBlock(NextPatternBB);
-    CasePatternIdx++;
+    CaseBegin = CaseEnd;
   }
 
   assert(!Cases.empty() && "expected at least one pattern");
