@@ -3172,6 +3172,16 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
     P->getTypeSourceInfo()->getType().print(OS, Policy);
     return;
   }
+  case MatchPattern::OrPatternClass: {
+    const auto *P = static_cast<const OrPattern *>(Pattern);
+    llvm::interleave(
+        P->alternatives(),
+        [&](const MatchPattern *Alternative) {
+          PrintMatchPattern(Alternative);
+        },
+        [&] { OS << " || "; });
+    return;
+  }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
     OS << "{";
