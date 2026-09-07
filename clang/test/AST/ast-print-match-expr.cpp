@@ -236,3 +236,16 @@ int attributed_cases(T value) {
 // CHECK-NEXT: {{^    }}};
 
 int instantiate_attributed_cases = attributed_cases(1);
+
+int or_pattern(int value) {
+  return value match {
+    case 0 || 1 || 2 => 1;
+    case _ => 0;
+  };
+}
+
+// CHECK-LABEL: int or_pattern(int value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        }}case 0 || 1 || 2 => 1;
+// CHECK-NEXT: {{^        }}case _ => 0;
+// CHECK-NEXT: {{^    }}};

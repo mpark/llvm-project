@@ -202,11 +202,18 @@ struct CtorKey {
 };
 
 struct CoveragePattern {
+  struct OrAlternative {
+    const OrPattern *Pattern;
+    unsigned Index;
+    SourceLocation Loc;
+  };
+
   enum Kind { Wild, Ctor, OpenProjectable, Opaque } K = Opaque;
   CtorKey C = CtorKey::productCtor(0);
   SmallVector<std::shared_ptr<CoveragePattern>, 4> Fields;
   SmallVector<QualType, 4> FieldTypes;
   SourceLocation Loc;
+  SmallVector<OrAlternative, 2> OrAlternatives;
 
   static CoveragePattern wild(SourceLocation Loc = {}) {
     CoveragePattern P;
@@ -424,6 +431,23 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
     return {CoveragePattern::opaque(Pattern->getBeginLoc())};
   }
 
+  case MatchPattern::OrPatternClass: {
+    auto *P = static_cast<OrPattern *>(Pattern);
+    CoveragePatterns Results;
+    for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
+      if (!Instantiation->isViableOrAlternative(P, I))
+        continue;
+      CoveragePatterns ChildPatterns =
+          makePatterns(S, Alternative, Instantiation, Type);
+      for (CoveragePattern &Child : ChildPatterns) {
+        Child.OrAlternatives.push_back(
+            {P, static_cast<unsigned>(I), Alternative->getBeginLoc()});
+        Results.push_back(std::move(Child));
+      }
+    }
+    return Results;
+  }
+
   case MatchPattern::DecompositionPatternClass: {
     auto *P = static_cast<DecompositionPattern *>(Pattern);
     ArrayRef<MatchPattern *> Patterns =
@@ -449,6 +473,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
           Copy.FieldTypes.push_back(FieldType);
           Copy.Fields.push_back(
               std::make_shared<CoveragePattern>(ChildPattern));
+          llvm::append_range(Copy.OrAlternatives, ChildPattern.OrAlternatives);
           Expanded.push_back(std::move(Copy));
         }
       }
@@ -488,6 +513,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
            makePatterns(S, P->getSubPattern(), Instantiation, FieldType)) {
         CoveragePattern Result = Initial;
         Result.FieldTypes.push_back(FieldType);
+        llvm::append_range(Result.OrAlternatives, Child.OrAlternatives);
         Result.Fields.push_back(
             std::make_shared<CoveragePattern>(std::move(Child)));
         Results.push_back(std::move(Result));
@@ -529,6 +555,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       for (CoveragePattern &Child : Children) {
         CoveragePattern Copy = Result;
         Copy.FieldTypes.push_back(FieldType);
+        llvm::append_range(Copy.OrAlternatives, Child.OrAlternatives);
         Copy.Fields.push_back(
             std::make_shared<CoveragePattern>(std::move(Child)));
         Results.push_back(std::move(Copy));
@@ -1132,6 +1159,16 @@ bool Sema::CheckMatchSelectExhaustiveness(
     bool AnyPattern = false;
     bool AnyUseful = false;
     bool AnyMaybeUseful = false;
+    struct OrAlternativeUsefulness {
+      const OrPattern *Pattern;
+      unsigned Index;
+      SourceLocation Loc;
+      bool Useful = false;
+      bool MaybeUseful = false;
+    };
+    SmallVector<OrAlternativeUsefulness, 4> OrUsefulness;
+    SmallVector<PatternRow, 8> IntraCaseMatrix(DefiniteMatrix.begin(),
+                                               DefiniteMatrix.end());
     for (unsigned J = I; J < GroupEnd; ++J) {
       const MatchCaseInstantiation &Case = Instantiations[J];
       CoveragePatterns Patterns = makePatterns(
@@ -1143,10 +1180,26 @@ bool Sema::CheckMatchSelectExhaustiveness(
         PatternRow Row;
         Row.push_back(Pattern);
         Usefulness Result =
-            isUseful(*this, DefiniteMatrix, Row, InitialTypes,
+            isUseful(*this, IntraCaseMatrix, Row, InitialTypes,
                      ConstructorDomain::RequiredAndResidual, nullptr);
         AnyUseful |= Result == Usefulness::Useful;
         AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
+        for (const CoveragePattern::OrAlternative &Alternative :
+             Pattern.OrAlternatives) {
+          auto Existing = llvm::find_if(OrUsefulness, [&](const auto &Use) {
+            return Use.Pattern == Alternative.Pattern &&
+                   Use.Index == Alternative.Index;
+          });
+          if (Existing == OrUsefulness.end()) {
+            OrUsefulness.push_back(
+                {Alternative.Pattern, Alternative.Index, Alternative.Loc});
+            Existing = std::prev(OrUsefulness.end());
+          }
+          Existing->Useful |= Result == Usefulness::Useful;
+          Existing->MaybeUseful |= Result == Usefulness::MaybeUseful;
+        }
+        if (Pattern.K != CoveragePattern::Opaque)
+          IntraCaseMatrix.push_back(Row);
       }
       if (hasGuard(Case))
         continue;
@@ -1169,6 +1222,10 @@ bool Sema::CheckMatchSelectExhaustiveness(
              !AnyMaybeUseful)
       Diag(Cases[CaseIndex].Pattern->getBeginLoc(),
            diag::err_match_case_redundant);
+    else if (!GroupIsMaybeUseful)
+      for (const OrAlternativeUsefulness &Alternative : OrUsefulness)
+        if (!Alternative.Useful && !Alternative.MaybeUseful)
+          Diag(Alternative.Loc, diag::err_or_pattern_alternative_redundant);
     I = GroupEnd;
   }
 
