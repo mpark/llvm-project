@@ -99,6 +99,14 @@ struct Pair {
   int second;
 };
 
+void or_pattern_condition_bindings(Pair pair) {
+  if (case [0, int value] || [int value, 0] = pair)
+    use(value);
+
+  if (case [0, int unused] || [int unused, 0] = pair) { // expected-warning {{unused variable 'unused'}}
+  }
+}
+
 namespace std {
 template<class T>
 struct alternative_traits;

@@ -6131,6 +6131,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
     if (!EvaluateMatchPattern(Pattern, PatternInstantiation, PatternMatched,
                               Info, &ProjectionCache))
       return ESR_Failed;
+    bool PatternSelected = PatternMatched;
     if (PatternMatched &&
         !EvaluateSharedDeclarationProjections(Pattern, PatternInstantiation,
                                               Info, ProjectionCache))
@@ -6173,6 +6174,8 @@ static EvalStmtResult EvaluateCaseConditionChain(
     Matched = CandidateMatched;
     if (ESR != ESR_Succeeded || CandidateMatched)
       return ESR;
+    if (PatternSelected)
+      return ESR_Succeeded;
     return std::nullopt;
   };
 
@@ -10053,10 +10056,14 @@ public:
     MatchProjectionEvaluationCache ProjectionCache;
 
     bool Result;
+    std::optional<unsigned> RejectedCase;
     for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
+      if (RejectedCase && *RejectedCase == Case.CaseIndex)
+        continue;
       if (!EvaluateMatchPattern(Case.Pattern, Case.PatternInstantiation, Result,
                                 Info, &ProjectionCache))
         return false;
+      bool PatternSelected = Result;
       if (Result &&
           !EvaluateSharedDeclarationProjections(
               Case.Pattern, Case.PatternInstantiation, Info, ProjectionCache))
@@ -10103,6 +10110,8 @@ public:
       }
       if (!Scope.destroy())
         return false;
+      if (PatternSelected)
+        RejectedCase = Case.CaseIndex;
     }
     if (E->getType()->isVoidType()) {
       MatchScope.extendToFullExpression();
@@ -21495,6 +21504,20 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
            "expected expression pattern state");
     return EvaluateAsBooleanCondition(PatternInfo->Condition, Result, Info);
   }
+  case MatchPattern::OrPatternClass: {
+    const auto *P = static_cast<const OrPattern *>(Pattern);
+    Result = false;
+    for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
+      if (!Instantiation->isViableOrAlternative(P, I))
+        continue;
+      if (!EvaluateMatchPattern(Alternative, Instantiation, Result, Info,
+                                ProjectionCache))
+        return false;
+      if (Result)
+        return true;
+    }
+    return true;
+  }
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);
@@ -21579,6 +21602,13 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
             return false;
     return true;
   }
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I) &&
+          !EvaluatePatternDeclarations(Alternative, Instantiation, Info))
+        return false;
+    return true;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
@@ -21604,6 +21634,14 @@ static bool EvaluateSharedDeclarationProjections(
   }
   if (isa<TypePattern>(Pattern))
     return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+      if (Instantiation->isViableOrAlternative(Or, I) &&
+          !EvaluateSharedDeclarationProjections(Alternative, Instantiation,
+                                                Info, ProjectionCache))
+        return false;
+    return true;
+  }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
@@ -21664,6 +21702,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                                 Instantiation.PatternInstantiation, Result,
                                 Info, &ProjectionCache))
         return false;
+      bool PatternSelected = Result;
       if (Result &&
           !EvaluateSharedDeclarationProjections(
               Instantiation.Pattern, Instantiation.PatternInstantiation, Info,
@@ -21698,6 +21737,8 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
         return false;
       if (Result)
         return Finish(Success(true, E));
+      if (PatternSelected)
+        return Finish(Success(false, E));
     }
     return Finish(Success(false, E));
   }
