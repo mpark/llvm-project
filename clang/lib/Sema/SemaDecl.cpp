@@ -2307,7 +2307,7 @@ static void CheckPoppedLabel(LabelDecl *L, Sema &S,
                                        << L);
 }
 
-void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
+void Sema::ActOnPopScope(SourceLocation Loc, Scope *S, bool DiagnoseDecls) {
   S->applyNRVO();
 
   if (S->decl_empty()) return;
@@ -2339,23 +2339,26 @@ void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
     NamedDecl *D = cast<NamedDecl>(TmpD);
 
     // Diagnose unused variables in this scope.
-    if (!S->hasUnrecoverableErrorOccurred()) {
+    if (DiagnoseDecls && !S->hasUnrecoverableErrorOccurred()) {
       DiagnoseUnusedDecl(D, addDiag);
       if (const auto *RD = dyn_cast<RecordDecl>(D))
         DiagnoseUnusedNestedTypedefs(RD, addDiag);
       // Wait until end of TU to diagnose internal linkage file vars.
       if (auto *VD = dyn_cast<VarDecl>(D);
-          VD && !VD->isInternalLinkageFileVar()) {
+          VD && !VD->isInternalLinkageFileVar())
         DiagnoseUnusedButSetDecl(VD, addDiag);
-        RefsMinusAssignments.erase(VD->getCanonicalDecl());
-      }
     }
+    if (const auto *VD = dyn_cast<VarDecl>(D);
+        VD && !VD->isInternalLinkageFileVar())
+      RefsMinusAssignments.erase(VD->getCanonicalDecl());
 
     if (!D->getDeclName()) continue;
 
     // If this was a forward reference to a label, verify it was defined.
-    if (LabelDecl *LD = dyn_cast<LabelDecl>(D))
-      CheckPoppedLabel(LD, *this, addDiag);
+    if (DiagnoseDecls) {
+      if (LabelDecl *LD = dyn_cast<LabelDecl>(D))
+        CheckPoppedLabel(LD, *this, addDiag);
+    }
 
     // Partial translation units that are created in incremental processing must
     // not clean up the IdResolver because PTUs should take into account the
@@ -2367,10 +2370,12 @@ void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
     // Warn on it if we are shadowing a declaration.
     auto ShadowI = ShadowingDecls.find(D);
     if (ShadowI != ShadowingDecls.end()) {
-      if (const auto *FD = dyn_cast<FieldDecl>(ShadowI->second)) {
-        addDiagWithPrev(D->getLocation(), FD->getLocation(),
-                        PDiag(diag::warn_ctor_parm_shadows_field)
-                            << D << FD << FD->getParent());
+      if (DiagnoseDecls) {
+        if (const auto *FD = dyn_cast<FieldDecl>(ShadowI->second)) {
+          addDiagWithPrev(D->getLocation(), FD->getLocation(),
+                          PDiag(diag::warn_ctor_parm_shadows_field)
+                              << D << FD << FD->getParent());
+        }
       }
       ShadowingDecls.erase(ShadowI);
     }

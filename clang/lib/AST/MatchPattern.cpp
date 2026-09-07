@@ -50,6 +50,13 @@ ArrayRef<MatchPattern *> MatchPatternInstantiation::getDecompositionPatterns(
   return P->patterns();
 }
 
+bool MatchPatternInstantiation::isViableOrAlternative(const OrPattern *P,
+                                                      unsigned Index) const {
+  const MatchPatternInfo *Info = find(P);
+  return !Info || Info->ViableOrAlternatives.empty() ||
+         Info->ViableOrAlternatives[Index];
+}
+
 void clang::visitMatchPatternEvaluation(
     const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     llvm::function_ref<void(const Decl *)> VisitDecl,
@@ -122,6 +129,8 @@ const char *MatchPattern::getMatchPatternClassName() const {
     return "DeclarationPattern";
   case TypePatternClass:
     return "TypePattern";
+  case OrPatternClass:
+    return "OrPattern";
   case AlternativePatternClass:
     return "AlternativePattern";
   case DecompositionPatternClass:
@@ -140,6 +149,8 @@ SourceLocation MatchPattern::getBeginLoc() const {
     return static_cast<const DeclarationPattern *>(this)->getBeginLoc();
   case TypePatternClass:
     return static_cast<const TypePattern *>(this)->getBeginLoc();
+  case OrPatternClass:
+    return static_cast<const OrPattern *>(this)->getBeginLoc();
   case AlternativePatternClass:
     return static_cast<const AlternativePattern *>(this)->getBeginLoc();
   case DecompositionPatternClass:
@@ -158,6 +169,8 @@ SourceLocation MatchPattern::getEndLoc() const {
     return static_cast<const DeclarationPattern *>(this)->getEndLoc();
   case TypePatternClass:
     return static_cast<const TypePattern *>(this)->getEndLoc();
+  case OrPatternClass:
+    return static_cast<const OrPattern *>(this)->getEndLoc();
   case AlternativePatternClass:
     return static_cast<const AlternativePattern *>(this)->getEndLoc();
   case DecompositionPatternClass:
@@ -176,6 +189,8 @@ llvm::iterator_range<MatchPattern **> MatchPattern::children() {
     return static_cast<DeclarationPattern *>(this)->children();
   case TypePatternClass:
     return static_cast<TypePattern *>(this)->children();
+  case OrPatternClass:
+    return static_cast<OrPattern *>(this)->children();
   case AlternativePatternClass:
     return static_cast<AlternativePattern *>(this)->children();
   case DecompositionPatternClass:

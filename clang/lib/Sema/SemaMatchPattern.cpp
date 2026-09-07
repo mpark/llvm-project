@@ -47,6 +47,36 @@ collectPatternBindings(MatchPattern *Pattern,
     collectPatternBindings(Child, Bindings);
 }
 
+static void
+collectPatternBindingInterface(MatchPattern *Pattern,
+                               SmallVectorImpl<ValueDecl *> &Bindings) {
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
+    VarDecl *Variable = Declaration->getDeclaration();
+    if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
+      for (BindingDecl *Binding : Decomposition->leaf_bindings())
+        if (Binding->getDeclName())
+          Bindings.push_back(Binding);
+    } else if (Variable->getDeclName()) {
+      Bindings.push_back(Variable);
+    }
+    return;
+  }
+
+  // The first child of a nested or-pattern provides the source declarations
+  // visible after the complete pattern has been parsed.
+  if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    collectPatternBindingInterface(Or->alternatives().front(), Bindings);
+    return;
+  }
+
+  if (auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
+    if (MatchPattern *Selector = Alternative->getSelector())
+      collectPatternBindingInterface(Selector, Bindings);
+
+  for (MatchPattern *Child : Pattern->children())
+    collectPatternBindingInterface(Child, Bindings);
+}
+
 static bool checkPatternBindingReferences(
     Sema &S, MatchPattern *Pattern,
     const llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
@@ -1289,6 +1319,85 @@ static bool isArityInferredDecompositionPack(MatchPattern *Pattern) {
   return false;
 }
 
+static bool isDecompositionPatternPack(MatchPattern *Pattern) {
+  if (isArityInferredDecompositionPack(Pattern))
+    return true;
+  if (auto *Expression = dyn_cast<ExpressionPattern>(Pattern->IgnoreParens()))
+    return Expression->isPackExpansion();
+  return false;
+}
+
+ActionResult<MatchPattern *>
+Sema::ActOnOrPattern(ArrayRef<MatchPattern *> Alternatives,
+                     ArrayRef<SourceLocation> OrLocs) {
+  for (MatchPattern *Alternative : Alternatives) {
+    if (!isDecompositionPatternPack(Alternative))
+      continue;
+    Diag(Alternative->getBeginLoc(),
+         diag::err_decomp_pattern_pack_in_or_pattern);
+    return true;
+  }
+
+  SmallVector<ValueDecl *, 4> ExpectedBindings;
+  collectPatternBindingInterface(Alternatives.front(), ExpectedBindings);
+  SmallVector<QualType, 4> InterfaceTypes;
+  InterfaceTypes.reserve(ExpectedBindings.size());
+  for (ValueDecl *Binding : ExpectedBindings)
+    InterfaceTypes.push_back(Binding->isParameterPack() ? QualType()
+                                                        : Binding->getType());
+  for (MatchPattern *Alternative : Alternatives.drop_front()) {
+    SmallVector<ValueDecl *, 4> ActualBindings;
+    collectPatternBindingInterface(Alternative, ActualBindings);
+    bool SameInterface = ExpectedBindings.size() == ActualBindings.size();
+    if (SameInterface)
+      for (auto [Expected, Actual] :
+           llvm::zip(ExpectedBindings, ActualBindings))
+        SameInterface &=
+            Expected->getDeclName() == Actual->getDeclName() &&
+            Expected->isParameterPack() == Actual->isParameterPack();
+    if (!SameInterface) {
+      Diag(Alternative->getBeginLoc(), diag::err_or_pattern_binding_mismatch);
+      Diag(Alternatives.front()->getBeginLoc(),
+           diag::note_or_pattern_binding_interface);
+      return true;
+    }
+    for (auto [I, Actual] : llvm::enumerate(ActualBindings))
+      if (InterfaceTypes[I].isNull() || Actual->getType().isNull() ||
+          InterfaceTypes[I]->isDependentType() ||
+          Actual->getType()->isDependentType() ||
+          !Context.hasSameType(InterfaceTypes[I], Actual->getType()))
+        InterfaceTypes[I] = QualType();
+  }
+
+  MatchPattern **AlternativeStorage =
+      Context.Allocate<MatchPattern *>(Alternatives.size());
+  llvm::copy(Alternatives, AlternativeStorage);
+  SourceLocation *LocationStorage =
+      Context.Allocate<SourceLocation>(OrLocs.size());
+  llvm::copy(OrLocs, LocationStorage);
+  VarDecl **BindingStorage =
+      Context.Allocate<VarDecl *>(ExpectedBindings.size());
+  for (auto [I, Binding] : llvm::enumerate(ExpectedBindings)) {
+    QualType InterfaceType = InterfaceTypes[I];
+    if (InterfaceType.isNull())
+      InterfaceType = Context.DependentTy;
+    if (Binding->isParameterPack())
+      InterfaceType = Context.getPackExpansionType(
+          Context.DependentTy, std::nullopt, /*ExpectPackInType=*/false);
+    TypeSourceInfo *TInfo =
+        Context.getTrivialTypeSourceInfo(InterfaceType, Binding->getLocation());
+    auto *Interface = VarDecl::Create(
+        Context, CurContext, Binding->getBeginLoc(), Binding->getLocation(),
+        Binding->getIdentifier(), InterfaceType, TInfo, SC_None);
+    if (Binding->hasAttrs())
+      Interface->setAttrs(Binding->getAttrs());
+    BindingStorage[I] = Interface;
+  }
+  return new (Context) OrPattern({AlternativeStorage, Alternatives.size()},
+                                 {LocationStorage, OrLocs.size()},
+                                 {BindingStorage, ExpectedBindings.size()});
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnBracedAlternativePattern(SourceRange Braces,
                                     MatchPattern *SubPattern) {
@@ -2475,6 +2584,120 @@ bool Sema::CheckCompleteMatchPatternImpl(
     }
     break;
   }
+  case MatchPattern::OrPatternClass: {
+    auto *P = static_cast<OrPattern *>(Pattern);
+    SmallVector<unsigned char, 4> Viable(P->alternatives().size(), 0);
+
+    auto PerformsInitialization = [&](const MatchPattern *Current,
+                                      auto &Recurse) -> bool {
+      if (isa<DeclarationPattern, TypePattern>(Current))
+        return true;
+      return llvm::any_of(Current->children(), [&](const MatchPattern *Child) {
+        return Recurse(Child, Recurse);
+      });
+    };
+    bool NeedsSelectedAlternative =
+        PerformsInitialization(P, PerformsInitialization);
+
+    // Declaration initialization belongs to the selected alternative. Defer
+    // such or-patterns so each viable child receives its own semantic arm
+    // instantiation and therefore its own guard and handler instantiation.
+    if (Subject && NeedsSelectedAlternative && ProjectionCache &&
+        ProjectionCache->DeferAlternativeChoices) {
+      SmallVector<unsigned, 4> Alternatives;
+      for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
+        if (CheckCompleteMatchPattern(nullptr, Alternative, State,
+                                      ProjectionCache))
+          return true;
+        Alternatives.push_back(I);
+        Viable[I] = 1;
+      }
+      ProjectionCache->AlternativeChoices.push_back(
+          {Alternatives, Alternatives.front()});
+      ProjectionCache->HasDeferredAlternativeChoices = true;
+      unsigned char *Storage = Context.Allocate<unsigned char>(Viable.size());
+      llvm::copy(Viable, Storage);
+      State.get(P).ViableOrAlternatives = {Storage, Viable.size()};
+      break;
+    }
+
+    if (Subject && NeedsSelectedAlternative && ProjectionCache) {
+      SmallVector<unsigned, 4> Alternatives;
+      for (unsigned I = 0; I != P->alternatives().size(); ++I)
+        Alternatives.push_back(I);
+      unsigned Chosen = Alternatives.front();
+      if (ProjectionCache->NextForcedAlternativeSelection <
+          ProjectionCache->ForcedAlternativeSelections.size())
+        Chosen = ProjectionCache->ForcedAlternativeSelections
+                     [ProjectionCache->NextForcedAlternativeSelection++];
+      if (!llvm::is_contained(Alternatives, Chosen))
+        return true;
+      ProjectionCache->AlternativeChoices.push_back({Alternatives, Chosen});
+      if (CheckCompleteMatchPattern(Subject, P->alternatives()[Chosen], State,
+                                    ProjectionCache))
+        return true;
+      Viable[Chosen] = 1;
+      unsigned char *Storage = Context.Allocate<unsigned char>(Viable.size());
+      llvm::copy(Viable, Storage);
+      State.get(P).ViableOrAlternatives = {Storage, Viable.size()};
+      break;
+    }
+
+    for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
+      if (!Subject) {
+        if (CheckCompleteMatchPattern(nullptr, Alternative, State,
+                                      ProjectionCache))
+          return true;
+        Viable[I] = 1;
+        continue;
+      }
+
+      size_t SavedInfoCount = State.Infos.size();
+      size_t SavedProjectionCount =
+          ProjectionCache ? ProjectionCache->Entries.size() : 0;
+      size_t SavedChoiceCount =
+          ProjectionCache ? ProjectionCache->AlternativeChoices.size() : 0;
+      unsigned SavedForcedSelection =
+          ProjectionCache ? ProjectionCache->NextForcedAlternativeSelection : 0;
+      bool SavedDeferredChoices =
+          ProjectionCache && ProjectionCache->HasDeferredAlternativeChoices;
+
+      bool Invalid;
+      bool SubstitutionFailure;
+      {
+        SFINAETrap Trap(*this, /*WithAccessChecking=*/true);
+        Invalid = CheckCompleteMatchPattern(Subject, Alternative, State,
+                                            ProjectionCache);
+        SubstitutionFailure = Trap.hasErrorOccurred();
+      }
+      if (!Invalid) {
+        Viable[I] = 1;
+        continue;
+      }
+      if (!SubstitutionFailure)
+        return true;
+
+      State.Infos.resize(SavedInfoCount);
+      if (ProjectionCache) {
+        ProjectionCache->Entries.resize(SavedProjectionCount);
+        ProjectionCache->AlternativeChoices.resize(SavedChoiceCount);
+        ProjectionCache->NextForcedAlternativeSelection = SavedForcedSelection;
+        ProjectionCache->HasDeferredAlternativeChoices = SavedDeferredChoices;
+      }
+    }
+
+    unsigned ViableCount = llvm::count(Viable, 1);
+    if (!ViableCount) {
+      Diag(P->getBeginLoc(), diag::err_or_pattern_no_viable_alternative)
+          << Subject->getType();
+      return true;
+    }
+
+    unsigned char *Storage = Context.Allocate<unsigned char>(Viable.size());
+    llvm::copy(Viable, Storage);
+    State.get(P).ViableOrAlternatives = {Storage, Viable.size()};
+    break;
+  }
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject) {
@@ -2652,6 +2875,36 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
           Info->Projection->getKind() == MatchProjection::CastProjection)
         return MatchPatternRefutability::Refutable;
       return MatchPatternRefutability::Irrefutable;
+
+    case MatchPattern::OrPatternClass: {
+      auto *Or = static_cast<OrPattern *>(P);
+      if (!Info || Info->ViableOrAlternatives.empty())
+        return MatchPatternRefutability::Refutable;
+
+      unsigned ViableCount = llvm::count(Info->ViableOrAlternatives, 1);
+      if (ViableCount == 1)
+        for (auto [Viable, Alternative] :
+             llvm::zip(Info->ViableOrAlternatives, Or->alternatives()))
+          if (Viable)
+            return Recurse(Alternative, Recurse);
+
+      bool AnyRefutable = false;
+      for (auto [Viable, Alternative] :
+           llvm::zip(Info->ViableOrAlternatives, Or->alternatives())) {
+        if (!Viable)
+          continue;
+        size_t SavedDomainSize = Result.Domain.size();
+        MatchPatternRefutability Child = Recurse(Alternative, Recurse);
+        bool IsUnconditional = Child == MatchPatternRefutability::Irrefutable &&
+                               Result.Domain.size() == SavedDomainSize;
+        Result.Domain.resize(SavedDomainSize);
+        if (IsUnconditional)
+          return MatchPatternRefutability::Irrefutable;
+        AnyRefutable |= Child != MatchPatternRefutability::Impossible;
+      }
+      return AnyRefutable ? MatchPatternRefutability::Refutable
+                          : MatchPatternRefutability::Impossible;
+    }
 
     case MatchPattern::AlternativePatternClass: {
       auto *Alternative = static_cast<AlternativePattern *>(P);

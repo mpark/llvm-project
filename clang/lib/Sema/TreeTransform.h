@@ -562,6 +562,16 @@ public:
     TransformedLocalDecls[Old] = New.front();
   }
 
+  void remapTransformedLocalDecl(Decl *Old, Decl *New) {
+    TransformedLocalDecls[Old] = New;
+  }
+
+  void remapTransformedLocalDeclPack(Decl *Old, ArrayRef<ValueDecl *> New) {
+    assert(New.size() == 1 &&
+           "base tree transform cannot represent a local declaration pack");
+    TransformedLocalDecls[Old] = New.front();
+  }
+
   /// Transform the definition of the given declaration.
   ///
   /// By default, invokes TransformDecl() to transform the declaration.
@@ -4426,6 +4436,91 @@ public:
                                                            LParenLoc, EndLoc);
   }
 
+  void
+  RemapSelectedOrPatternBindings(MatchPattern *Source,
+                                 MatchPattern *Transformed,
+                                 const Sema::MatchPatternState &PatternState) {
+    auto CollectSourceBindings = [&](MatchPattern *Pattern,
+                                     SmallVectorImpl<ValueDecl *> &Bindings,
+                                     auto &Recurse) -> void {
+      if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
+        llvm::append_range(Bindings, Or->bindings());
+        return;
+      }
+      for (MatchPattern *Child : Pattern->children())
+        Recurse(Child, Bindings, Recurse);
+    };
+    auto CollectSelectedBindings = [&](MatchPattern *Pattern,
+                                       SmallVectorImpl<ValueDecl *> &Bindings,
+                                       auto &Recurse) -> void {
+      if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
+        VarDecl *Variable = Declaration->getDeclaration();
+        if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
+          for (BindingDecl *Binding : Decomposition->leaf_bindings()) {
+            if (!Binding->getDeclName())
+              continue;
+            if (Binding->isParameterPack() && Binding->getBinding())
+              llvm::append_range(Bindings, Binding->getBindingPackDecls());
+            else
+              Bindings.push_back(Binding);
+          }
+        } else if (Variable->getDeclName()) {
+          Bindings.push_back(Variable);
+        }
+        return;
+      }
+
+      if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
+        unsigned Selected = 0;
+        if (const MatchPatternInfo *Info = PatternState.find(Or))
+          for (auto [I, Viable] : llvm::enumerate(Info->ViableOrAlternatives))
+            if (Viable) {
+              Selected = I;
+              break;
+            }
+        Recurse(Or->alternatives()[Selected], Bindings, Recurse);
+        return;
+      }
+
+      if (auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+        if (const MatchPatternInfo *Info = PatternState.find(Decomposition);
+            Info && Info->HasExpandedPatterns) {
+          for (MatchPattern *Child : Info->ExpandedPatterns)
+            Recurse(Child, Bindings, Recurse);
+          return;
+        }
+      }
+
+      for (MatchPattern *Child : Pattern->children())
+        Recurse(Child, Bindings, Recurse);
+    };
+
+    SmallVector<ValueDecl *, 4> SourceBindings;
+    SmallVector<ValueDecl *, 4> SelectedBindings;
+    CollectSourceBindings(Source, SourceBindings, CollectSourceBindings);
+    if (SourceBindings.empty())
+      return;
+    CollectSelectedBindings(Transformed, SelectedBindings,
+                            CollectSelectedBindings);
+    for (ValueDecl *SourceBinding : SourceBindings) {
+      if (SourceBinding->isParameterPack()) {
+        SmallVector<ValueDecl *, 4> Elements;
+        for (ValueDecl *SelectedBinding : SelectedBindings)
+          if (SelectedBinding->getDeclName() == SourceBinding->getDeclName())
+            Elements.push_back(SelectedBinding);
+        getDerived().remapTransformedLocalDeclPack(SourceBinding, Elements);
+      } else {
+        auto Selected =
+            llvm::find_if(SelectedBindings, [&](ValueDecl *Binding) {
+              return Binding->getDeclName() == SourceBinding->getDeclName();
+            });
+        assert(Selected != SelectedBindings.end() &&
+               "or-pattern binding missing after transformation");
+        getDerived().remapTransformedLocalDecl(SourceBinding, *Selected);
+      }
+    }
+  }
+
   ActionResult<MatchPattern *> TransformPattern(MatchPattern *Pattern,
                                                 bool Rebuild) {
     switch (Pattern->getMatchPatternClass()) {
@@ -4495,6 +4590,23 @@ public:
       if (TInfo == P->getTypeSourceInfo())
         return Pattern;
       return getSema().ActOnTypePattern(TInfo);
+    }
+    case MatchPattern::OrPatternClass: {
+      auto *P = static_cast<OrPattern *>(Pattern);
+      SmallVector<MatchPattern *, 4> Alternatives;
+      Alternatives.reserve(P->alternatives().size());
+      bool Changed = false;
+      for (MatchPattern *Alternative : P->alternatives()) {
+        ActionResult<MatchPattern *> Transformed =
+            TransformPattern(Alternative, Rebuild);
+        if (Transformed.isInvalid())
+          return true;
+        Changed |= Transformed.get() != Alternative;
+        Alternatives.push_back(Transformed.get());
+      }
+      if (!Changed)
+        return Pattern;
+      return getSema().ActOnOrPattern(Alternatives, P->orLocations());
     }
     case MatchPattern::AlternativePatternClass: {
       AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
@@ -19367,7 +19479,20 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
   bool SawAlternativeChoice = false;
   bool HasViableCandidate = false;
 
-  auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
+  auto PerformsDeclarationInitialization = [](MatchPattern *Pattern,
+                                              auto &Recurse) -> bool {
+    if (isa<DeclarationPattern, TypePattern>(Pattern))
+      return true;
+    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
+      return Recurse(Child, Recurse);
+    });
+  };
+  auto HasAlternativeChoice = [&](MatchPattern *Pattern,
+                                  auto &Recurse) -> bool {
+    if (isa<OrPattern>(Pattern) &&
+        PerformsDeclarationInitialization(Pattern,
+                                          PerformsDeclarationInitialization))
+      return true;
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
@@ -19421,6 +19546,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
     if (NoMatch) {
       ProjectionCache.Entries.resize(SavedProjectionCount);
     } else {
+      getDerived().RemapSelectedOrPatternBindings(
+          E->getPattern(), TransformedPattern, PatternState);
       HasViableCandidate = true;
       Sema::MatchPatternSemanticAnalysis Semantic =
           getSema().AnalyzeMatchPatternSemantics(TransformedPattern,
@@ -19612,7 +19739,20 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           });
         });
       };
-  auto HasAlternativeChoice = [](MatchPattern *Pattern, auto &Recurse) -> bool {
+  auto PerformsDeclarationInitialization = [](MatchPattern *Pattern,
+                                              auto &Recurse) -> bool {
+    if (isa<DeclarationPattern, TypePattern>(Pattern))
+      return true;
+    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
+      return Recurse(Child, Recurse);
+    });
+  };
+  auto HasAlternativeChoice = [&](MatchPattern *Pattern,
+                                  auto &Recurse) -> bool {
+    if (isa<OrPattern>(Pattern) &&
+        PerformsDeclarationInitialization(Pattern,
+                                          PerformsDeclarationInitialization))
+      return true;
     if (Pattern->getMatchPatternClass() ==
         MatchPattern::AlternativePatternClass) {
       auto *Alternative = static_cast<AlternativePattern *>(Pattern);
@@ -19660,6 +19800,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     } else if (TransformAndCheckPattern()) {
       return TransformCaseResult::Error;
     }
+
+    getDerived().RemapSelectedOrPatternBindings(
+        Case.Pattern, TransformedPattern, PatternState);
 
     MatchPatternInstantiation *PatternInstantiation =
         MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,

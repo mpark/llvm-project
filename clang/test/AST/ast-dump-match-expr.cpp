@@ -75,6 +75,17 @@ void test_type_pattern_dump(int x) {
   // CHECK-NEXT:   `-BuiltinType 0x{{[^ ]*}} 'int'
 }
 
+void test_or_pattern_dump(int x) {
+  x match { case 0 || 1 || 2 => 0; case _ => 1; };
+  // CHECK:      OrPattern 0x{{[^ ]*}} <col:18, col:28>
+  // CHECK-NEXT: |-ExpressionPattern 0x{{[^ ]*}} <col:18>
+  // CHECK-NEXT: | `-IntegerLiteral 0x{{[^ ]*}} <col:18> 'int' 0
+  // CHECK-NEXT: |-ExpressionPattern 0x{{[^ ]*}} <col:23>
+  // CHECK-NEXT: | `-IntegerLiteral 0x{{[^ ]*}} <col:23> 'int' 1
+  // CHECK-NEXT: `-ExpressionPattern 0x{{[^ ]*}} <col:28>
+  // CHECK-NEXT:   `-IntegerLiteral 0x{{[^ ]*}} <col:28> 'int' 2
+}
+
 void test_attributed_case_dump(int x) {
   x match { [[likely]] case _ => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:37> 'int'

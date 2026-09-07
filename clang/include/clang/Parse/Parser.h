@@ -518,9 +518,9 @@ public:
 
     // Exit - Exit the scope associated with this object now, rather
     // than waiting until the object is destroyed.
-    void Exit() {
+    void Exit(bool DiagnoseDecls = true) {
       if (Self) {
-        Self->ExitScope();
+        Self->ExitScope(DiagnoseDecls);
         Self = nullptr;
       }
     }
@@ -555,7 +555,7 @@ public:
   void EnterScope(unsigned ScopeFlags);
 
   /// ExitScope - Pop a scope off the scope stack.
-  void ExitScope();
+  void ExitScope(bool DiagnoseDecls = true);
 
   //===--------------------------------------------------------------------===//
   // Diagnostic Emission and Error recovery.
@@ -4562,6 +4562,11 @@ private:
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes,
                bool AllowUnnamedPack = false);
+  ActionResult<MatchPattern *>
+  ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+                      bool StopAtEqual,
+                      TypoCorrectionTypeBehavior CorrectionBehavior,
+                      bool AllowUnnamedPack);
   ActionResult<MatchPattern *>
   ParseWildcardPattern();
   ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);
