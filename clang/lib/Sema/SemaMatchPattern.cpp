@@ -1329,6 +1329,11 @@ Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
   return new (Context) ExpressionPattern(E, IsPackExpansion);
 }
 
+ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
+                                                     MatchPattern *SubPattern) {
+  return new (Context) ParenPattern(Parens, SubPattern);
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
                               VarDecl *PackSourceDeclaration) {
@@ -1860,6 +1865,7 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
 }
 
 static QualType getOpenAlternativeRequestedType(MatchPattern *Pattern) {
+  Pattern = Pattern->IgnoreParens();
   if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
     return Declaration->getDeclaration()->getType();
   if (auto *Type = dyn_cast<TypePattern>(Pattern))
@@ -1955,9 +1961,8 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   }
 
   MatchPattern *SubPattern = Pattern->getSubPattern();
-  bool IsProjectableWildcard =
-      !Pattern->isSelected() && SubPattern &&
-      SubPattern->getMatchPatternClass() == MatchPattern::WildcardPatternClass;
+  bool IsProjectableWildcard = !Pattern->isSelected() && SubPattern &&
+                               isa<WildcardPattern>(SubPattern->IgnoreParens());
   QualType RequestedType =
       Pattern->isTypeSelected() ? Pattern->getTypeSelector()->getType()
       : SubPattern              ? getOpenAlternativeRequestedType(SubPattern)
@@ -2448,6 +2453,11 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return true;
     break;
   }
+  case MatchPattern::ParenPatternClass: {
+    auto *P = static_cast<ParenPattern *>(Pattern);
+    return CheckCompleteMatchPattern(Subject, P->getSubPattern(), State,
+                                     ProjectionCache);
+  }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
     if (!Subject) {
@@ -2928,6 +2938,9 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
 
     case MatchPattern::ExpressionPatternClass:
       return MatchPatternRefutability::Refutable;
+
+    case MatchPattern::ParenPatternClass:
+      return Recurse(static_cast<ParenPattern *>(P)->getSubPattern(), Recurse);
 
     case MatchPattern::DeclarationPatternClass:
       if (Info && Info->Projection &&

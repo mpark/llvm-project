@@ -190,17 +190,19 @@ void test_expression_pattern(int x, int y) {
   x match case +_;
   x match case -_;
   x match case y + 1;
-  x match case _ + 1;
+  x match case auto(_ + 1);
   x match {
     case y + 1 => 0;
-    case _ + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case auto(_ + 1) => 0;
+    case auto([] { return 2; }()) => 0;
+    case auto([]<class T>(T value) { return value; }(3)) => 0;
     case _ => 0;
   };
-  x match case (int)y;
+  x match case auto((int)y);
   using Int = int;
-  x match case (Int)y;
-  x match case (Int)(y);
-  x match case (((Int)(y)));
+  x match case auto((Int)y);
+  x match case auto((Int)(y));
+  x match case auto(((Int)(y)));
   constexpr auto id = [](auto &&x) -> auto && {
     return static_cast<decltype(x)>(x);
   };
@@ -218,7 +220,7 @@ void test_expression_pattern(int x, int y) {
     case y++ => 0;
     case y++ * 2 => 0;
     case (y++) => 0;
-    case (y)++ * 2 => 0;
+    case auto((y)++ * 2) => 0;
     case _ => 0;
   };
 }
@@ -279,11 +281,49 @@ void test_invalid_decomposition_pattern() {
   s match { case [int first, ..._, int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
   s match { case [int first, ...42, int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
   s match { case [int first, ...[_, _], int last] => 0; }; // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  s match { case [int first, (...), int last] => 0; }; // expected-error {{expected expression}}
+  s match { case [int first, (auto&& ...middle), int last] => 0; }; // expected-error {{expected ')'}} expected-note {{to match this '('}}
 }
 
-void test_parenthesized_expression_pattern(int a, int b) {
+void test_parenthesized_pattern(int a, int b) {
+  int _ = 0;
+  a match case auto(_ + 1);
+  a match case auto((a) + b);
+  a match case auto(a = b);
+  a match case auto(a ? b : 0);
+  a match case auto((a, b));
+  a match case auto([] { return 1; }());
+  a match case auto(({ int value = 1; value; }));
+  a match case ([[maybe_unused]] int value);
+
   a match {
-    case (a) + b => 0;
+    case (a + b) => 0;
+    case (_) => 0;
+  };
+
+  PatternPair pair{};
+  pair match {
+    case ([0, int y]) => y;
+    case _ => 0;
+  };
+}
+
+void test_pattern_introducers_commit(int value) {
+  int _ = 0;
+  value match {
+    case _ + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case _ => 0;
+  };
+
+  value match {
+    case (value) + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case _ => 0;
+  };
+
+  struct Empty {};
+  Empty empty;
+  empty match {
+    case [] {}() => 0; // expected-error {{expected '=>' after pattern}}
     case _ => 0;
   };
 }
@@ -601,4 +641,11 @@ int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
     case [Is..., 0] => 1;
     case _ => -1;
   };
+}
+
+template <int... Is, int N>
+void test_non_pattern_pack_expansion(const int (&p)[N]) {
+  p match { case [(Is...)] => 0; }; // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  p match case auto&& ...elements; // expected-error {{expected expression}}
+  p match case Is...; // expected-error {{expected expression}}
 }

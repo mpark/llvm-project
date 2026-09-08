@@ -96,7 +96,8 @@ struct Constructed {
   friend constexpr bool operator==(Constructed, Constructed) = default;
 };
 
-static_assert(Constructed{} match case (Constructed()));
+static_assert(Constructed{} match case static_cast<Constructed>(Constructed{}));
+static_assert(Constructed{} match case (Constructed));
 
 constexpr void increment(int& value) {
   ++value;
