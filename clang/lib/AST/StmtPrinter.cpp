@@ -3152,6 +3152,13 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
     PrintExpr(const_cast<Expr *>(P->getExpr()));
     return;
   }
+  case MatchPattern::ParenPatternClass: {
+    const auto *P = static_cast<const ParenPattern *>(Pattern);
+    OS << '(';
+    PrintMatchPattern(P->getSubPattern());
+    OS << ')';
+    return;
+  }
   case MatchPattern::DeclarationPatternClass: {
     const auto *P = static_cast<const DeclarationPattern *>(Pattern);
     const VarDecl *D = P->getDeclaration();
