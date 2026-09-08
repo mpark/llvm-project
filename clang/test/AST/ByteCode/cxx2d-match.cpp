@@ -23,6 +23,10 @@ static_assert(test_case_condition(0) == 1);
 static_assert(test_case_condition(6) == 12);
 static_assert(test_case_condition(2) == -1);
 
+constexpr int assign(int& target, int value) {
+  return target = value;
+}
+
 constexpr bool test_case_condition_assignment_parsing() {
   int pattern_value = 0;
   int source = 0;
@@ -30,7 +34,7 @@ constexpr bool test_case_condition_assignment_parsing() {
   } else {
     return false;
   }
-  if (case (pattern_value = 4) = (source = 4)) {
+  if (case assign(pattern_value, 4) = (source = 4)) {
   } else {
     return false;
   }
@@ -38,6 +42,25 @@ constexpr bool test_case_condition_assignment_parsing() {
 }
 
 static_assert(test_case_condition_assignment_parsing());
+
+constexpr bool test_parenthesized_patterns(int value) {
+  return value match {
+    case ((0 || 1)) => true;
+    case (_) => false;
+  };
+}
+
+static_assert(test_parenthesized_patterns(0));
+static_assert(test_parenthesized_patterns(1));
+static_assert(!test_parenthesized_patterns(2));
+
+constexpr int test_parenthesized_declaration(int value) {
+  return value match {
+    case (int copy) => copy;
+  };
+}
+
+static_assert(test_parenthesized_declaration(42) == 42);
 
 constexpr int test_case_condition_same_name() {
   int value = 42;
@@ -157,6 +180,19 @@ constexpr int match_pointer(int *pointer) {
 static_assert(match_pointer(nullptr) == -1);
 static_assert([] { int value = 42; return match_pointer(&value); }() == 42);
 
+constexpr int match_parenthesized_pointer(int *pointer) {
+  return pointer match {
+    case ({ auto &&value }) => value;
+    case ({}) => -1;
+  };
+}
+
+static_assert(match_parenthesized_pointer(nullptr) == -1);
+static_assert([] {
+  int value = 44;
+  return match_parenthesized_pointer(&value);
+}() == 44);
+
 constexpr int match_named_pointer(int *pointer) {
   return pointer match {
     case { .some: auto &&value } => value;
@@ -237,6 +273,16 @@ static_assert(test_decomposition_pattern({0, 1}) == 4);
 static_assert(test_decomposition_pattern({0, 2}) == 8);
 static_assert(test_decomposition_pattern({2, 3}) == 6);
 static_assert(test_decomposition_pattern({3, 4}) == 12);
+
+constexpr int test_parenthesized_decomposition_pattern(const int (&xs)[2]) {
+  return xs match {
+    case ([0, int value]) => value;
+    case (_) => -1;
+  };
+}
+
+static_assert(test_parenthesized_decomposition_pattern({0, 3}) == 3);
+static_assert(test_parenthesized_decomposition_pattern({1, 3}) == -1);
 
 constexpr int test_vector_decomposition_pattern() {
   using FourUInts = unsigned __attribute__((__vector_size__(16)));

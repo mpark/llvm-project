@@ -431,6 +431,11 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
     return {CoveragePattern::opaque(Pattern->getBeginLoc())};
   }
 
+  case MatchPattern::ParenPatternClass:
+    return makePatterns(S,
+                        static_cast<ParenPattern *>(Pattern)->getSubPattern(),
+                        Instantiation, Type);
+
   case MatchPattern::OrPatternClass: {
     auto *P = static_cast<OrPattern *>(Pattern);
     CoveragePatterns Results;
