@@ -61,15 +61,36 @@ static_assert(nested({0, 2}));
 static_assert(nested({1, 3}));
 static_assert(!nested({2, 2}));
 
-constexpr bool parenthesized_expression(bool value) {
+constexpr bool parenthesized_or_pattern(bool value) {
   return value match {
     case (false || true) => true;
+  };
+}
+
+static_assert(parenthesized_or_pattern(true));
+static_assert(parenthesized_or_pattern(false));
+
+constexpr bool explicitly_parenthesized_expression(bool value) {
+  return value match {
+    case static_cast<bool>(false || true) => true;
     case _ => false;
   };
 }
 
-static_assert(parenthesized_expression(true));
-static_assert(!parenthesized_expression(false));
+static_assert(explicitly_parenthesized_expression(true));
+static_assert(!explicitly_parenthesized_expression(false));
+
+#define GROUP_PATTERN(...) (__VA_ARGS__)
+
+constexpr int substituted_pattern(Pair pair) {
+  return pair match {
+    case GROUP_PATTERN([0, int value]) => value;
+    case GROUP_PATTERN(_) => -1;
+  };
+}
+
+static_assert(substituted_pattern({0, 4}) == 4);
+static_assert(substituted_pattern({1, 4}) == -1);
 
 constexpr bool logical_and_remains_an_expression(bool value) {
   return value match {
@@ -252,6 +273,17 @@ constexpr int differently_typed_binding(const Choice& choice) {
 static_assert(differently_typed_binding({0, {}, {}, {}}) == 1);
 static_assert(differently_typed_binding({1, {}, {}, {}}) == 2);
 static_assert(differently_typed_binding({2, {}, {}, {}}) == 0);
+
+constexpr int parenthesized_differently_typed_binding(const Choice& choice) {
+  return choice match {
+    case ({ const Left& value } || { const Right& value }) => use(value);
+    case _ => 0;
+  };
+}
+
+static_assert(parenthesized_differently_typed_binding({0, {}, {}, {}}) == 1);
+static_assert(parenthesized_differently_typed_binding({1, {}, {}, {}}) == 2);
+static_assert(parenthesized_differently_typed_binding({2, {}, {}, {}}) == 0);
 
 constexpr int differently_typed_direct_binding(auto value) {
   return value match {

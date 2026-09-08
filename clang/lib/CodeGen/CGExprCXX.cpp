@@ -2545,11 +2545,12 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   // Sibling alternative discriminators have the decomposition declaration as
   // their common dependency. Emit them here so semantically specialized cases
   // can share one discriminator without initializing it in only one branch.
-  for (const MatchPattern *SubPattern : Patterns)
-    if (SubPattern->getMatchPatternClass() ==
-        MatchPattern::AlternativePatternClass)
+  for (const MatchPattern *SubPattern : Patterns) {
+    SubPattern = SubPattern->IgnoreParens();
+    if (isa<AlternativePattern>(SubPattern))
       EmitAlternativeDiscriminator(
           static_cast<const AlternativePattern *>(SubPattern), Instantiation);
+  }
 
   for (auto *SubPattern : Patterns) {
     RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr);
@@ -2580,6 +2581,10 @@ RValue CodeGenFunction::EmitMatchPattern(
   MatchPattern::MatchPatternClass PatternStyle =
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
+  case MatchPattern::MatchPatternClass::ParenPatternClass:
+    return EmitMatchPattern(
+        static_cast<const ParenPattern *>(Pattern)->getSubPattern(),
+        Instantiation, Subject);
   case MatchPattern::MatchPatternClass::OrPatternClass: {
     const auto *Or = static_cast<const OrPattern *>(Pattern);
     SmallVector<const MatchPattern *, 4> Viable;

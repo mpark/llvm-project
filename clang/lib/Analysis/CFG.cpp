@@ -3408,14 +3408,12 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
   if (!E->getType()->isVoidType() && asc.alwaysAdd(*this, E))
     appendStmt(ConfluenceBlock, E);
 
-  auto IsUnguardedWildcard = [](const MatchCaseInstantiation &Case) {
-    return Case.Pattern->getMatchPatternClass() ==
-               MatchPattern::WildcardPatternClass &&
+  auto IsUnguardedWildcard = [&](const MatchCaseInstantiation &Case) {
+    return isa<WildcardPattern>(Case.Pattern->IgnoreParens()) &&
            !Case.Guard.hasGuard();
   };
-  auto IsWildcard = [](const MatchCaseInstantiation &Case) {
-    return Case.Pattern->getMatchPatternClass() ==
-           MatchPattern::WildcardPatternClass;
+  auto IsWildcard = [&](const MatchCaseInstantiation &Case) {
+    return isa<WildcardPattern>(Case.Pattern->IgnoreParens());
   };
 
   auto Cases = E->getCaseInstantiations();
