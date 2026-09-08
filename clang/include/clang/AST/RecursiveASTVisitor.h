@@ -3300,6 +3300,9 @@ bool RecursiveASTVisitor<Derived>::TraverseMatchPattern(MatchPattern *P) {
   case MatchPattern::ExpressionPatternClass:
     return getDerived().TraverseStmt(
         static_cast<ExpressionPattern *>(P)->getExpr());
+  case MatchPattern::ParenPatternClass:
+    return getDerived().TraverseMatchPattern(
+        static_cast<ParenPattern *>(P)->getSubPattern());
   case MatchPattern::DeclarationPatternClass:
     return getDerived().TraverseDecl(
         static_cast<DeclarationPattern *>(P)->getDeclaration());

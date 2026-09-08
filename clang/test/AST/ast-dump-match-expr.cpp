@@ -86,6 +86,17 @@ void test_or_pattern_dump(int x) {
   // CHECK-NEXT:   `-IntegerLiteral 0x{{[^ ]*}} <col:28> 'int' 2
 }
 
+void test_paren_pattern_dump(int x) {
+  x match { case ((0 || 1)) => 0; case _ => 1; };
+  // CHECK:      ParenPattern 0x{{[^ ]*}} <col:18, col:27>
+  // CHECK-NEXT: `-ParenPattern 0x{{[^ ]*}} <col:19, col:26>
+  // CHECK-NEXT:   `-OrPattern 0x{{[^ ]*}} <col:20, col:25>
+  // CHECK-NEXT:     |-ExpressionPattern 0x{{[^ ]*}} <col:20>
+  // CHECK-NEXT:     | `-IntegerLiteral 0x{{[^ ]*}} <col:20> 'int' 0
+  // CHECK-NEXT:     `-ExpressionPattern 0x{{[^ ]*}} <col:25>
+  // CHECK-NEXT:       `-IntegerLiteral 0x{{[^ ]*}} <col:25> 'int' 1
+}
+
 void test_attributed_case_dump(int x) {
   x match { [[likely]] case _ => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:37> 'int'

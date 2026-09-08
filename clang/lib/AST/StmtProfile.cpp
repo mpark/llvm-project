@@ -263,6 +263,9 @@ void StmtProfiler::VisitMatchPattern(const MatchPattern *P) {
     Visit(EP->getExpr());
     return;
   }
+  case MatchPattern::ParenPatternClass:
+    VisitMatchPattern(static_cast<const ParenPattern *>(P)->getSubPattern());
+    return;
   case MatchPattern::DeclarationPatternClass:
     VisitType(static_cast<const DeclarationPattern *>(P)
                   ->getDeclaration()
