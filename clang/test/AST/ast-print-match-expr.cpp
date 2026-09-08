@@ -249,3 +249,16 @@ int or_pattern(int value) {
 // CHECK-NEXT: {{^        }}case 0 || 1 || 2 => 1;
 // CHECK-NEXT: {{^        }}case _ => 0;
 // CHECK-NEXT: {{^    }}};
+
+int parenthesized_pattern(int value) {
+  return value match {
+    case ((0 || 1)) => 1;
+    case (_) => 0;
+  };
+}
+
+// CHECK-LABEL: int parenthesized_pattern(int value) {
+// CHECK-NEXT: {{^    }}return value match {
+// CHECK-NEXT: {{^        }}case ((0 || 1)) => 1;
+// CHECK-NEXT: {{^        }}case (_) => 0;
+// CHECK-NEXT: {{^    }}};

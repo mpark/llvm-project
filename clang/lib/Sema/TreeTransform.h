@@ -4535,6 +4535,16 @@ public:
         return Pattern;
       return getSema().ActOnExpressionPattern(E.get());
     }
+    case MatchPattern::ParenPatternClass: {
+      auto *P = static_cast<ParenPattern *>(Pattern);
+      ActionResult<MatchPattern *> Sub =
+          TransformPattern(P->getSubPattern(), Rebuild);
+      if (Sub.isInvalid())
+        return true;
+      if (!Rebuild && Sub.get() == P->getSubPattern())
+        return Pattern;
+      return getSema().ActOnParenPattern(P->getParens(), Sub.get());
+    }
     case MatchPattern::DeclarationPatternClass: {
       auto *P = static_cast<DeclarationPattern *>(Pattern);
       // A declaration subpattern pack is expanded after the enclosing

@@ -586,6 +586,16 @@ constexpr int declaration_subpattern_pack(DeclarationPackFour value) {
 
 static_assert(declaration_subpattern_pack({1, 2, 3, 4}) == 12);
 
+constexpr int parenthesized_declaration_subpattern_pack(
+    DeclarationPackFour value) {
+  return value match {
+    case [auto&& first, (auto&& ...middle), auto&& last] =>
+        int(sizeof...(middle)) + first + (... + middle) + last;
+  };
+}
+
+static_assert(parenthesized_declaration_subpattern_pack({1, 2, 3, 4}) == 12);
+
 constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
   return value match {
     case [int first, int ...middle, int last] =>
@@ -602,6 +612,14 @@ constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
 }
 
 static_assert(wildcard_subpattern_pack({1, 2, 3, 4}) == 5);
+
+constexpr int parenthesized_wildcard_subpattern_pack(DeclarationPackFour value) {
+  return value match {
+    case [auto&& first, (..._), auto&& last] => first + last;
+  };
+}
+
+static_assert(parenthesized_wildcard_subpattern_pack({1, 2, 3, 4}) == 5);
 
 constexpr int empty_declaration_subpattern_pack(Pair value) {
   return value match {

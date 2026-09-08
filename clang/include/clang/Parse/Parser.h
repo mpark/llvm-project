@@ -4564,6 +4564,7 @@ private:
   ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                       bool StopAtEqual,
                       TypoCorrectionTypeBehavior CorrectionBehavior);
+
   ActionResult<MatchPattern *>
   ParseWildcardPattern(SourceLocation EllipsisLoc = {});
   ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);
@@ -4571,6 +4572,9 @@ private:
   ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                          bool StopAtEqual,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
+  ActionResult<MatchPattern *>
+  ParseParenPattern(bool Decomp, bool StopAtEqual,
+                    TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();
 

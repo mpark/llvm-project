@@ -1289,6 +1289,11 @@ Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
   return new (Context) ExpressionPattern(E, IsPackExpansion);
 }
 
+ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
+                                                     MatchPattern *SubPattern) {
+  return new (Context) ParenPattern(Parens, SubPattern);
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
                               VarDecl *PackSourceDeclaration) {
@@ -1401,11 +1406,12 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
                                 SourceRange Squares) {
   MatchPattern *Pack = nullptr;
   for (MatchPattern *Pattern : Patterns) {
-    auto *Declaration = dyn_cast<DeclarationPattern>(Pattern);
+    MatchPattern *Unwrapped = Pattern->IgnoreParens();
+    auto *Declaration = dyn_cast<DeclarationPattern>(Unwrapped);
     bool IsPack =
         (Declaration && Declaration->getDeclaration()->isParameterPack()) ||
-        (isa<WildcardPattern>(Pattern) &&
-         cast<WildcardPattern>(Pattern)->isPackExpansion());
+        (isa<WildcardPattern>(Unwrapped) &&
+         cast<WildcardPattern>(Unwrapped)->isPackExpansion());
     if (!IsPack)
       continue;
     if (Pack) {
@@ -1535,12 +1541,16 @@ static bool isDecompositionDeclarationPatternApplicable(
 
 static MatchPattern *
 getDecompositionSubpatternPack(DecompositionPattern *Pattern) {
-  for (MatchPattern *Child : Pattern->children())
-    if ((isa<WildcardPattern>(Child) &&
-         cast<WildcardPattern>(Child)->isPackExpansion()) ||
-        (isa<DeclarationPattern>(Child) &&
-         cast<DeclarationPattern>(Child)->getDeclaration()->isParameterPack()))
+  for (MatchPattern *Child : Pattern->children()) {
+    MatchPattern *Unwrapped = Child->IgnoreParens();
+    if ((isa<WildcardPattern>(Unwrapped) &&
+         cast<WildcardPattern>(Unwrapped)->isPackExpansion()) ||
+        (isa<DeclarationPattern>(Unwrapped) &&
+         cast<DeclarationPattern>(Unwrapped)
+             ->getDeclaration()
+             ->isParameterPack()))
       return Child;
+  }
   return nullptr;
 }
 
@@ -1589,6 +1599,7 @@ static ArrayRef<MatchPattern *>
 expandDecompositionSubpatternPack(Sema &S, DecompositionPattern *Pattern,
                                   MatchPattern *Pack, unsigned Arity,
                                   Sema::MatchPatternState &State) {
+  MatchPattern *UnwrappedPack = Pack->IgnoreParens();
   unsigned FixedPatterns = Pattern->getNumPatterns() - 1;
   unsigned PackSize = Arity - FixedPatterns;
   SmallVector<MatchPattern *, 8> Expanded;
@@ -1602,7 +1613,7 @@ expandDecompositionSubpatternPack(Sema &S, DecompositionPattern *Pattern,
     }
     for (unsigned I = 0; I != PackSize; ++I) {
       MatchPattern *Element;
-      if (auto *Declaration = dyn_cast<DeclarationPattern>(Pack)) {
+      if (auto *Declaration = dyn_cast<DeclarationPattern>(UnwrappedPack)) {
         Element = createDeclarationSubpatternPackElement(S, Declaration);
         ExpandedDeclarations.push_back(
             cast<DeclarationPattern>(Element)->getDeclaration());
@@ -1619,9 +1630,9 @@ expandDecompositionSubpatternPack(Sema &S, DecompositionPattern *Pattern,
   Info.ExpandedPatterns = {Storage, Expanded.size()};
   Info.HasExpandedPatterns = true;
 
-  if (S.CurrentInstantiationScope && isa<DeclarationPattern>(Pack)) {
+  if (S.CurrentInstantiationScope && isa<DeclarationPattern>(UnwrappedPack)) {
     VarDecl *Source =
-        cast<DeclarationPattern>(Pack)->getPackSourceDeclaration();
+        cast<DeclarationPattern>(UnwrappedPack)->getPackSourceDeclaration();
     S.CurrentInstantiationScope->MakeInstantiatedLocalArgPack(Source);
     for (VarDecl *Declaration : ExpandedDeclarations)
       S.CurrentInstantiationScope->InstantiatedLocalPackArg(Source,
@@ -1778,6 +1789,7 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
 }
 
 static QualType getOpenAlternativeRequestedType(MatchPattern *Pattern) {
+  Pattern = Pattern->IgnoreParens();
   if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
     return Declaration->getDeclaration()->getType();
   if (auto *Type = dyn_cast<TypePattern>(Pattern))
@@ -1869,9 +1881,8 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   }
 
   MatchPattern *SubPattern = Pattern->getSubPattern();
-  bool IsProjectableWildcard =
-      !Pattern->isSelected() && SubPattern &&
-      SubPattern->getMatchPatternClass() == MatchPattern::WildcardPatternClass;
+  bool IsProjectableWildcard = !Pattern->isSelected() && SubPattern &&
+                               isa<WildcardPattern>(SubPattern->IgnoreParens());
   QualType RequestedType =
       Pattern->isTypeSelected() ? Pattern->getTypeSelector()->getType()
       : SubPattern              ? getOpenAlternativeRequestedType(SubPattern)
@@ -2351,6 +2362,11 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return true;
     break;
   }
+  case MatchPattern::ParenPatternClass: {
+    auto *P = static_cast<ParenPattern *>(Pattern);
+    return CheckCompleteMatchPattern(Subject, P->getSubPattern(), State,
+                                     ProjectionCache);
+  }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
     if (!Subject) {
@@ -2698,7 +2714,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
         ProjectionCache->CurrentProjectionPath.resize(SavedProjectionPathSize);
     });
     MatchPattern *Pack = getDecompositionSubpatternPack(P);
-    auto *DeclarationPack = dyn_cast_if_present<DeclarationPattern>(Pack);
+    auto *DeclarationPack =
+        Pack ? dyn_cast<DeclarationPattern>(Pack->IgnoreParens()) : nullptr;
     if (DeclarationPack)
       ParsingInitForAutoVars.erase(DeclarationPack->getDeclaration());
     if (!Subject) {
@@ -2822,6 +2839,9 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
 
     case MatchPattern::ExpressionPatternClass:
       return MatchPatternRefutability::Refutable;
+
+    case MatchPattern::ParenPatternClass:
+      return Recurse(static_cast<ParenPattern *>(P)->getSubPattern(), Recurse);
 
     case MatchPattern::DeclarationPatternClass:
       if (Info && Info->Projection &&

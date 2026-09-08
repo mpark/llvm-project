@@ -4629,8 +4629,7 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
 
   switch (Tok.getKind()) {
   case tok::l_paren:
-    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
-                                  CorrectionBehavior);
+    return ParseParenPattern(Decomp, StopAtEqual, CorrectionBehavior);
   case tok::l_brace:
     return ParseBracedAlternativePattern();
   case tok::l_square:
@@ -4649,6 +4648,25 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                                   CorrectionBehavior);
   }
   }
+}
+
+ActionResult<MatchPattern *>
+Parser::ParseParenPattern(bool Decomp, bool StopAtEqual,
+                          TypoCorrectionTypeBehavior CorrectionBehavior) {
+  assert(Tok.is(tok::l_paren) && "not a parenthesized pattern");
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.expectAndConsume())
+    return true;
+
+  ActionResult<MatchPattern *> SubPattern = ParsePattern(
+      /*LHSOfMatchTestExpr=*/nullptr, Decomp, StopAtEqual, CorrectionBehavior);
+  if (SubPattern.isInvalid()) {
+    T.skipToEnd();
+    return true;
+  }
+  if (T.consumeClose())
+    return true;
+  return Actions.ActOnParenPattern(T.getRange(), SubPattern.get());
 }
 
 ActionResult<MatchPattern *>

@@ -190,17 +190,19 @@ void test_expression_pattern(int x, int y) {
   x match case +_;
   x match case -_;
   x match case y + 1;
-  x match case _ + 1;
+  x match case auto(_ + 1);
   x match {
     case y + 1 => 0;
-    case _ + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case auto(_ + 1) => 0;
+    case auto([] { return 2; }()) => 0;
+    case auto([]<class T>(T value) { return value; }(3)) => 0;
     case _ => 0;
   };
-  x match case (int)y;
+  x match case auto((int)y);
   using Int = int;
-  x match case (Int)y;
-  x match case (Int)(y);
-  x match case (((Int)(y)));
+  x match case auto((Int)y);
+  x match case auto((Int)(y));
+  x match case auto(((Int)(y)));
   constexpr auto id = [](auto &&x) -> auto && {
     return static_cast<decltype(x)>(x);
   };
@@ -218,7 +220,7 @@ void test_expression_pattern(int x, int y) {
     case y++ => 0;
     case y++ * 2 => 0;
     case (y++) => 0;
-    case (y)++ * 2 => 0;
+    case auto((y)++ * 2) => 0;
     case _ => 0;
   };
 }
@@ -277,9 +279,45 @@ void test_invalid_decomposition_pattern() {
   s match { case [,] => 0; case _ => 0; }; // expected-error {{expected expression}}
 }
 
-void test_parenthesized_expression_pattern(int a, int b) {
+void test_parenthesized_pattern(int a, int b) {
+  int _ = 0;
+  a match case auto(_ + 1);
+  a match case auto((a) + b);
+  a match case auto(a = b);
+  a match case auto(a ? b : 0);
+  a match case auto((a, b));
+  a match case auto([] { return 1; }());
+  a match case auto(({ int value = 1; value; }));
+  a match case ([[maybe_unused]] int value);
+
   a match {
-    case (a) + b => 0;
+    case (a + b) => 0;
+    case (_) => 0;
+  };
+
+  PatternPair pair{};
+  pair match {
+    case ([0, int y]) => y;
+    case _ => 0;
+  };
+}
+
+void test_pattern_introducers_commit(int value) {
+  int _ = 0;
+  value match {
+    case _ + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case _ => 0;
+  };
+
+  value match {
+    case (value) + 1 => 0; // expected-error {{expected '=>' after pattern}}
+    case _ => 0;
+  };
+
+  struct Empty {};
+  Empty empty;
+  empty match {
+    case [] {}() => 0; // expected-error {{expected '=>' after pattern}}
     case _ => 0;
   };
 }

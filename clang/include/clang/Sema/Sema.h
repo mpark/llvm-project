@@ -11198,6 +11198,8 @@ public:
                        SourceLocation EllipsisLoc = {});
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
                                                       bool IsPackExpansion = false);
+  ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
+                                                 MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnDeclarationPattern(VarDecl *Declaration, SourceRange WrittenRange,
                           VarDecl *PackSourceDeclaration = nullptr);
