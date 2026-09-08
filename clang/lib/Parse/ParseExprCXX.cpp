@@ -3979,7 +3979,8 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   SourceLocation CaseLoc = ConsumeToken();
   ParseScope MatchTestScope(this, Scope::DeclScope);
   ActionResult<MatchPattern *> ParsedPattern =
-      ParsePattern(nullptr, /*Decomp=*/false, /*StopAtEqual=*/true);
+      ParsePattern(nullptr, /*AllowPackExpansion=*/false,
+                   /*StopAtEqual=*/true);
   if (ParsedPattern.isInvalid())
     return Sema::ConditionError();
   MatchPattern *Pattern = ParsedPattern.get();
@@ -4555,7 +4556,7 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
 
 ActionResult<MatchPattern *>
 Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
-                     bool Decomp,
+                     bool AllowPackExpansion,
                      bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior,
                      bool AllowUnnamedPack) {
@@ -4563,8 +4564,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
                               SmallVectorImpl<Decl *> &Declarations) {
     ParseScope AlternativeScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Result =
-        ParsePrimaryPattern(LHS, Decomp, StopAtEqual, CorrectionBehavior,
-                            AllowUnnamedPack);
+        ParsePrimaryPattern(LHS, AllowPackExpansion, StopAtEqual,
+                            CorrectionBehavior, AllowUnnamedPack);
     if (Result.isUsable())
       llvm::append_range(Declarations, getCurScope()->decls());
     AlternativeScope.Exit(/*DiagnoseDecls=*/false);
@@ -4611,7 +4612,8 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
 }
 
 ActionResult<MatchPattern *>
-Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr,
+                            bool AllowPackExpansion,
                             bool StopAtEqual,
                             TypoCorrectionTypeBehavior CorrectionBehavior,
                             bool AllowUnnamedPack) {
@@ -4633,12 +4635,11 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
                                   /*AllowPatternDecl=*/true);
   };
   if (StartsAttributedDeclarationPattern())
-    return ParseDeclarationPattern(Decomp);
+    return ParseDeclarationPattern(AllowPackExpansion);
 
   switch (Tok.getKind()) {
   case tok::l_paren:
-    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
-                                  CorrectionBehavior);
+    return ParseParenPattern(StopAtEqual, CorrectionBehavior);
   case tok::l_brace:
     return ParseBracedAlternativePattern();
   case tok::l_square:
@@ -4652,11 +4653,32 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
   default: {
     if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
                                /*AllowPatternDecl=*/true))
-      return ParseDeclarationPattern(Decomp);
-    return ParseExpressionPattern(LHSOfMatchTestExpr, Decomp, StopAtEqual,
-                                  CorrectionBehavior);
+      return ParseDeclarationPattern(AllowPackExpansion);
+    return ParseExpressionPattern(LHSOfMatchTestExpr, AllowPackExpansion,
+                                  StopAtEqual, CorrectionBehavior);
   }
   }
+}
+
+ActionResult<MatchPattern *>
+Parser::ParseParenPattern(bool StopAtEqual,
+                          TypoCorrectionTypeBehavior CorrectionBehavior) {
+  assert(Tok.is(tok::l_paren) && "not a parenthesized pattern");
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.expectAndConsume())
+    return true;
+
+  ActionResult<MatchPattern *> SubPattern =
+      ParsePattern(/*LHSOfMatchTestExpr=*/nullptr,
+                   /*AllowPackExpansion=*/false, StopAtEqual,
+                   CorrectionBehavior, /*AllowUnnamedPack=*/false);
+  if (SubPattern.isInvalid()) {
+    T.skipToEnd();
+    return true;
+  }
+  if (T.consumeClose())
+    return true;
+  return Actions.ActOnParenPattern(T.getRange(), SubPattern.get());
 }
 
 ActionResult<MatchPattern *>
@@ -4664,7 +4686,8 @@ Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
 }
 
-ActionResult<MatchPattern *> Parser::ParseDeclarationPattern(bool Decomp) {
+ActionResult<MatchPattern *>
+Parser::ParseDeclarationPattern(bool AllowPackExpansion) {
   ParsedAttributes DeclAttrs(AttrFactory);
   MaybeParseCXX11Attributes(DeclAttrs, /*MightBeObjCMessageSend=*/true);
 
@@ -4675,7 +4698,7 @@ ActionResult<MatchPattern *> Parser::ParseDeclarationPattern(bool Decomp) {
 
   ParsingDeclarator D(*this, DS, DeclAttrs, DeclaratorContext::ForInit);
   D.setIdentifierMayBeOmitted();
-  if (Decomp)
+  if (AllowPackExpansion)
     D.setPatternPackAllowed();
   if (TemplateInfo.TemplateParams)
     D.setTemplateParameterLists(*TemplateInfo.TemplateParams);
@@ -4723,7 +4746,7 @@ ActionResult<MatchPattern *> Parser::ParseDeclarationPattern(bool Decomp) {
 ActionResult<MatchPattern *>
 Parser::ParseExpressionPattern(
     ExprResult *LHSOfMatchTestExpr,
-    bool,
+    bool AllowPackExpansion,
     bool StopAtEqual,
     TypoCorrectionTypeBehavior CorrectionBehavior) {
   ExprResult Expr = [&] {
@@ -4747,7 +4770,7 @@ Parser::ParseExpressionPattern(
   }();
   if (Expr.isInvalid())
     return true;
-  bool IsPackExpansion = Tok.is(tok::ellipsis);
+  bool IsPackExpansion = AllowPackExpansion && Tok.is(tok::ellipsis);
   if (IsPackExpansion) {
     Expr = Actions.ActOnPackExpansion(Expr.get(), ConsumeToken());
     if (Expr.isInvalid())

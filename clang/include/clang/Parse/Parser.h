@@ -4557,23 +4557,29 @@ private:
                                bool DeferSemanticChecking = false);
   ActionResult<MatchPattern *>
   ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
-               bool Decomp = false,
+               bool AllowPackExpansion = false,
                bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes,
                bool AllowUnnamedPack = false);
   ActionResult<MatchPattern *>
-  ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+  ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr,
+                      bool AllowPackExpansion,
                       bool StopAtEqual,
                       TypoCorrectionTypeBehavior CorrectionBehavior,
                       bool AllowUnnamedPack);
   ActionResult<MatchPattern *>
   ParseWildcardPattern();
-  ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);
   ActionResult<MatchPattern *>
-  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
+  ParseDeclarationPattern(bool AllowPackExpansion = false);
+  ActionResult<MatchPattern *>
+  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr,
+                         bool AllowPackExpansion,
                          bool StopAtEqual,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
+  ActionResult<MatchPattern *>
+  ParseParenPattern(bool StopAtEqual,
+                    TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *> ParseBracedAlternativePattern();
   ActionResult<MatchPattern *> ParseDecompositionPattern();
 
