@@ -159,7 +159,34 @@ Retry:
     return StmtError();
 
   case tok::identifier:
-  ParseIdentifier: {    Token Next = NextToken();
+  ParseIdentifier: {
+    Token Next = NextToken();
+    SourceLocation MissingCasePatternLoc;
+    if (isPrefixMatchSelection(/*StatementContext=*/true,
+                               &MissingCasePatternLoc))
+      return ParseMatchStatement();
+    if (MissingCasePatternLoc.isValid()) {
+      Diag(MissingCasePatternLoc,
+           diag::err_expected_case_before_match_pattern)
+          << FixItHint::CreateInsertion(MissingCasePatternLoc, "case ");
+      Diag(Tok, diag::note_match_type_name_declaration_ambiguity);
+
+      // The construct is not reinterpreted as a match. Skip the invalid
+      // declaration-shaped statement to avoid unrelated vexing-parse and
+      // declaration diagnostics.
+      ConsumeToken();
+      BalancedDelimiterTracker Parens(*this, tok::l_paren);
+      if (!Parens.consumeOpen())
+        Parens.skipToEnd();
+      if (Tok.is(tok::l_brace)) {
+        BalancedDelimiterTracker Braces(*this, tok::l_brace);
+        Braces.consumeOpen();
+        Braces.skipToEnd();
+      }
+      TryConsumeToken(tok::semi);
+      return StmtError();
+    }
+
     if (Next.is(tok::colon)) { // C99 6.8.1: labeled-statement
       // Both C++11 and GNU attributes preceding the label appertain to the
       // label, so put them in a single list to pass on to
@@ -607,6 +634,14 @@ StmtResult Parser::ParseExprStatement(ParsedStmtContext StmtCtx) {
     CurTok->setAnnotationValue(R.get());
 
   return R;
+}
+
+StmtResult Parser::ParseMatchStatement() {
+  ExprStatementTokLoc = Tok.getLocation();
+  ExprResult Expr = ParseMatchSelection(/*IsStatement=*/true);
+  if (Expr.isInvalid())
+    return Actions.ActOnExprStmtError();
+  return Actions.ActOnExprStmt(Expr, /*DiscardedValue=*/true);
 }
 
 StmtResult Parser::ParseSEHTryBlock() {
