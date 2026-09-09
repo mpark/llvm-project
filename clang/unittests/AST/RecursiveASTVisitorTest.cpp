@@ -217,13 +217,13 @@ TEST(RecursiveASTVisitorTest, MatchExpressionSourceComponents) {
     bool guard();
     int handler();
     int test() {
-      return subject() match {
+      return match (subject()) {
         case pattern() if (guard()) => handler();
         case _ => 0;
       };
     }
   )cpp",
-                                        {"-std=c++2c", "-fpattern-matching"});
+                                        {"-std=c++2d", "-fpattern-matching"});
   ASSERT_TRUE(AST);
   Visitor.TraverseAST(AST->getASTContext());
   EXPECT_THAT(Visitor.Calls,

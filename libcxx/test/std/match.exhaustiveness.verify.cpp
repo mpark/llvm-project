@@ -18,7 +18,7 @@
 
 template <class V>
 int dependent_missing_alternative(V value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: { std::string }}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: { std::string }}}
     case { int number } => number;
   };
 }
@@ -29,7 +29,7 @@ int instantiate_dependent_missing_alternative() {
 
 template <class V>
 int dependent_maybe_useful_alternative(V value) {
-  return value match {
+  return match (value) {
     case { int } => 0;
     case { std::string } => 1;
     case { char character } => static_cast<int>(character);
@@ -41,7 +41,7 @@ int instantiate_dependent_maybe_useful_alternative() {
 }
 
 int missing_partial_ordering(std::partial_ordering value) {
-  return value match { // expected-error {{match expression is not exhaustive}}
+  return match (value) { // expected-error {{match expression is not exhaustive}}
     case std::partial_ordering::less => -1;
     case std::partial_ordering::equivalent => 0;
     case std::partial_ordering::greater => 1;
@@ -49,7 +49,7 @@ int missing_partial_ordering(std::partial_ordering value) {
 }
 
 int duplicate_strong_ordering_alias(std::strong_ordering value) {
-  return value match {
+  return match (value) {
     case std::strong_ordering::less => -1;
     case std::strong_ordering::equal => 0;
     case std::strong_ordering::equivalent => 0; // expected-error {{match case is redundant}}
@@ -58,7 +58,7 @@ int duplicate_strong_ordering_alias(std::strong_ordering value) {
 }
 
 int duplicate_weekday_alias(std::chrono::weekday value) {
-  return value match {
+  return match (value) {
     case std::chrono::Sunday => 0;
     case std::chrono::weekday{7} => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -66,7 +66,7 @@ int duplicate_weekday_alias(std::chrono::weekday value) {
 }
 
 int duplicate_optional_empty_state(std::optional<int> value) {
-  return value match {
+  return match (value) {
     case std::nullopt => 0;
     case {} => 1; // expected-error {{match case is redundant}}
     case { int number } => number;
@@ -74,7 +74,7 @@ int duplicate_optional_empty_state(std::optional<int> value) {
 }
 
 int missing_month(std::chrono::month value) {
-  return value match { // expected-error {{match expression is not exhaustive}}
+  return match (value) { // expected-error {{match expression is not exhaustive}}
     case std::chrono::January => 1;
     case std::chrono::February => 2;
     case std::chrono::March => 3;

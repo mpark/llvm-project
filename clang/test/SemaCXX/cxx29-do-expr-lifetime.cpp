@@ -163,7 +163,7 @@ int &&project([[clang::lifetimebound]] Owner &&owner) {
 int consume(int);
 
 void reference_escaping_full_expression_warns() {
-  auto &&dangling = make_owner() match -> decltype(auto) { // expected-warning {{temporary bound to local reference 'dangling' will be destroyed at the end of the full-expression}}
+  auto &&dangling = match (make_owner()) -> decltype(auto) { // expected-warning {{temporary bound to local reference 'dangling' will be destroyed at the end of the full-expression}}
     case auto &&owner => do -> decltype(auto) {
       project(static_cast<decltype(owner) &&>(owner))
     };
@@ -172,7 +172,7 @@ void reference_escaping_full_expression_warns() {
 }
 
 int reference_consumed_in_full_expression_is_valid() {
-  return consume(make_owner() match -> decltype(auto) {
+  return consume(match (make_owner()) -> decltype(auto) {
     case auto &&owner => do -> decltype(auto) {
       project(static_cast<decltype(owner) &&>(owner))
     };
@@ -180,7 +180,7 @@ int reference_consumed_in_full_expression_is_valid() {
 }
 
 int &&reference_returned_from_function_is_ill_formed() {
-  return make_owner() match -> decltype(auto) { // expected-error {{returning reference to local temporary object}}
+  return match (make_owner()) -> decltype(auto) { // expected-error {{returning reference to local temporary object}}
     case auto &&owner => do -> decltype(auto) {
       project(static_cast<decltype(owner) &&>(owner))
     };
@@ -188,13 +188,13 @@ int &&reference_returned_from_function_is_ill_formed() {
 }
 
 const Owner &by_value_pattern_variable_dangles(Owner subject) {
-  return subject match -> const Owner & {
+  return match (subject) -> const Owner & {
     case Owner owner => owner; // expected-warning {{reference to stack memory associated with local variable 'owner' returned}}
   };
 }
 
 const Owner &by_value_pattern_variable_through_do_dangles(Owner subject) {
-  return subject match -> const Owner & {
+  return match (subject) -> const Owner & {
     case Owner owner => do -> const Owner & {
       owner // expected-warning {{reference to stack memory associated with local variable 'owner' returned}}
     };
@@ -202,7 +202,7 @@ const Owner &by_value_pattern_variable_through_do_dangles(Owner subject) {
 }
 
 const Owner &reference_pattern_is_an_alias(Owner &subject) {
-  return subject match -> const Owner & {
+  return match (subject) -> const Owner & {
     case Owner &owner => do -> const Owner & { owner };
   };
 }
