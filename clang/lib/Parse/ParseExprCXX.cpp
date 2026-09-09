@@ -3975,8 +3975,7 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   SourceLocation CaseLoc = ConsumeToken();
   ParseScope MatchTestScope(this, Scope::DeclScope);
   ActionResult<MatchPattern *> ParsedPattern =
-      ParsePattern(nullptr, /*AllowPackExpansion=*/false,
-                   /*StopAtEqual=*/true);
+      ParsePattern(/*AllowPackExpansion=*/false, /*StopAtEqual=*/true);
   if (ParsedPattern.isInvalid())
     return Sema::ConditionError();
   MatchPattern *Pattern = ParsedPattern.get();
@@ -4309,7 +4308,7 @@ ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
         return ExprError();
     }
     ParseScope MatchTestScope(this, Scope::DeclScope);
-    ActionResult<MatchPattern *> Pattern = ParsePattern(&LHS);
+    ActionResult<MatchPattern *> Pattern = ParsePattern();
     bool PatternNeedsAlternativeSpecialization =
         Pattern.isUsable() &&
         needsAlternativeCandidateSpecialization(Pattern.get());
@@ -4549,17 +4548,15 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
 }
 
 ActionResult<MatchPattern *>
-Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
-                     bool AllowPackExpansion,
+Parser::ParsePattern(bool AllowPackExpansion,
                      bool StopAtEqual,
                      TypoCorrectionTypeBehavior CorrectionBehavior,
                      bool AllowUnnamedPack) {
-  auto ParseAlternative = [&](ExprResult *LHS,
-                              SmallVectorImpl<Decl *> &Declarations) {
+  auto ParseAlternative = [&](SmallVectorImpl<Decl *> &Declarations) {
     ParseScope AlternativeScope(this, Scope::DeclScope);
     ActionResult<MatchPattern *> Result =
-        ParsePrimaryPattern(LHS, AllowPackExpansion, StopAtEqual,
-                            CorrectionBehavior, AllowUnnamedPack);
+        ParsePrimaryPattern(AllowPackExpansion, StopAtEqual, CorrectionBehavior,
+                            AllowUnnamedPack);
     if (Result.isUsable())
       llvm::append_range(Declarations, getCurScope()->decls());
     AlternativeScope.Exit(/*DiagnoseDecls=*/false);
@@ -4575,8 +4572,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   };
 
   SmallVector<Decl *, 4> FirstDeclarations;
-  ActionResult<MatchPattern *> First =
-      ParseAlternative(LHSOfMatchTestExpr, FirstDeclarations);
+  ActionResult<MatchPattern *> First = ParseAlternative(FirstDeclarations);
   if (First.isInvalid())
     return First;
   if (Tok.isNot(tok::pipepipe)) {
@@ -4589,8 +4585,7 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   do {
     OrLocs.push_back(ConsumeToken());
     SmallVector<Decl *, 4> Declarations;
-    ActionResult<MatchPattern *> Next =
-        ParseAlternative(/*LHS=*/nullptr, Declarations);
+    ActionResult<MatchPattern *> Next = ParseAlternative(Declarations);
     if (Next.isInvalid())
       return true;
     Alternatives.push_back(Next.get());
@@ -4605,10 +4600,66 @@ Parser::ParsePattern(ExprResult *LHSOfMatchTestExpr,
   return Result;
 }
 
+Parser::DeclarationPatternKind Parser::TryParseDeclarationPatternSyntax() {
+  if (!TrySkipAttributes())
+    return DeclarationPatternKind::Error;
+
+  bool HasTypeSpecifier = false;
+  bool HasAutoSpecifier = false;
+  while (true) {
+    // In `auto [[x, y]]`, `[[` begins a nested structured binding rather than
+    // an attribute. The real declaration parser makes the same distinction.
+    if (HasAutoSpecifier && Tok.is(tok::l_square) &&
+        isNestedDecompositionDeclarator())
+      break;
+
+    if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) ==
+        CXX11AttributeKind::AttributeSpecifier) {
+      if (!TrySkipAttributes())
+        return DeclarationPatternKind::Error;
+      continue;
+    }
+
+    // Once a type has been seen, an identifier is the optional pattern name,
+    // even if lookup could also find a type or concept with that name.
+    if (HasTypeSpecifier && Tok.is(tok::identifier))
+      break;
+
+    TPResult Result = isCXXDeclarationSpecifier(ImplicitTypenameContext::No);
+    if (Result == TPResult::Error)
+      return DeclarationPatternKind::Error;
+    if (Result == TPResult::False)
+      break;
+
+    HasTypeSpecifier |= isCXXDeclarationSpecifierAType() ||
+                        (Tok.is(tok::identifier) && Result == TPResult::True);
+    HasAutoSpecifier |= Tok.is(tok::kw_auto);
+    if (TryConsumeDeclarationSpecifier() == TPResult::Error)
+      return DeclarationPatternKind::Error;
+  }
+
+  if (!HasTypeSpecifier)
+    return DeclarationPatternKind::Expression;
+
+  if (TryParsePtrOperatorSeq() == TPResult::Error)
+    return DeclarationPatternKind::Error;
+
+  // A parenthesized or braced token following the type begins a functional
+  // cast. Neither token can continue a conversion-declarator.
+  if (Tok.isOneOf(tok::l_paren, tok::l_brace))
+    return DeclarationPatternKind::Expression;
+
+  return DeclarationPatternKind::Pattern;
+}
+
+bool Parser::isDeclarationPatternSyntax() {
+  RevertingTentativeParsingAction TPA(*this, /*Unannotated=*/true);
+  return TryParseDeclarationPatternSyntax() !=
+         DeclarationPatternKind::Expression;
+}
+
 ActionResult<MatchPattern *>
-Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr,
-                            bool AllowPackExpansion,
-                            bool StopAtEqual,
+Parser::ParsePrimaryPattern(bool AllowPackExpansion, bool StopAtEqual,
                             TypoCorrectionTypeBehavior CorrectionBehavior,
                             bool AllowUnnamedPack) {
   if (AllowUnnamedPack && Tok.is(tok::ellipsis)) {
@@ -4617,26 +4668,15 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr,
                                         /*IsPackExpansion=*/true);
   }
 
-  auto StartsAttributedDeclarationPattern = [&] {
-    if (isCXX11AttributeSpecifier(/*Disambiguate=*/true) !=
-        CXX11AttributeKind::AttributeSpecifier)
-      return false;
-
-    RevertingTentativeParsingAction TPA(*this);
-    if (!TrySkipAttributes())
-      return false;
-    return isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
-                                  /*AllowPatternDecl=*/true);
-  };
-  if (StartsAttributedDeclarationPattern())
-    return ParseDeclarationPattern(AllowPackExpansion);
-
   switch (Tok.getKind()) {
   case tok::l_paren:
     return ParseParenPattern(StopAtEqual, CorrectionBehavior);
   case tok::l_brace:
     return ParseBracedAlternativePattern();
   case tok::l_square:
+    if (NextToken().is(tok::l_square) &&
+        !isNestedDecompositionDeclarator(/*BeforeDeclSpecifier=*/true))
+      return ParseDeclarationPattern(AllowPackExpansion);
     return ParseDecompositionPattern();
   case tok::identifier: {
     IdentifierInfo *II = Tok.getIdentifierInfo();
@@ -4645,11 +4685,10 @@ Parser::ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr,
     [[fallthrough]];
   }
   default: {
-    if (isCXXSimpleDeclaration(/*AllowForRangeDecl=*/false,
-                               /*AllowPatternDecl=*/true))
+    if (isDeclarationPatternSyntax())
       return ParseDeclarationPattern(AllowPackExpansion);
-    return ParseExpressionPattern(LHSOfMatchTestExpr, AllowPackExpansion,
-                                  StopAtEqual, CorrectionBehavior);
+    return ParseExpressionPattern(AllowPackExpansion, StopAtEqual,
+                                  CorrectionBehavior);
   }
   }
 }
@@ -4662,10 +4701,9 @@ Parser::ParseParenPattern(bool StopAtEqual,
   if (T.expectAndConsume())
     return true;
 
-  ActionResult<MatchPattern *> SubPattern =
-      ParsePattern(/*LHSOfMatchTestExpr=*/nullptr,
-                   /*AllowPackExpansion=*/false, StopAtEqual,
-                   CorrectionBehavior, /*AllowUnnamedPack=*/false);
+  ActionResult<MatchPattern *> SubPattern = ParsePattern(
+      /*AllowPackExpansion=*/false, StopAtEqual, CorrectionBehavior,
+      /*AllowUnnamedPack=*/false);
   if (SubPattern.isInvalid()) {
     T.skipToEnd();
     return true;
@@ -4678,6 +4716,28 @@ Parser::ParseParenPattern(bool StopAtEqual,
 ActionResult<MatchPattern *>
 Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
+}
+
+void Parser::ParsePatternDeclaratorId(Declarator &D) {
+  // A declaration pattern has a conversion-declarator followed by either one
+  // identifier or a structured binding, rather than a full direct-declarator.
+  if (Tok.is(tok::l_square)) {
+    ParseDecompositionDeclarator(D);
+    return;
+  }
+
+  if (Tok.is(tok::ellipsis) && D.isPatternPackAllowed())
+    D.setEllipsisLoc(ConsumeToken());
+
+  if (Tok.is(tok::identifier)) {
+    D.SetIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
+    D.SetRangeEnd(Tok.getLocation());
+    ConsumeToken();
+    MaybeParseCXX11Attributes(D);
+    return;
+  }
+
+  D.SetIdentifier(nullptr, Tok.getLocation());
 }
 
 ActionResult<MatchPattern *>
@@ -4696,7 +4756,7 @@ Parser::ParseDeclarationPattern(bool AllowPackExpansion) {
     D.setPatternPackAllowed();
   if (TemplateInfo.TemplateParams)
     D.setTemplateParameterLists(*TemplateInfo.TemplateParams);
-  ParseDeclarator(D);
+  ParseDeclaratorInternal(D, &Parser::ParsePatternDeclaratorId);
   if (D.isInvalidType() || ParseAsmAttributesAfterDeclarator(D)) {
     D.complete(nullptr);
     return true;
@@ -4738,30 +4798,12 @@ Parser::ParseDeclarationPattern(bool AllowPackExpansion) {
 }
 
 ActionResult<MatchPattern *>
-Parser::ParseExpressionPattern(
-    ExprResult *LHSOfMatchTestExpr,
-    bool AllowPackExpansion,
-    bool StopAtEqual,
-    TypoCorrectionTypeBehavior CorrectionBehavior) {
-  ExprResult Expr = [&] {
-    if (!LHSOfMatchTestExpr) {
-      ExprResult LHS =
-          ParseCastExpression(CastParseKind::AnyCastExpr,
-                              /*isAddressOfOperand=*/false, CorrectionBehavior);
-      return ParseRHSOfBinaryExpression(LHS, prec::LogicalAnd);
-    }
-    bool RHSIsInitList = false;
-    prec::Level NextTokPrec;
-    ExprResult Expr = ParseRHSExprOfBinaryExpression(
-        *LHSOfMatchTestExpr, nullptr, RHSIsInitList, prec::Match, NextTokPrec,
-        /*Decls=*/nullptr, /*CaseState=*/nullptr);
-    assert(!RHSIsInitList &&
-           "RHS of a match test expression cannot be an init list.");
-    assert(NextTokPrec <= prec::Match &&
-           "The precedence of the operator to the right of the RHS cannot "
-           "be tighter than match");
-    return Expr;
-  }();
+Parser::ParseExpressionPattern(bool AllowPackExpansion, bool StopAtEqual,
+                               TypoCorrectionTypeBehavior CorrectionBehavior) {
+  ExprResult LHS =
+      ParseCastExpression(CastParseKind::AnyCastExpr,
+                          /*isAddressOfOperand=*/false, CorrectionBehavior);
+  ExprResult Expr = ParseRHSOfBinaryExpression(LHS, prec::LogicalAnd);
   if (Expr.isInvalid())
     return true;
   bool IsPackExpansion = AllowPackExpansion && Tok.is(tok::ellipsis);
@@ -4957,10 +4999,10 @@ ActionResult<MatchPattern *> Parser::ParseDecompositionPattern() {
   SmallVector<MatchPattern *, 4> Patterns;
   if (Tok.isNot(tok::r_square)) {
     do {
-      ActionResult<MatchPattern *> Pattern = ParsePattern(
-          nullptr, /*Decomp=*/true, /*StopAtEqual=*/false,
-          TypoCorrectionTypeBehavior::AllowNonTypes,
-          /*AllowUnnamedPack=*/true);
+      ActionResult<MatchPattern *> Pattern =
+          ParsePattern(/*AllowPackExpansion=*/true, /*StopAtEqual=*/false,
+                       TypoCorrectionTypeBehavior::AllowNonTypes,
+                       /*AllowUnnamedPack=*/true);
       if (Pattern.isInvalid()) {
         T.skipToEnd();
         return true;
