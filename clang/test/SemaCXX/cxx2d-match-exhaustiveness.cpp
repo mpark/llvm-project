@@ -4,41 +4,41 @@ enum class EmptyState { first, second };
 inline constexpr int nullable_empty_state = 0;
 
 int missing_bool(bool b) {
-  return b match { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
+  return match (b) { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
     case true => 1;
   };
 }
 
 int exhaustive_bool(bool b) {
-  return b match {
+  return match (b) {
     case false => 0;
     case true => 1;
   };
 }
 
 int guarded_case_is_not_coverage(bool b) {
-  return b match { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
+  return match (b) { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
     case _ if (int guard = 0; guard == 0) => 0;
     case true => 1;
   };
 }
 
 int redundant_bool(bool b) {
-  return b match {
+  return match (b) {
     case _ => 0;
     case true => 1; // expected-error {{match case is redundant}}
   };
 }
 
 int guarded_case_after_wildcard_is_redundant(bool b) {
-  return b match {
+  return match (b) {
     case _ => 0;
     case true if (b) => 1; // expected-error {{match case is redundant}}
   };
 }
 
 int guarded_case_after_same_value_is_redundant(bool b) {
-  return b match {
+  return match (b) {
     case true => 0;
     case true if (b) => 1; // expected-error {{match case is redundant}}
     case false => 2;
@@ -46,7 +46,7 @@ int guarded_case_after_same_value_is_redundant(bool b) {
 }
 
 int guarded_cases_do_not_make_later_cases_redundant(bool b) {
-  return b match {
+  return match (b) {
     case true if (b) => 0;
     case true if (!b) => 1;
     case true => 2;
@@ -55,14 +55,14 @@ int guarded_cases_do_not_make_later_cases_redundant(bool b) {
 }
 
 int missing_integer(int value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: 1}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: 1}}
     case 0 => 0;
   };
 }
 
 template<class T>
 int dependent_missing_integer(T value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: 1}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: 1}}
     case 0 => 0;
   };
 }
@@ -72,21 +72,21 @@ int instantiate_dependent_missing_integer() {
 }
 
 int exhaustive_integer(int value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case _ => 1;
   };
 }
 
 int redundant_integer_catch_all(int value) {
-  return value match {
+  return match (value) {
     case _ => 0;
     case _ => 1; // expected-error {{match case is redundant}}
   };
 }
 
 int redundant_integer_value(int value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case 0 => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -94,14 +94,14 @@ int redundant_integer_value(int value) {
 }
 
 int impossible_promoted_integer_value(unsigned char value) {
-  return value match {
+  return match (value) {
     case 256 => 0; // expected-error {{match case can never match a subject of type 'unsigned char'}}
     case _ => 1;
   };
 }
 
 int converted_unsigned_integer_value(unsigned value) {
-  return value match {
+  return match (value) {
     case -1 => 0;
     case ~0u => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -111,7 +111,7 @@ int converted_unsigned_integer_value(unsigned value) {
 using U2 = unsigned _BitInt(2);
 
 int missing_small_integer(U2 value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: 2}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: 2}}
     case 0 => 0;
     case 1 => 1;
     case 3 => 3;
@@ -119,7 +119,7 @@ int missing_small_integer(U2 value) {
 }
 
 int exhaustive_small_integer(U2 value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case 1 => 1;
     case 2 => 2;
@@ -128,7 +128,7 @@ int exhaustive_small_integer(U2 value) {
 }
 
 int redundant_small_integer_catch_all(U2 value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case 1 => 1;
     case 2 => 2;
@@ -138,7 +138,7 @@ int redundant_small_integer_catch_all(U2 value) {
 }
 
 int impossible_small_integer_value(U2 value) {
-  return value match {
+  return match (value) {
     case 4 => 4; // expected-error {{match case can never match a subject of type 'U2' (aka 'unsigned _BitInt(2)')}}
     case _ => 0;
   };
@@ -147,7 +147,7 @@ int impossible_small_integer_value(U2 value) {
 using S2 = _BitInt(2);
 
 int exhaustive_signed_small_integer(S2 value) {
-  return value match {
+  return match (value) {
     case -2 => -2;
     case -1 => -1;
     case 0 => 0;
@@ -157,7 +157,7 @@ int exhaustive_signed_small_integer(S2 value) {
 }
 
 int impossible_bool_value(bool value) {
-  return value match {
+  return match (value) {
     case 2 => 0; // expected-error {{match case can never match a subject of type 'bool'}}
     case _ => 1;
   };
@@ -168,7 +168,7 @@ struct IntegerWrapper {
 };
 
 int exhaustive_exact_declaration(IntegerWrapper value) {
-  return value match {
+  return match (value) {
     case IntegerWrapper copy => copy.value;
   };
 }
@@ -180,13 +180,13 @@ struct Shape {
 struct Circle : Shape {};
 
 int cast_declaration_is_not_exhaustive(Shape &shape) {
-  return shape match { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
+  return match (shape) { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
     case Circle &circle => 0;
   };
 }
 
 int exhaustive_cast_declaration(Shape &shape) {
-  return shape match {
+  return match (shape) {
     case Circle &circle => 0;
     case _ => 1;
   };
@@ -195,14 +195,14 @@ int exhaustive_cast_declaration(Shape &shape) {
 enum E { A, B, C };
 
 int missing_enum(E e) {
-  return e match { // expected-error {{match expression is not exhaustive; example of a missing case: C}}
+  return match (e) { // expected-error {{match expression is not exhaustive; example of a missing case: C}}
     case A => 0;
     case B => 1;
   };
 }
 
 int exhaustive_enum(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case B => 1;
     case C => 2;
@@ -215,20 +215,20 @@ enum MaybeUnusedEnumerator {
 };
 
 int maybe_unused_enumerator_is_required(MaybeUnusedEnumerator value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: StillRequired}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: StillRequired}}
     case Present => 0;
   };
 }
 
 int maybe_unused_enumerator_can_be_covered(MaybeUnusedEnumerator value) {
-  return value match {
+  return match (value) {
     case Present => 0;
     case StillRequired => 1;
   };
 }
 
 int wildcard_after_enumerators_covers_residual_values(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case B => 1;
     case C => 2;
@@ -237,7 +237,7 @@ int wildcard_after_enumerators_covers_residual_values(E e) {
 }
 
 int residual_value_is_useful_after_enumerators(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case B => 1;
     case C => 2;
@@ -246,7 +246,7 @@ int residual_value_is_useful_after_enumerators(E e) {
 }
 
 int explicit_residual_value_completes_enum_domain(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case B => 1;
     case C => 2;
@@ -256,14 +256,14 @@ int explicit_residual_value_completes_enum_domain(E e) {
 }
 
 int out_of_range_enum_value_is_impossible(E e) {
-  return e match {
+  return match (e) {
     case static_cast<E>(4) => 0; // expected-error {{match case can never match a subject of type 'E'}}
     case _ => 4;
   };
 }
 
 int duplicate_residual_value(E e) {
-  return e match {
+  return match (e) {
     case static_cast<E>(3) => 0;
     case static_cast<E>(3) => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -271,7 +271,7 @@ int duplicate_residual_value(E e) {
 }
 
 int wildcard_covers_enumerators_and_residual_values(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case B => 1;
     case _ => 2;
@@ -281,7 +281,7 @@ int wildcard_covers_enumerators_and_residual_values(E e) {
 }
 
 int redundant_enum(E e) {
-  return e match {
+  return match (e) {
     case A => 0;
     case A => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -291,14 +291,14 @@ int redundant_enum(E e) {
 enum class Aliased : unsigned { First = 1, AlsoFirst = 1, Second = 2 };
 
 int exhaustive_enum_aliases(Aliased value) {
-  return value match {
+  return match (value) {
     case Aliased::First => 0;
     case Aliased::Second => 1;
   };
 }
 
 int redundant_enum_alias(Aliased value) {
-  return value match {
+  return match (value) {
     case Aliased::First => 0;
     case Aliased::AlsoFirst => 1; // expected-error {{match case is redundant}}
     case Aliased::Second => 2;
@@ -308,7 +308,7 @@ int redundant_enum_alias(Aliased value) {
 enum Gapless { GaplessA, GaplessB };
 
 int gapless_enum_has_no_residual_values(Gapless value) {
-  return value match {
+  return match (value) {
     case GaplessA => 0;
     case GaplessB => 1;
     case _ => 2; // expected-error {{match case is redundant}}
@@ -318,7 +318,7 @@ int gapless_enum_has_no_residual_values(Gapless value) {
 enum Gapped { GappedC = 0, GappedD = 2 };
 
 int explicit_values_cover_gapped_enum_domain(Gapped value) {
-  return value match {
+  return match (value) {
     case GappedC => 0;
     case 1 => 1;
     case 2 => 2;
@@ -328,7 +328,7 @@ int explicit_values_cover_gapped_enum_domain(Gapped value) {
 }
 
 int integer_value_covers_named_enumerator(Gapped value) {
-  return value match {
+  return match (value) {
     case 2 => 0;
     case GappedD => 1; // expected-error {{match case is redundant}}
     case _ => 2;
@@ -338,7 +338,7 @@ int integer_value_covers_named_enumerator(Gapped value) {
 enum class Fixed : unsigned char { First, Second };
 
 int fixed_enum_retains_residual_values(Fixed value) {
-  return value match {
+  return match (value) {
     case Fixed::First => 0;
     case Fixed::Second => 1;
     case _ => 2;
@@ -348,7 +348,7 @@ int fixed_enum_retains_residual_values(Fixed value) {
 enum Signed { Negative = -1, Zero = 0, Positive = 1 };
 
 int explicit_value_completes_signed_enum_domain(Signed value) {
-  return value match {
+  return match (value) {
     case Negative => -1;
     case Zero => 0;
     case Positive => 1;
@@ -390,14 +390,14 @@ struct alternative_traits<int*> {
 }
 
 int exhaustive_pointer(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case {} => 0;
     case { int &value } => value;
   };
 }
 
 int pointer_wildcard_after_both_states(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case {} => 0;
     case { int &value } => value;
     case _ => 2; // expected-error {{match case is redundant}}
@@ -405,27 +405,27 @@ int pointer_wildcard_after_both_states(int *pointer) {
 }
 
 int missing_null_pointer_state(int *pointer) {
-  return pointer match { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
+  return match (pointer) { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
     case { int &value } => value;
   };
 }
 
 int named_pointer_states_are_builtin(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case { .some: int &value } => value;
     case { .none } => 0;
   };
 }
 
 int null_pointer_constant_covers_empty_state(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case nullptr => 0;
     case { int &value } => value;
   };
 }
 
 int empty_pointer_state_redundant_after_nullptr(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case nullptr => 0;
     case {} => 1; // expected-error {{match case is redundant}}
     case { int &value } => value;
@@ -433,14 +433,14 @@ int empty_pointer_state_redundant_after_nullptr(int *pointer) {
 }
 
 int exhaustive_void_pointer(void *pointer) {
-  return pointer match {
+  return match (pointer) {
     case {} => 0;
     case { void } => 1;
   };
 }
 
 int null_void_pointer_constant_covers_empty_state(void *pointer) {
-  return pointer match {
+  return match (pointer) {
     case nullptr => 0;
     case { void } => 1;
   };
@@ -472,7 +472,7 @@ struct std::alternative_traits<FiniteChoice> {
 };
 
 int exhaustive_singleton_states(FiniteChoice value) {
-  return value match {
+  return match (value) {
     case FiniteFirst => 0;
     case FiniteSecond => 1;
     case FiniteThird => 2;
@@ -481,7 +481,7 @@ int exhaustive_singleton_states(FiniteChoice value) {
 
 template<class T>
 int dependent_singleton_states(T value) {
-  return value match {
+  return match (value) {
     case FiniteFirst => 0;
     case FiniteSecond => 1;
     case FiniteThird => 2;
@@ -493,14 +493,14 @@ int instantiate_dependent_singleton_states(FiniteChoice value) {
 }
 
 int missing_singleton_state(FiniteChoice value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: FiniteThird}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: FiniteThird}}
     case FiniteFirst => 0;
     case FiniteSecond => 1;
   };
 }
 
 int singleton_alias_is_redundant(FiniteChoice value) {
-  return value match {
+  return match (value) {
     case FiniteFirst => 0;
     case FiniteFirstAlias => 1; // expected-error {{match case is redundant}}
     case FiniteSecond => 2;
@@ -509,7 +509,7 @@ int singleton_alias_is_redundant(FiniteChoice value) {
 }
 
 int singleton_states_are_not_empty(FiniteChoice value) {
-  return value match {
+  return match (value) {
     case {} => 0; // expected-error {{type 'FiniteChoice' has no non-projectable alternative state}}
     case _ => 1;
   };
@@ -539,14 +539,14 @@ struct std::alternative_traits<ClassifiedChoice> {
 
 int unrepresented_values_do_not_contribute_to_exhaustiveness(
     ClassifiedChoice value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
     case ClassifiedFirst => 0;
     case ClassifiedSecond => 1;
   };
 }
 
 int index_selectors_cover_unrepresented_states(ClassifiedChoice value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0;
     case { .[1] } => 1;
   };
@@ -558,7 +558,7 @@ struct FiniteChoiceAndBool {
 };
 
 int singleton_state_coverage_is_recursive(FiniteChoiceAndBool value) {
-  return value match {
+  return match (value) {
     case [FiniteFirst, _] => 0;
     case [FiniteSecond, _] => 1;
     case [FiniteThird, false] => 2;
@@ -589,14 +589,14 @@ struct std::alternative_traits<ResidualFiniteChoice> {
 };
 
 int singleton_required_domain_is_exhaustive(ResidualFiniteChoice value) {
-  return value match {
+  return match (value) {
     case ResidualFirst => 0;
     case ResidualSecond => 1;
   };
 }
 
 int singleton_residual_state_is_useful(ResidualFiniteChoice value) {
-  return value match {
+  return match (value) {
     case ResidualFirst => 0;
     case ResidualSecond => 1;
     case _ => 2;
@@ -628,7 +628,7 @@ struct std::alternative_traits<InaccessibleChoice> {
 };
 
 int inaccessible_alternative_state_can_fall_back(InaccessibleChoice value) {
-  return value match {
+  return match (value) {
     case { int payload } => payload;
     case _ => 1;
   };
@@ -656,7 +656,7 @@ struct std::alternative_traits<NamedOnlyChoice> {
 };
 
 int named_only_alternative_states_are_accessible(NamedOnlyChoice value) {
-  return value match {
+  return match (value) {
     case { .first } => 0;
     case { .second } => 1;
   };
@@ -683,7 +683,7 @@ struct GappedAndBool {
 };
 
 int required_enum_domain_is_recursive(EnumAndBool value) {
-  return value match {
+  return match (value) {
     case [A, _] => 0;
     case [B, _] => 1;
     case [C, _] => 2;
@@ -691,7 +691,7 @@ int required_enum_domain_is_recursive(EnumAndBool value) {
 }
 
 int residual_enum_domain_is_recursive(EnumAndBool value) {
-  return value match {
+  return match (value) {
     case [A, _] => 0;
     case [B, _] => 1;
     case [C, _] => 2;
@@ -701,7 +701,7 @@ int residual_enum_domain_is_recursive(EnumAndBool value) {
 }
 
 int explicit_enum_domain_coverage_is_recursive(GappedAndBool value) {
-  return value match {
+  return match (value) {
     case [GappedC, _] => 0;
     case [1, false] => 1;
     case [1, true] => 2;
@@ -712,7 +712,7 @@ int explicit_enum_domain_coverage_is_recursive(GappedAndBool value) {
 }
 
 int integer_domain_coverage_is_recursive(SmallIntegerAndBool value) {
-  return value match {
+  return match (value) {
     case [0, _] => 0;
     case [1, _] => 1;
     case [2, false] => 2;
@@ -723,14 +723,14 @@ int integer_domain_coverage_is_recursive(SmallIntegerAndBool value) {
 }
 
 int missing_decomposition(Pair p) {
-  return p match { // expected-error {{match expression is not exhaustive; example of a missing case: [false, false]}}
+  return match (p) { // expected-error {{match expression is not exhaustive; example of a missing case: [false, false]}}
     case [true, _] => 1;
     case [_, true] => 2;
   };
 }
 
 int exhaustive_decomposition(Pair p) {
-  return p match {
+  return match (p) {
     case [true, _] => 1;
     case [false, _] => 2;
   };
@@ -778,7 +778,7 @@ struct std::alternative_traits<Choice> {
 };
 
 int exhaustive_alternatives(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .flag: _ } => 0;
     case { .number: _ } => 1;
     case {} => 2;
@@ -786,21 +786,21 @@ int exhaustive_alternatives(Choice choice) {
 }
 
 int missing_empty_alternative(Choice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
     case { .flag: _ } => 0;
     case { .number: _ } => 1;
   };
 }
 
 int missing_projected_alternative(Choice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: { bool }}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { bool }}}
     case { .number: _ } => 1;
     case {} => 2;
   };
 }
 
 int missing_projected_integer_alternative(Choice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: { int }}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { int }}}
     case { .flag: _ } => 0;
     case {} => 2;
   };
@@ -812,14 +812,14 @@ struct ChoiceProduct {
 };
 
 int missing_projected_alternative_in_product(ChoiceProduct value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: [{ int }, false]}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: [{ int }, false]}}
     case [{ .flag: _ }, _] => 0;
     case [{}, _] => 1;
   };
 }
 
 int missing_projected_alternative_value(Choice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: { false }}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { false }}}
     case { .flag: true } => 0;
     case { .number: _ } => 1;
     case {} => 2;
@@ -827,7 +827,7 @@ int missing_projected_alternative_value(Choice choice) {
 }
 
 int exhaustive_nested_alternatives(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { true } => 0;
     case { false } => 1;
     case { int number } => number;
@@ -836,14 +836,14 @@ int exhaustive_nested_alternatives(Choice choice) {
 }
 
 int exhaustive_generic_alternatives(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => static_cast<int>(value);
     case {} => 2;
   };
 }
 
 int no_residual_state_after_all_alternatives(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => static_cast<int>(value);
     case {} => 2;
     case _ => 3; // expected-error {{match case is redundant}}
@@ -896,7 +896,7 @@ struct std::alternative_traits<NullableChoice> {
 };
 
 int complete_secondary_view_after_partial_primary(NullableChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .value: 0 } => 0;
     case { .some: _ } => 1;
     case { .none } => 2;
@@ -904,14 +904,14 @@ int complete_secondary_view_after_partial_primary(NullableChoice choice) {
 }
 
 int partial_views_do_not_combine(NullableChoice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive}}
+  return match (choice) { // expected-error {{match expression is not exhaustive}}
     case { .value: _ } => 0;
     case { .none } => 1;
   };
 }
 
 int overlap_between_views_is_maybe_useful(NullableChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .value: _ } => 0;
     case { .some: _ } => 1;
     case { .none } => 2;
@@ -919,7 +919,7 @@ int overlap_between_views_is_maybe_useful(NullableChoice choice) {
 }
 
 int complete_view_makes_other_view_redundant(NullableChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .some: _ } => 0;
     case { .none } => 1;
     case { .value: _ } => 2; // expected-error {{match case is redundant}}
@@ -933,7 +933,7 @@ struct NullableChoiceProduct {
 
 int complete_nested_view_makes_other_view_redundant(
     NullableChoiceProduct value) {
-  return value match {
+  return match (value) {
     case [{ .some: _ }, _] => 0;
     case [{ .none }, _] => 1;
     case [{ .value: _ }, _] => 2; // expected-error {{match case is redundant}}
@@ -967,14 +967,14 @@ struct std::alternative_traits<ResidualChoice> {
 };
 
 int projected_states_are_required(ResidualChoice choice) {
-  return choice match {
+  return match (choice) {
     case { bool flag } => static_cast<int>(flag);
     case { int number } => number;
   };
 }
 
 int residual_alternative_state_is_useful(ResidualChoice choice) {
-  return choice match {
+  return match (choice) {
     case { bool flag } => static_cast<int>(flag);
     case { int number } => number;
     case _ => 2;
@@ -987,7 +987,7 @@ struct ResidualChoiceAndBool {
 };
 
 int residual_alternative_state_is_recursive(ResidualChoiceAndBool value) {
-  return value match {
+  return match (value) {
     case [{ bool flag }, _] => static_cast<int>(flag);
     case [{ int number }, _] => number;
     case [_, true] => 2;
@@ -996,14 +996,14 @@ int residual_alternative_state_is_recursive(ResidualChoiceAndBool value) {
 }
 
 int unbraced_type_pattern_does_not_project(Choice choice) {
-  return choice match {
+  return match (choice) {
     case int => 0; // expected-error {{type pattern of type 'int' is not an exact match for subject of type 'Choice'}}
     case _ => 1;
   };
 }
 
 int redundant_alternative(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .flag: _ } => 0;
     case { .flag: false } => 1; // expected-error {{match case is redundant}}
     case { .number: _ } => 2;
@@ -1013,7 +1013,7 @@ int redundant_alternative(Choice choice) {
 }
 
 int generic_makes_typed_alternative_redundant(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => static_cast<int>(value);
     case { .flag: _ } => 1; // expected-error {{match case is redundant}}
     case {} => 2;
@@ -1021,7 +1021,7 @@ int generic_makes_typed_alternative_redundant(Choice choice) {
 }
 
 int type_selectors_are_exhaustive(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { bool: _ } => 0;
     case { int: _ } => 1;
     case {} => 2;
@@ -1029,7 +1029,7 @@ int type_selectors_are_exhaustive(Choice choice) {
 }
 
 int expression_selectors_are_exhaustive(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: _ } => 0;
     case { .[1]: _ } => 1;
     case {} => 2;
@@ -1037,7 +1037,7 @@ int expression_selectors_are_exhaustive(Choice choice) {
 }
 
 int type_selector_makes_index_redundant(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { bool: _ } => 0;
     case { .[0]: _ } => 1; // expected-error {{match case is redundant}}
     case { int: _ } => 2;
@@ -1051,7 +1051,7 @@ struct ChoiceAndBool {
 };
 
 int exhaustive_nested_projection(ChoiceAndBool value) {
-  return value match {
+  return match (value) {
     case [{ .flag: _ }, _] => 0;
     case [{ .number: _ }, _] => 1;
     case [{}, _] => 2;
@@ -1069,7 +1069,7 @@ struct std::alternative_traits<OpenChoice> {
 };
 
 int exhaustive_open_alternatives(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
     case { _ } => 1;
     case {} => 0;
@@ -1077,20 +1077,20 @@ int exhaustive_open_alternatives(OpenChoice choice) {
 }
 
 int missing_open_alternative(OpenChoice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: { _ }}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { _ }}}
     case { int value } => value;
     case {} => 0;
   };
 }
 
 int missing_open_empty_state(OpenChoice choice) {
-  return choice match { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
     case { _ } => 1;
   };
 }
 
 int projectable_wildcard_shadows_open_type(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { _ } => 1;
     case { int value } => value; // expected-error {{match case is redundant}}
     case {} => 0;
@@ -1098,7 +1098,7 @@ int projectable_wildcard_shadows_open_type(OpenChoice choice) {
 }
 
 int open_type_coverage_ignores_cvref(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { const int& value } => value;
     case { int value } => value; // expected-error {{match case is redundant}}
     case { _ } => 1;
@@ -1112,7 +1112,7 @@ struct OpenChoiceAndBool {
 };
 
 int exhaustive_nested_open_alternative(OpenChoiceAndBool value) {
-  return value match {
+  return match (value) {
     case [{ int number }, _] => number;
     case [{ _ }, true] => 1;
     case [{ _ }, false] => 2;
@@ -1121,14 +1121,14 @@ int exhaustive_nested_open_alternative(OpenChoiceAndBool value) {
 }
 
 int missing_nested_open_empty_state(OpenChoiceAndBool value) {
-  return value match { // expected-error {{match expression is not exhaustive; example of a missing case: [{}, false]}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: [{}, false]}}
     case [{ _ }, _] => 1;
     case [{}, true] => 0;
   };
 }
 
 int whole_wildcard_shadows_open_states(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case _ => 0;
     case { _ } => 1; // expected-error {{match case is redundant}}
     case {} => 2; // expected-error {{match case is redundant}}
@@ -1144,7 +1144,7 @@ struct std::alternative_traits<AlwaysOpen> {
 };
 
 int projectable_wildcard_exhausts_nonnullable_open_choice(AlwaysOpen choice) {
-  return choice match {
+  return match (choice) {
     case { _ } => 1;
   };
 }

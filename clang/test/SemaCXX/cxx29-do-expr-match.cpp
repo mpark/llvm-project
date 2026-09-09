@@ -4,7 +4,7 @@
 
 constexpr int match_handler_do_return(int value) {
   return do {
-    value match -> void {
+    (void)match (value) -> void {
       case 0 => do_return 42;
       case _ => do_return 7;
     };
