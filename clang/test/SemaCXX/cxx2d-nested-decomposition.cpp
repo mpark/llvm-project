@@ -249,7 +249,7 @@ void attributes() {
 
 #if !defined(PRE_CXX29)
 constexpr int nested_declaration_pattern(Outer value) {
-  return value match {
+  return match (value) {
     case auto&& [[x, y], z] if (x < 0) => 0;
     case auto&& [[a, b], c] => a + b + c;
   };
@@ -257,7 +257,7 @@ constexpr int nested_declaration_pattern(Outer value) {
 static_assert(nested_declaration_pattern({{1, 2}, 3}) == 6);
 
 constexpr int nested_pack_declaration_pattern(WithFour value) {
-  return value match {
+  return match (value) {
     case auto&& [[first, ...middle, last], tail] =>
         first + (... + middle) + last + tail;
   };

@@ -7,7 +7,7 @@
 // CHECK: %[[RESULT:.*]] = zext i1 %[[IN_RANGE]] to i32
 // CHECK: ret i32 %[[RESULT]]
 int classify(int value) {
-  return value match {
+  return match (value) {
     case 0 || 1 => 1;
     case _ => 0;
   };
@@ -36,7 +36,7 @@ struct Pair {
 
 // CHECK-LABEL: define{{.*}} i32 @_Z16bind_from_either4Pair(
 int bind_from_either(Pair pair) {
-  return pair match {
+  return match (pair) {
     case [0, int value] || [int value, 0] => value;
     case _ => -1;
   };
@@ -57,7 +57,7 @@ struct Triple {
 
 // CHECK-LABEL: define{{.*}} i32 @_Z25bind_pack_from_either_end6Triple(
 int bind_pack_from_either_end(Triple triple) {
-  return triple match {
+  return match (triple) {
     case [0, auto&& ...values] || [auto&& ...values, 0] =>
         (... + values);
     case _ => -1;

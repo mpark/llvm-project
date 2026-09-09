@@ -20,7 +20,7 @@
 #include <variant>
 
 int matching_integrals(int x) {
-  return x match {
+  return match (x) {
     case 0 => 0;
     case 1 => 1;
     case _ => 2;
@@ -28,7 +28,7 @@ int matching_integrals(int x) {
 }
 
 int matching_strings(const std::string& s) {
-  return s match {
+  return match (s) {
     case "foo" => 0;
     case "bar" => 1;
     case _ => 2;
@@ -36,7 +36,7 @@ int matching_strings(const std::string& s) {
 }
 
 int matching_tuples(std::pair<int, int> p) {
-  return p match {
+  return match (p) {
     case [0, 0] => 0;
     case [0, auto&& y] => 10 + y;
     case [auto&& x, 0] => 20 + x;
@@ -46,7 +46,7 @@ int matching_tuples(std::pair<int, int> p) {
 
 constexpr int matching_tuples_with_declaration_patterns(
     const std::pair<int, int>& p) {
-  return p match {
+  return match (p) {
     case [0, 0] => 0;
     case [0, int y] => y + 2;
     case [int x, 0] => x + 4;
@@ -62,7 +62,7 @@ static_assert(matching_tuples_with_declaration_patterns({3, 4}) == 12);
 using Number = std::variant<std::int32_t, std::int64_t, float, double>;
 
 int matching_variants(Number v) {
-  return v match {
+  return match (v) {
     case { std::int32_t i32 } => 100 + i32;
     case { std::int64_t i64 } => 200 + static_cast<int>(i64);
     case { float f } => 300 + static_cast<int>(f);
@@ -71,7 +71,7 @@ int matching_variants(Number v) {
 }
 
 int matching_variant_concepts(Number v) {
-  return v match {
+  return match (v) {
     case { std::integral auto i } => 500 + static_cast<int>(i);
     case { std::floating_point auto f } => 600 + static_cast<int>(f);
   };
@@ -90,7 +90,7 @@ struct Rectangle : Shape {
 int get_area(const Shape& shape) {
   // R5 omits the trailing return type, but its handlers deduce different
   // types. Its specified -> auto deduction therefore requires -> int here.
-  return shape match -> int {
+  return match (shape) -> int {
     case const Circle& circle => 3.14 * circle.radius * circle.radius;
     case const Rectangle& rectangle => rectangle.width * rectangle.height;
     case _ => 0;
@@ -120,7 +120,7 @@ struct ChangeColor {
 using Command = std::variant<Quit, Move, Write, ChangeColor>;
 
 int matching_nested_structures(Command cmd) {
-  return cmd match {
+  return match (cmd) {
     case { const Quit& } => 0;
     case { const Move& move } => 100 + move.x + move.y;
     case { const Write& write } =>

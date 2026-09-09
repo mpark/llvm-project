@@ -44,7 +44,7 @@ struct std::alternative_traits<MaybeInt> {
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK: ret i32
 int match_alternative(MaybeInt& value) {
-  return value match {
+  return match (value) {
     case { int& number } if (number == 0) => 0;
     case { int& number } => number;
     case {} => -1;
@@ -101,7 +101,7 @@ struct std::alternative_traits<Choice> {
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm1E
 // CHECK: ret i32
 int match_selected_type(Choice& value) {
-  return value match {
+  return match (value) {
     case { int: auto number } => number;
     case { double: auto number } => static_cast<int>(number);
   };
@@ -113,7 +113,7 @@ int match_selected_type(Choice& value) {
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm1E
 // CHECK: ret i32
 int match_selected_index(Choice& value) {
-  return value match {
+  return match (value) {
     case { .[0]: int number } => number;
     case { .[1]: double number } => static_cast<int>(number);
   };
@@ -127,7 +127,7 @@ int match_selected_index(Choice& value) {
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
 template<class = void>
 int match_nondependent_subject_in_template(Choice& value) {
-  return value match {
+  return match (value) {
     case { auto&& alternative } => static_cast<int>(alternative);
   };
 }
@@ -136,7 +136,7 @@ template int match_nondependent_subject_in_template<>(Choice&);
 
 template<class T>
 int match_dependent_alternative(T& value, int& guards) {
-  return value match {
+  return match (value) {
     case { auto&& alternative } if (++guards == 2) =>
         static_cast<int>(alternative);
     case _ => 0;
@@ -152,7 +152,7 @@ int instantiate_dependent_alternative_pattern(Choice& value, int& guards) {
 template<class Outer>
 int match_nested_dependent_alternative(Choice& value, int& guards) {
   return [&]<class Inner>(Inner) {
-    return value match {
+    return match (value) {
       case { auto&& alternative }
           if (++guards == 2 && sizeof(Outer) == sizeof(Inner)) =>
               static_cast<int>(alternative);
@@ -185,7 +185,7 @@ struct std::alternative_traits<OpenChoice> {
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
 // CHECK: ret i32
 int match_open_alternative(OpenChoice& value) {
-  return value match {
+  return match (value) {
     case { int& number } if (number == 0) => 0;
     case { int& number } => number;
     case { _ } => -2;
@@ -213,7 +213,7 @@ int combine(double&, double&);
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
 // CHECK: ret i32
 int match_choice_product(ChoiceProduct& value) {
-  return value match {
+  return match (value) {
     case [{ auto&& first }, { auto&& second }] => combine(first, second);
   };
 }

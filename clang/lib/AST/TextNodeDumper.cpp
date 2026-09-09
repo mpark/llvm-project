@@ -3454,6 +3454,8 @@ void TextNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {
 void TextNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";
+  if (Node->isStatement())
+    OS << " statement";
 }
 
 void TextNodeDumper::Visit(const MatchPattern *Node) {
