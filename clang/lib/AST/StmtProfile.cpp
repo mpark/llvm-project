@@ -2801,6 +2801,7 @@ void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
             : S->getSubject());
   VisitType(S->getType());
   ID.AddBoolean(S->isConstexpr());
+  ID.AddBoolean(S->isStatement());
   ID.AddInteger(S->getNumCases());
   for (const MatchCase &Case : S->getCases()) {
     VisitMatchPattern(Case.Pattern);

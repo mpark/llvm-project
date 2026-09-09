@@ -184,7 +184,7 @@ struct std::alternative_traits<MissingResidualStates> {
 };
 
 int missing_residual_states(MissingResidualStates choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value; // expected-error {{does not provide a usable 'has_residual_states' member}}
   };
 }
@@ -199,7 +199,7 @@ struct std::alternative_traits<NonArrayDescriptors> {
 };
 
 int non_array_descriptors(NonArrayDescriptors value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{'std::alternative_traits<'NonArrayDescriptors'>::alternatives' must be a constant array of 'std::alternative_info'}}
   };
 }
@@ -214,7 +214,7 @@ struct std::alternative_traits<WrongDescriptorType> {
 };
 
 int wrong_descriptor_type(WrongDescriptorType value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{'std::alternative_traits<'WrongDescriptorType'>::alternatives' must be a constant array of 'std::alternative_info'}}
   };
 }
@@ -234,7 +234,7 @@ struct std::alternative_traits<InvalidSelectorDescriptor> {
 };
 
 int invalid_selector_descriptor(InvalidSelectorDescriptor value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{state 0 of type 'InvalidSelectorDescriptor' has an invalid reflection in its 'alternative_info' descriptor}}
   };
 }
@@ -251,7 +251,7 @@ struct std::alternative_traits<EmptyTypedChoice> {
 };
 
 int empty_state_cannot_be_typed(EmptyTypedChoice value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyTypedChoice' is both empty and typed}}
   };
 }
@@ -276,7 +276,7 @@ struct std::alternative_traits<EmptyProjectedChoice> {
 };
 
 int empty_state_cannot_be_projected(EmptyProjectedChoice value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyProjectedChoice' is both empty and projectable}}
   };
 }
@@ -291,7 +291,7 @@ struct std::alternative_traits<EmptyWithoutValueChoice> {
 };
 
 int empty_state_requires_value(EmptyWithoutValueChoice value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{empty state 0 of type 'EmptyWithoutValueChoice' is not represented by a value}}
   };
 }
@@ -319,27 +319,27 @@ struct std::alternative_traits<SingletonProjectedChoice> {
 };
 
 int singleton_state_cannot_be_projected(SingletonProjectedChoice value) {
-  return value match {
+  return match (value) {
     case { .[0] } => 0; // expected-error {{state 0 of type 'SingletonProjectedChoice' is both represented by a value and projectable}}
   };
 }
 
 int named(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .integer: int value } => value;
     case { .real: double value } => static_cast<int>(value);
   };
 }
 
 int generic_binding(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
     case { double value } => static_cast<int>(value);
   };
 }
 
 int type_selectors(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { int: 0 } => 10;
     case { int: int value } => value;
     case { double: auto value } => static_cast<int>(value);
@@ -362,28 +362,28 @@ template<class T>
 concept LvalueReference = is_lvalue_reference<T>;
 
 int type_constraint_selectors(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { Integral: auto value } => value;
     case { SameAs<double>: auto value } => static_cast<int>(value);
   };
 }
 
 int no_viable_type_constraint_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { SameAs<char>: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case { _ } => 1;
   };
 }
 
 int type_constraint_uses_declared_alternative_type(Choice& choice) {
-  return choice match {
+  return match (choice) {
     case { LvalueReference: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case { _ } => 1;
   };
 }
 
 int redundant_after_type_constraint_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { Integral: _ } => 0;
     case { int: _ } => 1; // expected-error {{match case is redundant}}
     case { _ } => 2;
@@ -392,7 +392,7 @@ int redundant_after_type_constraint_selector(Choice choice) {
 
 template<class T>
 int dependent_type_constraint_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { SameAs<T>: auto value } => static_cast<int>(value);
     case { _ } => -1;
   };
@@ -402,21 +402,21 @@ template int dependent_type_constraint_selector<int>(Choice);
 template int dependent_type_constraint_selector<double>(Choice);
 
 int expression_selectors(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: int value } => value;
     case { .[1]: double value } => static_cast<int>(value);
   };
 }
 
 int expression_selector_out_of_range(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[2]: _ } => 0; // expected-error {{alternative index 2 is outside the range [0, 2)}}
     case _ => 1;
   };
 }
 
 int expression_selector_negative(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[-1]: _ } => 0; // expected-error {{alternative index -1 is outside the range [0, 2)}}
     case _ => 1;
   };
@@ -424,14 +424,14 @@ int expression_selector_negative(Choice choice) {
 
 int expression_selector_not_constant(Choice choice,
                                      unsigned index) { // expected-note {{declared here}}
-  return choice match {
+  return match (choice) {
     case { .[index]: _ } => 0; // expected-error {{expression is not an integral constant expression}} expected-note {{function parameter 'index' with unknown value cannot be used in a constant expression}}
     case _ => 1;
   };
 }
 
 int expression_selector_requires_projection(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[1]: _ } => 0;
     case { .[0]: _ } => 1;
   };
@@ -452,14 +452,14 @@ struct std::alternative_traits<IndexOnlyChoice> {
 };
 
 int index_only_states(IndexOnlyChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0] } => 0;
     case { .[1] } => 1;
   };
 }
 
 int index_only_state_cannot_be_projected(IndexOnlyChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: int value } => value; // expected-error {{alternative state 0 of type 'IndexOnlyChoice' has no projected value; omit the ': pattern'}}
     case _ => 0;
   };
@@ -484,19 +484,19 @@ struct std::alternative_traits<AnonymousProjection> {
 };
 
 int anonymous_projection_by_index(AnonymousProjection choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: int value } => value;
   };
 }
 
 int anonymous_projection_is_generic(AnonymousProjection choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
   };
 }
 
 int anonymous_projection_has_no_type_selector(AnonymousProjection choice) {
-  return choice match {
+  return match (choice) {
     case { int: _ } => 1; // expected-error {{braced alternative pattern does not match any projectable state of 'AnonymousProjection'}}
     case _ => 0;
   };
@@ -512,7 +512,7 @@ struct std::alternative_traits<TypedWithoutProjection> {
 };
 
 int advertised_type_requires_projection(TypedWithoutProjection choice) {
-  return choice match {
+  return match (choice) {
     case { int: _ } => 0; // expected-error {{invalid alternative protocol; state 0 of type 'TypedWithoutProjection' advertises type 'int', but 'get<0>' does not provide a compatible projection}}
   };
 }
@@ -535,13 +535,13 @@ struct std::alternative_traits<IncompatibleProjection> {
 };
 
 int advertised_type_requires_compatible_projection(IncompatibleProjection choice) {
-  return choice match {
+  return match (choice) {
     case { int: _ } => 0; // expected-error {{invalid alternative protocol; state 0 of type 'IncompatibleProjection' advertises type 'int', but 'get<0>' does not provide a compatible projection}}
   };
 }
 
 double index_selector_ignores_advertised_type(IncompatibleProjection choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: double value } => value;
   };
 }
@@ -560,27 +560,27 @@ struct std::alternative_traits<VoidProjection> {
 };
 
 int advertised_void_projection(VoidProjection choice) {
-  return choice match {
+  return match (choice) {
     case { void: _ } => 0;
   };
 }
 
 int projected_deleted_copy_does_not_fall_back(const CopyChoice& choice) {
-  return choice match {
+  return match (choice) {
     case { auto copy } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
     case _ => 0;
   };
 }
 
 int projected_deleted_hypothetical_copy_is_invalid(const CopyChoice& choice) {
-  return choice match {
+  return match (choice) {
     case { ProjectedNonCopyable } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
     case _ => 0;
   };
 }
 
 int type_selector_does_not_initialize(const CopyChoice& choice) {
-  return choice match {
+  return match (choice) {
     case { ProjectedNonCopyable: _ } => 1;
     case {} => 0;
   };
@@ -610,21 +610,21 @@ static_assert(dependent_constexpr_alternative<0>() == 42);
 static_assert(dependent_constexpr_alternative<1>() == -1);
 
 int empty(MaybeInt value) {
-  return value match {
+  return match (value) {
     case { int number } => number;
     case {} => -1;
   };
 }
 
 int bad_name(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .missing: int value } => value; // expected-error {{alternative name 'missing' is not defined}}
     case _ => 0;
   };
 }
 
 int bad_empty(Choice choice) {
-  return choice match {
+  return match (choice) {
     case {} => 0; // expected-error {{type 'Choice' has no non-projectable alternative state}}
     case _ => 1;
   };
@@ -634,20 +634,20 @@ int classify(int&);
 int classify(double&);
 
 int generic(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => classify(value);
   };
 }
 
 int no_viable_alternative(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { char value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case _ => 0;
   };
 }
 
 int no_viable_type_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { char: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case _ => 1;
   };
@@ -655,7 +655,7 @@ int no_viable_type_selector(Choice choice) {
 
 template<class T, unsigned I>
 int dependent_selectors(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { T: auto value } => static_cast<int>(value);
     case { .[I]: auto value } => static_cast<int>(value);
     case _ => 0;
@@ -665,13 +665,13 @@ int dependent_selectors(Choice choice) {
 template int dependent_selectors<int, 1>(Choice);
 
 int valid_single_alternative(SingleChoice choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
   };
 }
 
 int no_viable_single_alternative(SingleChoice choice) {
-  return choice match {
+  return match (choice) {
     case { char value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
     case _ => 0;
   };
@@ -679,7 +679,7 @@ int no_viable_single_alternative(SingleChoice choice) {
 
 template<class T>
 int dependent_single_alternative(T choice) {
-  return choice match {
+  return match (choice) {
     case { char value } => value;
     case _ => 0;
   };
@@ -717,7 +717,7 @@ void single_alternative_loop_conditions(SingleChoice choice) {
 }
 
 int no_structural_alternative(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& [first, second] } => first; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
     case _ => 0;
   };
@@ -779,7 +779,7 @@ bool invalid_direct_alternative(ChoicePair pair) {
 struct NoTraits {};
 
 int missing_traits(NoTraits value) {
-  return value match {
+  return match (value) {
     case { NoTraits copy } => 0; // expected-error {{implicit instantiation of undefined template 'std::alternative_traits<NoTraits>'}}
     case _ => 1;
   };
@@ -800,7 +800,7 @@ struct std::alternative_traits<OpenChoice> {
 };
 
 int open_alternatives(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
     case { double } => 2;
     case { _ } => 1;
@@ -809,28 +809,28 @@ int open_alternatives(OpenChoice choice) {
 }
 
 int open_type_selector(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { int: auto value } => value;
     case _ => 0;
   };
 }
 
 int open_expression_selector(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: _ } => 1; // expected-error {{expression alternative selector cannot be used with open alternative type 'OpenChoice'}}
     case _ => 0;
   };
 }
 
 int open_type_selector_does_not_initialize(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { OpenNonCopyable: _ } => 1;
     case _ => 0;
   };
 }
 
 int open_type_constraint_selector(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { Integral: _ } => 1; // expected-error {{type-constraint alternative selector cannot be used with open alternative type 'OpenChoice'}}
     case { _ } => 0;
   };
@@ -842,7 +842,7 @@ bool open_empty(OpenChoice choice) {
 
 template<class T>
 int dependent_open_type(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { T value } => static_cast<int>(value);
     case _ => 0;
   };
@@ -853,7 +853,7 @@ int instantiate_dependent_open_type(OpenChoice choice) {
 }
 
 int open_requires_type_direction(OpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => 1; // expected-error {{open alternative protocol for type 'OpenChoice' requires a declaration or type pattern with a non-placeholder, non-void type}}
     case _ => 0;
   };
@@ -868,13 +868,13 @@ struct std::alternative_traits<AlwaysOpen> {
 };
 
 int always_open(AlwaysOpen choice) {
-  return choice match {
+  return match (choice) {
     case { _ } => 1;
   };
 }
 
 int always_open_has_no_empty_state(AlwaysOpen choice) {
-  return choice match {
+  return match (choice) {
     case {} => 0; // expected-error {{type 'AlwaysOpen' has no non-projectable alternative state}}
     case { _ } => 1;
   };
@@ -890,7 +890,7 @@ struct std::alternative_traits<ConstOpenChoice> {
 
 int mutable_reference_does_not_bind_to_const_projection(
     ConstOpenChoice choice) {
-  return choice match {
+  return match (choice) {
     case { int& value } => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'const int'}}
     case { _ } => 0;
   };
@@ -905,7 +905,7 @@ struct std::alternative_traits<InvalidOpen> {
 };
 
 int invalid_open_protocol(InvalidOpen choice) {
-  return choice match {
+  return match (choice) {
     case { int } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'try_cast' must return a pointer}}
     case { _ } => 0;
   };
@@ -917,7 +917,7 @@ template<>
 struct std::alternative_traits<IncompleteOpen> {};
 
 int incomplete_open_protocol(IncompleteOpen choice) {
-  return choice match {
+  return match (choice) {
     case { int } => 1; // expected-error {{does not provide a usable either 'alternatives' or 'try_cast' member}}
     case _ => 0;
   };

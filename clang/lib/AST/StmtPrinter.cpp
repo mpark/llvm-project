@@ -86,7 +86,10 @@ namespace {
         // If this is an expr used in a stmt context, indent and newline it.
         Indent();
         Visit(S);
-        OS << ";" << NL;
+        if (!isa<MatchSelectExpr>(S) ||
+            !cast<MatchSelectExpr>(S)->isStatement())
+          OS << ";";
+        OS << NL;
       } else if (S) {
         Visit(S);
       } else {
@@ -3300,10 +3303,12 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
   Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
                       ? Node->getHoldingVar()->getInit()
                       : Node->getSubject();
-  PrintExpr(Subject);
-  OS << " match";
+  OS << "match";
   if (Node->isConstexpr())
     OS << " constexpr";
+  OS << " (";
+  PrintExpr(Subject);
+  OS << ")";
   if (Node->getOrigResultType().getBeginLoc().isValid()) {
     OS << " -> ";
     Node->getOrigResultType().getType().print(OS, Policy);

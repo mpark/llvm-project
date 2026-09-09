@@ -7,7 +7,7 @@ struct Pair {
 };
 
 constexpr int direct(int value) {
-  return value match {
+  return match (value) {
     case int => 1;
   };
 }
@@ -80,7 +80,7 @@ constexpr bool unnamed_value_pattern_moves_from_xvalue() {
 constexpr int each_selected_arm_initializes() {
   int copies = 0;
   CopyCounter value(copies);
-  int result = value match {
+  int result = match (value) {
     case CopyCounter if (false) => 0;
     case CopyCounter => copies;
   };
@@ -106,7 +106,7 @@ constexpr void increment(int& value) {
 
 constexpr int direct_void() {
   int evaluations = 0;
-  int result = increment(evaluations) match {
+  int result = match (increment(evaluations)) {
     case const void => evaluations;
   };
   return result * 10 + evaluations;
@@ -132,7 +132,7 @@ struct IntResult {
 
 template<class T>
 constexpr int dependent_result_type(T value) {
-  return value.f() match {
+  return match (value.f()) {
     case void => 1;
     case int result => result;
   };
@@ -158,7 +158,7 @@ struct Right {
 
 template<class T>
 constexpr int dependent(T value) {
-  return value match {
+  return match (value) {
     case Left => value.left;
     case Right => value.right;
   };
@@ -206,7 +206,7 @@ struct std::alternative_traits<VoidOrInt> {
 };
 
 constexpr int project_void(VoidOrInt value) {
-  return value match {
+  return match (value) {
     case { void } => 5;
     case { int } => 6;
   };

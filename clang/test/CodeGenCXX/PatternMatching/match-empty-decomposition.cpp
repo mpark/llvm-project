@@ -7,7 +7,7 @@ struct Empty {};
 // CHECK: store i32 42
 // CHECK: ret i32
 int match_empty_decomposition(Empty value) {
-  return value match {
+  return match (value) {
     case [] => 42;
   };
 }

@@ -5838,6 +5838,8 @@ class MatchSelectExpr final
   bool IsConstexpr;
   /// True when the cases cover required and residual runtime states.
   bool IsFullyCovered;
+  /// True when the selection was parsed directly as a statement.
+  bool IsStatement;
   TypeLoc OrigResultType;
   unsigned NumCases;
   unsigned NumCaseInstantiations;
@@ -5845,15 +5847,17 @@ class MatchSelectExpr final
 
   explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
                            SourceLocation MatchLoc, bool IsConstexpr,
-                           bool IsFullyCovered, TypeLoc OrigResultType,
-                           QualType Ty, ArrayRef<MatchCase> Cases,
+                           bool IsStatement, bool IsFullyCovered,
+                           TypeLoc OrigResultType, QualType Ty,
+                           ArrayRef<MatchCase> Cases,
                            ArrayRef<MatchCaseInstantiation> Instantiations,
                            SourceRange Braces);
 
   explicit MatchSelectExpr(unsigned NumCases, unsigned NumCaseInstantiations,
                            EmptyShell Empty)
-      : Expr(MatchSelectExprClass, Empty), IsFullyCovered(false),
-        NumCases(NumCases), NumCaseInstantiations(NumCaseInstantiations) {}
+      : Expr(MatchSelectExprClass, Empty), IsConstexpr(false),
+        IsFullyCovered(false), IsStatement(false), NumCases(NumCases),
+        NumCaseInstantiations(NumCaseInstantiations) {}
 
 public:
   unsigned numTrailingObjects(OverloadToken<MatchCase>) const {
@@ -5866,8 +5870,9 @@ public:
 
   static MatchSelectExpr *
   Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
-         SourceLocation MatchLoc, bool IsConstexpr, bool IsFullyCovered,
-         TypeLoc OrigResultType, QualType Ty, ArrayRef<MatchCase> Cases,
+         SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
+         bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
+         ArrayRef<MatchCase> Cases,
          ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumCases,
@@ -5889,6 +5894,8 @@ public:
 
   bool isFullyCovered() const { return IsFullyCovered; }
 
+  bool isStatement() const { return IsStatement; }
+
   ArrayRef<MatchCase> getCases() const {
     return llvm::ArrayRef(getTrailingObjects<MatchCase>(), NumCases);
   }
@@ -5902,7 +5909,7 @@ public:
   unsigned getNumCaseInstantiations() const { return NumCaseInstantiations; }
 
   SourceLocation getBeginLoc() const LLVM_READONLY {
-    return Subject->getBeginLoc();
+    return MatchLoc;
   }
 
   SourceLocation getEndLoc() const LLVM_READONLY { return Braces.getEnd(); }
