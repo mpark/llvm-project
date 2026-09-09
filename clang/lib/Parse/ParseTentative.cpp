@@ -119,8 +119,7 @@ bool Parser::isCXXDeclarationStatement(
   }
 }
 
-bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl,
-                                    bool AllowPatternDecl) {
+bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl) {
   // C++ 6.8p1:
   // There is an ambiguity in the grammar involving expression-statements and
   // declarations: An expression-statement with a function-style explicit type
@@ -174,7 +173,7 @@ bool Parser::isCXXSimpleDeclaration(bool AllowForRangeDecl,
 
   {
     RevertingTentativeParsingAction PA(*this);
-    TPR = TryParseSimpleDeclaration(AllowForRangeDecl, AllowPatternDecl);
+    TPR = TryParseSimpleDeclaration(AllowForRangeDecl);
   }
 
   // In case of an error, let the declaration parsing code handle it.
@@ -256,8 +255,7 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
   return TPResult::Ambiguous;
 }
 
-Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
-                                                   bool AllowPatternDecl) {
+Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl) {
   bool DeclSpecifierIsAuto = Tok.is(tok::kw_auto);
   if (TryConsumeDeclarationSpecifier() == TPResult::Error)
     return TPResult::Error;
@@ -276,15 +274,12 @@ Parser::TPResult Parser::TryParseSimpleDeclaration(bool AllowForRangeDecl,
 
   TPResult TPR = TryParseInitDeclaratorList(
       /*MayHaveTrailingReturnType=*/DeclSpecifierIsAuto,
-      /*StopAfterFirstDeclarator=*/AllowPatternDecl,
-      /*MayBeAbstract=*/AllowPatternDecl);
+      /*StopAfterFirstDeclarator=*/false,
+      /*MayBeAbstract=*/false);
   if (TPR != TPResult::Ambiguous)
     return TPR;
 
-  if (Tok.isNot(tok::semi) && (!AllowForRangeDecl || Tok.isNot(tok::colon)) &&
-      (!AllowPatternDecl ||
-       !Tok.isOneOf(tok::kw_if, tok::equalgreater, tok::comma, tok::r_square,
-                    tok::r_brace, tok::r_paren)))
+  if (Tok.isNot(tok::semi) && (!AllowForRangeDecl || Tok.isNot(tok::colon)))
     return TPResult::False;
 
   return TPResult::Ambiguous;
