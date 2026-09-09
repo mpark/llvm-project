@@ -2,7 +2,7 @@
 // RUN:   -disable-llvm-passes -emit-llvm %s -o - | FileCheck %s
 
 int likely_case(int value) {
-  return value match {
+  return match (value) {
     [[likely]] case 0 => 1;
     case _ => 2;
   };
@@ -12,7 +12,7 @@ int likely_case(int value) {
 // CHECK: call i1 @llvm.expect.i1(i1 {{.*}}, i1 true)
 
 int unlikely_case(int value) {
-  return value match {
+  return match (value) {
     [[unlikely]] case 0 => 1;
     case _ => 2;
   };
@@ -23,7 +23,7 @@ int unlikely_case(int value) {
 
 template<class T>
 int dependent_case(T value) {
-  return value match {
+  return match (value) {
     [[likely]] case int integer => integer;
     case _ => 0;
   };

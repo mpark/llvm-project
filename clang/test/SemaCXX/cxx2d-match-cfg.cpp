@@ -3,36 +3,36 @@
 // RUN:   -verify %s
 
 int exhaustive(bool value) {
-  value match {
+  match (value) {
     case true => return 1;
     case false => return 0;
-  };
+  }
 }
 
 int guarded(int value) {
-  return value match {
+  return match (value) {
     case auto&& copy if (copy > 0) => copy;
     case _ => 0;
   };
 }
 
 int declaration(int value) {
-  value match {
+  match (value) {
     case int copy => return copy;
-  };
+  }
 }
 
 enum Gapped { Zero = 0, Two = 2 };
 
 int required_but_not_fully_covered(Gapped value) {
-  value match {
+  match (value) {
     case Zero => return 0;
     case Two => return 2;
-  };
+  }
 } // expected-warning {{non-void function does not return a value in all control paths}}
 
 int guarded_init_statement(int value) {
-  return value match {
+  return match (value) {
     case int copy if (int adjusted = copy + 1; adjusted > 0) => adjusted;
     case _ => 0;
   };

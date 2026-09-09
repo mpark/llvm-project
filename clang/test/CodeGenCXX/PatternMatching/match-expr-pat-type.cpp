@@ -67,7 +67,7 @@ void make_void() {
 // CHECK-NOT: call void @_Z9make_voidv
 // CHECK: ret i32
 int matches_void_once() {
-  return make_void() match {
+  return match (make_void()) {
     case void => void_evaluations;
   };
 }

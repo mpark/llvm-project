@@ -20084,7 +20084,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
   return getSema().ActOnMatchSelectExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
-      E->getOrigResultType(), RetTy, SourceCases, E->getBraces(),
+      E->isStatement(), E->getOrigResultType(), RetTy, SourceCases,
+      E->getBraces(),
       /*ExpandDeferredCases=*/false,
       ArrayRef<MatchCaseInstantiation>(Instantiations),
       ArrayRef<MatchCaseInstantiation>(DiagnosticInstantiations));

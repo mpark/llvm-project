@@ -11221,7 +11221,8 @@ public:
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
   ExprResult ActOnMatchSelectExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-      bool IsConstexpr, TypeLoc OrigResultType, QualType RetTy,
+      bool IsConstexpr, bool IsStatement, TypeLoc OrigResultType,
+      QualType RetTy,
       SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
       bool ExpandDeferredCases = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =

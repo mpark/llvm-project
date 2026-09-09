@@ -12,7 +12,7 @@ struct Pair {
 // CHECK: load i32
 // CHECK: ret i32
 int by_value(int value) {
-  return value match { case int copy => copy; };
+  return match (value) { case int copy => copy; };
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z12by_referenceRi(ptr noundef nonnull align 4 dereferenceable(4) %value)
@@ -21,13 +21,13 @@ int by_value(int value) {
 // CHECK: add nsw i32
 // CHECK: store i32
 int by_reference(int &value) {
-  return value match { case int &ref => ++ref; };
+  return match (value) { case int &ref => ++ref; };
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z9decompose4Pair
 // CHECK: add nsw i32
 int decompose(Pair pair) {
-  return pair match {
+  return match (pair) {
     case auto [first, second] => first + second;
   };
 }
@@ -43,7 +43,7 @@ struct Triple {
 // CHECK: add nsw i32
 // CHECK: ret i32
 int sum_binding_pack(Triple triple) {
-  return triple match {
+  return match (triple) {
     case auto [...elements] => (... + elements);
   };
 }
@@ -52,7 +52,7 @@ int sum_binding_pack(Triple triple) {
 // CHECK: add nsw i32
 // CHECK: ret i32
 int unnamed_binding_pack(Triple triple) {
-  return triple match {
+  return match (triple) {
     case auto [first, ..., last] => first + last;
   };
 }
@@ -70,7 +70,7 @@ struct Four {
 // CHECK: add nsw i32
 // CHECK: ret i32
 int sum_declaration_pack_middle(Four value) {
-  return value match {
+  return match (value) {
     case [auto&& first, auto&& ...middle, auto&& last] =>
         first + (... + middle) + last;
   };
@@ -78,7 +78,7 @@ int sum_declaration_pack_middle(Four value) {
 
 template<class T>
 T dependent(T value) {
-  return value match { case auto &&ref => ref; };
+  return match (value) { case auto &&ref => ref; };
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z21instantiate_dependentv()
@@ -98,7 +98,7 @@ int make_subject() {
 // CHECK-NOT: call noundef i32 @_Z12make_subjectv()
 // CHECK: ret i32
 int evaluate_subject_once() {
-  return make_subject() match {
+  return match (make_subject()) {
     case int value if (value < 0) => 0;
     case int value => value;
   };
@@ -114,7 +114,7 @@ struct MoveOnly {
 // CHECK-LABEL: define{{.*}} i32 @_Z14forward_rvaluev()
 // CHECK: ret i32
 int forward_rvalue() {
-  return MoveOnly{7} match {
+  return match (MoveOnly{7}) {
     case MoveOnly &&value => value.value;
   };
 }
@@ -141,7 +141,7 @@ struct CopyCounter {
 // CHECK: match.select.cleanup:
 // CHECK: call void @_ZN11CopyCounterD1Ev
 int guarded_copy(CopyCounter value) {
-  return value match {
+  return match (value) {
     case CopyCounter copy if (copy.value > 0) => copy.value;
     case _ => 0;
   };
@@ -160,7 +160,7 @@ struct Circle : Shape {
 // CHECK-NOT: call ptr @__dynamic_cast
 // CHECK: ret i32
 int downcast_declaration(Shape &shape) {
-  return shape match {
+  return match (shape) {
     case Circle &circle if (circle.radius == 0) => 0;
     case Circle &circle => circle.radius;
     case _ => -1;
@@ -201,7 +201,7 @@ template<__SIZE_TYPE__ I> struct tuple_element<I, RuntimeProjection> {
 // CHECK-NOT: call{{.*}} @_ZNR17RuntimeProjection3get
 // CHECK: ret i32
 int reuse_structural_projection(RuntimeProjection &subject) {
-  return subject match {
+  return match (subject) {
     case [0, 0] => 0;
     case [auto &&x, 0] => x;
     case [0, auto &&y] => y;
@@ -215,7 +215,7 @@ int reuse_structural_projection(RuntimeProjection &subject) {
 // CHECK-NOT: call{{.*}} @_ZNR17RuntimeProjection3get
 // CHECK: ret i32
 int reuse_declaration_projection(RuntimeProjection &subject) {
-  return subject match {
+  return match (subject) {
     case auto &&[x, y] if (x == 0) => 0;
     case auto &&[x, y] => x + y;
   };
@@ -227,7 +227,7 @@ int reuse_declaration_projection(RuntimeProjection &subject) {
 // CHECK-NOT: call{{.*}} @_ZNR17RuntimeProjection3get
 // CHECK: ret i32
 int reuse_binding_pack_projection(RuntimeProjection &subject) {
-  return subject match {
+  return match (subject) {
     case auto &&[...elements] if ((... + elements) == 0) => 0;
     case auto &&[...elements] => (... + elements);
   };

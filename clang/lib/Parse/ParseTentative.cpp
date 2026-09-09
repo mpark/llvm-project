@@ -552,6 +552,41 @@ Parser::isCXXConditionDeclarationOrInitStatement(bool CanBeInitStatement,
 bool Parser::isCXXTypeId(TentativeCXXTypeIdContext Context, bool &isAmbiguous) {
   isAmbiguous = false;
 
+  if (Context == TentativeCXXTypeIdContext::InMatchTrailingReturnType) {
+    bool HasTypeSpecifier = false;
+    bool MayHaveTrailingReturnType = Tok.is(tok::kw_auto);
+
+    while (true) {
+      // In this context, `auto {` is a placeholder type followed by the match
+      // body, not a braced functional cast.
+      if (Tok.is(tok::kw_auto)) {
+        ConsumeToken();
+        HasTypeSpecifier = true;
+        continue;
+      }
+
+      TPResult TPR =
+          isCXXDeclarationSpecifier(ImplicitTypenameContext::No,
+                                    /*BracedCastResult=*/TPResult::True);
+      if (TPR == TPResult::False)
+        break;
+      if (TPR == TPResult::Error)
+        return false;
+
+      HasTypeSpecifier |= isCXXDeclarationSpecifierAType();
+      if (TryConsumeDeclarationSpecifier() == TPResult::Error)
+        return false;
+    }
+
+    if (!HasTypeSpecifier)
+      return false;
+
+    TPResult TPR = TryParseDeclarator(
+        /*mayBeAbstract=*/true, /*mayHaveIdentifier=*/false,
+        /*mayHaveDirectInit=*/false, MayHaveTrailingReturnType);
+    return TPR != TPResult::False && TPR != TPResult::Error;
+  }
+
   // C++ 8.2p2:
   // The ambiguity arising from the similarity between a function-style cast and
   // a type-id can occur in different contexts. The ambiguity appears as a
