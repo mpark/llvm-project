@@ -6613,7 +6613,7 @@ void Parser::ParseTypeQualifierListOpt(
   }
 }
 
-bool Parser::isNestedDecompositionDeclarator() {
+bool Parser::isNestedDecompositionDeclarator(bool BeforeDeclSpecifier) {
   if (Tok.isNot(tok::l_square) || NextToken().isNot(tok::l_square))
     return false;
 
@@ -6632,6 +6632,9 @@ bool Parser::isNestedDecompositionDeclarator() {
     if (Tok.is(tok::l_square))
       return false;
   }
+  if (BeforeDeclSpecifier)
+    return isCXXDeclarationSpecifier(ImplicitTypenameContext::No) ==
+           TPResult::False;
   return TryParseDeclarator(/*mayBeAbstract=*/false) == TPResult::False;
 }
 
