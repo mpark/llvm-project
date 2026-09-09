@@ -17,14 +17,14 @@
 #include <variant>
 
 constexpr int match_optional(const std::optional<int>& value) {
-  return value match {
+  return match (value) {
     case std::nullopt => -1;
     case { const int& number } => number;
   };
 }
 
 constexpr int match_optional_zero(const std::optional<int>& value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case {} => 1;
     case { const int& } => 2;
@@ -32,14 +32,14 @@ constexpr int match_optional_zero(const std::optional<int>& value) {
 }
 
 constexpr int match_pointer(const int* pointer) {
-  return pointer match {
+  return match (pointer) {
     case nullptr => -1;
     case { const int& number } => number;
   };
 }
 
 constexpr int match_partial_ordering(std::partial_ordering value) {
-  return value match {
+  return match (value) {
     case std::partial_ordering::less => -1;
     case std::partial_ordering::equivalent => 0;
     case std::partial_ordering::greater => 1;
@@ -48,7 +48,7 @@ constexpr int match_partial_ordering(std::partial_ordering value) {
 }
 
 constexpr int match_strong_ordering(std::strong_ordering value) {
-  return value match {
+  return match (value) {
     case std::strong_ordering::less => -1;
     case 0 => 0;
     case std::strong_ordering::greater => 1;
@@ -56,7 +56,7 @@ constexpr int match_strong_ordering(std::strong_ordering value) {
 }
 
 constexpr unsigned match_month(std::chrono::month value) {
-  return value match {
+  return match (value) {
     case std::chrono::January => 1;
     case std::chrono::February => 2;
     case std::chrono::March => 3;
@@ -74,7 +74,7 @@ constexpr unsigned match_month(std::chrono::month value) {
 }
 
 constexpr unsigned match_valid_month(std::chrono::month value) {
-  return value match {
+  return match (value) {
     case std::chrono::January => 1;
     case std::chrono::February => 2;
     case std::chrono::March => 3;
@@ -91,7 +91,7 @@ constexpr unsigned match_valid_month(std::chrono::month value) {
 }
 
 constexpr unsigned match_weekday(std::chrono::weekday value) {
-  return value match {
+  return match (value) {
     case std::chrono::Sunday => 0;
     case std::chrono::Monday => 1;
     case std::chrono::Tuesday => 2;
@@ -104,7 +104,7 @@ constexpr unsigned match_weekday(std::chrono::weekday value) {
 }
 
 constexpr unsigned match_valid_weekday(std::chrono::weekday value) {
-  return value match {
+  return match (value) {
     case std::chrono::Sunday => 0;
     case std::chrono::Monday => 1;
     case std::chrono::Tuesday => 2;
@@ -117,7 +117,7 @@ constexpr unsigned match_valid_weekday(std::chrono::weekday value) {
 
 constexpr int match_nested(
     const std::variant<std::partial_ordering, int>& value) {
-  return value match {
+  return match (value) {
     case { std::partial_ordering::less } => -1;
     case { std::partial_ordering::equivalent } => 0;
     case { std::partial_ordering::greater } => 1;

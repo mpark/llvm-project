@@ -78,16 +78,16 @@ TEST(Profiling, MatchExpressionsIncludePatternsAndHandlers) {
   auto AST =
       tooling::buildASTFromCodeWithArgs(R"cpp(
     int first(int value) {
-      return value match { case 0 => 1; case _ => 2; };
+      return match (value) { case 0 => 1; case _ => 2; };
     }
     int second(int value) {
-      return value match { case 1 => 1; case _ => 2; };
+      return match (value) { case 1 => 1; case _ => 2; };
     }
     int third(int value) {
-      return value match { case 0 => 3; case _ => 2; };
+      return match (value) { case 0 => 3; case _ => 2; };
     }
   )cpp",
-                                        {"-std=c++2c", "-fpattern-matching"});
+                                        {"-std=c++2d", "-fpattern-matching"});
   ASSERT_TRUE(AST);
   ASTContext &Ctx = AST->getASTContext();
 

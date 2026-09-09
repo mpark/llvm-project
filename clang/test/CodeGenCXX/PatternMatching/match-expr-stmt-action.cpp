@@ -4,7 +4,7 @@
 int match_stmt_action(int limit) {
   int r = 0;
   for (int i = limit; i >= 0; i--) {
-    r += i match {
+    r += match (i) {
       case auto&& x if (x < 5) => 1;
       case 5 => continue;
       case 6 => break;
@@ -39,11 +39,11 @@ int match_stmt_action(int limit) {
 // CHECK:   br label %return
 
 auto match_only_return_actions(int value) {
-  value match {
+  match (value) {
     case 0 => return 101;
     case 1 => return 202;
     case _ => return -1;
-  };
+  }
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z25match_only_return_actionsi
@@ -56,10 +56,10 @@ auto match_only_return_actions(int value) {
 
 template <class T>
 auto match_only_return_actions_template(T value) {
-  value match {
+  match (value) {
     case 0 => return 303;
     case _ => return -2;
-  };
+  }
 }
 
 template auto match_only_return_actions_template<int>(int);

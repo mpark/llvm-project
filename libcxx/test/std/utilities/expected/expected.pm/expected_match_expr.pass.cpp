@@ -15,10 +15,10 @@
 #include <variant>
 #include <expected>
 
-static_assert(42 match { case 42 => 0; case _ => 1; } == 0);
+static_assert(match (42) { case 42 => 0; case _ => 1; } == 0);
 
 constexpr int match_variant(std::variant<int, long> v) {
-    return v match {
+    return match (v) {
         case { int } => 0;
         case { long } => 1;
     };
@@ -27,7 +27,7 @@ static_assert(match_variant(std::variant<int, long>(42)) == 0);
 static_assert(match_variant(std::variant<int, long>(42l)) == 1);
 
 constexpr int match_expected(std::expected<int, long> v) {
-    return v match {
+    return match (v) {
         case { int } => 0;
         case { long } => 1;
     };
@@ -36,7 +36,7 @@ static_assert(match_expected(std::expected<int, long>(42)) == 0);
 static_assert(match_expected(std::expected<int, long>(std::unexpect, 42l)) == 1);
 
 constexpr int match_expected(std::expected<int, int> v) {
-    return v match {
+    return match (v) {
         case { int } => v.has_value() ? 0 : 1;
     };
 }
@@ -44,7 +44,7 @@ static_assert(match_expected(std::expected<int, int>(42)) == 0);
 static_assert(match_expected(std::expected<int, int>(std::unexpect, 42)) == 1);
 
 constexpr int match_expected(std::expected<void, int> v) {
-    return v match {
+    return match (v) {
         case { void } => 0;
         case { int } => 1;
     };

@@ -69,7 +69,7 @@
 // CHECK-NEXT:    ret i32 [[TMP11]]
 //
 auto decomposition_pattern(const int (&xs)[2]) {
-  return xs match {
+  return match (xs) {
     case [auto&& x, 0] => x * 2;
     case _ => throw 0;
   };
@@ -192,7 +192,7 @@ namespace std {
 // CHECK-NEXT:    ret i32 [[TMP15]]
 //
 int tuple_like_decomposition_pattern(const Pair &tup) {
-  return tup match {
+  return match (tup) {
     case [0, auto&& y] => y * 2;
     case _ => throw 0;
   };

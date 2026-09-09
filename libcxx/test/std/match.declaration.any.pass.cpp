@@ -14,7 +14,7 @@
 #include <cassert>
 
 int match_any(const std::any& a) {
-  return a match {
+  return match (a) {
     case { const int& i } if (i == 0) => 0;
     case { const int& i } => i;
     case { const double& d } => static_cast<int>(d) + 4;
@@ -23,7 +23,7 @@ int match_any(const std::any& a) {
 }
 
 int match_any_type_selector(const std::any& a) {
-  return a match {
+  return match (a) {
     case { int: auto value } => value;
     case { double: auto value } => static_cast<int>(value) + 4;
     case _ => -1;
@@ -31,21 +31,21 @@ int match_any_type_selector(const std::any& a) {
 }
 
 int match_rvalue_any(std::any&& a) {
-  return static_cast<std::any&&>(a) match {
+  return match (static_cast<std::any&&>(a)) {
     case { int&& i } => i;
     case _ => -1;
   };
 }
 
 int match_prvalue_any() {
-  return std::any(43) match {
+  return match (std::any(43)) {
     case { int&& i } => i;
     case _ => -1;
   };
 }
 
 int match_empty_any(const std::any& a) {
-  return a match {
+  return match (a) {
     case {} => 0;
     case { const int& i } => i;
     case _ => -1;
@@ -57,14 +57,14 @@ bool test_empty_any(const std::any& a) {
 }
 
 bool test_nonempty_any(const std::any& a) {
-  return a match {
+  return match (a) {
     case { _ } => true;
     case {} => false;
   };
 }
 
 bool test_any_type_pattern(const std::any& a) {
-  return a match {
+  return match (a) {
     case { int } => true;
     case _ => false;
   };
@@ -80,7 +80,7 @@ struct CopyCounter {
 };
 
 int match_any_by_value(std::any& a) {
-  return a match {
+  return match (a) {
     case { CopyCounter copy } if (copy.value == 0) => 0;
     case { CopyCounter copy } => copy.value;
     case _ => -1;
