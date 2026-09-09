@@ -29,7 +29,8 @@ constexpr bool declaration_equivalent_types() {
 static_assert(declaration_equivalent_types());
 
 void function_subject() noexcept;
-static_assert(function_subject match case void (*)());
+using Function = void();
+static_assert(function_subject match case Function*);
 
 struct CopyCounter {
   int* copies;
