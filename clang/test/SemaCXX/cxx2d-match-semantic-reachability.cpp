@@ -21,7 +21,7 @@ struct Sized {
 
 template<class T>
 constexpr int whole_subject(T value) {
-  return value match {
+  return match (value) {
     case int i => i;
     case auto&& other => other.size();
   };
@@ -57,7 +57,7 @@ struct std::alternative_traits<Choice> {
 };
 
 constexpr int closed_choice(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { int i } => i;
     case { auto&& other } => other.size();
   };
@@ -72,7 +72,7 @@ struct ChoicePair {
 };
 
 constexpr int nested_choices(ChoicePair choices) {
-  return choices match {
+  return match (choices) {
     case [{ int i }, _] => i;
     case [_, { int i }] => i;
     case [{ auto&& first }, { auto&& second }] =>
@@ -105,7 +105,7 @@ struct std::alternative_traits<One> {
 };
 
 int one_state(One one) {
-  return one match {
+  return match (one) {
     case { int i } => i;
     case { auto&& other } => other.no_such_member(); // expected-error {{match case is redundant}}
   };
@@ -113,7 +113,7 @@ int one_state(One one) {
 
 template<class T>
 int guarded_arm_does_not_close(T value) {
-  return value match {
+  return match (value) {
     case int i if (i > 0) => i;
     case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
   };
@@ -125,7 +125,7 @@ int use_guarded_arm() {
 
 template<class T>
 int value_arm_does_not_close(T value) {
-  return value match {
+  return match (value) {
     case 0 => 0;
     case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
   };
@@ -137,7 +137,7 @@ int use_value_arm() {
 
 template<class T>
 int refutable_arms_do_not_collect(T value) {
-  return value match {
+  return match (value) {
     case true => 1;
     case false => 0;
     case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'bool' is not a structure or union}}
@@ -155,7 +155,7 @@ struct Derived : Base {};
 
 template<class T>
 int dynamic_cast_arm_does_not_close(T& value) {
-  return value match {
+  return match (value) {
     case Derived& derived => 1;
     case auto&& other => other.no_such_member(); // expected-error {{no member named 'no_such_member' in 'Base'}}
   };

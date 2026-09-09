@@ -1,14 +1,14 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -verify %s
 
 int redundant_type(int value) {
-  return value match {
+  return match (value) {
     case double => 0; // expected-error {{type pattern of type 'double' is not an exact match for subject of type 'int'}}
     case _ => 1;
   };
 }
 
 int impossible_guarded_type(int value) {
-  return value match {
+  return match (value) {
     case double if (value > 0) => 0; // expected-error {{type pattern of type 'double' is not an exact match for subject of type 'int'}}
     case _ => 1;
   };
@@ -31,7 +31,7 @@ template<class T>
 concept LvalueReference = __is_lvalue_reference(T);
 
 constexpr int unnamed_constrained_pattern(auto&& value) {
-  return static_cast<decltype(value)>(value) match {
+  return match (static_cast<decltype(value)>(value)) {
     case Integral auto => 1;
     case _ => 0;
   };
@@ -41,7 +41,7 @@ static_assert(unnamed_constrained_pattern(0) == 1);
 static_assert(unnamed_constrained_pattern(0.0) == 0);
 
 constexpr int unnamed_constrained_forwarding_pattern(auto&& value) {
-  return static_cast<decltype(value)>(value) match {
+  return match (static_cast<decltype(value)>(value)) {
     case LvalueReference auto&& => 1;
     case _ => 0;
   };
@@ -75,7 +75,7 @@ bool incompatible_nested_type_pattern(Pair value) {
 struct NoMatch {};
 
 int redundant_nested(Pair value) {
-  return value match {
+  return match (value) {
     case [int, NoMatch] => 0; // expected-error {{type pattern of type 'NoMatch' is not an exact match for subject of type 'long'}}
     case _ => 1;
   };
@@ -92,7 +92,7 @@ bool invalid_hypothetical_initialization(NonCopyable& value) {
 
 template<class U>
 constexpr int dependent_type_pattern(int value) {
-  return value match {
+  return match (value) {
     case U => 1;
     case _ => 0;
   };

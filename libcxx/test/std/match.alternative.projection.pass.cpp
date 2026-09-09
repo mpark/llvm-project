@@ -22,98 +22,98 @@
 #include <variant>
 
 int match_pointer(int* pointer) {
-  return pointer match {
+  return match (pointer) {
     case { int& value } => value;
     case {} => -1;
   };
 }
 
 int match_void_pointer(void* pointer) {
-  return pointer match {
+  return match (pointer) {
     case { void } => 1;
     case {} => 0;
   };
 }
 
 int match_optional(const std::optional<int>& value) {
-  return value match {
+  return match (value) {
     case { const int& number } => number;
     case {} => -1;
   };
 }
 
 int match_named_optional(const std::optional<int>& value) {
-  return value match {
+  return match (value) {
     case { .some: const int& number } => number;
     case { .none } => -2;
   };
 }
 
 int match_optional_reference(const std::optional<int&>& value) {
-  return value match {
+  return match (value) {
     case { int& number } => ++number;
     case {} => -7;
   };
 }
 
 int match_named_optional_reference(std::optional<int&>&& value) {
-  return static_cast<std::optional<int&>&&>(value) match {
+  return match (static_cast<std::optional<int&>&&>(value)) {
     case { .some: int& number } => ++number;
     case { .none } => -8;
   };
 }
 
 int match_const_optional_reference(const std::optional<const int&>& value) {
-  return value match {
+  return match (value) {
     case { const int& number } => number;
     case {} => -9;
   };
 }
 
 int match_unique_ptr(const std::unique_ptr<int>& value) {
-  return value match {
+  return match (value) {
     case { int& number } => number;
     case {} => -3;
   };
 }
 
 int match_shared_ptr(const std::shared_ptr<int>& value) {
-  return value match {
+  return match (value) {
     case { .some: int& number } => number;
     case { .none } => -4;
   };
 }
 
 int match_nullable(const auto& value) {
-  return value match {
+  return match (value) {
     case { .some: const int& number } => number;
     case { .none } => -6;
   };
 }
 
 int match_rvalue_optional(std::optional<int>&& value) {
-  return static_cast<std::optional<int>&&>(value) match {
+  return match (static_cast<std::optional<int>&&>(value)) {
     case { int&& number } => number;
     case {} => -1;
   };
 }
 
 int match_variant(const std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { const int& integer } => integer;
     case { const double& real } => static_cast<int>(real) + 10;
   };
 }
 
 int match_variant_type_patterns(const std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { const int& } => 12;
     case { const double& } => 13;
   };
 }
 
 int match_variant_type_selectors(const std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { int: 0 } => 14;
     case { int: auto integer } => integer;
     case { double: auto real } => static_cast<int>(real) + 10;
@@ -133,35 +133,35 @@ concept SameAs = std::same_as<T, U>;
 
 int match_variant_type_constraint_selectors(
     const std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { std::integral: const auto& integer } => integer;
     case { SameAs<double>: const auto& real } => static_cast<int>(real) + 10;
   };
 }
 
 int match_dependent_type_constraint_selector(const auto& value) {
-  return value match {
+  return match (value) {
     case { std::integral: const auto& integer } => integer;
     case { _ } => -1;
   };
 }
 
 int match_variant_index_selectors(const std::variant<int, int>& value) {
-  return value match {
+  return match (value) {
     case { .[0]: auto integer } => integer + 20;
     case { .[1]: auto integer } => integer + 30;
   };
 }
 
 int match_duplicate_type_selector(const std::variant<int, int>& value) {
-  return value match {
+  return match (value) {
     case { int: auto integer } => integer;
   };
 }
 
 int match_recursive_type_selector(
     const std::variant<std::tuple<int, int>, double>& value) {
-  return value match {
+  return match (value) {
     case { std::tuple<int, int>: [auto first, auto second] } =>
         first * 10 + second;
     case { double: auto real } => static_cast<int>(real);
@@ -181,27 +181,27 @@ struct SelectorValue {
 
 int match_type_selector_does_not_initialize(
     const std::variant<SelectorValue>& value) {
-  return value match {
+  return match (value) {
     case { SelectorValue: const auto& selected } => selected.value;
   };
 }
 
 int match_projected_unnamed_type_pattern_does_not_initialize(
     const std::variant<SelectorValue>& value) {
-  return value match {
+  return match (value) {
     case { SelectorValue } => selector_copies;
   };
 }
 
 int match_expected(const std::expected<int, long>& value) {
-  return value match {
+  return match (value) {
     case { .value: const int& result } => result;
     case { .error: const long& error } => static_cast<int>(error) + 20;
   };
 }
 
 int match_nullable_expected(const std::expected<int, long>& value) {
-  return value match {
+  return match (value) {
     case { .some: const int& result } => result;
     case { .none } => -5;
   };
@@ -209,7 +209,7 @@ int match_nullable_expected(const std::expected<int, long>& value) {
 
 int match_complete_nullable_view_after_primary(
     const std::expected<int, long>& value) {
-  return value match {
+  return match (value) {
     case { .value: 0 } => 20;
     case { .some: const int& result } => result;
     case { .none } => -7;
@@ -217,14 +217,14 @@ int match_complete_nullable_view_after_primary(
 }
 
 int match_same_type_expected(const std::expected<int, int>& value) {
-  return value match {
+  return match (value) {
     case { .value: const int& result } => result;
     case { .error: const int& error } => error + 30;
   };
 }
 
 int match_void_expected(const std::expected<void, std::string>& value) {
-  return value match {
+  return match (value) {
     case { void } => 40;
     case { std::string } => 41;
   };
@@ -232,7 +232,7 @@ int match_void_expected(const std::expected<void, std::string>& value) {
 
 int match_nullable_void_expected(
     const std::expected<void, std::string>& value) {
-  return value match {
+  return match (value) {
     case { .some: void } => 42;
     case { .none } => 43;
   };
@@ -242,7 +242,7 @@ int classify(int&) { return 40; }
 int classify(double&) { return 50; }
 
 int match_generic_variant(std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { auto&& alternative } => classify(alternative);
   };
 }
@@ -251,7 +251,7 @@ using ScalarOrPair =
     std::variant<int, std::tuple<int, int>, std::array<int, 2>>;
 
 int match_scalar_or_pair(ScalarOrPair& value) {
-  return value match {
+  return match (value) {
     case { int scalar } => scalar;
     case { auto&& [x, y] } => x * 10 + y;
   };
@@ -259,7 +259,7 @@ int match_scalar_or_pair(ScalarOrPair& value) {
 
 template<class T>
 int match_dependent_generic(T& value) {
-  return value match {
+  return match (value) {
     case { auto&& alternative } => classify(alternative);
   };
 }
@@ -268,20 +268,20 @@ int classify_rvalue(int&&) { return 51; }
 int classify_rvalue(double&&) { return 52; }
 
 int match_generic_rvalue(std::variant<int, double>&& value) {
-  return static_cast<std::variant<int, double>&&>(value) match {
+  return match (static_cast<std::variant<int, double>&&>(value)) {
     case { auto&& alternative } =>
         classify_rvalue(static_cast<decltype(alternative)&&>(alternative));
   };
 }
 
 int match_repeated_variant(const std::variant<int, int>& value) {
-  return value match {
+  return match (value) {
     case { const int& alternative } => alternative;
   };
 }
 
 int match_repeated_type(const std::variant<int, int>& value) {
-  return value match {
+  return match (value) {
     case { const int& } => 75;
   };
 }
@@ -293,7 +293,7 @@ struct Shape {
 struct Circle : Shape {};
 
 int match_pointer_downcast(Shape* value) {
-  return value match {
+  return match (value) {
     case { Circle& } => 74;
     case {} => 75;
     case _ => 76;
@@ -301,21 +301,21 @@ int match_pointer_downcast(Shape* value) {
 }
 
 int match_projected_downcast(const std::variant<Shape*, int>& value) {
-  return value match {
+  return match (value) {
     case { { Circle& } } => 77;
     case { _ } => 78;
   };
 }
 
 int match_repeated_value(const std::variant<int, int>& value) {
-  return value match {
+  return match (value) {
     case { 0 } => 100;
     case { const int& alternative } => alternative;
   };
 }
 
 int match_numeric_zero(const std::variant<int, double>& value) {
-  return value match {
+  return match (value) {
     case { 0 } => 80;
     case { _ } => 81;
   };
@@ -323,14 +323,14 @@ int match_numeric_zero(const std::variant<int, double>& value) {
 
 template<class T>
 int match_dependent_zero(T value) {
-  return value match {
+  return match (value) {
     case 0 => 84;
     case _ => 85;
   };
 }
 
 int match_partially_viable_zero(const std::variant<int, std::string>& value) {
-  return value match {
+  return match (value) {
     case { 0 } => 82;
     case { _ } => 83;
   };
@@ -338,7 +338,7 @@ int match_partially_viable_zero(const std::variant<int, std::string>& value) {
 
 template<class T, class U>
 int match_dependent_typed_variant(const std::variant<T, U>& value) {
-  return value match {
+  return match (value) {
     case { char c } => static_cast<int>(c);
     case { int i } => i;
     case { _ } => -1;
@@ -356,7 +356,7 @@ int combine(double&, char&) { return 62; }
 int combine(double&, long&) { return 63; }
 
 int match_nested_variants(TwoVariants& value) {
-  return value match {
+  return match (value) {
     case [{ auto&& first }, { auto&& second }] => combine(first, second);
   };
 }
@@ -412,14 +412,14 @@ int classify_nested(bool&) { return 74; }
 
 template<class T>
 int match_uneven_nested_variants(T& value) {
-  return value match {
+  return match (value) {
     case { { auto&& alternative } } => classify_nested(alternative);
   };
 }
 
 template<class T>
 int match_repeated_nested_variants(T& value) {
-  return value match {
+  return match (value) {
     case { { auto&& alternative } } => classify_nested(alternative);
   };
 }
@@ -460,7 +460,7 @@ struct std::alternative_traits<PrvalueAlternative> {
 void test_prvalue_projection_initialization() {
   int destructions = 0;
   PrvalueAlternative alternative{&destructions};
-  bool has_expected_identity = alternative match {
+  bool has_expected_identity = match (alternative) {
     case { PrvalueProjection value } => value.self == &value;
   };
   assert(has_expected_identity);

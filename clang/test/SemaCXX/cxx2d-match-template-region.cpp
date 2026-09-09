@@ -36,20 +36,20 @@ template <> struct std::alternative_traits<Choice> {
 };
 
 int deferred_assertion(Choice value) {
-  return value match {
+  return match (value) {
     case { auto payload } => // expected-note 2{{while instantiating this pattern match}}
       [] { static_assert(false); return 0; }(); // expected-error 2{{static assertion failed}} expected-note 2{{while substituting into a lambda expression here}}
   };
 }
 
 int nondependent_lookup(Choice value) {
-  return value match {
+  return match (value) {
     case { auto payload } => undeclared_name(); // expected-error {{use of undeclared identifier 'undeclared_name'}}
   };
 }
 
 constexpr int project(Choice value) {
-  return value match {
+  return match (value) {
     case { auto payload } => static_cast<int>(payload);
   };
 }

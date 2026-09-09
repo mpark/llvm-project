@@ -12,13 +12,13 @@ struct Triple {
 };
 
 constexpr int placeholder_pack(auto value) {
-  return value match {
+  return match (value) {
     case auto&& [first, ..._, last] => first + last;
   };
 }
 
 constexpr int unnamed_pack(auto value) {
-  return value match {
+  return match (value) {
     case auto&& [first, ..., last] => first + last;
   };
 }
