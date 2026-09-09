@@ -75,6 +75,25 @@ void test_type_pattern_dump(int x) {
   // CHECK-NEXT:   `-BuiltinType 0x{{[^ ]*}} 'int'
 }
 
+constexpr int pattern_value = 1;
+
+void test_declaration_expression_disambiguation_dump(int x) {
+  x match { case int(pattern_value) => 0; case _ => 1; };
+  // CHECK:      ExpressionPattern 0x{{[^ ]*}} <col:18, col:35>
+  // CHECK-NEXT: `-CXXFunctionalCastExpr 0x{{[^ ]*}} <col:18, col:35> 'int' functional cast to int <NoOp>
+
+  x match { case auto(pattern_value) => 0; case _ => 1; };
+  // CHECK:      ExpressionPattern 0x{{[^ ]*}} <col:18, col:36>
+  // CHECK-NEXT: `-CXXFunctionalCastExpr 0x{{[^ ]*}} <col:18, col:36> 'int' functional cast to auto <NoOp>
+
+  x match { case int() => 0; case _ => 1; };
+  // CHECK:      ExpressionPattern 0x{{[^ ]*}} <col:18, col:22>
+  // CHECK-NEXT: `-CXXScalarValueInitExpr 0x{{[^ ]*}} <col:18, col:22> 'int'
+
+  x match { case int named => named; };
+  // CHECK:      DeclarationPattern 0x{{[^ ]*}} <col:18, col:22>
+}
+
 void test_or_pattern_dump(int x) {
   x match { case 0 || 1 || 2 => 0; case _ => 1; };
   // CHECK:      OrPattern 0x{{[^ ]*}} <col:18, col:28>
