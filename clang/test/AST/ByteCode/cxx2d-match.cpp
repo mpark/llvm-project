@@ -1864,3 +1864,169 @@ constexpr bool reference_match_result_selects_referent(bool first) {
 
 static_assert(reference_match_result_selects_referent(true));
 static_assert(reference_match_result_selects_referent(false));
+
+constexpr int declaration_pattern_expression_constant = 2;
+using PatternInteger = int;
+
+constexpr int functional_cast_is_an_expression_pattern(int value) {
+  return value match {
+    case int(declaration_pattern_expression_constant) => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(functional_cast_is_an_expression_pattern(2) == 1);
+static_assert(functional_cast_is_an_expression_pattern(3) == 0);
+
+constexpr bool alias_cast_is_an_expression_pattern(int value) {
+  return value match case PatternInteger(declaration_pattern_expression_constant);
+}
+
+static_assert(alias_cast_is_an_expression_pattern(2));
+static_assert(!alias_cast_is_an_expression_pattern(3));
+
+template<class T>
+constexpr bool default_construction_is_an_expression_pattern(T value) {
+  return value match case T();
+}
+
+static_assert(default_construction_is_an_expression_pattern(0));
+static_assert(!default_construction_is_an_expression_pattern(1));
+
+constexpr bool parenthesized_default_construction_is_an_expression_pattern(
+    int value) {
+  return value match case (PatternInteger());
+}
+
+static_assert(parenthesized_default_construction_is_an_expression_pattern(0));
+static_assert(!parenthesized_default_construction_is_an_expression_pattern(1));
+
+constexpr int declaration_pattern_pointee = 5;
+constexpr const int *declaration_pattern_pointer =
+    &declaration_pattern_pointee;
+
+constexpr bool dereference_inside_cast_is_an_expression_pattern(int value) {
+  return value match case int(*declaration_pattern_pointer);
+}
+
+static_assert(dereference_inside_cast_is_an_expression_pattern(5));
+static_assert(!dereference_inside_cast_is_an_expression_pattern(4));
+
+constexpr bool boolean_cast_is_an_expression_pattern(bool value) {
+  return value match {
+    case bool(true) => true;
+    case _ => false;
+  };
+}
+
+static_assert(boolean_cast_is_an_expression_pattern(true));
+static_assert(!boolean_cast_is_an_expression_pattern(false));
+
+constexpr bool logical_or_lhs = false;
+constexpr bool logical_or_rhs = true;
+
+constexpr bool cast_forces_logical_or_expression(bool value) {
+  return value match case bool(logical_or_lhs || logical_or_rhs);
+}
+
+static_assert(cast_forces_logical_or_expression(true));
+static_assert(!cast_forces_logical_or_expression(false));
+
+constexpr int placeholder_cast_is_an_expression_pattern(int value) {
+  return value match {
+    case auto(declaration_pattern_expression_constant + 1) => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(placeholder_cast_is_an_expression_pattern(3) == 1);
+static_assert(placeholder_cast_is_an_expression_pattern(2) == 0);
+
+constexpr int _ = 4;
+
+constexpr bool placeholder_cast_can_name_underscore(int value) {
+  return value match {
+    case auto(_) => true;
+    case _ => false;
+  };
+}
+
+static_assert(placeholder_cast_can_name_underscore(4));
+static_assert(!placeholder_cast_can_name_underscore(5));
+
+constexpr bool placeholder_cast_escapes_pattern_introducers(int value) {
+  return value match case auto(_ + 1);
+}
+
+static_assert(placeholder_cast_escapes_pattern_introducers(5));
+static_assert(!placeholder_cast_escapes_pattern_introducers(4));
+
+constexpr bool placeholder_cast_escapes_lambda_pattern(int value) {
+  return value match case auto([] { return 6; }());
+}
+
+static_assert(placeholder_cast_escapes_lambda_pattern(6));
+static_assert(!placeholder_cast_escapes_lambda_pattern(5));
+
+constexpr bool braced_placeholder_cast_can_name_underscore(int value) {
+  return value match case auto{_};
+}
+
+static_assert(braced_placeholder_cast_can_name_underscore(4));
+static_assert(!braced_placeholder_cast_can_name_underscore(5));
+
+namespace declaration_expression_lookup {
+namespace expression {
+constexpr int T = 2;
+constexpr int x = 3;
+
+constexpr bool matches(int value) {
+  return value match case T * x;
+}
+
+static_assert(matches(6));
+static_assert(!matches(5));
+} // namespace expression
+
+namespace declaration {
+using T = int;
+
+constexpr bool matches(T *value) {
+  return value match case T *x;
+}
+
+static_assert(matches(nullptr));
+} // namespace declaration
+} // namespace declaration_expression_lookup
+
+constexpr bool parenthesized_pattern_extends_through_or(int value) {
+  return value match case (0) || 1;
+}
+
+static_assert(parenthesized_pattern_extends_through_or(0));
+static_assert(parenthesized_pattern_extends_through_or(1));
+static_assert(!parenthesized_pattern_extends_through_or(2));
+
+constexpr bool parentheses_complete_match_before_boolean_or(int value,
+                                                            bool fallback) {
+  return (value match case (0)) || fallback;
+}
+
+static_assert(parentheses_complete_match_before_boolean_or(0, false));
+static_assert(parentheses_complete_match_before_boolean_or(1, true));
+static_assert(!parentheses_complete_match_before_boolean_or(1, false));
+
+using PatternFunction = int(double);
+using PatternArray = int[2];
+
+constexpr int alias_supports_complex_declaration_types(PatternFunction *fn,
+                                                       const PatternArray &array) {
+  int result = fn match { case PatternFunction* value => value == fn; };
+  return result +
+         (array match { case const PatternArray& value => &value == &array; });
+}
+
+constexpr int pattern_function(double) { return 0; }
+constexpr PatternArray pattern_array{};
+static_assert(alias_supports_complex_declaration_types(&pattern_function,
+                                                       pattern_array) == 2);

@@ -3080,8 +3080,10 @@ private:
   }
 
   /// Determine whether a leading '[[' starts a nested structured-binding
-  /// declarator rather than an attribute-specifier-seq.
-  bool isNestedDecompositionDeclarator();
+  /// declarator rather than an attribute-specifier-seq. When
+  /// BeforeDeclSpecifier is true, an attribute is followed by declaration
+  /// specifiers rather than a declarator.
+  bool isNestedDecompositionDeclarator(bool BeforeDeclSpecifier = false);
 
   /// Skip C++11 and C23 attributes and return the end location of the
   /// last one.
@@ -4555,22 +4557,23 @@ private:
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
                                bool DeferSemanticChecking = false);
   ActionResult<MatchPattern *>
-  ParsePattern(ExprResult *LHSOfMatchTestExpr = nullptr,
-               bool Decomp = false,
+  ParsePattern(bool Decomp = false,
                bool StopAtEqual = false,
                TypoCorrectionTypeBehavior CorrectionBehavior =
                    TypoCorrectionTypeBehavior::AllowNonTypes);
   ActionResult<MatchPattern *>
-  ParsePrimaryPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
-                      bool StopAtEqual,
+  ParsePrimaryPattern(bool Decomp, bool StopAtEqual,
                       TypoCorrectionTypeBehavior CorrectionBehavior);
 
+  enum class DeclarationPatternKind { Pattern, Expression, Error };
+  DeclarationPatternKind TryParseDeclarationPatternSyntax();
+  bool isDeclarationPatternSyntax();
   ActionResult<MatchPattern *>
   ParseWildcardPattern(SourceLocation EllipsisLoc = {});
+  void ParsePatternDeclaratorId(Declarator &D);
   ActionResult<MatchPattern *> ParseDeclarationPattern(bool Decomp = false);
   ActionResult<MatchPattern *>
-  ParseExpressionPattern(ExprResult *LHSOfMatchTestExpr, bool Decomp,
-                         bool StopAtEqual,
+  ParseExpressionPattern(bool Decomp, bool StopAtEqual,
                          TypoCorrectionTypeBehavior CorrectionBehavior);
   ActionResult<MatchPattern *>
   ParseParenPattern(bool Decomp, bool StopAtEqual,
@@ -8804,8 +8807,7 @@ public:
   ///
   /// In any of the above cases there can be a preceding
   /// attribute-specifier-seq, but the caller is expected to handle that.
-  bool isCXXSimpleDeclaration(bool AllowForRangeDecl,
-                              bool AllowPatternDecl = false);
+  bool isCXXSimpleDeclaration(bool AllowForRangeDecl);
 
   /// isCXXFunctionDeclarator - Disambiguates between a function declarator or
   /// a constructor-style initializer, when parsing declaration statements.
@@ -9053,8 +9055,7 @@ public:
   ///    attribute-specifier-seqopt type-specifier-seq declarator
   /// \endverbatim
   ///
-  TPResult TryParseSimpleDeclaration(bool AllowForRangeDecl,
-                                     bool AllowPatternDecl = false);
+  TPResult TryParseSimpleDeclaration(bool AllowForRangeDecl);
 
   /// \verbatim
   /// [GNU] typeof-specifier:

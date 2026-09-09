@@ -247,6 +247,47 @@ concept Integral = __is_integral(T);
 void test_constrained_declaration_pattern(int i) {
   i match case Integral auto value;
   i match { case Integral auto value => value; };
+  i match { case Integral auto => 0; };
+  i match { case Integral auto Integral => Integral; };
+}
+
+constexpr int declaration_pattern_constant = 1;
+
+void test_declaration_expression_disambiguation(int value) {
+  value match { case int(declaration_pattern_constant) => 0; case _ => 0; };
+  value match { case auto(declaration_pattern_constant) => 0; case _ => 0; };
+  value match { case (int(declaration_pattern_constant)) => 0; case _ => 0; };
+  value match { case int() => 0; case _ => 0; };
+  value match { case (int()) => 0; case _ => 0; };
+  value match { case (int named) => named; };
+
+  struct Owner { int member; };
+  int Owner::*member = &Owner::member;
+  member match { case int Owner::*pointer => pointer == member; };
+
+  using Function = int(double);
+  Function *function = nullptr;
+  function match { case Function* pointer => pointer == function; };
+
+  using Array = int[2];
+  Array array{};
+  array match { case Array& reference => &reference == &array; };
+}
+
+void test_direct_function_and_array_declarators_are_not_patterns() {
+  using Function = int(double);
+  Function *function = nullptr;
+  function match {
+    case int (*copy)(double) => 0; // expected-error {{use of undeclared identifier 'copy'}} expected-error {{expected '(' for function-style cast or type construction}}
+    case _ => 0;
+  };
+
+  using Array = int[2];
+  Array array{};
+  array match {
+    case int (&copy)[2] => 0; // expected-error {{use of undeclared identifier 'copy'}}
+    case _ => 0;
+  };
 }
 
 void test_decomposition_pattern() {
@@ -267,6 +308,17 @@ void test_decomposition_pattern() {
 void test_attributed_declaration_pattern(int value) {
   value match {
     case [[maybe_unused]] int copy => copy;
+  };
+  value match { case int copy [[maybe_unused]] => copy; };
+
+  int pair[2] = {1, 2};
+  pair match {
+    [[likely]] case [[maybe_unused]] auto [first, second] => first + second;
+  };
+
+  int nested[1][2] = {{1, 2}};
+  nested match {
+    [[likely]] case [[maybe_unused]] auto [[first, second]] => first + second;
   };
 }
 
