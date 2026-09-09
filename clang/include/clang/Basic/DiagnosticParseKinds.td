@@ -486,6 +486,14 @@ def ext_expansion_stmt_body_attr : Extension<
 
 def err_expected_case_before_expression: Error<
   "expected 'case' keyword before expression">;
+def err_expected_case_before_match_pattern: Error<
+  "expected 'case' before pattern">;
+def note_match_type_name_declaration_ambiguity: Note<
+  "'match' names a type, so this construct is otherwise parsed as a declaration">;
+def err_match_statement_result_type: Error<
+  "match statement cannot have an explicit result type">;
+def err_expected_lbrace_after_match_result_type: Error<
+  "expected '{' after match result type">;
 
 def ext_warn_gnu_final : ExtWarn<
   "__final is a GNU extension, consider using C++11 final">,

@@ -153,7 +153,8 @@ enum class TentativeCXXTypeIdContext {
   InTrailingReturnType,
   AsGenericSelectionArgument,
   AsReflectionOperand,
-  InMatchPattern
+  InMatchPattern,
+  InMatchTrailingReturnType
 };
 
 /// The kind of attribute specifier we have found.
@@ -4525,8 +4526,12 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
-  ExprResult ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
-                                 InjectedDeclSet *InjectedDecls);
+  bool isPrefixMatchSelection(
+      bool StatementContext,
+      SourceLocation *MissingCasePatternLoc = nullptr);
+  ExprResult ParseMatchSelection(bool IsStatement);
+  ExprResult ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                     InjectedDeclSet *InjectedDecls);
   Sema::ConditionResult
   ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
                      Sema::ConditionKind CK, bool MissingOK,
@@ -7548,6 +7553,8 @@ public:
   /// Parse an expression statement.
   StmtResult ParseExprStatement(ParsedStmtContext StmtCtx);
 
+  StmtResult ParseMatchStatement();
+
   /// ParseLabeledStatement - We have an identifier and a ':' after it.
   ///
   /// \verbatim
@@ -8872,6 +8879,10 @@ public:
   /// the function returns true to let the declaration parsing code handle it.
   ///
   /// \verbatim
+  /// When Context is InMatchTrailingReturnType, this function consumes the
+  /// complete type-id and leaves the current token immediately after it. The
+  /// caller is responsible for performing this query within a tentative parse.
+  ///
   /// type-id:
   ///   type-specifier-seq abstract-declarator[opt]
   /// \endverbatim

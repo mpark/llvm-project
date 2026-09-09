@@ -412,10 +412,9 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
       return LHS;
     }
 
-    // Special case handling for match expressions.
+    // Special case handling for postfix match tests.
     if (NextTokPrec == prec::Match) {
-      ParseScope MatchScope(this, Scope::DeclScope);
-      LHS = ParseRHSOfMatchExpr(LHS, OpToken.getLocation(), Decls);
+      LHS = ParseRHSOfMatchTestExpr(LHS, OpToken.getLocation(), Decls);
       NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
                                        getLangOpts().CPlusPlus11,
                                        getLangOpts().PatternMatching);
@@ -943,6 +942,9 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
   ParseIdentifier: {    // primary-expression: identifier
                         // unqualified-id: identifier
                         // constant: enumeration-constant
+    if (isPrefixMatchSelection(/*StatementContext=*/false))
+      return ParseMatchSelection(/*IsStatement=*/false);
+
     // Turn a potentially qualified name into a annot_typename or
     // annot_cxxscope if it would be valid.  This handles things like x::y, etc.
     if (getLangOpts().CPlusPlus) {
@@ -2914,6 +2916,9 @@ ExprResult Parser::ParseExpressionWithLeadingParen(
     return Actions.ObjC().ActOnObjCBridgedCast(getCurScope(), OpenLoc, Kind,
                                                BridgeKeywordLoc, Ty.get(),
                                                RParenLoc, SubExpr.get());
+  } else if (isPrefixMatchSelection(/*StatementContext=*/false)) {
+    Fallback = true;
+    return ExprEmpty();
   } else if (ExprType >= ParenParseOption::CompoundLiteral &&
              isTypeIdInParens(isAmbiguousTypeId)) {
 

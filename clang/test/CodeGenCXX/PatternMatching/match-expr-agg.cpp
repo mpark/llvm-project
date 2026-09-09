@@ -108,7 +108,7 @@ struct Result {
 // CHECK-NEXT:    ret i64 [[TMP16]]
 //
 auto nested_decomposition_pattern(const S& s) {
-  return s match -> Result {
+  return match (s) -> Result {
     case [auto&& c, [0, 0]] => {c, -1};
     case _ => throw 0;
   };

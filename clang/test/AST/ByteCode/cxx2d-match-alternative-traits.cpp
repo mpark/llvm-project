@@ -208,14 +208,14 @@ struct std::alternative_traits<MultiViewChoice> {
 };
 
 constexpr int match_choice(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .first: int value } => value;
     case { .second: double value } => static_cast<int>(value) + 10;
   };
 }
 
 constexpr int match_maybe(MaybeInt value) {
-  return value match {
+  return match (value) {
     case { int number } => number;
     case {} => -1;
   };
@@ -225,13 +225,13 @@ constexpr int classify(const int&) { return 1; }
 constexpr int classify(const double&) { return 2; }
 
 constexpr int match_generic(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => classify(value);
   };
 }
 
 constexpr int match_type_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { int: 0 } => 20;
     case { int: auto value } => value;
     case { double: auto value } => static_cast<int>(value) + 10;
@@ -245,7 +245,7 @@ template<class T, class U>
 concept SameAs = __is_same(T, U);
 
 constexpr int match_type_constraint_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { Integral: auto value } => value;
     case { SameAs<double>: auto value } => static_cast<int>(value) + 10;
   };
@@ -253,7 +253,7 @@ constexpr int match_type_constraint_selector(Choice choice) {
 
 template<class T>
 constexpr int match_dependent_type_constraint_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { SameAs<T>: auto value } => static_cast<int>(value);
     case { _ } => -1;
   };
@@ -265,14 +265,14 @@ struct ChoiceWithTail {
 };
 
 constexpr int match_nested_type_constraint_selector(ChoiceWithTail value) {
-  return value match {
+  return match (value) {
     case [{ Integral: auto head }, auto tail] => head + tail;
     case _ => -1;
   };
 }
 
 constexpr int match_expression_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: int value } => value;
     case { .[1]: double value } => static_cast<int>(value) + 10;
   };
@@ -288,7 +288,7 @@ static_assert(match_nested_type_constraint_selector({{1, 0, 2.5}, 5}) == -1);
 
 template<class T>
 constexpr int match_dependent_type_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { T: auto value } => static_cast<int>(value);
     case _ => -1;
   };
@@ -296,27 +296,27 @@ constexpr int match_dependent_type_selector(Choice choice) {
 
 template<__SIZE_TYPE__ I>
 constexpr int match_dependent_expression_selector(Choice choice) {
-  return choice match {
+  return match (choice) {
     case { .[I]: auto value } => static_cast<int>(value);
     case _ => -1;
   };
 }
 
 constexpr int match_generic_binding_pack(TupleChoice choice) {
-  return choice match {
+  return match (choice) {
     case { auto [...elements] } => (... + elements);
   };
 }
 
 constexpr int match_generic_declaration_pack(TupleChoice choice) {
-  return choice match {
+  return match (choice) {
     case { [auto&& ...elements] } =>
         int(sizeof...(elements)) + (... + elements);
   };
 }
 
 constexpr int match_generic_wildcard_pack(TupleChoice choice) {
-  return choice match {
+  return match (choice) {
     case { [auto&& first, ..._] } => first;
   };
 }
@@ -326,7 +326,7 @@ constexpr int multiple_views_cache_each_discriminator() {
   int nullable_index_calls = 0;
   MultiViewChoice choice{
       true, 2, &primary_index_calls, &nullable_index_calls};
-  int result = choice match {
+  int result = match (choice) {
     case { .value: 0 } => 0;
     case { .some: 1 } => 1;
     case { .some: int value } => value;
@@ -337,7 +337,7 @@ constexpr int multiple_views_cache_each_discriminator() {
 
 template<class T>
 constexpr int match_dependent_generic(T& choice) {
-  return choice match {
+  return match (choice) {
     case { auto&& value } => classify(value);
   };
 }
@@ -345,7 +345,7 @@ constexpr int match_dependent_generic(T& choice) {
 template<class T>
 constexpr bool failed_dependent_guard_is_evaluated_once(T& choice) {
   int guards = 0;
-  int result = choice match {
+  int result = match (choice) {
     case { auto&& value } if (++guards == 2) => classify(value);
     case _ => 0;
   };
@@ -398,11 +398,11 @@ static_assert(match_choice({0, 3, 4}) == 3);
 static_assert(match_choice({1, 3, 4}) == 14);
 static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
-static_assert(IndexOnlyChoice{0} match {
+static_assert(match (IndexOnlyChoice{0}) {
   case { .[0] } => true;
   case { .[1] } => false;
 });
-static_assert(IndexOnlyChoice{1} match {
+static_assert(match (IndexOnlyChoice{1}) {
   case { .[0] } => false;
   case { .[1] } => true;
 });
@@ -416,20 +416,20 @@ static_assert(index_only_state<0>({0}));
 static_assert(!index_only_state<0>({1}));
 static_assert(index_only_state<1>({1}));
 constexpr int match_anonymous_by_index(AnonymousProjection choice) {
-  return choice match {
+  return match (choice) {
     case { .[0]: int value } => value;
   };
 }
 
 constexpr int match_anonymous_generically(AnonymousProjection choice) {
-  return choice match {
+  return match (choice) {
     case { int value } => value;
   };
 }
 
 static_assert(match_anonymous_by_index({42}) == 42);
 static_assert(match_anonymous_generically({42}) == 42);
-static_assert(VoidProjection{} match {
+static_assert(match (VoidProjection{}) {
   case { void: _ } => true;
 });
 static_assert(match_generic({0, 3, 4}) == 1);

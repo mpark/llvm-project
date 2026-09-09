@@ -44,7 +44,7 @@ constexpr bool test_case_condition_assignment_parsing() {
 static_assert(test_case_condition_assignment_parsing());
 
 constexpr bool test_parenthesized_patterns(int value) {
-  return value match {
+  return match (value) {
     case ((0 || 1)) => true;
     case (_) => false;
   };
@@ -55,7 +55,7 @@ static_assert(test_parenthesized_patterns(1));
 static_assert(!test_parenthesized_patterns(2));
 
 constexpr int test_parenthesized_declaration(int value) {
-  return value match {
+  return match (value) {
     case (int copy) => copy;
   };
 }
@@ -171,7 +171,7 @@ static_assert([](int* p) { return p match case {}; }(nullptr));
 static_assert(![](int value) { return &value match case {}; }(0));
 
 constexpr int match_pointer(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case {} => -1;
     case { auto &&value } => value;
   };
@@ -181,7 +181,7 @@ static_assert(match_pointer(nullptr) == -1);
 static_assert([] { int value = 42; return match_pointer(&value); }() == 42);
 
 constexpr int match_parenthesized_pointer(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case ({ auto &&value }) => value;
     case ({}) => -1;
   };
@@ -194,7 +194,7 @@ static_assert([] {
 }() == 44);
 
 constexpr int match_named_pointer(int *pointer) {
-  return pointer match {
+  return match (pointer) {
     case { .some: auto &&value } => value;
     case { .none } => -2;
   };
@@ -231,7 +231,7 @@ static_assert(test_dependent_match_2(0.0));
 static_assert(!test_dependent_match_2(1));
 
 constexpr auto test(char c) {
-  return c match {
+  return match (c) {
     case 'a' => 1;
     case 'b' => 2;
     case auto&& x => int(x);
@@ -244,7 +244,7 @@ static_assert(test('c') == 99);
 
 template <auto v>
 constexpr auto test_dependent(auto c) {
-  return c match {
+  return match (c) {
     case 'a' => 1;
     case v => 2;
     case auto&& x => int(x);
@@ -256,7 +256,7 @@ static_assert(test_dependent<'b'>('b') == 2);
 static_assert(test_dependent<'b'>('c') == 99);
 
 constexpr auto test_decomposition_pattern(const int (&xs)[2]) {
-  return xs match {
+  return match (xs) {
     case [0, 0] => -1;
     case [auto&& x, 0] => x * 2;
     case [0, auto&& y] => y * 4;
@@ -275,7 +275,7 @@ static_assert(test_decomposition_pattern({2, 3}) == 6);
 static_assert(test_decomposition_pattern({3, 4}) == 12);
 
 constexpr int test_parenthesized_decomposition_pattern(const int (&xs)[2]) {
-  return xs match {
+  return match (xs) {
     case ([0, int value]) => value;
     case (_) => -1;
   };
@@ -287,7 +287,7 @@ static_assert(test_parenthesized_decomposition_pattern({1, 3}) == -1);
 constexpr int test_vector_decomposition_pattern() {
   using FourUInts = unsigned __attribute__((__vector_size__(16)));
   FourUInts four_uints = {1, 2, 3, 4};
-  return four_uints match {
+  return match (four_uints) {
     case [1, 2, 3, 4] => 10;
     case _ => 20;
   };
@@ -309,7 +309,7 @@ struct Result {
 };
 
 constexpr auto test_nested_decomposition_pattern(const S& s) {
-  return s match -> Result {
+  return match (s) -> Result {
     case [auto&& c, [0, 0]] => {c, -1};
     case [auto&& c, [auto&& x, 0]] => {c, x * 2};
     case [auto&& c, [0, auto&& y]] => {c, y * 4};
@@ -351,7 +351,7 @@ struct DecompositionOuter {
 
 constexpr int test_nested_decomposition_forwards_xvalues() {
   DecompositionOuter subject{1, {2, DecompositionMoveOnly(3)}};
-  int result = static_cast<DecompositionOuter &&>(subject) match {
+  int result = match (static_cast<DecompositionOuter &&>(subject)) {
     case [1, [0, _]] => 0;
     case [auto&& x, [auto&& y, DecompositionMoveOnly widget]] =>
       __is_same(decltype(x), int &&) &&
@@ -366,7 +366,7 @@ static_assert(test_nested_decomposition_forwards_xvalues() == 61);
 
 constexpr int test_nested_decomposition_preserves_lvalues() {
   DecompositionOuter subject{1, {2, DecompositionMoveOnly(3)}};
-  int result = subject match {
+  int result = match (subject) {
     case [1, [0, _]] => 0;
     case [auto&& x, [auto&& y, DecompositionMoveOnly& widget]] =>
       __is_same(decltype(x), int &) && __is_same(decltype(y), int &)
@@ -386,7 +386,7 @@ constexpr bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
   for (int i = 1; i <= Size; ++i) {
     State s = states[i - 1];
     int n = elems[i - 1];
-    result &= (int[2]){i % 3, i % 5} match {
+    result &= match ((int[2]){i % 3, i % 5}) {
       case [0, 0] => s == FizzBuzz && n == 0;
       case [0, auto&& y] => s == Fizz && n == y;
       case [auto&& x, 0] => s == Buzz && n == x;
@@ -407,7 +407,7 @@ static_assert(!fizzbuzz(
 ));
 
 constexpr auto test_trailing_return_type(int x) {
-  return x match -> int {
+  return match (x) -> int {
     case 0 => 0;
     case 1 => 3.0;
     case 2 => 'c';
@@ -432,7 +432,7 @@ struct DerivedB : Base {
 };
 
 constexpr auto test_alternative_pattern_const(const Base &base) {
-  return base match {
+  return match (base) {
     case const DerivedA& a => ({
       static_assert(__is_same(decltype(a), const DerivedA&));
       static_assert(__is_same(decltype((a)), const DerivedA &));
@@ -456,7 +456,7 @@ static_assert(test_alternative_pattern_const(DerivedB{'a'}) == 97);
 
 constexpr auto test_alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
-  return base match {
+  return match (base) {
     case DerivedA& a => ({
       static_assert(__is_same(decltype(a), DerivedA&));
       static_assert(__is_same(decltype((a)), DerivedA&));
@@ -476,7 +476,7 @@ static_assert(test_alternative_pattern_non_const(DerivedA{202}) == 404);
 
 constexpr auto test_bitfields(int x) {
   struct S { int i : 6; } s{x};
-  return s.i match {
+  return match (s.i) {
     case 8 => 0;
     case auto&& n => n;
   };
@@ -488,7 +488,7 @@ static_assert(test_bitfields(4) == 4);
 
 constexpr int test_bitfield_decomposition(unsigned x, unsigned y) {
   struct S { unsigned opc : 16, imm : 16; } s{x, y};
-  return s match {
+  return match (s) {
     case [auto opc, auto imm] => int(opc + imm);
   };
 }
@@ -559,7 +559,7 @@ namespace std {
 }
 
 constexpr int test_tuple_like_decomposition_pattern(const Pair &tup) {
-  return tup match {
+  return match (tup) {
     case [0, 0] => -1;
     case [0, auto&& y] => y * 2;
     case [auto&& x, 0] => x * 4;
@@ -574,7 +574,7 @@ static_assert(test_tuple_like_decomposition_pattern({2, 3}) == 6);
 
 constexpr bool test_tuple_like_decomposition_preserves_get_category() {
   LvalueProjectingTuple subject{DecompositionMoveOnly(3)};
-  int result = static_cast<LvalueProjectingTuple &&>(subject) match {
+  int result = match (static_cast<LvalueProjectingTuple &&>(subject)) {
     case [DecompositionMoveOnly& widget] => (widget.value = 4);
   };
   return result == 4 && subject.widget.value == 4;
@@ -583,7 +583,7 @@ constexpr bool test_tuple_like_decomposition_preserves_get_category() {
 static_assert(test_tuple_like_decomposition_preserves_get_category());
 
 constexpr int test_tuple_like_decomposition_pattern_dependent(const auto &tup) {
-  return tup match {
+  return match (tup) {
     case [0, 0] => -1;
     case [0, auto&& y] => y * 2;
     case [auto&& x, 0] => x * 4;
@@ -607,7 +607,7 @@ static_assert(test_match_test_with_guard({1, 1}));
 static_assert(!test_match_test_with_guard({2, 3}));
 
 constexpr auto test_match_pattern_guards(const Pair& p) {
-  return p match {
+  return match (p) {
     case auto&& [x, y] if (x < 0 && y < 0) => 0;
     case auto&& [x, y] if (x < 0) => y;
     case auto&& [x, y] if (y < 0) => x;
@@ -622,7 +622,7 @@ static_assert(test_match_pattern_guards({3, 0}) == 3);
 static_assert(test_match_pattern_guards({4, 7}) == 11);
 
 constexpr int test_match_guard_init_statement(const Pair &p) {
-  return p match {
+  return match (p) {
     case auto&& [x, y] if (int sum = x + y; sum < 0) => sum;
     case auto&& [x, y] => x + y;
   };
@@ -649,7 +649,7 @@ struct GuardInitLifetime {
 
 constexpr int test_match_guard_init_lifetime(bool take_first) {
   int live = 0;
-  int result = take_first match {
+  int result = match (take_first) {
     case _ if (GuardInitLifetime guard(live); take_first) => live;
     case _ => live;
   };
@@ -739,8 +739,8 @@ namespace std {
 }
 
 constexpr int test_variant_like_alternative_pattern(const Variant &var) {
-  return var match {
-    case { int integer } => integer match {
+  return match (var) {
+    case { int integer } => match (integer) {
       case 0 => 0;
       case 1 => 1;
       case _ => -1;
@@ -761,8 +761,8 @@ constexpr int variant_arms_share_projection() {
   int index_calls = 0;
   int get_calls = 0;
   Variant var(1, index_calls, get_calls);
-  int result = var match {
-    case { int integer } => integer match {
+  int result = match (var) {
+    case { int integer } => match (integer) {
       case 0 => 0;
       case _ => integer;
     };
@@ -775,8 +775,8 @@ static_assert(variant_arms_share_projection() == 111);
 
 template <typename T, typename U>
 constexpr int test_variant_like_alternative_pattern_dependent(const auto &var) {
-  return var match {
-    case { T first } => first match {
+  return match (var) {
+    case { T first } => match (first) {
       case 0 => 0;
       case 1 => 1;
       case _ => -1;
@@ -817,7 +817,7 @@ constexpr int sibling_variant_discriminators_are_shared() {
   VariantProduct value{
       Variant(1, first_index_calls, first_get_calls),
       Variant(2.0, second_index_calls, second_get_calls)};
-  int result = value match {
+  int result = match (value) {
     case [{ auto&& first }, { auto&& second }] =>
         static_cast<int>(first) + static_cast<int>(second);
   };
@@ -900,7 +900,7 @@ struct std::alternative_traits<PrvalueAlternative> {
 constexpr int prvalue_projection_initializes_declaration_directly() {
   int destructions = 0;
   PrvalueAlternative alternative{&destructions};
-  bool has_expected_identity = alternative match {
+  bool has_expected_identity = match (alternative) {
     case { PrvalueProjection value } => value.self == &value;
   };
   return has_expected_identity * 10 + destructions;
@@ -917,7 +917,7 @@ struct MatchFullExpressionLifetime {
 constexpr int test_match_subject_full_expression_lifetime() {
   int destructions = 0;
   int observed =
-      ((MatchFullExpressionLifetime{&destructions} match {
+      ((match (MatchFullExpressionLifetime{&destructions}) {
          case auto&& value => 0;
        }),
        destructions);
@@ -1039,7 +1039,7 @@ struct std::alternative_traits<N1::S> {
 };
 
 constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
-  return s match -> int {
+  return match (s) -> int {
     case { const int& i } if (i == 0) => 0;
     case { const int& i } => i;
     case { const double& d } => d;
@@ -1084,7 +1084,7 @@ struct alternative_code<float> {
 };
 
 constexpr int test_concept_selects_every_matching_alternative(const Variant &var) {
-  return var match {
+  return match (var) {
     case { arithmetic auto value } =>
         alternative_code<decltype(value)>::value * 10 +
         static_cast<int>(value);
@@ -1096,7 +1096,7 @@ static_assert(test_concept_selects_every_matching_alternative(2.0) == 22);
 static_assert(test_concept_selects_every_matching_alternative(3.0f) == 33);
 
 constexpr int test_auto_selects_every_alternative(const Variant &var) {
-  return var match {
+  return match (var) {
     case { auto&& value } => alternative_code<decltype(value)>::value;
   };
 }
@@ -1107,7 +1107,7 @@ static_assert(test_auto_selects_every_alternative(3.0f) == 3);
 
 template <int... Is, int N>
 constexpr int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
-  return p match {
+  return match (p) {
     case [0, Is...] => 0;
     case [Is..., 0] => 1;
     case _ => -1;
@@ -1224,7 +1224,7 @@ struct Pair {
 struct EmptyDecomposition {};
 
 constexpr int empty_decomposition_pattern(EmptyDecomposition value) {
-  return value match {
+  return match (value) {
     case [] => 42;
   };
 }
@@ -1233,22 +1233,22 @@ static_assert(empty_decomposition_pattern({}) == 42);
 static_assert(EmptyDecomposition{} match case []);
 
 static_assert([](int value) {
-  return value match { case int copy => copy; };
+  return match (value) { case int copy => copy; };
 }(42) == 42);
 
 static_assert([] {
   int value = 1;
-  return value match { case int &ref => ++ref; };
+  return match (value) { case int &ref => ++ref; };
 }() == 2);
 
 static_assert([] {
-  return Pair{2, 3} match {
+  return match (Pair{2, 3}) {
     case auto [first, second] => first + second;
   };
 }() == 5);
 
 static_assert([](int value) {
-  return value match {
+  return match (value) {
     case int copy if (copy > 0) => copy;
     case int copy => -copy;
   };
@@ -1256,17 +1256,17 @@ static_assert([](int value) {
 
 template<class T>
 constexpr T dependent(T value) {
-  return value match { case T copy => copy; };
+  return match (value) { case T copy => copy; };
 }
 
 template<class T>
 constexpr T dependent_auto(T value) {
-  return value match { case auto &&ref => ref; };
+  return match (value) { case auto &&ref => ref; };
 }
 
 template<class T>
 constexpr T dependent_guard(T value) {
-  return value match {
+  return match (value) {
     case T copy if (copy > T{}) => copy;
     case T copy => copy;
   };
@@ -1274,7 +1274,7 @@ constexpr T dependent_guard(T value) {
 
 template<class T>
 constexpr int dependent_nested_declarations(T value) {
-  return value match {
+  return match (value) {
     case [auto &&first, auto &&second] => first;
   };
 }
@@ -1290,7 +1290,7 @@ struct ConstantSubject {
 
 constexpr bool constant_prvalue_subject_has_one_identity() {
   const ConstantSubject *saved = nullptr;
-  return ConstantSubject{42} match {
+  return match (ConstantSubject{42}) {
     case auto &&value if ((saved = &value, false)) => false;
     case auto &&value => &value == saved;
   };
@@ -1313,7 +1313,7 @@ struct CopyCounter {
 constexpr int failed_guard_copies_once() {
   int copies = 0;
   CopyCounter source{3, &copies};
-  return source match {
+  return match (source) {
     case CopyCounter copy if (false) => copy.value;
     case auto &&ref => copies + ref.value;
   };
@@ -1322,7 +1322,7 @@ constexpr int failed_guard_copies_once() {
 constexpr int successful_guard_copies_once() {
   int copies = 0;
   CopyCounter source{3, &copies};
-  return source match {
+  return match (source) {
     case CopyCounter copy if (copy.value == 3) => copies;
     case _ => -1;
   };
@@ -1366,10 +1366,10 @@ constexpr int guarded_declaration_lifetime(bool guard) {
   int destructions = 0;
   {
     LifetimeCounter source{&copies, &destructions};
-    source match {
+    match (source) {
       case LifetimeCounter copy if (guard) => 0;
       case _ => 0;
-    };
+    }
   }
   return copies * 10 + destructions;
 }
@@ -1394,7 +1394,7 @@ static_assert(match_test_declaration_lifetime(true) == 122);
 
 constexpr int structured_binding_guard_is_eager() {
   Pair pair{2, 3};
-  return pair match {
+  return match (pair) {
     case auto [first, second] if (first < 0) => -1;
     case auto [first, second] => first + second;
   };
@@ -1405,7 +1405,7 @@ static_assert(structured_binding_guard_is_eager() == 5);
 constexpr int structured_binding_guard_projects_once() {
   int projections = 0;
   GuardProjection source{7, &projections};
-  return source match {
+  return match (source) {
     case auto [value] if (value == 7) => projections;
     case _ => -1;
   };
@@ -1414,7 +1414,7 @@ constexpr int structured_binding_guard_projects_once() {
 constexpr int each_guarded_arm_projects_once() {
   int projections = 0;
   GuardProjection source{7, &projections};
-  return source match {
+  return match (source) {
     case auto [value] if (false) => -1;
     case auto [value] => projections;
   };
@@ -1426,7 +1426,7 @@ static_assert(each_guarded_arm_projects_once() == 2);
 constexpr int structural_arms_share_projections() {
   int projections[2] = {};
   SharedProjection source{1, 2, projections};
-  int result = source match {
+  int result = match (source) {
     case [0, 0] => 0;
     case [auto &&x, 0] => x;
     case [0, auto &&y] => y;
@@ -1438,7 +1438,7 @@ constexpr int structural_arms_share_projections() {
 static_assert(structural_arms_share_projections() == 113);
 
 constexpr int dependent_structural_arms_share_projections(auto &source) {
-  return source match {
+  return match (source) {
     case [0, 0] => 0;
     case [1, 0] => 1;
     case [0, 2] => 2;
@@ -1458,7 +1458,7 @@ static_assert(instantiate_dependent_structural_projection() == 113);
 constexpr int declaration_arms_share_projections() {
   int projections[2] = {};
   SharedProjection source{1, 2, projections};
-  int result = source match {
+  int result = match (source) {
     case auto &&[x, y] if (x == 0) => 0;
     case auto &&[x, y] => x + y;
   };
@@ -1468,10 +1468,10 @@ constexpr int declaration_arms_share_projections() {
 static_assert(declaration_arms_share_projections() == 113);
 
 constexpr void null_and_static_assert_handlers(bool value) {
-  value match {
+  match (value) {
     case true => ;
     case false => static_assert(sizeof(int) >= 2);
-  };
+  }
 }
 
 static_assert((null_and_static_assert_handlers(true), true));
@@ -1482,7 +1482,7 @@ struct DependentHandlerResult {
 };
 
 constexpr auto dependent_handler_result(auto value) {
-  return value match {
+  return match (value) {
     case int i => i;
     case DependentHandlerResult result => result.size();
     case _ => static_assert(false, "unsupported match subject");
@@ -1503,7 +1503,7 @@ struct BindingPackTriple {
 };
 
 constexpr int binding_pack_sum(BindingPackTriple value) {
-  return value match {
+  return match (value) {
     case auto [...elements] => (... + elements);
   };
 }
@@ -1511,7 +1511,7 @@ constexpr int binding_pack_sum(BindingPackTriple value) {
 static_assert(binding_pack_sum({1, 2, 3}) == 6);
 
 constexpr int binding_pack_prefix_and_suffix(BindingPackTriple value) {
-  return value match {
+  return match (value) {
     case auto [first, ...middle, last] => first + (... + middle) + last;
   };
 }
@@ -1519,7 +1519,7 @@ constexpr int binding_pack_prefix_and_suffix(BindingPackTriple value) {
 static_assert(binding_pack_prefix_and_suffix({1, 2, 3}) == 6);
 
 constexpr int binding_pack_guard(BindingPackTriple value) {
-  return value match {
+  return match (value) {
     case auto [...elements] if ((... + elements) < 0) => -1;
     case auto [...elements] => (... + elements);
   };
@@ -1543,7 +1543,7 @@ struct DeclarationPackFour {
 };
 
 constexpr int declaration_subpattern_pack(DeclarationPackFour value) {
-  return value match {
+  return match (value) {
     case [auto&& first, auto&& ...middle, auto&& last] =>
         int(sizeof...(middle)) + first + (... + middle) + last;
   };
@@ -1552,7 +1552,7 @@ constexpr int declaration_subpattern_pack(DeclarationPackFour value) {
 static_assert(declaration_subpattern_pack({1, 2, 3, 4}) == 12);
 
 constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
-  return value match {
+  return match (value) {
     case [int first, int ...middle, int last] =>
         first + (... + middle) + last;
   };
@@ -1561,7 +1561,7 @@ constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
 static_assert(typed_declaration_subpattern_pack({1, 2, 3, 4}) == 10);
 
 constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
-  return value match {
+  return match (value) {
     case [auto&& first, ..._, auto&& last] => first + last;
   };
 }
@@ -1569,7 +1569,7 @@ constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
 static_assert(wildcard_subpattern_pack({1, 2, 3, 4}) == 5);
 
 constexpr int empty_declaration_subpattern_pack(Pair value) {
-  return value match {
+  return match (value) {
     case [auto&& first, auto&& ...middle, auto&& last] =>
         int(sizeof...(middle)) + first + last;
   };
@@ -1578,7 +1578,7 @@ constexpr int empty_declaration_subpattern_pack(Pair value) {
 static_assert(empty_declaration_subpattern_pack({1, 2}) == 3);
 
 constexpr int empty_wildcard_subpattern_pack(Pair value) {
-  return value match {
+  return match (value) {
     case [auto&& first, ..._, auto&& last] => first + last;
   };
 }
@@ -1592,7 +1592,7 @@ struct NestedDeclarationPack {
 };
 
 constexpr int nested_declaration_subpattern_pack(NestedDeclarationPack value) {
-  return value match {
+  return match (value) {
     case [auto&& first,
           [auto&& nested_first, auto&& ...middle, auto&& nested_last],
           auto&& last] => first + nested_first + (... + middle) + nested_last +
@@ -1604,7 +1604,7 @@ static_assert(
     nested_declaration_subpattern_pack({1, {2, 3, 4, 5}, 6}) == 21);
 
 constexpr int nested_wildcard_subpattern_pack(NestedDeclarationPack value) {
-  return value match {
+  return match (value) {
     case [auto&& first, [auto&& nested_first, ..._, auto&& nested_last],
           auto&& last] => first + nested_first + nested_last + last;
   };
@@ -1613,7 +1613,7 @@ constexpr int nested_wildcard_subpattern_pack(NestedDeclarationPack value) {
 static_assert(nested_wildcard_subpattern_pack({1, {2, 3, 4, 5}, 6}) == 14);
 
 constexpr int declaration_subpattern_pack_guard(DeclarationPackFour value) {
-  return value match {
+  return match (value) {
     case [auto&& first, auto&& ...middle, auto&& last]
         if ((... + middle) < 0) => -1;
     case [auto&& first, auto&& ...middle, auto&& last] =>
@@ -1633,7 +1633,7 @@ static_assert(declaration_subpattern_pack_condition({1, 2, 3, 4}) == 10);
 
 template<class T>
 constexpr int dependent_declaration_subpattern_pack_size(T value) {
-  return value match -> int {
+  return match (value) -> int {
     case [auto&& ...elements] => int(sizeof...(elements));
     case _ => -1;
   };
@@ -1645,7 +1645,7 @@ static_assert(dependent_declaration_subpattern_pack_size(1) == -1);
 
 template<class T>
 constexpr int dependent_wildcard_subpattern_pack(T value) {
-  return value match -> int {
+  return match (value) -> int {
     case [..._] => 0;
     case _ => -1;
   };
@@ -1655,7 +1655,7 @@ static_assert(dependent_wildcard_subpattern_pack(DeclarationPackFour{}) == 0);
 static_assert(dependent_wildcard_subpattern_pack(1) == -1);
 
 constexpr int binding_pack_size(auto value) {
-  return value match -> int {
+  return match (value) -> int {
     case auto [...elements] => int(sizeof...(elements));
     case _ => -1;
   };
@@ -1672,7 +1672,7 @@ struct NestedBindingPack {
 };
 
 constexpr int nested_binding_pack(NestedBindingPack value) {
-  return value match {
+  return match (value) {
     case [auto [...elements]] => (... + elements);
   };
 }
@@ -1685,7 +1685,7 @@ constexpr int nested_arms_share_projections() {
   int alternative_projections = 0;
   SharedVariantProjection source{
       {1, 2, element_projections}, &index_calls, &alternative_projections};
-  int result = source match {
+  int result = match (source) {
     case { [0, 0] } => 0;
     case { [auto &&x, auto &&y] } => x + y;
   };
@@ -1697,7 +1697,7 @@ static_assert(nested_arms_share_projections() == 1114);
 
 constexpr int guard_mutates_its_eager_declaration() {
   int subject = 1;
-  int result = subject match {
+  int result = match (subject) {
     case int copy if ((copy = 3, true)) => copy;
     case _ => 0;
   };
@@ -1719,7 +1719,7 @@ struct ArmCopy {
 constexpr int failed_guard_uses_a_fresh_copy_for_the_next_arm() {
   int copies = 0;
   ArmCopy subject{1, &copies};
-  int result = subject match {
+  int result = match (subject) {
     case ArmCopy copy if (copy.value == 1) => 1;
     case ArmCopy copy => 2;
   };
@@ -1731,7 +1731,7 @@ static_assert(failed_guard_uses_a_fresh_copy_for_the_next_arm() == 22);
 constexpr int failed_guard_does_not_reuse_binding_identity() {
   int subject = 1;
   const int *saved = nullptr;
-  return subject match {
+  return match (subject) {
     case int copy if ((saved = &copy, false)) => 1;
     case int copy => &copy == saved ? 2 : 3;
   };
@@ -1745,7 +1745,7 @@ struct TrivialMoveState {
 
 constexpr int failed_guard_preserves_trivially_moved_subject() {
   TrivialMoveState subject{7};
-  return static_cast<TrivialMoveState &&>(subject) match {
+  return match (static_cast<TrivialMoveState &&>(subject)) {
     case TrivialMoveState first if (false) => first.value;
     case TrivialMoveState second if (second.value == 7) => 1;
     case _ => 2;
@@ -1756,7 +1756,7 @@ static_assert(failed_guard_preserves_trivially_moved_subject() == 1);
 
 constexpr int subject_is_evaluated_once() {
   int evaluations = 0;
-  return (++evaluations, 5) match {
+  return match ((++evaluations, 5)) {
     case int value if (value < 0) => 0;
     case int value => evaluations;
   };
@@ -1768,7 +1768,7 @@ static_assert(subject_is_evaluated_once() == 1);
 
 constexpr int match_subject_is_evaluated_once() {
   int evaluations = 0;
-  return (++evaluations, 5) match {
+  return match ((++evaluations, 5)) {
     case auto&& value if (value < 0) => 0;
     case auto&& value => evaluations;
   };
@@ -1782,7 +1782,7 @@ struct ConstantMatchSubject {
 
 constexpr bool constant_prvalue_match_subject_has_one_identity() {
   const ConstantMatchSubject *saved = nullptr;
-  return ConstantMatchSubject{42} match {
+  return match (ConstantMatchSubject{42}) {
     case auto&& value if ((saved = &value, false)) => false;
     case auto&& value => &value == saved;
   };
@@ -1822,7 +1822,7 @@ struct tuple_element<I, SharedMatchProjection> {
 constexpr int structural_arms_share_match_projections() {
   int projections[2] = {};
   SharedMatchProjection source{1, 2, projections};
-  int result = source match {
+  int result = match (source) {
     case [0, 0] => 0;
     case [auto&& x, 0] => x;
     case [0, auto&& y] => y;
@@ -1834,7 +1834,7 @@ constexpr int structural_arms_share_match_projections() {
 static_assert(structural_arms_share_match_projections() == 113);
 
 constexpr int dependent_structural_arms_share_match_projections(auto &source) {
-  return source match {
+  return match (source) {
     case [0, 0] => 0;
     case [1, 0] => 1;
     case [0, 2] => 2;
@@ -1854,7 +1854,7 @@ static_assert(instantiate_shared_match_projection() == 113);
 constexpr bool reference_match_result_selects_referent(bool first) {
   int x = 1;
   int y = 2;
-  int &selected = first match -> int & {
+  int &selected = match (first) -> int & {
     case true => static_cast<int &>(x);
     case false => static_cast<int &>(y);
   };
@@ -1869,7 +1869,7 @@ constexpr int declaration_pattern_expression_constant = 2;
 using PatternInteger = int;
 
 constexpr int functional_cast_is_an_expression_pattern(int value) {
-  return value match {
+  return match (value) {
     case int(declaration_pattern_expression_constant) => 1;
     case _ => 0;
   };
@@ -1913,7 +1913,7 @@ static_assert(dereference_inside_cast_is_an_expression_pattern(5));
 static_assert(!dereference_inside_cast_is_an_expression_pattern(4));
 
 constexpr bool boolean_cast_is_an_expression_pattern(bool value) {
-  return value match {
+  return match (value) {
     case bool(true) => true;
     case _ => false;
   };
@@ -1933,7 +1933,7 @@ static_assert(cast_forces_logical_or_expression(true));
 static_assert(!cast_forces_logical_or_expression(false));
 
 constexpr int placeholder_cast_is_an_expression_pattern(int value) {
-  return value match {
+  return match (value) {
     case auto(declaration_pattern_expression_constant + 1) => 1;
     case _ => 0;
   };
@@ -1945,7 +1945,7 @@ static_assert(placeholder_cast_is_an_expression_pattern(2) == 0);
 constexpr int _ = 4;
 
 constexpr bool placeholder_cast_can_name_underscore(int value) {
-  return value match {
+  return match (value) {
     case auto(_) => true;
     case _ => false;
   };
@@ -2021,9 +2021,9 @@ using PatternArray = int[2];
 
 constexpr int alias_supports_complex_declaration_types(PatternFunction *fn,
                                                        const PatternArray &array) {
-  int result = fn match { case PatternFunction* value => value == fn; };
+  int result = match (fn) { case PatternFunction* value => value == fn; };
   return result +
-         (array match { case const PatternArray& value => &value == &array; });
+         (match (array) { case const PatternArray& value => &value == &array; });
 }
 
 constexpr int pattern_function(double) { return 0; }

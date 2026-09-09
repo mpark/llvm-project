@@ -56,7 +56,7 @@ struct TrivialMoveState {
 
 int failed_guard_preserves_trivially_moved_subject() {
   TrivialMoveState subject{7};
-  return static_cast<TrivialMoveState&&>(subject) match {
+  return match (static_cast<TrivialMoveState&&>(subject)) {
     case TrivialMoveState first if (false) => first.value;
     case TrivialMoveState second if (second.value == 7) => 1;
     case _ => 2;
@@ -92,7 +92,7 @@ bool unnamed_value_pattern_initializes() {
   int alive = 0;
   int copies = 0;
   UnnamedTracked subject(&alive, &copies);
-  int observed = subject match {
+  int observed = match (subject) {
     case UnnamedTracked if (alive == 2) => alive;
     case _ => -1;
   };
@@ -103,7 +103,7 @@ bool unnamed_reference_pattern_does_not_copy() {
   int alive = 0;
   int copies = 0;
   UnnamedTracked subject(&alive, &copies);
-  int observed = subject match {
+  int observed = match (subject) {
     case UnnamedTracked& => alive;
   };
   return observed == 1 && alive == 1 && copies == 0;
@@ -113,7 +113,7 @@ bool failed_guard_destroys_unnamed_value_before_next_arm() {
   int alive = 0;
   int copies = 0;
   UnnamedTracked subject(&alive, &copies);
-  int observed = subject match {
+  int observed = match (subject) {
     case UnnamedTracked if (false) => 0;
     case UnnamedTracked => alive;
   };

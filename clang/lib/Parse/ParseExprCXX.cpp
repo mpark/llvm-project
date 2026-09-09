@@ -4245,118 +4245,280 @@ ExprResult Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI) {
       Semantic.isUnconditionallyMatched(), NeedsCaseInstantiation);
 }
 
-ExprResult Parser::ParseRHSOfMatchExpr(ExprResult LHS, SourceLocation MatchLoc,
-                                       InjectedDeclSet *InjectedDecls) {
-  if (Tok.isOneOf(tok::kw_constexpr, tok::arrow, tok::l_brace)) {
-    bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
-    QualType RetTy;
-    TypeSourceInfo *TSI = nullptr;
-    if (Tok.is(tok::arrow)) {
+ExprResult Parser::ParseMatchSelection(bool IsStatement) {
+  SourceLocation MatchLoc = ConsumeToken();
+  ParseScope MatchScope(this, Scope::DeclScope);
+  bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
+
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return ExprError();
+  ExprResult Subject = ParseExpression();
+  if (Subject.isInvalid() || Parens.consumeClose())
+    return ExprError();
+
+  QualType RetTy;
+  TypeSourceInfo *TSI = nullptr;
+  if (Tok.is(tok::arrow)) {
+    SourceLocation ArrowLoc = Tok.getLocation();
+    if (IsStatement) {
+      Diag(ArrowLoc, diag::err_match_statement_result_type);
+      ConsumeToken();
+      if (!SkipUntil(tok::l_brace, StopAtSemi | StopBeforeMatch) ||
+          Tok.isNot(tok::l_brace))
+        return ExprError();
+    } else {
       SourceRange Range;
       TypeResult TrailingReturnType =
           ParseTrailingReturnType(Range, /*MayBeFollowedByDirectInit=*/false);
-      if (TrailingReturnType.isInvalid())
+      if (TrailingReturnType.isInvalid()) {
+        if (Tok.isNot(tok::l_brace))
+          SkipUntil(tok::l_brace, StopAtSemi | StopBeforeMatch);
+        if (Tok.is(tok::l_brace)) {
+          BalancedDelimiterTracker Braces(*this, tok::l_brace);
+          Braces.consumeOpen();
+          Braces.skipToEnd();
+        }
         return ExprError();
+      }
       RetTy = Actions.GetTypeFromParser(TrailingReturnType.get(), &TSI);
-    } else {
-      RetTy = Actions.Context.getAutoDeductType();
-      TSI = Actions.Context.CreateTypeSourceInfo(RetTy);
+      if (Tok.isNot(tok::l_brace))
+        return ExprError(
+            Diag(Tok, diag::err_expected_lbrace_after_match_result_type));
     }
-    TypeLoc OrigResultType = TSI->getTypeLoc();
-    SmallVector<MatchCase, 32> Cases;
-    SourceRange Braces;
-    bool HasDeferredCases = false;
-    if (LHS.isInvalid()) {
-      return ExprError();
+  }
+  if (RetTy.isNull()) {
+    RetTy = IsStatement ? Actions.Context.VoidTy
+                        : Actions.Context.getAutoDeductType();
+    TSI = Actions.Context.CreateTypeSourceInfo(RetTy);
+  }
+
+  TypeLoc OrigResultType = TSI->getTypeLoc();
+  SmallVector<MatchCase, 32> Cases;
+  SourceRange Braces;
+  bool HasDeferredCases = false;
+  VarDecl *HoldingVar = nullptr;
+  Subject = Actions.ActOnMatchSubject(Subject.get(), HoldingVar);
+  if (Subject.isInvalid())
+    return ExprError();
+  if (ParseMatchBody(Subject.get(), OrigResultType, RetTy, Cases, Braces,
+                     HasDeferredCases,
+                     /*DeferHandlerChecking=*/IsConstexpr))
+    return ExprError();
+  if (IsConstexpr) {
+    bool SelectionIsDependent =
+        Subject.get()->isTypeDependent() || Subject.get()->isValueDependent() ||
+        llvm::any_of(Cases, [](const MatchCase &Case) {
+          return static_cast<bool>(Case.Pattern->getDependence() &
+                                   ExprDependence::Instantiation) ||
+                 (Case.Guard.Condition &&
+                  (Case.Guard.Condition->isTypeDependent() ||
+                   Case.Guard.Condition->isValueDependent()));
+        });
+    HasDeferredCases |= !SelectionIsDependent;
+    if (OrigResultType.getType()->getContainedAutoType())
+      RetTy = Actions.Context.DependentTy;
+  }
+  return Actions.ActOnMatchSelectExpr(HoldingVar, Subject.get(), MatchLoc,
+                                      IsConstexpr, IsStatement, OrigResultType,
+                                      RetTy, Cases, Braces, HasDeferredCases);
+}
+
+bool Parser::isPrefixMatchSelection(
+    bool StatementContext, SourceLocation *MissingCasePatternLoc) {
+  if (MissingCasePatternLoc)
+    *MissingCasePatternLoc = SourceLocation();
+  if (!getLangOpts().PatternMatching || Tok.isNot(tok::identifier) ||
+      Tok.getIdentifierInfo() != Ident_match)
+    return false;
+  if (NextToken().is(tok::kw_constexpr))
+    return true;
+  if (NextToken().isNot(tok::l_paren))
+    return false;
+
+  // Establish the prefix shape before doing lookup or tentative declarator
+  // parsing. A non-type entity named `match`, including a function or a
+  // callable object, cannot be followed by a braced match body as part of its
+  // call, so most uses are unambiguous after this balanced scan.
+  tok::TokenKind FirstBodyToken;
+  SourceLocation FirstBodyLoc;
+  bool BodyBeginsAttribute = false;
+  bool HasExplicitResultType = false;
+  {
+    RevertingTentativeParsingAction Selection(*this, /*Unannotated=*/true);
+    ConsumeToken();
+    ConsumeParen();
+    if (!SkipUntil(tok::r_paren))
+      return false;
+    if (Tok.is(tok::arrow)) {
+      // An arrow can begin either ordinary member access or an explicit match
+      // result type. Unambiguous type syntax commits immediately. For an
+      // ambiguous start, use the existing tentative type-id machinery to
+      // consume the complete type-id and require the match body.
+      ConsumeToken();
+      bool CanBeginMemberAccess = Tok.isOneOf(
+          tok::identifier, tok::annot_typename, tok::annot_template_id,
+          tok::kw_operator, tok::kw_template, tok::tilde);
+
+      // When the next token can begin a type-id but not a member name, the
+      // arrow cannot be member access. Commit to the match grammar immediately
+      // and let the real trailing-return-type parser diagnose any malformed
+      // type-id or missing body.
+      if (!CanBeginMemberAccess) {
+        Sema::TentativeAnalysisScope Trap(Actions);
+        if (Tok.isOneOf(tok::kw_auto, tok::kw_decltype, tok::annot_decltype,
+                        tok::annot_pack_indexing_type) ||
+            isTypeSpecifierQualifier(Tok))
+          return true;
+      }
+
+      bool HasMatchResultType = false;
+      bool ParsedTypeId = false;
+      {
+        TentativeParsingAction TypeId(*this, /*Unannotated=*/true);
+        Sema::TentativeAnalysisScope Trap(Actions);
+        ParsedTypeId =
+            isCXXTypeId(TentativeCXXTypeIdContext::InMatchTrailingReturnType);
+        HasMatchResultType = ParsedTypeId && Tok.is(tok::l_brace);
+        if (HasMatchResultType)
+          TypeId.Commit();
+        else
+          TypeId.Revert();
+      }
+
+      if (!HasMatchResultType) {
+        // A successfully parsed type-id beginning with syntax that cannot
+        // name a member is an attempted match result type even when its body
+        // is missing. Let the match parser provide the missing-body
+        // diagnostic. Identifier-like starts remain ordinary member access.
+        if (ParsedTypeId && !CanBeginMemberAccess)
+          return true;
+
+        // An unresolved identifier can still have been intended as the match
+        // result type. Recover only when its immediately following brace makes
+        // the ordinary member-access interpretation ill-formed. Do not scan
+        // across intervening expression tokens to find a later brace.
+        if (!ParsedTypeId && Tok.is(tok::identifier) &&
+            NextToken().is(tok::l_brace))
+          return true;
+        return false;
+      }
+      HasExplicitResultType = true;
     }
-    VarDecl *HoldingVar = nullptr;
+    if (Tok.isNot(tok::l_brace))
+      return false;
+    ConsumeBrace();
+    FirstBodyToken = Tok.getKind();
+    FirstBodyLoc = Tok.getLocation();
+    BodyBeginsAttribute =
+        Tok.is(tok::l_square) && NextToken().is(tok::l_square);
+  }
+
+  if (HasExplicitResultType)
+    return true;
+
+  // Every valid arm starts with one of these tokens, so no declarator probe
+  // is needed in the common match-statement case.
+  if (FirstBodyToken == tok::kw_case ||
+      BodyBeginsAttribute)
+    return true;
+
+  if (!StatementContext ||
+      !Actions.getTypeName(*Tok.getIdentifierInfo(), Tok.getLocation(),
+                           getCurScope()))
+    return true;
+
+  // At statement scope, `match (x) { ... }` can be a declaration when match
+  // names a type. Only this case needs a declarator probe. If the contents of
+  // the parentheses do not form a declarator (for example, `x + 1`), this is
+  // a selection. Otherwise, a match arm introducer resolves the remaining
+  // tie in favor of a selection statement.
+  //
+  // Merely seeing `[` after the brace is insufficient: a declaration's
+  // braced initializer can begin with a lambda. `[[` is sufficient and no
+  // attribute parsing is needed because an attribute followed by a case is
+  // not an initializer-clause.
+  RevertingTentativeParsingAction Declarator(*this);
+  ConsumeToken();
+  bool HasDeclarator =
+      TryParseDeclarator(/*mayBeAbstract=*/false) != TPResult::False;
+  if (!HasDeclarator)
+    return true;
+
+  // `=>` has no meaning in a braced initializer. Do not use it to choose the
+  // match grammar, but remember it as a diagnostic clue so that a missing
+  // `case` does not produce only declaration diagnostics. SkipUntil ignores
+  // arrows in nested delimiters, such as a match expression used as an
+  // initializer.
+  if (MissingCasePatternLoc && Tok.is(tok::l_brace)) {
+    ConsumeBrace();
+    if (SkipUntil({tok::equalgreater, tok::comma, tok::semi, tok::r_brace},
+                  StopBeforeMatch) &&
+        Tok.is(tok::equalgreater))
+      *MissingCasePatternLoc = FirstBodyLoc;
+  }
+  return false;
+}
+
+ExprResult
+Parser::ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
+                                InjectedDeclSet *InjectedDecls) {
+  if (ExpectAndConsume(tok::kw_case))
+    return ExprError();
+  VarDecl *HoldingVar = nullptr;
+  if (LHS.isUsable()) {
     LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
     if (LHS.isInvalid())
       return ExprError();
-    if (ParseMatchBody(LHS.get(), OrigResultType, RetTy, Cases, Braces,
-                       HasDeferredCases,
-                       /*DeferHandlerChecking=*/IsConstexpr)) {
-      return ExprError();
-    }
-    if (IsConstexpr) {
-      bool SelectionIsDependent = LHS.get()->isTypeDependent() ||
-                                  LHS.get()->isValueDependent() ||
-                                  llvm::any_of(Cases, [](const MatchCase &Case) {
-                                    return static_cast<bool>(
-                                               Case.Pattern->getDependence() &
-                                               ExprDependence::Instantiation) ||
-                                           (Case.Guard.Condition &&
-                                            (Case.Guard.Condition
-                                                 ->isTypeDependent() ||
-                                             Case.Guard.Condition
-                                                 ->isValueDependent()));
-                                  });
-      HasDeferredCases |= !SelectionIsDependent;
-      if (OrigResultType.getType()->getContainedAutoType())
-        RetTy = Actions.Context.DependentTy;
-    }
-    return Actions.ActOnMatchSelectExpr(HoldingVar, LHS.get(), MatchLoc,
-                                        IsConstexpr, OrigResultType, RetTy,
-                                        Cases, Braces, HasDeferredCases);
-  } else {
-    if (ExpectAndConsume(tok::kw_case))
-      return ExprError();
-    VarDecl *HoldingVar = nullptr;
-    if (LHS.isUsable()) {
-      LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
-      if (LHS.isInvalid())
-        return ExprError();
-    }
-    ParseScope MatchTestScope(this, Scope::DeclScope);
-    ActionResult<MatchPattern *> Pattern = ParsePattern();
-    bool PatternNeedsAlternativeSpecialization =
-        Pattern.isUsable() &&
-        needsAlternativeCandidateSpecialization(Pattern.get());
-    bool PatternContainsBindingPack =
-        Pattern.isUsable() && containsDeclarationBindingPack(Pattern.get());
-    Sema::MatchProjectionCache ProjectionCache;
-    Sema::MatchPatternState PatternState;
-    ProjectionCache.DeferAlternativeChoices = true;
-    if (LHS.isInvalid() || Pattern.isInvalid() ||
-        Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(),
-                                          PatternState, &ProjectionCache))
-      return ExprError();
-    SourceLocation IfLoc;
-    StmtResult GuardInit;
-    Sema::ConditionResult Guard =
-        ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
-    if (Guard.isInvalid()) {
-      SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
-      return true;
-    }
-    if (InjectedDecls) {
-      Scope::decl_range DR = getCurScope()->decls();
-      *InjectedDecls = {DR.begin(), DR.end()};
-      for (Decl *D : *InjectedDecls) {
-        getCurScope()->RemoveDecl(D);
-        if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
-          Actions.IdResolver.RemoveDecl(ND);
-      }
-    }
-    bool NeedsCaseInstantiation =
-        ProjectionCache.HasDeferredAlternativeChoices ||
-        PatternContainsBindingPack ||
-        (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
-    Sema::MatchPatternSemanticAnalysis Semantic =
-        Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
-    bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
-    ExprResult Result = Actions.ActOnMatchTestExpr(
-        HoldingVar, LHS.get(), MatchLoc, Pattern.get(),
-        MatchPatternInstantiation::Create(Actions.Context, Pattern.get(),
-                                          PatternState.Infos),
-        IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
-        PatternIsIrrefutable, NeedsCaseInstantiation);
-    if (Result.isInvalid() || InjectedDecls || !NeedsCaseInstantiation ||
-        Actions.CurContext->isDependentContext())
-      return Result;
-    return Actions.ExpandDeferredMatchTestExpr(
-        cast<MatchTestExpr>(Result.get()));
   }
+  ParseScope MatchTestScope(this, Scope::DeclScope);
+  ActionResult<MatchPattern *> Pattern = ParsePattern();
+  bool PatternNeedsAlternativeSpecialization =
+      Pattern.isUsable() &&
+      needsAlternativeCandidateSpecialization(Pattern.get());
+  bool PatternContainsBindingPack =
+      Pattern.isUsable() && containsDeclarationBindingPack(Pattern.get());
+  Sema::MatchProjectionCache ProjectionCache;
+  Sema::MatchPatternState PatternState;
+  ProjectionCache.DeferAlternativeChoices = true;
+  if (LHS.isInvalid() || Pattern.isInvalid() ||
+      Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(), PatternState,
+                                        &ProjectionCache))
+    return ExprError();
+  SourceLocation IfLoc;
+  StmtResult GuardInit;
+  Sema::ConditionResult Guard =
+      ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
+  if (Guard.isInvalid()) {
+    SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
+    return true;
+  }
+  if (InjectedDecls) {
+    Scope::decl_range DR = getCurScope()->decls();
+    *InjectedDecls = {DR.begin(), DR.end()};
+    for (Decl *D : *InjectedDecls) {
+      getCurScope()->RemoveDecl(D);
+      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
+        Actions.IdResolver.RemoveDecl(ND);
+    }
+  }
+  bool NeedsCaseInstantiation =
+      ProjectionCache.HasDeferredAlternativeChoices ||
+      PatternContainsBindingPack ||
+      (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
+  Sema::MatchPatternSemanticAnalysis Semantic =
+      Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
+  bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+  ExprResult Result = Actions.ActOnMatchTestExpr(
+      HoldingVar, LHS.get(), MatchLoc, Pattern.get(),
+      MatchPatternInstantiation::Create(Actions.Context, Pattern.get(),
+                                        PatternState.Infos),
+      IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
+      PatternIsIrrefutable, NeedsCaseInstantiation);
+  if (Result.isInvalid() || InjectedDecls || !NeedsCaseInstantiation ||
+      Actions.CurContext->isDependentContext())
+    return Result;
+  return Actions.ExpandDeferredMatchTestExpr(cast<MatchTestExpr>(Result.get()));
 }
 
 bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
@@ -4412,7 +4574,13 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   ParsedAttributes Attributes(AttrFactory);
   MaybeParseCXX11Attributes(Attributes,
                             /*MightBeObjCMessageSend=*/true);
-  if (ExpectAndConsume(tok::kw_case))
+  SourceLocation IntroducerLoc;
+  if (!TryConsumeToken(tok::kw_case, IntroducerLoc)) {
+    DiagnosticBuilder DB =
+        Diag(Tok, diag::err_expected_case_before_match_pattern);
+    if (Tok.isNot(tok::r_brace) && Tok.isNot(tok::semi) &&
+        Tok.isNot(tok::eof))
+      DB << FixItHint::CreateInsertion(Tok.getLocation(), "case ");
     return true;
 
   ParseScope MatchCaseScope(this, Scope::DeclScope);

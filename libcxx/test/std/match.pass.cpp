@@ -20,7 +20,7 @@ void check(bool b) { assert(b); }
 
 template <class T>
 constexpr int match_static_pointer(T* value) {
-  return value match {
+  return match (value) {
     case int* pointer => pointer ? 10 : 11;
     case double* pointer => pointer ? 20 : 21;
     case _ => 30;
@@ -79,7 +79,7 @@ void test_match_test_expr() {
 }
 
 auto char_pattern(char c) {
-  return c match {
+  return match (c) {
     case 'a'   => 1;
     case 'b'   => 2;
     case auto&& x => int(x);
@@ -93,7 +93,7 @@ void test_char_pattern() {
 }
 
 auto decomposition_pattern(const int (&xs)[2]) {
-  return xs match {
+  return match (xs) {
     case [ 0, 0 ]     => -1;
     case [ auto&& x, 0 ] => x * 2;
     case [ 0, auto&& y ] => y * 4;
@@ -127,7 +127,7 @@ struct Result {
 };
 
 auto nested_decomposition_pattern(const S& s) {
-  return s match -> Result {
+  return match (s) -> Result {
     case [auto&& c, [0, 0]] => {c, -1};
     case [auto&& c, [auto&& x, 0]] => {c, x * 2};
     case [auto&& c, [0, auto&& y]] => {c, y * 4};
@@ -161,7 +161,7 @@ struct MoveOnlyWidget {
 void test_nested_decomposition_forwards_xvalues() {
   std::tuple<int, std::pair<int, MoveOnlyWidget>> subject(
       1, std::pair<int, MoveOnlyWidget>(2, MoveOnlyWidget(3)));
-  int result = static_cast<decltype(subject)&&>(subject) match {
+  int result = match (static_cast<decltype(subject)&&>(subject)) {
     case [auto&& x, [auto&& y, MoveOnlyWidget widget]] =>
       x + y + widget.value;
   };
@@ -172,7 +172,7 @@ void test_nested_decomposition_forwards_xvalues() {
 void test_nested_decomposition_preserves_lvalues() {
   std::tuple<int, std::pair<int, MoveOnlyWidget>> subject(
       1, std::pair<int, MoveOnlyWidget>(2, MoveOnlyWidget(3)));
-  int result = subject match {
+  int result = match (subject) {
     case [auto&& x, [auto&& y, MoveOnlyWidget& widget]] =>
       (widget.value = 4, x + y + widget.value);
   };
@@ -188,7 +188,7 @@ bool fizzbuzz(const State (&states)[Size], const int (&elems)[Size]) {
   for (int i = 1; i <= Size; ++i) {
     State s = states[i - 1];
     int n = elems[i - 1];
-    result &= (int[2]){i % 3, i % 5} match {
+    result &= match ((int[2]){i % 3, i % 5}) {
       case [0, 0] => s == FizzBuzz && n == 0;
       case [0, auto&& y] => s == Fizz && n == y;
       case [auto&& x, 0] => s == Buzz && n == x;
@@ -211,7 +211,7 @@ void test_fizzbuzz() {
 }
 
 auto trailing_return_type(int x) {
-  return x match -> int {
+  return match (x) -> int {
     case 0 => 0;
     case 1 => 3.0;
     case 2 => 'c';
@@ -238,7 +238,7 @@ struct DerivedB : Base {
 };
 
 auto alternative_pattern_const(const Base &base) {
-  return base match {
+  return match (base) {
     case const DerivedA& a => a.x * 2;
     case const DerivedB& b => (int)b.c;
     case _ => 0;
@@ -252,7 +252,7 @@ void test_alternative_pattern_const() {
 
 auto alternative_pattern_non_const(DerivedA derived) {
   Base &base = derived;
-  return base match {
+  return match (base) {
     case DerivedA& a => a.x * 2;
     case DerivedB& b => (int)b.c;
     case _ => 0;
@@ -266,7 +266,7 @@ void test_alternative_pattern_non_const() {
 
 auto bitfields(int x) {
   struct S { int i : 6; } s{x};
-  return s.i match {
+  return match (s.i) {
     case 8 => 0;
     case auto&& n => n;
   };
@@ -303,7 +303,7 @@ namespace std {
 }
 
 int tuple_decomposition_pattern(const std::tuple<int, int> &tup) {
-  return tup match {
+  return match (tup) {
     case [0, 0] => -1;
     case [0, auto&& y] => y * 2;
     case [auto&& x, 0] => x * 4;
@@ -312,7 +312,7 @@ int tuple_decomposition_pattern(const std::tuple<int, int> &tup) {
 }
 
 int tuple_like_decomposition_pattern(const Pair &tup) {
-  return tup match {
+  return match (tup) {
     case [0, 0] => -1;
     case [0, auto&& y] => y * 2;
     case [auto&& x, 0] => x * 4;
@@ -343,7 +343,7 @@ void test_match_test_with_guard() {
 }
 
 auto match_pattern_guards(const Pair& p) {
-  return p match {
+  return match (p) {
     case auto&& [x, y] if (x < 0 && y < 0) => 0;
     case auto&& [x, y] if (x < 0) => y;
     case auto&& [x, y] if (y < 0) => x;
@@ -555,8 +555,8 @@ namespace std {
 }
 
 int variant_alternative_pattern(const std::variant<int, double, float> &var) {
-  return var match {
-    case { int x } => x match {
+  return match (var) {
+    case { int x } => match (x) {
       case 0 => 0;
       case 1 => 1;
       case _ => -1;
@@ -567,8 +567,8 @@ int variant_alternative_pattern(const std::variant<int, double, float> &var) {
 }
 
 int variant_like_alternative_pattern(const Variant &var) {
-  return var match {
-    case { int x } => x match {
+  return match (var) {
+    case { int x } => match (x) {
       case 0 => 0;
       case 1 => 1;
       case _ => -1;
@@ -583,13 +583,13 @@ int classify(const double&) { return 20; }
 int classify(const float&) { return 30; }
 
 int auto_alternative_pattern(const std::variant<int, double, float>& var) {
-  return var match {
+  return match (var) {
     case { auto&& value } => classify(value);
   };
 }
 
 int variant_residual_pattern(const std::variant<int, double, float>& var) {
-  return var match {
+  return match (var) {
     case { int } => 10;
     case { double } => 20;
     case { float } => 30;
@@ -599,7 +599,7 @@ int variant_residual_pattern(const std::variant<int, double, float>& var) {
 
 template<class T>
 int dependent_auto_alternative_pattern(const T& var) {
-  return var match {
+  return match (var) {
     case { auto&& value } => classify(value);
   };
 }
@@ -634,7 +634,7 @@ void test_variant_like_alternative_pattern() {
 int match_stmt_action(int limit) {
   int r = 0;
   for (int i = limit; i >= 0; i--) {
-    r += i match {
+    r += match (i) {
       case auto&& x if (x < 5) => 1;
       case 5 => continue;
       case 6 => break;
@@ -652,7 +652,7 @@ void test_match_stmt_action() {
 }
 
 int any_alternative_pattern(const std::any& a) {
-  return a match {
+  return match (a) {
     case { const int& x } if (x == 0) => 0;
     case { const int& x } if (x == 1) => 1;
     case { const double& y } => (int)y + 4;
@@ -670,11 +670,11 @@ void test_any_alternative_pattern() {
 }
 
 void test_void_returning_match() {
-  0 match { case _ => []() {}(); };
+  match (0) { case _ => []() {}(); };
 }
 
 int throw_action(int x) {
-  return x match {
+  return match (x) {
     case 0 => 0;
     case 1 => 1;
     case _ => throw 101;
@@ -693,7 +693,7 @@ void test_throw_action() {
 
 template <int... Is, int N>
 int pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
-  return p match {
+  return match (p) {
     case [0, Is...] => 0;
     case [Is..., 0] => 1;
     case _ => -1;
