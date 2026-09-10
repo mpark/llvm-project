@@ -9442,6 +9442,16 @@ public:
   ///@{
 
 public:
+  enum class UnqualifiedCallCandidateStatus { None, Found, Dependent };
+
+  /// Determine whether an unqualified call name has any ordinary or
+  /// argument-dependent lookup candidates, without performing overload
+  /// resolution.
+  UnqualifiedCallCandidateStatus
+  classifyUnqualifiedCallCandidates(Scope *S, IdentifierInfo *Name,
+                                    SourceLocation NameLoc,
+                                    ArrayRef<Expr *> Args);
+
   /// Tracks whether we are in a context where typo correction is
   /// disabled.
   bool DisableTypoCorrection;
@@ -11149,7 +11159,41 @@ public:
   /// Implementations are in SemaMatchPattern.cpp
   ///@{
 
+private:
+  SourceLocation PotentialMatchCallLoc;
+  SourceLocation PotentialMatchResultTypeLoc;
+
 public:
+  class MatchResultTypeDiagnosticRAII {
+    Sema &S;
+    SourceLocation PreviousCallLoc;
+    SourceLocation PreviousResultTypeLoc;
+
+  public:
+    MatchResultTypeDiagnosticRAII(Sema &S, SourceLocation CallLoc,
+                                  SourceLocation ResultTypeLoc)
+        : S(S), PreviousCallLoc(S.PotentialMatchCallLoc),
+          PreviousResultTypeLoc(S.PotentialMatchResultTypeLoc) {
+      S.PotentialMatchCallLoc = CallLoc;
+      S.PotentialMatchResultTypeLoc = ResultTypeLoc;
+    }
+
+    ~MatchResultTypeDiagnosticRAII() {
+      S.PotentialMatchCallLoc = PreviousCallLoc;
+      S.PotentialMatchResultTypeLoc = PreviousResultTypeLoc;
+    }
+
+    MatchResultTypeDiagnosticRAII(const MatchResultTypeDiagnosticRAII &) =
+        delete;
+    MatchResultTypeDiagnosticRAII &
+    operator=(const MatchResultTypeDiagnosticRAII &) = delete;
+  };
+
+  SourceLocation getPotentialMatchResultTypeLoc(SourceLocation CallLoc) const {
+    return CallLoc == PotentialMatchCallLoc ? PotentialMatchResultTypeLoc
+                                            : SourceLocation();
+  }
+
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
   bool CheckMatchSubjectBindingReferences(Expr *Subject,
                                           MatchPattern *Pattern);

@@ -15045,6 +15045,14 @@ static ExprResult FinishOverloadedCallExpr(Sema &SemaRef, Scope *S, Expr *Fn,
   }
 
   case OR_No_Viable_Function: {
+    SourceLocation MatchResultTypeLoc =
+        SemaRef.getPotentialMatchResultTypeLoc(ULE->getNameLoc());
+    if (CandidateSet->empty() && MatchResultTypeLoc.isValid()) {
+      SemaRef.Diag(MatchResultTypeLoc,
+                   diag::err_dependent_match_result_type_missing_body);
+      return ExprError();
+    }
+
     if (*Best != CandidateSet->end() &&
         CandidateSet->getKind() ==
             clang::OverloadCandidateSet::CSK_AddressOfOverloadSet) {
