@@ -162,9 +162,10 @@ Retry:
   ParseIdentifier: {
     Token Next = NextToken();
     SourceLocation MissingCasePatternLoc;
+    bool MissingSubjectParens = false;
     if (isPrefixMatchSelection(/*StatementContext=*/true,
-                               &MissingCasePatternLoc))
-      return ParseMatchStatement();
+                               &MissingCasePatternLoc, &MissingSubjectParens))
+      return ParseMatchStatement(MissingSubjectParens);
     if (MissingCasePatternLoc.isValid()) {
       Diag(MissingCasePatternLoc,
            diag::err_expected_case_before_match_pattern)
@@ -636,9 +637,10 @@ StmtResult Parser::ParseExprStatement(ParsedStmtContext StmtCtx) {
   return R;
 }
 
-StmtResult Parser::ParseMatchStatement() {
+StmtResult Parser::ParseMatchStatement(bool MissingSubjectParens) {
   ExprStatementTokLoc = Tok.getLocation();
-  ExprResult Expr = ParseMatchSelection(/*IsStatement=*/true);
+  ExprResult Expr =
+      ParseMatchSelection(/*IsStatement=*/true, MissingSubjectParens);
   if (Expr.isInvalid())
     return Actions.ActOnExprStmtError();
   return Actions.ActOnExprStmt(Expr, /*DiscardedValue=*/true);

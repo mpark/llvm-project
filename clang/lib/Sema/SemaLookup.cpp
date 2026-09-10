@@ -4025,6 +4025,27 @@ void Sema::ArgumentDependentLookup(DeclarationName Name, SourceLocation Loc,
   }
 }
 
+Sema::UnqualifiedCallCandidateStatus
+Sema::classifyUnqualifiedCallCandidates(Scope *S, IdentifierInfo *Name,
+                                        SourceLocation NameLoc,
+                                        ArrayRef<Expr *> Args) {
+  LookupResult Ordinary(*this, Name, NameLoc, LookupOrdinaryName);
+  LookupName(Ordinary, S);
+  Ordinary.suppressDiagnostics();
+
+  if (!Ordinary.empty() || Ordinary.isAmbiguous())
+    return UnqualifiedCallCandidateStatus::Found;
+  if (Ordinary.wasNotFoundInCurrentInstantiation() ||
+      llvm::any_of(Args,
+                   [](const Expr *Arg) { return Arg->isTypeDependent(); }))
+    return UnqualifiedCallCandidateStatus::Dependent;
+
+  ADLResult ADL;
+  ArgumentDependentLookup(Name, NameLoc, Args, ADL);
+  return ADL.begin() == ADL.end() ? UnqualifiedCallCandidateStatus::None
+                                  : UnqualifiedCallCandidateStatus::Found;
+}
+
 //----------------------------------------------------------------------------
 // Search for all visible declarations.
 //----------------------------------------------------------------------------
