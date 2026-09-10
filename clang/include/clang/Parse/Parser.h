@@ -4526,10 +4526,12 @@ private:
 
   //===--------------------------------------------------------------------===//
   // C++ Pattern Matching
-  bool isPrefixMatchSelection(
-      bool StatementContext,
-      SourceLocation *MissingCasePatternLoc = nullptr);
-  ExprResult ParseMatchSelection(bool IsStatement);
+  bool isPrefixMatchSelection(bool StatementContext,
+                              SourceLocation *MissingCasePatternLoc = nullptr,
+                              bool *MissingSubjectParens = nullptr);
+  bool hasPossibleOrdinaryMatchCall();
+  ExprResult ParseMatchSelection(bool IsStatement,
+                                 bool MissingSubjectParens = false);
   ExprResult ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
                                      InjectedDeclSet *InjectedDecls);
   Sema::ConditionResult
@@ -7557,7 +7559,7 @@ public:
   /// Parse an expression statement.
   StmtResult ParseExprStatement(ParsedStmtContext StmtCtx);
 
-  StmtResult ParseMatchStatement();
+  StmtResult ParseMatchStatement(bool MissingSubjectParens = false);
 
   /// ParseLabeledStatement - We have an identifier and a ':' after it.
   ///
