@@ -4249,17 +4249,26 @@ ExprResult Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI) {
       Semantic.isUnconditionallyMatched(), NeedsCaseInstantiation);
 }
 
-ExprResult Parser::ParseMatchSelection(bool IsStatement) {
+ExprResult Parser::ParseMatchSelection(bool IsStatement,
+                                       bool MissingSubjectParens) {
   SourceLocation MatchLoc = ConsumeToken();
   ParseScope MatchScope(this, Scope::DeclScope);
   bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
 
-  BalancedDelimiterTracker Parens(*this, tok::l_paren);
-  if (Parens.expectAndConsume())
-    return ExprError();
-  ExprResult Subject = ParseExpression();
-  if (Subject.isInvalid() || Parens.consumeClose())
-    return ExprError();
+  ExprResult Subject;
+  if (MissingSubjectParens) {
+    Diag(Tok, diag::err_expected_lparen_after) << "match";
+    Subject = ParseExpression();
+    if (Subject.isInvalid() || Tok.isNot(tok::l_brace))
+      return ExprError();
+  } else {
+    BalancedDelimiterTracker Parens(*this, tok::l_paren);
+    if (Parens.expectAndConsume())
+      return ExprError();
+    Subject = ParseExpression();
+    if (Subject.isInvalid() || Parens.consumeClose())
+      return ExprError();
+  }
 
   QualType RetTy;
   TypeSourceInfo *TSI = nullptr;
@@ -4328,17 +4337,63 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement) {
                                       RetTy, Cases, Braces, HasDeferredCases);
 }
 
-bool Parser::isPrefixMatchSelection(
-    bool StatementContext, SourceLocation *MissingCasePatternLoc) {
+bool Parser::hasPossibleOrdinaryMatchCall() {
+  RevertingTentativeParsingAction Probe(*this, /*Unannotated=*/true);
+  SourceLocation MatchLoc = ConsumeToken();
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return true;
+
+  DiagnosticsEngine &Diags = PP.getDiagnostics();
+  bool PreviouslySuppressed = Diags.getSuppressAllDiagnostics();
+  Diags.setSuppressAllDiagnostics(true);
+  llvm::scope_exit RestoreDiagnostics(
+      [&] { Diags.setSuppressAllDiagnostics(PreviouslySuppressed); });
+  Sema::TentativeAnalysisScope Trap(Actions);
+
+  ExprVector Args;
+  if ((Tok.isNot(tok::r_paren) && ParseExpressionList(Args)) ||
+      Parens.consumeClose())
+    return true;
+
+  return Actions.classifyUnqualifiedCallCandidates(getCurScope(), Ident_match,
+                                                   MatchLoc, Args) !=
+         Sema::UnqualifiedCallCandidateStatus::None;
+}
+
+bool Parser::isPrefixMatchSelection(bool StatementContext,
+                                    SourceLocation *MissingCasePatternLoc,
+                                    bool *MissingSubjectParens) {
   if (MissingCasePatternLoc)
     *MissingCasePatternLoc = SourceLocation();
+  if (MissingSubjectParens)
+    *MissingSubjectParens = false;
   if (!getLangOpts().PatternMatching || Tok.isNot(tok::identifier) ||
       Tok.getIdentifierInfo() != Ident_match)
     return false;
   if (NextToken().is(tok::kw_constexpr))
     return true;
-  if (NextToken().isNot(tok::l_paren))
-    return false;
+  if (NextToken().isNot(tok::l_paren)) {
+    // A label does not participate in ordinary name lookup.
+    if (StatementContext && NextToken().is(tok::colon))
+      return false;
+
+    // Preserve explicit-template-argument calls for dependent ADL.
+    if (NextToken().is(tok::less))
+      return false;
+
+    // Without the parenthesized subject, an ordinary declaration or
+    // expression can only be valid if `match` names something. Otherwise,
+    // prefer the match parser's missing-parenthesis diagnostic. Defer when
+    // lookup depends on a later template instantiation.
+    if (Actions.classifyUnqualifiedCallCandidates(getCurScope(), Ident_match,
+                                                  Tok.getLocation(), {}) !=
+        Sema::UnqualifiedCallCandidateStatus::None)
+      return false;
+    if (MissingSubjectParens)
+      *MissingSubjectParens = true;
+    return true;
+  }
 
   // Establish the prefix shape before doing lookup or tentative declarator
   // parsing. A non-type entity named `match`, including a function or a
@@ -4348,6 +4403,7 @@ bool Parser::isPrefixMatchSelection(
   SourceLocation FirstBodyLoc;
   bool BodyBeginsAttribute = false;
   bool HasExplicitResultType = false;
+  bool ProbeOrdinaryMatchCall = false;
   {
     RevertingTentativeParsingAction Selection(*this, /*Unannotated=*/true);
     ConsumeToken();
@@ -4356,30 +4412,25 @@ bool Parser::isPrefixMatchSelection(
       return false;
     if (Tok.is(tok::arrow)) {
       // An arrow can begin either ordinary member access or an explicit match
-      // result type. Unambiguous type syntax commits immediately. For an
-      // ambiguous start, use the existing tentative type-id machinery to
-      // consume the complete type-id and require the match body.
-      ConsumeToken();
-      bool CanBeginMemberAccess = Tok.isOneOf(
-          tok::identifier, tok::annot_typename, tok::annot_template_id,
-          tok::kw_operator, tok::kw_template, tok::tilde);
-
-      // When the next token can begin a type-id but not a member name, the
-      // arrow cannot be member access. Commit to the match grammar immediately
-      // and let the real trailing-return-type parser diagnose any malformed
-      // type-id or missing body.
-      if (!CanBeginMemberAccess) {
-        Sema::TentativeAnalysisScope Trap(Actions);
-        if (Tok.isOneOf(tok::kw_auto, tok::kw_decltype, tok::annot_decltype,
-                        tok::annot_pack_indexing_type) ||
-            isTypeSpecifierQualifier(Tok))
-          return true;
-      }
-
+      // result type. First use the syntax-only type-id probe for the normative
+      // classification. The real type parser is used separately below only
+      // for diagnostic recovery.
+      bool CanBeginMemberAccess = false;
+      bool CanOnlyBeginTypeId = false;
       bool HasMatchResultType = false;
       bool ParsedTypeId = false;
       {
         TentativeParsingAction TypeId(*this, /*Unannotated=*/true);
+        ConsumeToken();
+        CanBeginMemberAccess = Tok.isOneOf(
+            tok::identifier, tok::annot_typename, tok::annot_template_id,
+            tok::kw_operator, tok::kw_template, tok::tilde);
+        CanOnlyBeginTypeId =
+            !CanBeginMemberAccess &&
+            (Tok.isOneOf(tok::kw_auto, tok::kw_decltype, tok::kw_typename,
+                         tok::annot_decltype, tok::annot_pack_indexing_type) ||
+             isTypeSpecifierQualifier(Tok));
+
         Sema::TentativeAnalysisScope Trap(Actions);
         ParsedTypeId =
             isCXXTypeId(TentativeCXXTypeIdContext::InMatchTrailingReturnType);
@@ -4390,33 +4441,62 @@ bool Parser::isPrefixMatchSelection(
           TypeId.Revert();
       }
 
+      // When the next token can begin a type-id but not a member name, the
+      // arrow cannot be member access. Commit to the match grammar immediately
+      // and let the real trailing-return-type parser diagnose any malformed
+      // type-id or missing body.
       if (!HasMatchResultType) {
-        // A successfully parsed type-id beginning with syntax that cannot
-        // name a member is an attempted match result type even when its body
-        // is missing. Let the match parser provide the missing-body
-        // diagnostic. Identifier-like starts remain ordinary member access.
-        if (ParsedTypeId && !CanBeginMemberAccess)
+        // No recovery parse is needed when the first token cannot begin member
+        // access. Let the real match parser diagnose the type directly.
+        if (CanOnlyBeginTypeId)
           return true;
 
-        // An unresolved identifier can still have been intended as the match
-        // result type. Recover only when its immediately following brace makes
-        // the ordinary member-access interpretation ill-formed. Do not scan
-        // across intervening expression tokens to find a later brace.
-        if (!ParsedTypeId && Tok.is(tok::identifier) &&
-            NextToken().is(tok::l_brace))
+        // Run the real trailing-return-type parser under rollback. Unlike the
+        // syntax-only probe above, this permits ordinary type recovery and
+        // typo correction. Reaching the immediately following brace is enough
+        // to establish that the ill-formed construct was intended as a match.
+        bool RecoveredToMatchBody = false;
+        {
+          RevertingTentativeParsingAction Recovery(*this,
+                                                   /*Unannotated=*/true);
+          DiagnosticsEngine &Diags = PP.getDiagnostics();
+          bool PreviouslySuppressed = Diags.getSuppressAllDiagnostics();
+          Diags.setSuppressAllDiagnostics(true);
+          llvm::scope_exit RestoreDiagnostics(
+              [&] { Diags.setSuppressAllDiagnostics(PreviouslySuppressed); });
+          auto PreviousTypoFailures = Actions.TypoCorrectionFailures;
+          unsigned PreviousTyposCorrected = Actions.TyposCorrected;
+          SourceRange Range;
+          (void)ParseTrailingReturnType(Range,
+                                        /*MayBeFollowedByDirectInit=*/false);
+          RecoveredToMatchBody = Tok.is(tok::l_brace);
+          Actions.TypoCorrectionFailures = std::move(PreviousTypoFailures);
+          Actions.TyposCorrected = PreviousTyposCorrected;
+        }
+        if (RecoveredToMatchBody)
           return true;
-        return false;
+
+        // Identifier-like syntax can also be ordinary member access. Decide
+        // using candidate existence, not call viability, after restoring to
+        // the original `match` token below.
+        ProbeOrdinaryMatchCall = true;
+      } else {
+        HasExplicitResultType = true;
       }
-      HasExplicitResultType = true;
     }
-    if (Tok.isNot(tok::l_brace))
-      return false;
-    ConsumeBrace();
-    FirstBodyToken = Tok.getKind();
-    FirstBodyLoc = Tok.getLocation();
-    BodyBeginsAttribute =
-        Tok.is(tok::l_square) && NextToken().is(tok::l_square);
+    if (!ProbeOrdinaryMatchCall) {
+      if (Tok.isNot(tok::l_brace))
+        return false;
+      ConsumeBrace();
+      FirstBodyToken = Tok.getKind();
+      FirstBodyLoc = Tok.getLocation();
+      BodyBeginsAttribute =
+          Tok.is(tok::l_square) && NextToken().is(tok::l_square);
+    }
   }
+
+  if (ProbeOrdinaryMatchCall)
+    return !hasPossibleOrdinaryMatchCall();
 
   if (HasExplicitResultType)
     return true;

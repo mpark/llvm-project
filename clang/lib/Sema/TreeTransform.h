@@ -17573,6 +17573,26 @@ TreeTransform<Derived>::TransformCXXDependentScopeMemberExpr(
   QualType ObjectType;
   if (!E->isImplicitAccess()) {
     OldBase = E->getBase();
+    SourceLocation PotentialMatchCallLoc;
+    SourceLocation PotentialMatchResultTypeLoc;
+    if (SemaRef.getLangOpts().PatternMatching && E->isArrow()) {
+      if (const auto *Call = dyn_cast<CallExpr>(OldBase)) {
+        if (const auto *Lookup =
+                dyn_cast<UnresolvedLookupExpr>(Call->getCallee())) {
+          const IdentifierInfo *Name = Lookup->getName().getAsIdentifierInfo();
+          if (Name && Name->isStr("match") && Lookup->requiresADL() &&
+              !Lookup->getQualifierLoc() &&
+              !Lookup->hasExplicitTemplateArgs() &&
+              !Lookup->hasTemplateKeyword() &&
+              Lookup->decls_begin() == Lookup->decls_end()) {
+            PotentialMatchCallLoc = Lookup->getNameLoc();
+            PotentialMatchResultTypeLoc = E->getMemberNameInfo().getEndLoc();
+          }
+        }
+      }
+    }
+    Sema::MatchResultTypeDiagnosticRAII MatchResultTypeDiagnostic(
+        SemaRef, PotentialMatchCallLoc, PotentialMatchResultTypeLoc);
     Base = getDerived().TransformExpr(OldBase);
     if (Base.isInvalid())
       return ExprError();

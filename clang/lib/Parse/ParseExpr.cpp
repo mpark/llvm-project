@@ -942,8 +942,11 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
   ParseIdentifier: {    // primary-expression: identifier
                         // unqualified-id: identifier
                         // constant: enumeration-constant
-    if (isPrefixMatchSelection(/*StatementContext=*/false))
-      return ParseMatchSelection(/*IsStatement=*/false);
+    bool MissingSubjectParens = false;
+    if (isPrefixMatchSelection(/*StatementContext=*/false,
+                               /*MissingCasePatternLoc=*/nullptr,
+                               &MissingSubjectParens))
+      return ParseMatchSelection(/*IsStatement=*/false, MissingSubjectParens);
 
     // Turn a potentially qualified name into a annot_typename or
     // annot_cxxscope if it would be valid.  This handles things like x::y, etc.
