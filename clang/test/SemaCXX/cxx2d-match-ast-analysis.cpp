@@ -20,18 +20,18 @@ static_assert(!noexcept(match (0) { case _ => may_throw(); }));
 static_assert(!noexcept(0 match case _ if (throwing_bool())));
 
 void side_effects_are_observed(int &value) {
-  match (throwing_int()) { case _ => 0; }
+  match (throwing_int()) { case _ => 0; } // expected-warning {{expression result unused}}
   match (value) {
-    case ++value => 0;
-    case _ => 1;
+    case ++value => 0; // expected-warning {{expression result unused}}
+    case _ => 1; // expected-warning {{expression result unused}}
   }
   match (value) {
-    case _ if (++value, true) => 0;
-    case _ => 1;
+    case _ if (++value, true) => 0; // expected-warning {{expression result unused}}
+    case _ => 1; // expected-warning {{expression result unused}}
   }
   match (value) { case _ => ++value; }
   value match case _ if ((++value, true));
 
-  match (value) { case _ => value; }
+  match (value) { case _ => value; } // expected-warning {{expression result unused}}
   value match case _; // expected-warning {{expression result unused}}
 }
