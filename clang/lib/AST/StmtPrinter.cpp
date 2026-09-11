@@ -3304,6 +3304,10 @@ void StmtPrinter::PrintMatchHandler(Stmt *Handler) {
     OS << ";";
     return;
   }
+  if (auto *CS = dyn_cast<CompoundStmt>(Handler)) {
+    PrintRawCompoundStmt(CS);
+    return;
+  }
   if (isa<NullStmt>(Handler)) {
     OS << ";";
     return;

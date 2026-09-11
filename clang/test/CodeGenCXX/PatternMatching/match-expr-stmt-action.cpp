@@ -65,3 +65,46 @@ auto match_only_return_actions_template(T value) {
 template auto match_only_return_actions_template<int>(int);
 
 // CHECK-LABEL: define{{.*}} @_Z{{.*}}match_only_return_actions_template
+
+void record(int);
+
+void match_general_statements(int value) {
+  match (value) {
+    case 0 => {
+      record(10);
+      record(11);
+    }
+    case 1 => if (value) record(20); else record(21);
+    case _ => record(30);
+  }
+}
+
+// CHECK-LABEL: define{{.*}} void @_Z24match_general_statementsi
+// CHECK: call void @_Z6recordi(i32 noundef 10)
+// CHECK: call void @_Z6recordi(i32 noundef 11)
+// CHECK: call void @_Z6recordi(i32 noundef 20)
+// CHECK: call void @_Z6recordi(i32 noundef 21)
+// CHECK: call void @_Z6recordi(i32 noundef 30)
+
+struct Cleanup {
+  Cleanup();
+  ~Cleanup();
+};
+
+void match_declaration_statement(int value) {
+  match (value) {
+    case 0 => Cleanup cleanup;
+    case _ => record(40);
+  }
+  record(41);
+}
+
+// CHECK-LABEL: define{{.*}} void @_Z27match_declaration_statementi
+// CHECK: match.select.action:
+// CHECK: call void @_ZN7CleanupC1Ev
+// CHECK: call void @_ZN7CleanupD1Ev
+// CHECK: br label %match.select.end
+// CHECK: match.select.action{{[0-9]+}}:
+// CHECK: call void @_Z6recordi(i32 noundef 40)
+// CHECK: match.select.end:
+// CHECK: call void @_Z6recordi(i32 noundef 41)

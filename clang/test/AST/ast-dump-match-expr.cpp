@@ -19,8 +19,7 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT:   |-WildcardPattern 0x{{[^ ]*}} <col:20>
   // CHECK-NEXT:   |-<<<NULL>>>
   // CHECK-NEXT:   |-CXXBoolLiteralExpr 0x{{[^ ]*}} <col:26> 'bool' true
-  // CHECK-NEXT:   `-ImplicitCastExpr 0x{{[^ ]*}} <col:35> 'void' <ToVoid>
-  // CHECK-NEXT:     `-IntegerLiteral 0x{{[^ ]*}} <col:35> 'int' 0
+  // CHECK-NEXT:   `-IntegerLiteral 0x{{[^ ]*}} <col:35> 'int' 0
 
   (void)match constexpr (x) -> int { case _ => 0; };
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <col:9, col:51> 'int' constexpr
@@ -52,8 +51,7 @@ void test_match_dump(int x, int *p) {
   // CHECK-NEXT:   | `-VarDecl 0x{{[^ ]*}} <col:20, col:10> col:24 used value 'int' cinit
   // CHECK-NEXT:   |   `-ImplicitCastExpr 0x{{[^ ]*}} <col:10> 'int' <LValueToRValue>
   // CHECK-NEXT:   |     `-DeclRefExpr 0x{{[^ ]*}} <col:10> 'int' lvalue Var 0x{{[^ ]*}} <col:10> 'int &'
-  // CHECK-NEXT:   `-ImplicitCastExpr 0x{{[^ ]*}} <col:33> 'void' <ToVoid>
-  // CHECK-NEXT:     `-DeclRefExpr 0x{{[^ ]*}} <col:33> 'int' lvalue Var 0x{{[^ ]*}} 'value' 'int'
+  // CHECK-NEXT:   `-DeclRefExpr 0x{{[^ ]*}} <col:33> 'int' lvalue Var 0x{{[^ ]*}} 'value' 'int'
 }
 
 void test_case_condition_dump(int x) {
@@ -121,6 +119,5 @@ void test_attributed_case_dump(int x) {
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:39> 'void' statement
   // CHECK:      LikelyAttr 0x{{[^ ]*}} <col:17>
   // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:31>
-  // CHECK-NEXT: ImplicitCastExpr 0x{{[^ ]*}} <col:36> 'void' <ToVoid>
   // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:36> 'int' 0
 }
