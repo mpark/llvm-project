@@ -286,6 +286,25 @@ int nonreturning_handler(int value) {
 // CHECK-NEXT: {{^        }}case _ => 42;
 // CHECK-NEXT: {{^    }}};
 
+enum class PreambleKind { first, second };
+
+int match_preamble(PreambleKind kind) {
+  return match (kind) {
+    using Result = int;
+    static_assert(sizeof(Result) == sizeof(int));
+    case PreambleKind::first => Result{1};
+    case PreambleKind::second => Result{2};
+  };
+}
+
+// CHECK-LABEL: int match_preamble(PreambleKind kind) {
+// CHECK-NEXT: {{^    }}return match (kind) {
+// CHECK-NEXT: {{^        }}using Result = int;
+// CHECK-NEXT: {{^        }}static_assert(sizeof(Result) == sizeof(int));
+// CHECK-NEXT: {{^        }}case PreambleKind::first => Result{1};
+// CHECK-NEXT: {{^        }}case PreambleKind::second => Result{2};
+// CHECK-NEXT: {{^    }}};
+
 int or_pattern(int value) {
   return match (value) {
     case 0 || 1 || 2 => 1;
