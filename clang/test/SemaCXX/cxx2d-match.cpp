@@ -64,6 +64,103 @@ constexpr int test_guard_rejects_nonreturning_handler() {
 
 static_assert(test_guard_rejects_nonreturning_handler() == 42);
 
+namespace match_preamble {
+enum class Kind { first, second };
+
+namespace constants {
+inline constexpr int one = 1;
+inline constexpr int two = 2;
+} // namespace constants
+
+namespace nested {
+inline constexpr int three = 3;
+} // namespace nested
+
+constexpr int select_kind(Kind kind) {
+  return match (kind) {
+    using enum Kind;
+    using Result = int;
+    static_assert(__is_same(Result, int));
+    case first => Result{1};
+    case second => Result{2};
+  };
+}
+
+constexpr int select_integer(int value) {
+  return match (value) {
+    using constants::one;
+    using namespace constants;
+    namespace n = nested;
+    case one => 10;
+    case two => 20;
+    case n::three => 30;
+    case _ => 0;
+  };
+}
+
+template<class T> struct traits;
+template<> struct traits<int> { using type = int; };
+
+template<class T>
+constexpr int dependent(T value) {
+  return match (value) {
+    using U = typename traits<T>::type;
+    static_assert(__is_same(U, T));
+    case U copy => copy;
+  };
+}
+
+template<class T>
+constexpr int dependent_preamble_only() {
+  return match (0) {
+    static_assert(sizeof(T) != 0);
+    case _ => 42;
+  };
+}
+
+constexpr int generic_projection_with_preamble(const int* pointer) {
+  return match (pointer) {
+    using Result = int;
+    case { const auto& value } => Result(value);
+    case {} => -1;
+  };
+}
+
+static_assert(select_kind(Kind::first) == 1);
+static_assert(select_kind(Kind::second) == 2);
+static_assert(select_integer(1) == 10);
+static_assert(select_integer(2) == 20);
+static_assert(select_integer(3) == 30);
+static_assert(dependent(42) == 42);
+static_assert(dependent_preamble_only<int>() == 42);
+constexpr int projected_value = 42;
+static_assert(generic_projection_with_preamble(&projected_value) == 42);
+static_assert(generic_projection_with_preamble(nullptr) == -1);
+
+void simple_declaration_is_not_a_preamble(int value) {
+  match (value) {
+    int local = 1; // expected-error {{expected 'case' before pattern}}
+    case _ => local; // expected-error {{use of undeclared identifier 'local'}}
+  }
+}
+
+void preamble_must_precede_cases(int value) {
+  match (value) {
+    case 0 => ;
+    using Alias = int; // expected-error {{match preamble declaration must precede all cases}}
+    case Alias copy => copy;
+  }
+}
+
+void preamble_scope_ends_with_selection(int value) {
+  match (value) {
+    using Alias = int;
+    case _ => Alias{};
+  }
+  Alias outside; // expected-error {{unknown type name 'Alias'}}
+}
+} // namespace match_preamble
+
 constexpr int test_returning_nonreturning_handler() {
   return match (true) -> int {
     case true => not return 1;
