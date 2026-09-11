@@ -92,6 +92,26 @@ void select_statement(Pair pair) {
 // CHECK-NEXT: {{^    }}}
 // CHECK-NEXT: {{^}}}
 
+void select_compound_statement(Pair pair) {
+  match (pair) {
+    case [0, long second] => {
+      long copy = second;
+      ++copy;
+    }
+    case _ => ;
+  }
+}
+
+// CHECK-LABEL: void select_compound_statement(Pair pair) {
+// CHECK-NEXT: {{^    }}match (pair) {
+// CHECK-NEXT: {{^        }}case [0, long second] => {
+// CHECK-NEXT: {{^            }}long copy = second;
+// CHECK-NEXT: {{^            }}++copy;
+// CHECK-NEXT: {{^        }}}
+// CHECK-NEXT: {{^        }}case _ => ;
+// CHECK-NEXT: {{^    }}}
+// CHECK-NEXT: {{^}}}
+
 bool tests(Pair pair) {
   bool direct = pair match case [int first, long second] if (first < second);
   if (case [int first, long second] = pair)

@@ -2030,3 +2030,22 @@ constexpr int pattern_function(double) { return 0; }
 constexpr PatternArray pattern_array{};
 static_assert(alias_supports_complex_declaration_types(&pattern_function,
                                                        pattern_array) == 2);
+
+constexpr int statement_handlers(int value) {
+  int result = 0;
+  match (value) {
+    case 0 => {
+      result = 1;
+      result += 2;
+    }
+    case 1 => if (value) result = 4; else result = 5;
+    case 2 => for (int i = 0; i != 3; ++i) result += i;
+    case _ => result = 6;
+  }
+  return result;
+}
+
+static_assert(statement_handlers(0) == 3);
+static_assert(statement_handlers(1) == 4);
+static_assert(statement_handlers(2) == 3);
+static_assert(statement_handlers(3) == 6);
