@@ -3428,11 +3428,11 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
                                 ? ConfluenceBlock
                                 : nullptr;
   for (const MatchCaseInstantiation &Case : llvm::reverse(Cases)) {
-    Succ = ConfluenceBlock;
+    Succ = Case.isNonReturning() ? nullptr : ConfluenceBlock;
     Block = nullptr;
     CFGBlock *HandlerBlock = addStmt(Case.Handler);
     if (!HandlerBlock)
-      HandlerBlock = ConfluenceBlock;
+      HandlerBlock = Case.isNonReturning() ? nullptr : ConfluenceBlock;
     if (badCFG)
       return nullptr;
 

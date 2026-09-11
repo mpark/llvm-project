@@ -2821,6 +2821,7 @@ void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
     ID.AddBoolean(Case.Guard.Condition);
     if (Case.Guard.Condition)
       Visit(Case.Guard.Condition);
+    ID.AddBoolean(Case.isNonReturning());
     Visit(Case.Handler);
   }
 }

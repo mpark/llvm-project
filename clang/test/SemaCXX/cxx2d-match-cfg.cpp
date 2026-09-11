@@ -38,6 +38,22 @@ int guarded_init_statement(int value) {
   };
 }
 
+int potentially_returns();
+
+int nonreturning_handler(bool value) {
+  return match (value) {
+    case true => not return potentially_returns();
+    case false => 42;
+  };
+}
+
+int nonreturning_handler_has_no_fallthrough(bool value) {
+  (void)match (value) -> int {
+    case true => not return potentially_returns();
+    case false => return 42;
+  };
+}
+
 namespace std {
 template<class T>
 struct alternative_traits;

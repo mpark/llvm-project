@@ -4564,7 +4564,7 @@ private:
                                         MatchPattern *Pattern,
                                         StmtResult &InitStmt);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
-                               bool IsStatement,
+                               bool IsStatement, SourceLocation &NotReturnLoc,
                                bool DeferSemanticChecking = false);
   ActionResult<MatchPattern *>
   ParsePattern(bool AllowPackExpansion = false,

@@ -1242,8 +1242,8 @@ ExprResult Sema::ActOnMatchSelectExpr(
     for (auto [Index, Case] : llvm::enumerate(SourceCases))
       CaseInstantiations.push_back({Case.Pattern, Case.IfLoc, Case.Guard,
                                     Case.Handler, static_cast<unsigned>(Index),
-                                    Case.PatternInstantiation,
-                                    Case.Attributes});
+                                    Case.PatternInstantiation, Case.Attributes,
+                                    Case.NotReturnLoc});
   }
 
   if (const AutoType *AT = RetTy->getContainedAutoType();
