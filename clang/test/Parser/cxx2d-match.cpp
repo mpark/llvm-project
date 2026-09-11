@@ -629,7 +629,7 @@ int test_structured_jump_statements(char c) {
     case 'c' => return;       // expected-error {{non-void function 'test_structured_jump_statements' should return a value}}
     case 'd' => return 42;
     case 'e' => co_return 42; // expected-error {{std::coroutine_traits type was not found}}
-    case 'f' => goto foo;     // expected-error {{cannot jump from this goto statement to its label}}
+    case 'f' => goto foo;
     case _ => 0;
   }
 
@@ -639,9 +639,32 @@ int test_structured_jump_statements(char c) {
       case 'b' => continue;
       case 'c' => return;     // expected-error {{non-void function 'test_structured_jump_statements' should return a value}}
       case 'd' => return 42;
-      case 'e' => goto foo;   // expected-error {{cannot jump from this goto statement to its label}}
+      case 'e' => goto foo;
       case _ => 0;
     }
+  }
+}
+
+void test_jump_into_match_handler(int value) {
+  goto handler; // expected-error {{cannot jump from this goto statement to its label}}
+  match (value) {
+    case int copy => handler: (void)copy; // expected-note {{jump enters a match handler}}
+  }
+}
+
+void test_switch_into_match_handler(int value) {
+  switch (value) {
+    match (value) {
+      case _ => case 0: break; // expected-error {{cannot jump from switch statement to this case label}} expected-note {{jump enters a match handler}}
+    }
+  }
+}
+
+void test_jump_from_guard_into_match_handler(int value) {
+  match (value) {
+    case int copy if (({ goto handler; false; })) => // expected-error {{cannot jump from this goto statement to its label}}
+      handler: (void)copy; // expected-note {{jump enters a match handler}}
+    case _ => ;
   }
 }
 

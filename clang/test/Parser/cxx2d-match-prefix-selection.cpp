@@ -24,6 +24,25 @@ void statement(int value) {
     match (value) { case _ => 1; }
 }
 
+void consume(int);
+
+void statement_handlers(int value) {
+  match (value) {
+    case 0 => {
+      int local = value;
+      consume(local);
+    }
+    case 1 => if (value) consume(value); else consume(0);
+    case 2 => for (int i = 0; i != value; ++i) consume(i);
+    case 3 => while (value-- > 0) consume(value);
+    case 4 => do consume(value); while (false);
+    case 5 => switch (value) { default: break; }
+    case 7 => int local = value;
+    case 8 => static_assert(true);
+    case _ => ;
+  }
+}
+
 void missing_case(int value) {
   match (value) {
     _ => 0; // expected-error {{expected 'case' before pattern}}
