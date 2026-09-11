@@ -64,9 +64,54 @@ constexpr int explicit_result() {
   };
 }
 
+int may_return();
+
+int nonreturning_handler(int value) {
+  return match (value) {
+    case 0 => not return may_return();
+    case _ => 42;
+  };
+}
+
+constexpr int noreturn = 7;
+
+constexpr int noreturn_is_an_ordinary_expression(int value) {
+  return match (value) {
+    case 0 => noreturn + 1;
+    case _ => 42;
+  };
+}
+
+namespace ordinary_noreturn_call {
+constexpr int noreturn(int value) { return value + 2; }
+
+constexpr int call(int value) {
+  return match (value) {
+    case 0 => noreturn(value);
+    case _ => 42;
+  };
+}
+} // namespace ordinary_noreturn_call
+
+int symbolic_nonreturning_handler(int value) {
+  return match (value) {
+    case 0 => !return may_return();
+    case _ => 42;
+  };
+}
+
+void noreturn_is_ordinary_in_statement_form(int value) {
+  match (value) {
+    case 0 => noreturn;
+    case _ => ;
+  }
+}
+
 static_assert(expression(0) == 1);
 static_assert(expression(3) == 2);
 static_assert(explicit_result() == 1);
+static_assert(noreturn_is_an_ordinary_expression(0) == 8);
+static_assert(ordinary_noreturn_call::call(0) == 2);
 } // namespace selections
 
 namespace missing_subject_parentheses {

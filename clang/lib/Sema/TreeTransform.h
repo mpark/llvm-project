@@ -19888,10 +19888,13 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     CasesToTransform.reserve(E->getNumCaseInstantiations());
     for (const MatchCaseInstantiation &Instantiation :
          E->getCaseInstantiations()) {
+      const MatchCase &Source = E->getCases()[Instantiation.CaseIndex];
       CasesToTransform.emplace_back(
           Instantiation.CaseIndex,
           MatchCase{Instantiation.Pattern, Instantiation.IfLoc,
-                    Instantiation.Guard, Instantiation.Handler});
+                    Instantiation.Guard, Instantiation.Handler,
+                    Source.MaybeUseful, Instantiation.PatternInstantiation,
+                    Instantiation.Attributes, Instantiation.NotReturnLoc});
     }
   }
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
@@ -19990,10 +19993,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     Sema::MatchPatternSemanticAnalysis Semantic =
         getSema().AnalyzeMatchPatternSemantics(TransformedPattern,
                                                PatternState);
-    DiagnosticInstantiations.push_back({TransformedPattern, Case.IfLoc,
-                                        Case.Guard, Case.Handler, CaseIndex,
-                                        PatternInstantiation,
-                                        Case.Attributes});
+    DiagnosticInstantiations.push_back(
+        {TransformedPattern, Case.IfLoc, Case.Guard, Case.Handler, CaseIndex,
+         PatternInstantiation, Case.Attributes, Case.NotReturnLoc});
 
     if (Semantic.Refutability == Sema::MatchPatternRefutability::Impossible)
       return TransformCaseResult::NoMatch;
@@ -20059,18 +20061,23 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
     Stmt *HS = Handler.get();
     if (!E->isStatement()) {
-      if (Expr *HE = dyn_cast<Expr>(HS))
-        Handler =
-            getSema().ActOnMatchExprHandler(E->getOrigResultType(), RetTy, HE);
-      else if (auto *DS = dyn_cast<DeclStmt>(HS);
-               isa<NullStmt>(HS) ||
-               (DS && DS->isSingleDecl() &&
-                isa<StaticAssertDecl>(DS->getSingleDecl()))) {
-        if (DS && cast<StaticAssertDecl>(DS->getSingleDecl())->isFailed())
-          return TransformCaseResult::Error;
-        if (getSema().ActOnMatchVoidHandler(E->getOrigResultType(), RetTy,
-                                            HS->getBeginLoc()))
-          return TransformCaseResult::Error;
+      if (Case.isNonReturning()) {
+        Handler = getSema().ActOnExprStmt(cast<Expr>(HS),
+                                          /*DiscardedValue=*/true);
+      } else {
+        if (Expr *HE = dyn_cast<Expr>(HS))
+          Handler = getSema().ActOnMatchExprHandler(E->getOrigResultType(),
+                                                    RetTy, HE);
+        else if (auto *DS = dyn_cast<DeclStmt>(HS);
+                 isa<NullStmt>(HS) ||
+                 (DS && DS->isSingleDecl() &&
+                  isa<StaticAssertDecl>(DS->getSingleDecl()))) {
+          if (DS && cast<StaticAssertDecl>(DS->getSingleDecl())->isFailed())
+            return TransformCaseResult::Error;
+          if (getSema().ActOnMatchVoidHandler(E->getOrigResultType(), RetTy,
+                                              HS->getBeginLoc()))
+            return TransformCaseResult::Error;
+        }
       }
     }
     if (Handler.isInvalid())
@@ -20101,7 +20108,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                    Handler.get(),
                    CaseIndex,
                    PatternInstantiation,
-                   Attributes};
+                   Attributes,
+                   Case.NotReturnLoc};
     if (!Case.Guard.hasGuard() &&
         Semantic.Refutability == Sema::MatchPatternRefutability::Irrefutable)
       ClosedDomains.push_back(std::move(Semantic.Domain));

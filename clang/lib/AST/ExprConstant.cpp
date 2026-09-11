@@ -10095,7 +10095,7 @@ public:
       }
       if (Result) {
         if (const auto *HandlerExpr = dyn_cast<Expr>(Case.Handler);
-            HandlerExpr && !E->isStatement()) {
+            HandlerExpr && !E->isStatement() && !Case.isNonReturning()) {
           if (!this->Visit(HandlerExpr))
             return false;
         } else {
@@ -10104,6 +10104,12 @@ public:
           EvalStmtResult ESR = EvaluateStmt(HandlerResult, Info, Case.Handler);
           if (ESR == ESR_Failed)
             return false;
+          if (ESR == ESR_Succeeded && Case.isNonReturning()) {
+            Info.CCEDiag(
+                Case.NotReturnLoc,
+                diag::note_constexpr_nonreturning_match_handler_returned);
+            return false;
+          }
           if (ESR != ESR_Succeeded) {
             if (!Scope.destroy() || !MatchScope.destroy())
               return false;

@@ -5808,7 +5808,10 @@ struct MatchCase {
   bool MaybeUseful = false;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
   ArrayRef<const Attr *> Attributes;
+  SourceLocation NotReturnLoc;
   MatchTemplateRegionDecl *Region = nullptr;
+
+  bool isNonReturning() const { return NotReturnLoc.isValid(); }
 };
 
 /// A semantically checked form of a source match case. A source case can have
@@ -5821,6 +5824,9 @@ struct MatchCaseInstantiation {
   unsigned CaseIndex;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
   ArrayRef<const Attr *> Attributes;
+  SourceLocation NotReturnLoc;
+
+  bool isNonReturning() const { return NotReturnLoc.isValid(); }
 };
 
 class MatchSelectExpr final
