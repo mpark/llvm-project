@@ -21,6 +21,59 @@ void test_throw_action() {
   } == 1);
 }
 
+double potentially_returns();
+
+auto test_nonreturning_handler_result(int value) {
+  return match (value) {
+    case 0 => not return potentially_returns();
+    case _ => 42;
+  };
+}
+
+static_assert(__is_same(decltype(test_nonreturning_handler_result(0)), int));
+
+template<class T>
+T dependent_potentially_returns(T);
+
+template<class T>
+auto test_dependent_nonreturning_handler(bool selected, T value) {
+  return match (selected) {
+    case true => not return dependent_potentially_returns(value);
+    case false => 42;
+  };
+}
+
+static_assert(__is_same(decltype(test_dependent_nonreturning_handler(false, 1.0)),
+                        int));
+
+constexpr int test_unselected_nonreturning_handler() {
+  return match (false) -> int {
+    case true => not return 1;
+    case false => 42;
+  };
+}
+
+static_assert(test_unselected_nonreturning_handler() == 42);
+
+constexpr int test_guard_rejects_nonreturning_handler() {
+  return match (0) -> int {
+    case _ if (false) => not return 1;
+    case _ => 42;
+  };
+}
+
+static_assert(test_guard_rejects_nonreturning_handler() == 42);
+
+constexpr int test_returning_nonreturning_handler() {
+  return match (true) -> int {
+    case true => not return 1;
+    case false => 42;
+  };
+}
+
+static_assert(test_returning_nonreturning_handler() == 1); // expected-error {{static assertion expression is not an integral constant expression}} expected-note {{in call to 'test_returning_nonreturning_handler()'}}
+// expected-note@-6 {{control returned from a 'not return' match handler}}
+
 constexpr void test_null_and_static_assert_handlers(bool value) {
   match (value) {
     case true => ;

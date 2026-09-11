@@ -772,7 +772,8 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     MatchVisit.enableBindingDecls();
     for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
       if (auto *Handler = dyn_cast<Expr>(Case.Handler);
-          Handler && !Handler->getType()->isVoidType())
+          Handler && !Case.isNonReturning() &&
+          !Handler->getType()->isVoidType())
         visitLocalsRetainedByReferenceBinding(Path, Handler, RK, MatchVisit);
     break;
   }
@@ -1076,7 +1077,8 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
     LocalVisitor MatchVisit(VisitOnce);
     MatchVisit.enableBindingDecls();
     for (const MatchCaseInstantiation &Case : Match->getCaseInstantiations())
-      if (auto *Handler = dyn_cast<Expr>(Case.Handler))
+      if (auto *Handler = dyn_cast<Expr>(Case.Handler);
+          Handler && !Case.isNonReturning())
         visitLocalsRetainedByInitializer(Path, Handler, MatchVisit,
                                          /*RevisitSubinits=*/true);
     break;

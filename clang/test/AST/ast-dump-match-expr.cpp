@@ -121,3 +121,14 @@ void test_attributed_case_dump(int x) {
   // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:31>
   // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:36> 'int' 0
 }
+int potentially_returns();
+
+int test_nonreturning_handler_dump(int x) {
+  return match (x) {
+    case 0 => not return potentially_returns();
+    case _ => 42;
+  };
+  // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-4]]:10, line:[[@LINE-1]]:3> 'int'
+  // CHECK:      not return:
+  // CHECK:      CallExpr 0x{{[^ ]*}} <col:26, col:46> 'int'
+}

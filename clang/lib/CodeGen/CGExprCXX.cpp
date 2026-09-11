@@ -3134,10 +3134,18 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   auto EmitCaseHandler = [&](const MatchCaseInstantiation &Case) {
     EmitWithStmtAttributes(Case.Handler, Case.Attributes, [&] {
-      if (const Expr *E = dyn_cast<Expr>(Case.Handler); E && !S.isStatement())
-        EmitHandler(E);
-      else
+      if (Case.isNonReturning()) {
         EmitStmt(Case.Handler);
+        if (HaveInsertPoint()) {
+          EmitUnreachable(Case.NotReturnLoc);
+          Builder.ClearInsertionPoint();
+        }
+      } else if (const Expr *E = dyn_cast<Expr>(Case.Handler);
+                 E && !S.isStatement()) {
+        EmitHandler(E);
+      } else {
+        EmitStmt(Case.Handler);
+      }
     });
   };
 

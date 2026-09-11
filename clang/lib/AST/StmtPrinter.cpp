@@ -3329,6 +3329,8 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
     PrintMatchPattern(Case.Pattern);
     PrintMatchGuard(Case.Guard);
     OS << " => ";
+    if (Case.isNonReturning())
+      OS << "not return ";
     PrintMatchHandler(Case.Handler);
     OS << NL;
   }
