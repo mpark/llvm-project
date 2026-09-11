@@ -552,6 +552,29 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
     return;
   }
 
+  case Stmt::MatchSelectExprClass: {
+    auto *ME = cast<MatchSelectExpr>(S);
+    BuildScopeInformation(ME->getHoldingVar() && ME->getHoldingVar()->hasInit()
+                              ? ME->getHoldingVar()->getInit()
+                              : ME->getSubject(),
+                          ParentScope);
+    for (const MatchCase &Case : ME->getCases()) {
+      unsigned CaseScope = ParentScope;
+      if (Case.Guard.Init)
+        BuildScopeInformation(Case.Guard.Init, CaseScope);
+      if (Case.Guard.ConditionVariable)
+        BuildScopeInformation(Case.Guard.ConditionVariable, CaseScope);
+      if (Case.Guard.Condition)
+        BuildScopeInformation(Case.Guard.Condition, CaseScope);
+
+      unsigned HandlerScope = Scopes.size();
+      Scopes.emplace_back(CaseScope, diag::note_enters_match_handler,
+                          /*OutDiag=*/0, Case.Handler->getBeginLoc());
+      BuildScopeInformation(Case.Handler, HandlerScope);
+    }
+    return;
+  }
+
   case Stmt::ObjCAtTryStmtClass: {
     // Disallow jumps into any part of an @try statement by pushing a scope and
     // walking all sub-stmts in that scope.
