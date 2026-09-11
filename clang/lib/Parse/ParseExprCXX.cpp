@@ -4700,8 +4700,9 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after,
                        "pattern"))
     return true;
+  SourceLocation NotReturnLoc;
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy, IsStatement,
-                                         DeferHandlerChecking);
+                                         NotReturnLoc, DeferHandlerChecking);
   if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
   Case = {Pattern.get(), IfLoc,
@@ -4709,6 +4710,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
           Handler.get()};
   Case.Attributes =
       Actions.ActOnMatchCaseAttributes(Attributes, Handler.get());
+  Case.NotReturnLoc = NotReturnLoc;
   Case.PatternInstantiation = MatchPatternInstantiation::Create(
       Actions.Context, Pattern.get(), PatternState.Infos);
   return false;
@@ -4733,12 +4735,30 @@ Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
 
 StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
                                      bool IsStatement,
+                                     SourceLocation &NotReturnLoc,
                                      bool DeferSemanticChecking) {
   if (IsStatement)
     return ParseStatement();
 
+  if (Tok.is(tok::exclaim) && NextToken().is(tok::kw_return)) {
+    NotReturnLoc = ConsumeToken();
+    ConsumeToken();
+  }
+
   const char *SemiError = nullptr;
   StmtResult Result;
+  if (NotReturnLoc.isValid()) {
+    ExprResult Expression = ParseExpression();
+    if (DeferSemanticChecking)
+      Result = Expression.isInvalid() ? StmtError() : Expression.get();
+    else
+      Result = Actions.ActOnExprStmt(Expression, /*DiscardedValue=*/true);
+    if (Result.isInvalid() ||
+        ExpectAndConsumeSemi(diag::err_expected_semi_after_expr))
+      return StmtError();
+    return Result;
+  }
+
   switch (Tok.getKind()) {
   default: {
     ExprResult Expression =

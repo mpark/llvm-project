@@ -44,6 +44,8 @@ def note_constexpr_invalid_inhctor : Note<
   "constant expression; derived class cannot be implicitly initialized">;
 def note_constexpr_no_return : Note<
   "control reached end of constexpr function">;
+def note_constexpr_nonreturning_match_handler_returned : Note<
+  "control returned from a 'not return' match handler">;
 def note_constexpr_virtual_call : Note<
   "cannot evaluate call to virtual function in a constant expression "
   "in C++ standards before C++20">;
