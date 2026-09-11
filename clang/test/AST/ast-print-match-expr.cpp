@@ -271,6 +271,21 @@ int attributed_cases(T value) {
 
 int instantiate_attributed_cases = attributed_cases(1);
 
+int potentially_returns();
+
+int nonreturning_handler(int value) {
+  return match (value) {
+    case 0 => !return potentially_returns();
+    case _ => 42;
+  };
+}
+
+// CHECK-LABEL: int nonreturning_handler(int value) {
+// CHECK-NEXT: {{^    }}return match (value) {
+// CHECK-NEXT: {{^        }}case 0 => not return potentially_returns();
+// CHECK-NEXT: {{^        }}case _ => 42;
+// CHECK-NEXT: {{^    }}};
+
 int or_pattern(int value) {
   return match (value) {
     case 0 || 1 || 2 => 1;
