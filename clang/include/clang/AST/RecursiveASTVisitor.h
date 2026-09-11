@@ -3359,6 +3359,8 @@ DEF_TRAVERSE_STMT(MatchSelectExpr, {
                                           S->getHoldingVar()->getInit()
                                       ? S->getHoldingVar()->getInit()
                                       : S->getSubject());
+  for (Stmt *Statement : S->getPreamble())
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Statement);
   for (const MatchCase &Case : S->getCases()) {
     for (const Attr *Attribute : Case.Attributes)
       TRY_TO(getDerived().TraverseAttr(const_cast<Attr *>(Attribute)));

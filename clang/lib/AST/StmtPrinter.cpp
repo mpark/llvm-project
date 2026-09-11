@@ -3324,6 +3324,8 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
   }
   OS << " {" << NL;
   IndentLevel += Policy.Indentation;
+  for (Stmt *Statement : Node->getPreamble())
+    PrintStmt(Statement, /*SubIndent=*/0);
   for (const MatchCase &Case : Node->getCases()) {
     Indent();
     for (const Attr *Attribute : Case.Attributes) {

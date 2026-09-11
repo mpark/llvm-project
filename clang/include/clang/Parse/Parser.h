@@ -4569,6 +4569,7 @@ private:
                            Expr *Increment = nullptr);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
+                      SmallVectorImpl<Stmt *> &Preamble,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,
                       bool &HasDeferredCases, bool IsStatement,
                       bool DeferHandlerChecking);
