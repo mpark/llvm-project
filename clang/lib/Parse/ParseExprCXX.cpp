@@ -4307,6 +4307,7 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   }
 
   TypeLoc OrigResultType = TSI->getTypeLoc();
+  SmallVector<Stmt *, 8> Preamble;
   SmallVector<MatchCase, 32> Cases;
   SourceRange Braces;
   bool HasDeferredCases = false;
@@ -4314,8 +4315,8 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   Subject = Actions.ActOnMatchSubject(Subject.get(), HoldingVar);
   if (Subject.isInvalid())
     return ExprError();
-  if (ParseMatchBody(Subject.get(), OrigResultType, RetTy, Cases, Braces,
-                     HasDeferredCases, IsStatement,
+  if (ParseMatchBody(Subject.get(), OrigResultType, RetTy, Preamble, Cases,
+                     Braces, HasDeferredCases, IsStatement,
                      /*DeferHandlerChecking=*/IsConstexpr))
     return ExprError();
   if (IsConstexpr) {
@@ -4332,9 +4333,9 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
     if (OrigResultType.getType()->getContainedAutoType())
       RetTy = Actions.Context.DependentTy;
   }
-  return Actions.ActOnMatchSelectExpr(HoldingVar, Subject.get(), MatchLoc,
-                                      IsConstexpr, IsStatement, OrigResultType,
-                                      RetTy, Cases, Braces, HasDeferredCases);
+  return Actions.ActOnMatchSelectExpr(
+      HoldingVar, Subject.get(), MatchLoc, IsConstexpr, IsStatement,
+      OrigResultType, RetTy, Preamble, Cases, Braces, HasDeferredCases);
 }
 
 bool Parser::hasPossibleOrdinaryMatchCall() {
@@ -4503,8 +4504,9 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
 
   // Every valid arm starts with one of these tokens, so no declarator probe
   // is needed in the common match-statement case.
-  if (FirstBodyToken == tok::kw_case ||
-      BodyBeginsAttribute)
+  if (FirstBodyToken == tok::kw_case || FirstBodyToken == tok::kw_using ||
+      FirstBodyToken == tok::kw_namespace ||
+      FirstBodyToken == tok::kw_static_assert || BodyBeginsAttribute)
     return true;
 
   if (!StatementContext ||
@@ -4606,7 +4608,8 @@ Parser::ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
 }
 
 bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
-                            QualType &RetTy, SmallVectorImpl<MatchCase> &Result,
+                            QualType &RetTy, SmallVectorImpl<Stmt *> &Preamble,
+                            SmallVectorImpl<MatchCase> &Result,
                             SourceRange &Braces, bool &HasDeferredCases,
                             bool IsStatement, bool DeferHandlerChecking) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
@@ -4623,7 +4626,35 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
       OrigResultType.getType()->getContainedAutoType())
     RetTy = Actions.Context.DependentTy;
   bool InvalidBody = false;
+
+  auto StartsPreambleDeclaration = [&] {
+    if (Tok.isOneOf(tok::kw_using, tok::kw_static_assert))
+      return true;
+    return Tok.is(tok::kw_namespace) && NextToken().is(tok::identifier) &&
+           GetLookAheadToken(2).is(tok::equal);
+  };
+  while (StartsPreambleDeclaration()) {
+    StmtResult Declaration = ParseStatement();
+    if (Declaration.isInvalid()) {
+      InvalidBody = true;
+      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+      TryConsumeToken(tok::semi);
+      continue;
+    }
+    Preamble.push_back(Declaration.get());
+  }
+
   while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
+    if (StartsPreambleDeclaration()) {
+      Diag(Tok, diag::err_match_preamble_after_case);
+      StmtResult Declaration = ParseStatement();
+      InvalidBody = true;
+      if (Declaration.isInvalid()) {
+        SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+        TryConsumeToken(tok::semi);
+      }
+      continue;
+    }
     ProjectionCache.AlternativeChoices.clear();
     ProjectionCache.HasDeferredAlternativeChoices = false;
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
