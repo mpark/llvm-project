@@ -108,3 +108,19 @@ void match_declaration_statement(int value) {
 // CHECK: call void @_Z6recordi(i32 noundef 40)
 // CHECK: match.select.end:
 // CHECK: call void @_Z6recordi(i32 noundef 41)
+
+double potentially_returns();
+
+int match_nonreturning_handler(int value) {
+  return match (value) -> int {
+    case 0 => not return potentially_returns();
+    case _ => 42;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z26match_nonreturning_handleri
+// CHECK: match.select.action:
+// CHECK-NEXT: call noundef double @_Z19potentially_returnsv()
+// CHECK-NEXT: unreachable
+// CHECK: match.select.action{{[0-9]+}}:
+// CHECK: store i32 42, ptr %match.select.result
