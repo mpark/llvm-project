@@ -7169,6 +7169,8 @@ def note_enters_statement_expression : Note<
 def note_enters_defer_stmt : Note<"jump enters a defer statement">;
 def note_enters_do_expression : Note<
   "jump enters a do-expression">;
+def note_enters_match_handler : Note<
+  "jump enters a match handler">;
 
 def note_exits_cleanup : Note<
   "jump exits scope of variable with __attribute__((cleanup))">;

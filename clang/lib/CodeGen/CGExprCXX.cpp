@@ -3134,7 +3134,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
 
   auto EmitCaseHandler = [&](const MatchCaseInstantiation &Case) {
     EmitWithStmtAttributes(Case.Handler, Case.Attributes, [&] {
-      if (const Expr *E = dyn_cast<Expr>(Case.Handler))
+      if (const Expr *E = dyn_cast<Expr>(Case.Handler); E && !S.isStatement())
         EmitHandler(E);
       else
         EmitStmt(Case.Handler);
@@ -3180,7 +3180,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
         Builder.CreateCondBr(Condition, ExecuteActionBB, NextPatternBB);
 
         EmitBlock(ExecuteActionBB);
-        EmitCaseHandler(MatchC);
+        {
+          RunCleanupsScope CaseScope(*this);
+          EmitCaseHandler(MatchC);
+        }
         EmitBranch(SelectEndBB);
         EmitBlock(NextPatternBB);
         continue;

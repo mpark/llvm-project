@@ -4553,16 +4553,18 @@ private:
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<MatchCase> &Result, SourceRange &Braces,
-                      bool &HasDeferredCases, bool DeferHandlerChecking);
+                      bool &HasDeferredCases, bool IsStatement,
+                      bool DeferHandlerChecking);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case,
                       Sema::MatchProjectionCache &ProjectionCache,
-                      bool DeferHandlerChecking);
+                      bool IsStatement, bool DeferHandlerChecking);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
                                         MatchPattern *Pattern,
                                         StmtResult &InitStmt,
                                         const Sema::MatchPatternState *State);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
+                               bool IsStatement,
                                bool DeferSemanticChecking = false);
   ActionResult<MatchPattern *>
   ParsePattern(bool AllowPackExpansion = false,

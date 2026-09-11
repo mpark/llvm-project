@@ -149,6 +149,22 @@ int instantiate_dependent_alternative_pattern(Choice& value, int& guards) {
   return match_dependent_alternative(value, guards);
 }
 
+template<class T>
+void match_dependent_statement(T& value, int& result) {
+  match (value) {
+    case { auto&& alternative } => {
+      result = static_cast<int>(alternative);
+    }
+  }
+}
+
+// CHECK-LABEL: define{{.*}} void @_Z25match_dependent_statementI6ChoiceEvRT_Ri
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm0E
+// CHECK: store i32
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm1E
+// CHECK: store i32
+template void match_dependent_statement(Choice&, int&);
+
 template<class Outer>
 int match_nested_dependent_alternative(Choice& value, int& guards) {
   return [&]<class Inner>(Inner) {

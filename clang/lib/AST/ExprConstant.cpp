@@ -10033,7 +10033,8 @@ public:
           return false;
       }
       if (Result) {
-        if (const auto *HandlerExpr = dyn_cast<Expr>(Case.Handler)) {
+        if (const auto *HandlerExpr = dyn_cast<Expr>(Case.Handler);
+            HandlerExpr && !E->isStatement()) {
           if (!this->Visit(HandlerExpr))
             return false;
         } else {

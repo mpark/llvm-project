@@ -4311,7 +4311,7 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   if (Subject.isInvalid())
     return ExprError();
   if (ParseMatchBody(Subject.get(), OrigResultType, RetTy, Cases, Braces,
-                     HasDeferredCases,
+                     HasDeferredCases, IsStatement,
                      /*DeferHandlerChecking=*/IsConstexpr))
     return ExprError();
   if (IsConstexpr) {
@@ -4604,7 +4604,7 @@ Parser::ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
 bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, SmallVectorImpl<MatchCase> &Result,
                             SourceRange &Braces, bool &HasDeferredCases,
-                            bool DeferHandlerChecking) {
+                            bool IsStatement, bool DeferHandlerChecking) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
                                 "in match body");
@@ -4624,8 +4624,9 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
     ProjectionCache.HasDeferredAlternativeChoices = false;
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
-    bool Invalid = ParseMatchCase(Subject, OrigResultType, RetTy, Case,
-                                  ProjectionCache, DeferHandlerChecking);
+    bool Invalid =
+        ParseMatchCase(Subject, OrigResultType, RetTy, Case, ProjectionCache,
+                       IsStatement, DeferHandlerChecking);
     bool ContainsBindingPack =
         !Invalid && containsDeclarationBindingPack(Case.Pattern);
     if (ProjectionCache.HasDeferredAlternativeChoices || ContainsBindingPack) {
@@ -4636,8 +4637,17 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
 
     if (Invalid) {
       InvalidBody = true;
-      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
-      TryConsumeToken(tok::semi);
+      bool AtNextCase =
+          Tok.is(tok::kw_case) ||
+          (Tok.is(tok::l_square) && NextToken().is(tok::l_square));
+      // ParseStatement normally consumes a complete statement, including its
+      // semicolon, even when semantic checking rejects it. Do not recover past
+      // the following arm in that case. Expression handlers leave their
+      // terminator for this recovery path when building the handler fails.
+      if (!IsStatement || (!AtNextCase && Tok.isNot(tok::r_brace))) {
+        SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+        TryConsumeToken(tok::semi);
+      }
       continue;
     }
     Result.push_back(Case);
@@ -4650,7 +4660,7 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
 bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
                             QualType &RetTy, MatchCase &Case,
                             Sema::MatchProjectionCache &ProjectionCache,
-                            bool DeferHandlerChecking) {
+                            bool IsStatement, bool DeferHandlerChecking) {
   ParsedAttributes Attributes(AttrFactory);
   MaybeParseCXX11Attributes(Attributes,
                             /*MightBeObjCMessageSend=*/true);
@@ -4690,7 +4700,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   if (ExpectAndConsume(tok::equalgreater, diag::err_expected_after,
                        "pattern"))
     return true;
-  StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy,
+  StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy, IsStatement,
                                          DeferHandlerChecking);
   if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
     return true;
@@ -4723,7 +4733,11 @@ Sema::ConditionResult Parser::ParseMatchGuard(SourceLocation &IfLoc,
 }
 
 StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
+                                     bool IsStatement,
                                      bool DeferSemanticChecking) {
+  if (IsStatement)
+    return ParseStatement();
+
   const char *SemiError = nullptr;
   StmtResult Result;
   switch (Tok.getKind()) {
