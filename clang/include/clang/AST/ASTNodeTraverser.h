@@ -1077,6 +1077,8 @@ public:
     if (const VarDecl *HoldingVar = Node->getHoldingVar())
       Visit(HoldingVar);
     Visit(Node->getSubject());
+    for (const Stmt *Statement : Node->getPreamble())
+      Visit(Statement);
     for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
       StringRef Label;
       if (Case.isNonReturning())
