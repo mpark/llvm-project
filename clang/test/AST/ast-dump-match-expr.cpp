@@ -121,6 +121,23 @@ void test_attributed_case_dump(int x) {
   // CHECK-NEXT: WildcardPattern 0x{{[^ ]*}} <col:31>
   // CHECK-NEXT: IntegerLiteral 0x{{[^ ]*}} <col:36> 'int' 0
 }
+enum class PreambleKind { first, second };
+
+int test_match_preamble_dump(PreambleKind kind) {
+  return match (kind) {
+    using enum PreambleKind;
+    using Result = int;
+    static_assert(sizeof(Result) == sizeof(int));
+    case first => Result{1};
+    case second => Result{2};
+  };
+  // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:{{[0-9]+}}:10, line:{{[0-9]+}}:3> 'Result':'int'
+  // CHECK:      UsingEnumDecl 0x{{[^ ]*}} {{.*}} 'PreambleKind'
+  // CHECK:      TypeAliasDecl 0x{{[^ ]*}} {{.*}} Result 'int'
+  // CHECK:      StaticAssertDecl 0x{{[^ ]*}}
+  // CHECK:      ExpressionPattern 0x{{[^ ]*}}
+}
+
 int potentially_returns();
 
 int test_nonreturning_handler_dump(int x) {

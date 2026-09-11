@@ -1156,6 +1156,14 @@ static ExprDependence getMatchStmtDependence(const Stmt *S) {
   ExprDependence D = ExprDependence::None;
   if (const auto *DS = dyn_cast<DeclStmt>(S)) {
     for (const Decl *Declaration : DS->decls()) {
+      if (const auto *Assertion = dyn_cast<StaticAssertDecl>(Declaration)) {
+        D |= Assertion->getAssertExpr()->getDependence();
+        if (const Expr *Message = Assertion->getMessage())
+          D |= Message->getDependence();
+      }
+      if (const auto *Alias = dyn_cast<TypedefNameDecl>(Declaration))
+        D |= toExprDependenceForImpliedType(
+            Alias->getUnderlyingType()->getDependence());
       const auto *Value = dyn_cast<ValueDecl>(Declaration);
       if (!Value)
         continue;
@@ -1227,6 +1235,8 @@ ExprDependence clang::computeDependence(MatchSelectExpr *E) {
   ExprDependence D =
       toExprDependenceForImpliedType(E->getType()->getDependence());
   D |= turnTypeToValueDependence(E->getSubject()->getDependence());
+  for (const Stmt *Statement : E->getPreamble())
+    D |= turnTypeToValueDependence(getMatchStmtDependence(Statement));
   for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
     D |= turnTypeToValueDependence(
         getMatchPatternDependence(Case.Pattern, Case.PatternInstantiation));
