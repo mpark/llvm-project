@@ -2263,8 +2263,9 @@ CXXExpansionSelectExpr::CXXExpansionSelectExpr(const ASTContext &C,
 MatchSelectExpr::MatchSelectExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     bool IsConstexpr, bool IsStatement, bool IsFullyCovered,
-    TypeLoc OrigResultType, QualType Ty, ArrayRef<MatchCase> Cases,
-    ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces)
+    TypeLoc OrigResultType, QualType Ty, ArrayRef<Stmt *> Preamble,
+    ArrayRef<MatchCase> Cases, ArrayRef<MatchCaseInstantiation> Instantiations,
+    SourceRange Braces)
     : Expr(MatchSelectExprClass, Ty.getNonReferenceType(),
            Ty->isLValueReferenceType()   ? VK_LValue
            : Ty->isRValueReferenceType() ? VK_XValue
@@ -2273,8 +2274,10 @@ MatchSelectExpr::MatchSelectExpr(
       HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
       IsConstexpr(IsConstexpr), IsFullyCovered(IsFullyCovered),
       IsStatement(IsStatement), OrigResultType(OrigResultType),
-      NumCases(Cases.size()),
+      NumPreambleStatements(Preamble.size()), NumCases(Cases.size()),
       NumCaseInstantiations(Instantiations.size()), Braces(Braces) {
+  std::uninitialized_copy(Preamble.begin(), Preamble.end(),
+                          getTrailingObjects<Stmt *>());
   std::uninitialized_copy(Cases.begin(), Cases.end(),
                           getTrailingObjects<MatchCase>());
   std::uninitialized_copy(Instantiations.begin(), Instantiations.end(),
@@ -2286,20 +2289,23 @@ MatchSelectExpr *MatchSelectExpr::Create(
     const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
     SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
     bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
-    ArrayRef<MatchCase> Cases,
+    ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
     ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces) {
-  void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase, MatchCaseInstantiation>(
-      Cases.size(), Instantiations.size()));
-  return new (Mem) MatchSelectExpr(
-      HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement, IsFullyCovered,
-      OrigResultType, Ty, Cases, Instantiations, Braces);
+  void *Mem =
+      Ctx.Allocate(totalSizeToAlloc<Stmt *, MatchCase, MatchCaseInstantiation>(
+          Preamble.size(), Cases.size(), Instantiations.size()));
+  return new (Mem) MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr,
+                                   IsStatement, IsFullyCovered, OrigResultType,
+                                   Ty, Preamble, Cases, Instantiations, Braces);
 }
 
 MatchSelectExpr *MatchSelectExpr::CreateEmpty(const ASTContext &Ctx,
+                                              unsigned NumPreambleStatements,
                                               unsigned NumCases,
                                               unsigned NumCaseInstantiations) {
-  void *Mem = Ctx.Allocate(totalSizeToAlloc<MatchCase, MatchCaseInstantiation>(
-      NumCases, NumCaseInstantiations));
-  return new (Mem)
-      MatchSelectExpr(NumCases, NumCaseInstantiations, EmptyShell());
+  void *Mem =
+      Ctx.Allocate(totalSizeToAlloc<Stmt *, MatchCase, MatchCaseInstantiation>(
+          NumPreambleStatements, NumCases, NumCaseInstantiations));
+  return new (Mem) MatchSelectExpr(NumPreambleStatements, NumCases,
+                                   NumCaseInstantiations, EmptyShell());
 }

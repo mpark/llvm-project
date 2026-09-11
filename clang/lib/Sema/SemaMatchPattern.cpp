@@ -1218,15 +1218,15 @@ ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
 ExprResult Sema::ActOnMatchSelectExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     bool IsConstexpr, bool IsStatement, TypeLoc OrigResultType, QualType RetTy,
-    SmallVectorImpl<MatchCase> &SourceCases, SourceRange Braces,
-    bool ExpandDeferredCases,
+    ArrayRef<Stmt *> Preamble, SmallVectorImpl<MatchCase> &SourceCases,
+    SourceRange Braces, bool ExpandDeferredCases,
     std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
     std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
   if (ExpandDeferredCases) {
     auto *E = MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
                                       IsConstexpr, IsStatement,
                                       /*IsFullyCovered=*/false, OrigResultType,
-                                      RetTy, SourceCases, {}, Braces);
+                                      RetTy, Preamble, SourceCases, {}, Braces);
     if (CurContext->isDependentContext())
       return E;
     return ExpandDeferredMatchSelectExpr(E);
@@ -1252,10 +1252,10 @@ ExprResult Sema::ActOnMatchSelectExpr(
       Subject, SourceCases,
       DiagnosticInstantiations.value_or(
           ArrayRef<MatchCaseInstantiation>(CaseInstantiations)));
-  return MatchSelectExpr::Create(
-      Context, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
-      IsFullyCovered, OrigResultType, RetTy, SourceCases, CaseInstantiations,
-      Braces);
+  return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
+                                 IsConstexpr, IsStatement, IsFullyCovered,
+                                 OrigResultType, RetTy, Preamble, SourceCases,
+                                 CaseInstantiations, Braces);
 }
 
 ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(

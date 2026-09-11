@@ -19705,6 +19705,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
+  LocalInstantiationScope MatchScope(getSema(),
+                                     /*CombineWithOuterScope=*/true);
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
   if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
@@ -19733,6 +19735,15 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     LHS = ImplicitCastExpr::Create(getSema().Context, LHS.get()->getType(),
                                    CK_NoOp, LHS.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
+
+  SmallVector<Stmt *, 8> Preamble;
+  Preamble.reserve(E->getPreamble().size());
+  for (Stmt *Statement : E->getPreamble()) {
+    StmtResult Transformed = getDerived().TransformStmt(Statement);
+    if (Transformed.isInvalid())
+      return ExprError();
+    Preamble.push_back(Transformed.get());
+  }
 
   QualType RetTy;
   if (E->getType()->isDependentType())
@@ -20029,7 +20040,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
   return getSema().ActOnMatchSelectExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
-      E->isStatement(), E->getOrigResultType(), RetTy, SourceCases,
+      E->isStatement(), E->getOrigResultType(), RetTy, Preamble, SourceCases,
       E->getBraces(),
       /*ExpandDeferredCases=*/false,
       ArrayRef<MatchCaseInstantiation>(Instantiations),

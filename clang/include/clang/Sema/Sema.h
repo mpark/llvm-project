@@ -11226,7 +11226,7 @@ public:
   ExprResult ActOnMatchSelectExpr(
       VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
       bool IsConstexpr, bool IsStatement, TypeLoc OrigResultType,
-      QualType RetTy,
+      QualType RetTy, ArrayRef<Stmt *> Preamble,
       SmallVectorImpl<MatchCase> &Cases, SourceRange Braces,
       bool ExpandDeferredCases = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =

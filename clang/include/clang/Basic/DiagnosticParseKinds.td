@@ -488,6 +488,8 @@ def err_expected_case_before_expression: Error<
   "expected 'case' keyword before expression">;
 def err_expected_case_before_match_pattern: Error<
   "expected 'case' before pattern">;
+def err_match_preamble_after_case: Error<
+  "match preamble declaration must precede all cases">;
 def note_match_type_name_declaration_ambiguity: Note<
   "'match' names a type, so this construct is otherwise parsed as a declaration">;
 def err_match_statement_result_type: Error<
