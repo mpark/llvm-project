@@ -139,6 +139,10 @@ int no_ordinary_name() {
 } // namespace missing_subject_parentheses
 
 namespace declaration_disambiguation {
+namespace constants {
+inline constexpr int one = 1;
+}
+
 struct match {
   match() = default;
   match(int);
@@ -161,6 +165,14 @@ void declarations_and_selections(int value) {
   match (value) { case _ => 0; }
   match (value) { [[likely]] case _ => 0; }
   match (value + 1) { case _ => 0; }
+
+  match (value) {
+    using Alias = int;
+    namespace c = constants;
+    static_assert(sizeof(Alias) == sizeof(int));
+    case c::one => 1;
+    case Alias copy => copy;
+  }
 }
 
 match expression_construction() {
