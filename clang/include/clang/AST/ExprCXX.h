@@ -5846,6 +5846,9 @@ class MatchSelectExpr final
   bool IsFullyCovered;
   /// True when the selection was parsed directly as a statement.
   bool IsStatement;
+  /// True when the subject is an implementation-generated product of the
+  /// expressions written in a multiple-subject selection.
+  bool HasSubjectProduct;
   TypeLoc OrigResultType;
   unsigned NumPreambleStatements;
   unsigned NumCases;
@@ -5854,16 +5857,17 @@ class MatchSelectExpr final
 
   explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
                            SourceLocation MatchLoc, bool IsConstexpr,
-                           bool IsStatement, bool IsFullyCovered,
-                           TypeLoc OrigResultType, QualType Ty,
-                           ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+                           bool IsStatement, bool HasSubjectProduct,
+                           bool IsFullyCovered, TypeLoc OrigResultType,
+                           QualType Ty, ArrayRef<Stmt *> Preamble,
+                           ArrayRef<MatchCase> Cases,
                            ArrayRef<MatchCaseInstantiation> Instantiations,
                            SourceRange Braces);
 
   explicit MatchSelectExpr(unsigned NumPreambleStatements, unsigned NumCases,
                            unsigned NumCaseInstantiations, EmptyShell Empty)
       : Expr(MatchSelectExprClass, Empty), IsConstexpr(false),
-        IsFullyCovered(false), IsStatement(false),
+        IsFullyCovered(false), IsStatement(false), HasSubjectProduct(false),
         NumPreambleStatements(NumPreambleStatements), NumCases(NumCases),
         NumCaseInstantiations(NumCaseInstantiations) {}
 
@@ -5883,8 +5887,8 @@ public:
   static MatchSelectExpr *
   Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
          SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
-         bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
-         ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+         bool HasSubjectProduct, bool IsFullyCovered, TypeLoc OrigResultType,
+         QualType Ty, ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
          ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx,
@@ -5909,6 +5913,10 @@ public:
   bool isFullyCovered() const { return IsFullyCovered; }
 
   bool isStatement() const { return IsStatement; }
+
+  bool hasSubjectProduct() const { return HasSubjectProduct; }
+
+  ArrayRef<Expr *> getSubjectProductElements() const;
 
   ArrayRef<Stmt *> getPreamble() const {
     return llvm::ArrayRef(getTrailingObjects<Stmt *>(), NumPreambleStatements);
