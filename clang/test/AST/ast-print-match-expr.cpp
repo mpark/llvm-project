@@ -113,17 +113,24 @@ void select_compound_statement(Pair pair) {
 // CHECK-NEXT: {{^}}}
 
 bool tests(Pair pair) {
-  bool direct = pair match case [int first, long second] if (first < second);
+  bool direct = match(pair, case [int first, long second] if (first < second));
   if (case [int first, long second] = pair)
     return first < second;
   return direct;
 }
 
 // CHECK-LABEL: bool tests(Pair pair) {
-// CHECK-NEXT: {{^    }}bool direct = pair match case [int first, long second] if (first < second);
+// CHECK-NEXT: {{^    }}bool direct = match(pair, case [int first, long second] if (first < second));
 // CHECK-NEXT: {{^    }}if (case [int first, long second] = pair)
 // CHECK-NEXT: {{^        }}return first < second;
 // CHECK-NEXT: {{^    }}return direct;
+
+bool test_multiple(int first, int second) {
+  return match(first, second, case [0, int value] if (value > 0));
+}
+
+// CHECK-LABEL: bool test_multiple(int first, int second) {
+// CHECK-NEXT: {{^    }}return match(first, second, case [0, int value] if (value > 0));
 
 int alternatives(Choice choice) {
   return match (choice) {

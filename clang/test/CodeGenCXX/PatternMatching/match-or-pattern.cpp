@@ -26,7 +26,7 @@ extern bool second(int);
 // CHECK: %[[SECOND_MATCH:.*]] = icmp eq i32 %[[VALUE]],
 // CHECK: br i1 %[[SECOND_MATCH]], label %[[DONE]], label
 bool short_circuit(int value) {
-  return value match case first(value) || second(value);
+  return match(value, case first(value) || second(value));
 }
 
 struct Pair {

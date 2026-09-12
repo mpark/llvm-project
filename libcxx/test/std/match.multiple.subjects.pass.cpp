@@ -41,6 +41,8 @@ int main(int, char**) {
     }
   }
   assert(first == 3 && second == 4);
+  assert((match(first, second, case [3, 4])));
+  assert(!(match(first, second, case [4, 3])));
 
   int alive = 0;
   int moves = 0;
@@ -51,6 +53,16 @@ int main(int, char**) {
   };
   assert(result == 12);
   assert(alive == 0);
+
+  int test_alive = 0;
+  int test_moves = 0;
+  bool matched =
+      match(MoveOnly(8, &test_alive, &test_moves),
+             MoveOnly(9, &test_alive, &test_moves),
+             case [MoveOnly x, MoveOnly y]);
+  assert(matched);
+  assert(test_moves == 2);
+  assert(test_alive == 0);
 
   return 0;
 }

@@ -16,7 +16,7 @@
 namespace clang {
 
 prec::Level getBinOpPrecedence(const Token &Tok, bool GreaterThanIsOperator,
-                               bool CPlusPlus11, bool PatternMatching) {
+                               bool CPlusPlus11, bool /*PatternMatching*/) {
   switch (Tok.getKind()) {
   case tok::greater:
     // C++ [temp.names]p3:
@@ -36,13 +36,6 @@ prec::Level getBinOpPrecedence(const Token &Tok, bool GreaterThanIsOperator,
     //   the template-id. [...]
     if (GreaterThanIsOperator || !CPlusPlus11)
       return prec::Shift;
-    return prec::Unknown;
-
-  case tok::identifier:
-    if (PatternMatching)
-      if (IdentifierInfo* II = Tok.getIdentifierInfo())
-        if (II->isStr("match"))
-          return prec::Match;
     return prec::Unknown;
 
   default:                        return prec::Unknown;

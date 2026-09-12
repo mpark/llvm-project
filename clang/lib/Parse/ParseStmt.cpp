@@ -161,6 +161,9 @@ Retry:
   case tok::identifier:
   ParseIdentifier: {
     Token Next = NextToken();
+    if (isPrefixMatchTestExpression())
+      return ParseExprStatement(StmtCtx);
+
     SourceLocation MissingCasePatternLoc;
     bool MissingSubjectParens = false;
     if (isPrefixMatchSelection(/*StatementContext=*/true,
