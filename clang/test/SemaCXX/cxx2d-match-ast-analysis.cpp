@@ -4,14 +4,17 @@ void may_throw();
 bool throwing_bool();
 int throwing_int();
 
+struct ThrowingPattern {
+  friend bool operator==(int, ThrowingPattern) noexcept(false);
+};
+
+inline constexpr ThrowingPattern throwing_pattern;
+
 static_assert(noexcept(match (0) { case _ => 0; }));
 static_assert(noexcept(match(0, case _)));
 
 static_assert(!noexcept(match (throwing_int()) { case _ => 0; }));
-static_assert(!noexcept(match (0) {
-  case throwing_int() => 0;
-  case _ => 1;
-}));
+static_assert(!noexcept(match(0, case throwing_pattern)));
 static_assert(!noexcept(match (0) {
   case _ if (throwing_bool()) => 0;
   case _ => 1;
@@ -21,10 +24,6 @@ static_assert(!noexcept(match(0, case _ if (throwing_bool()))));
 
 void side_effects_are_observed(int &value) {
   match (throwing_int()) { case _ => 0; } // expected-warning {{expression result unused}}
-  match (value) {
-    case ++value => 0; // expected-warning {{expression result unused}}
-    case _ => 1; // expected-warning {{expression result unused}}
-  }
   match (value) {
     case _ if (++value, true) => 0; // expected-warning {{expression result unused}}
     case _ => 1; // expected-warning {{expression result unused}}

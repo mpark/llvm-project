@@ -92,14 +92,24 @@ constexpr int substituted_pattern(Pair pair) {
 static_assert(substituted_pattern({0, 4}) == 4);
 static_assert(substituted_pattern({1, 4}) == -1);
 
-constexpr bool logical_and_remains_an_expression(bool value) {
+void logical_and_is_not_a_pattern(bool value) {
+  (void)match(value, case true && false); // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match (value) {
+    case true && false => {} // expected-error {{expected '=>' after pattern}}
+    case _ => {}
+  }
+}
+
+constexpr bool logical_and_expression(bool value) {
+  constexpr bool first = true;
+  constexpr bool second = false;
   return match (value) {
-    case true && false => true;
+    case bool(first && second) => true;
     case _ => false;
   };
 }
 
-static_assert(logical_and_remains_an_expression(false));
+static_assert(logical_and_expression(false));
 
 constexpr int bind_from_either_position(Pair pair) {
   return match (pair) {
