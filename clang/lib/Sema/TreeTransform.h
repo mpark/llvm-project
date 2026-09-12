@@ -19773,7 +19773,17 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                                      /*CombineWithOuterScope=*/true);
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
-  if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
+  bool IsSubjectProduct = E->hasSubjectProduct();
+  ArrayRef<Expr *> ProductElements = E->getSubjectProductElements();
+  if (IsSubjectProduct) {
+    SmallVector<Expr *, 4> TransformedElements;
+    if (getDerived().TransformExprs(ProductElements.data(),
+                                    ProductElements.size(),
+                                    /*IsCall=*/false, TransformedElements))
+      return ExprError();
+    LHS = getSema().ActOnMatchSubjects(TransformedElements, E->getMatchLoc(),
+                                       HoldingVar, /*ForceProduct=*/true);
+  } else if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
     assert(OldHoldingVar->hasInit() &&
            "match subject holder must have an initializer");
     ExprResult Subject =

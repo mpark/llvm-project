@@ -14554,6 +14554,11 @@ def err_pattern_binding_used_in_pattern : Error<
   "pattern binding %0 cannot be used within the pattern that introduces it">;
 def err_pattern_binding_used_in_subject : Error<
   "pattern binding %0 cannot be used in its own subject initializer">;
+def err_match_multiple_subject_void : Error<
+  "void expression cannot be an element of a multiple-subject match">;
+def err_match_multiple_subject_pattern : Error<
+  "multiple match subjects require a decomposition pattern, structured "
+  "binding declaration pattern, or wildcard">;
 def err_match_case_redundant : Error<"match case is redundant">;
 def err_match_case_impossible : Error<
   "match case can never match a subject of type %0">;

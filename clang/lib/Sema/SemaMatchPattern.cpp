@@ -970,6 +970,38 @@ static ExprResult rebuildMatchSubjectForLifetimeExtension(
   return Rebuilt;
 }
 
+static void extendMatchSubjectTemporaries(
+    Sema &S, VarDecl *HoldingVar,
+    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries) {
+  class TemporaryCollector : public EvaluatedExprVisitor<TemporaryCollector> {
+    using Inherited = EvaluatedExprVisitor<TemporaryCollector>;
+    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries;
+
+  public:
+    TemporaryCollector(ASTContext &Context,
+                       SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries)
+        : Inherited(Context), Temporaries(Temporaries) {}
+
+    void VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
+      if (!E->getExtendingDecl())
+        Temporaries.push_back(E);
+      Inherited::VisitStmt(E);
+    }
+
+    void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
+      if (E->hasRewrittenInit())
+        Visit(E->getRewrittenExpr());
+    }
+  };
+
+  TemporaryCollector(S.Context, Temporaries).Visit(HoldingVar->getInit());
+  llvm::SmallPtrSet<MaterializeTemporaryExpr *, 8> Seen;
+  llvm::erase_if(Temporaries, [&](MaterializeTemporaryExpr *Temporary) {
+    return Temporary->getExtendingDecl() || !Seen.insert(Temporary).second;
+  });
+  S.ApplyForRangeOrExpansionStatementLifetimeExtension(HoldingVar, Temporaries);
+}
+
 ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
   SmallVector<MaterializeTemporaryExpr *, 8> RebuiltTemporaries;
   bool ContainsDefaultArg = false;
@@ -1000,38 +1032,9 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
   }
   HoldingVar = VD;
 
-  // Associate every materialized temporary in the subject with its hidden
-  // holder. In an expression match the holder ends with the full-expression;
-  // in an unparenthesized condition it has condition-variable lifetime.
-  class TemporaryCollector : public EvaluatedExprVisitor<TemporaryCollector> {
-    using Inherited = EvaluatedExprVisitor<TemporaryCollector>;
-    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries;
-
-  public:
-    TemporaryCollector(ASTContext &Context,
-                       SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries)
-        : Inherited(Context), Temporaries(Temporaries) {}
-
-    void VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
-      if (!E->getExtendingDecl())
-        Temporaries.push_back(E);
-      Inherited::VisitStmt(E);
-    }
-
-    void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
-      if (E->hasRewrittenInit())
-        Visit(E->getRewrittenExpr());
-    }
-  };
-
   SmallVector<MaterializeTemporaryExpr *, 8> Temporaries =
       std::move(RebuiltTemporaries);
-  TemporaryCollector(Context, Temporaries).Visit(HoldingVar->getInit());
-  llvm::SmallPtrSet<MaterializeTemporaryExpr *, 8> Seen;
-  llvm::erase_if(Temporaries, [&](MaterializeTemporaryExpr *Temporary) {
-    return Temporary->getExtendingDecl() || !Seen.insert(Temporary).second;
-  });
-  ApplyForRangeOrExpansionStatementLifetimeExtension(HoldingVar, Temporaries);
+  extendMatchSubjectTemporaries(*this, HoldingVar, Temporaries);
 
   ExprResult Ref = BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
@@ -1041,6 +1044,94 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
   return ImplicitCastExpr::Create(Context, Ref.get()->getType(), CK_NoOp,
                                   Ref.get(), nullptr, VK_XValue,
                                   FPOptionsOverride());
+}
+
+bool Sema::isMatchSubjectProductType(QualType Type) const {
+  return MatchSubjectProductDecls.contains(
+      Type.getNonReferenceType()->getAsCXXRecordDecl());
+}
+
+ExprResult Sema::ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
+                                    SourceLocation MatchLoc,
+                                    VarDecl *&HoldingVar, bool ForceProduct) {
+  assert((ForceProduct || !Subjects.empty()) &&
+         "a source-level match selection requires a subject");
+  if (!ForceProduct && Subjects.size() == 1 &&
+      !isa<PackExpansionExpr>(Subjects.front()))
+    return ActOnMatchSubject(Subjects.front(), HoldingVar);
+
+  SmallVector<Expr *, 4> RebuiltSubjects;
+  SmallVector<MaterializeTemporaryExpr *, 8> RebuiltTemporaries;
+  RebuiltSubjects.reserve(Subjects.size());
+  for (Expr *Subject : Subjects) {
+    if (Subject->getType()->isVoidType()) {
+      Diag(Subject->getExprLoc(), diag::err_match_multiple_subject_void);
+      return ExprError();
+    }
+
+    SmallVector<MaterializeTemporaryExpr *, 4> SubjectTemporaries;
+    bool ContainsDefaultArg = false;
+    ExprResult Rebuilt = rebuildMatchSubjectForLifetimeExtension(
+        *this, Subject, SubjectTemporaries, ContainsDefaultArg);
+    if (Rebuilt.isInvalid())
+      return ExprError();
+    RebuiltSubjects.push_back(Rebuilt.get());
+    llvm::append_range(RebuiltTemporaries, SubjectTemporaries);
+  }
+
+  auto *Product = CXXRecordDecl::Create(Context, TagDecl::TagKind::Struct,
+                                        CurContext, MatchLoc, MatchLoc,
+                                        /*Id=*/nullptr);
+  Product->setImplicit();
+  MatchSubjectProductDecls.insert(Product);
+  Product->startDefinition();
+  // References make product formation non-consuming for glvalues. Scalar
+  // prvalues are stored directly so a constant product can remain a constant
+  // expression. Decomposition restores each field's original value category
+  // below.
+  for (auto [Index, Subject] : llvm::enumerate(RebuiltSubjects)) {
+    QualType FieldType = Subject->getType();
+    bool StorePrValue = Subject->isPRValue() && !FieldType->isRecordType();
+    if (!Subject->refersToBitField() && !StorePrValue) {
+      FieldType = BuildReferenceType(FieldType, Subject->isLValue(), MatchLoc,
+                                     DeclarationName());
+      if (FieldType.isNull())
+        return ExprError();
+    }
+    IdentifierInfo *Name =
+        &Context.Idents.get(("__match_subject_" + llvm::Twine(Index)).str());
+    TypeSourceInfo *TInfo =
+        Context.getTrivialTypeSourceInfo(FieldType, MatchLoc);
+    auto *Field = FieldDecl::Create(
+        Context, Product, MatchLoc, MatchLoc, Name, FieldType, TInfo,
+        /*BitWidth=*/nullptr, /*Mutable=*/false, ICIS_NoInit);
+    Field->setImplicit();
+    Field->setAccess(AS_public);
+    Product->addDecl(Field);
+  }
+  Product->completeDefinition();
+  CurContext->addDecl(Product);
+
+  ExprResult Init = BuildInitList(MatchLoc, RebuiltSubjects, MatchLoc,
+                                  /*IsExplicit=*/true);
+  if (Init.isInvalid())
+    return ExprError();
+  QualType ProductType = Context.getCanonicalTagType(Product);
+  HoldingVar = BuildVarDecl(*this, MatchLoc, ProductType, Init.get());
+  if (HoldingVar->isInvalidDecl())
+    return ExprError();
+  if (!HoldingVar->getInit()->isValueDependent() &&
+      HoldingVar->getInit()->isCXX11ConstantExpr(Context))
+    HoldingVar->setConstexpr(true);
+
+  extendMatchSubjectTemporaries(*this, HoldingVar, RebuiltTemporaries);
+
+  ExprResult Ref =
+      BuildDeclRefExpr(HoldingVar, ProductType, VK_LValue, MatchLoc);
+  if (Ref.isInvalid())
+    return ExprError();
+  return ImplicitCastExpr::Create(Context, ProductType, CK_NoOp, Ref.get(),
+                                  nullptr, VK_XValue, FPOptionsOverride());
 }
 
 namespace {
@@ -1225,10 +1316,11 @@ ExprResult Sema::ActOnMatchSelectExpr(
     std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
     std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
   if (ExpandDeferredCases) {
-    auto *E = MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
-                                      IsConstexpr, IsStatement,
-                                      /*IsFullyCovered=*/false, OrigResultType,
-                                      RetTy, Preamble, SourceCases, {}, Braces);
+    auto *E = MatchSelectExpr::Create(
+        Context, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
+        isMatchSubjectProductType(Subject->getType()),
+        /*IsFullyCovered=*/false, OrigResultType, RetTy, Preamble, SourceCases,
+        {}, Braces);
     if (CurContext->isDependentContext())
       return E;
     return ExpandDeferredMatchSelectExpr(E);
@@ -1254,10 +1346,10 @@ ExprResult Sema::ActOnMatchSelectExpr(
       Subject, SourceCases,
       DiagnosticInstantiations.value_or(
           ArrayRef<MatchCaseInstantiation>(CaseInstantiations)));
-  return MatchSelectExpr::Create(Context, HoldingVar, Subject, MatchLoc,
-                                 IsConstexpr, IsStatement, IsFullyCovered,
-                                 OrigResultType, RetTy, Preamble, SourceCases,
-                                 CaseInstantiations, Braces);
+  return MatchSelectExpr::Create(
+      Context, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
+      isMatchSubjectProductType(Subject->getType()), IsFullyCovered,
+      OrigResultType, RetTy, Preamble, SourceCases, CaseInstantiations, Braces);
 }
 
 ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(
@@ -1716,6 +1808,17 @@ static Expr *asValueKind(Sema &S, Expr *E, ExprValueKind ValueKind) {
 static Expr *getDecompositionElement(Sema &S, Expr *Subject,
                                      BindingDecl *Binding) {
   ExprValueKind ValueKind = Subject->isLValue() ? VK_LValue : VK_XValue;
+  if (S.isMatchSubjectProductType(Subject->getType())) {
+    const auto *Member =
+        dyn_cast<MemberExpr>(Binding->getBinding()->IgnoreParenImpCasts());
+    const auto *Field =
+        Member ? dyn_cast<FieldDecl>(Member->getMemberDecl()) : nullptr;
+    assert(Field && "in-place match product must decompose into fields");
+    if (Field->getType()->isLValueReferenceType())
+      ValueKind = VK_LValue;
+    else
+      ValueKind = VK_XValue;
+  }
   if (VarDecl *HoldingVar = Binding->getHoldingVar())
     ValueKind = HoldingVar->getType()->isLValueReferenceType() ? VK_LValue
                                                                : VK_XValue;
@@ -2831,6 +2934,20 @@ bool Sema::CheckCompleteMatchPatternImpl(
     if (Decomposed->isInvalidDecl()) {
       return true;
     }
+    if (isMatchSubjectProductType(Subject->getType())) {
+      for (BindingDecl *Binding : Bindings) {
+        const auto *Member =
+            cast<MemberExpr>(Binding->getBinding()->IgnoreParenImpCasts());
+        auto *Field = cast<FieldDecl>(Member->getMemberDecl());
+        ExprResult DirectBinding = BuildFieldReferenceExpr(
+            Subject, /*IsArrow=*/false, Binding->getLocation(), CXXScopeSpec(),
+            Field, DeclAccessPair::make(Field, Field->getAccess()),
+            DeclarationNameInfo(Field->getDeclName(), Binding->getLocation()));
+        if (DirectBinding.isInvalid())
+          return true;
+        Binding->setBinding(Binding->getType(), DirectBinding.get());
+      }
+    }
     unsigned I = 0;
     for (MatchPattern *C : Patterns) {
       BindingDecl *BD = Bindings[I];
@@ -2850,9 +2967,26 @@ bool Sema::CheckCompleteMatchPatternImpl(
   return false;
 }
 
+static bool isMatchSubjectProductPattern(MatchPattern *Pattern) {
+  Pattern = Pattern->IgnoreParens();
+  if (isa<DecompositionPattern, WildcardPattern>(Pattern))
+    return true;
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
+    return isa<DecompositionDecl>(Declaration->getDeclaration());
+  if (auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::all_of(Or->alternatives(), isMatchSubjectProductPattern);
+  return false;
+}
+
 bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache) {
+  if (Subject && isMatchSubjectProductType(Subject->getType()) &&
+      !isMatchSubjectProductPattern(Pattern)) {
+    Diag(Pattern->getBeginLoc(), diag::err_match_multiple_subject_pattern)
+        << Pattern->getSourceRange();
+    return true;
+  }
   if (!State.CheckedBindingReferences) {
     State.CheckedBindingReferences = true;
     if (checkPatternBindingReferences(*this, Pattern))

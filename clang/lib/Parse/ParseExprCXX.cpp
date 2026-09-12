@@ -4256,17 +4256,28 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
 
   ExprResult Subject;
+  ExprVector Subjects;
   if (MissingSubjectParens) {
     Diag(Tok, diag::err_expected_lparen_after) << "match";
     Subject = ParseExpression();
     if (Subject.isInvalid() || Tok.isNot(tok::l_brace))
       return ExprError();
+    Subjects.push_back(Subject.get());
   } else {
     BalancedDelimiterTracker Parens(*this, tok::l_paren);
     if (Parens.expectAndConsume())
       return ExprError();
-    Subject = ParseExpression();
-    if (Subject.isInvalid() || Parens.consumeClose())
+    if (Tok.is(tok::r_paren)) {
+      Diag(Tok, diag::err_expected_expression);
+      Parens.consumeClose();
+      if (Tok.is(tok::l_brace)) {
+        BalancedDelimiterTracker Body(*this, tok::l_brace);
+        Body.consumeOpen();
+        Body.skipToEnd();
+      }
+      return ExprError();
+    }
+    if (ParseExpressionList(Subjects) || Parens.consumeClose())
       return ExprError();
   }
 
@@ -4312,9 +4323,15 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   SourceRange Braces;
   bool HasDeferredCases = false;
   VarDecl *HoldingVar = nullptr;
-  Subject = Actions.ActOnMatchSubject(Subject.get(), HoldingVar);
-  if (Subject.isInvalid())
+  Subject = Actions.ActOnMatchSubjects(Subjects, MatchLoc, HoldingVar);
+  if (Subject.isInvalid()) {
+    if (Subjects.size() != 1 && Tok.is(tok::l_brace)) {
+      BalancedDelimiterTracker Body(*this, tok::l_brace);
+      Body.consumeOpen();
+      Body.skipToEnd();
+    }
     return ExprError();
+  }
   if (ParseMatchBody(Subject.get(), OrigResultType, RetTy, Preamble, Cases,
                      Braces, HasDeferredCases, IsStatement,
                      /*DeferHandlerChecking=*/IsConstexpr))
