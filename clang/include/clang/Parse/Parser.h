@@ -4343,7 +4343,8 @@ private:
                            llvm::function_ref<void()> ExpressionStarts =
                                llvm::function_ref<void()>(),
                            bool FailImmediatelyOnInvalidExpr = false,
-                           bool ParsingExpansionStmtInitList = false);
+                           bool ParsingExpansionStmtInitList = false,
+                           bool AllowBracedInitList = true);
 
   /// ParseSimpleExpressionList - A simple comma-separated list of expressions,
   /// used for misc language extensions.

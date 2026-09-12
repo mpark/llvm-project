@@ -100,6 +100,16 @@ void test_match_structures(int x) {
   match (&x) { case { _ } => 0, case _ => 1; }
 }
 
+void test_match_subject_requires_expression(int x) {
+  match ({1, 2}) { // expected-error {{expected expression}}
+    case _ => 0;
+  }
+  match (x, {1, 2}) { // expected-error {{expected expression}}
+    case [_, _] => 0;
+  }
+  (void)match({1, 2}, case _); // expected-error {{expected expression}}
+}
+
 void test_match_statement(int x) {
   match (x) {
     case 0 => 0;
