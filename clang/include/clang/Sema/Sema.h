@@ -11250,6 +11250,7 @@ public:
   ActOnWildcardPattern(SourceLocation Loc, bool IsPackExpansion = false);
   ActionResult<MatchPattern *> ActOnExpressionPattern(Expr *SubExpr,
                                                       bool IsPackExpansion = false);
+  bool CheckConstantExpressionPatterns(MatchPattern *Pattern);
   ActionResult<MatchPattern *> ActOnParenPattern(SourceRange Parens,
                                                  MatchPattern *SubPattern);
   ActionResult<MatchPattern *>

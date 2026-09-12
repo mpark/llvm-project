@@ -394,6 +394,52 @@ int attributed(int value) {
   };
 }
 
+int selection_value_patterns_are_constant(int subject, int value) { // expected-note {{declared here}}
+  return match (subject) {
+    case value => 1; // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+    case _ => 0;
+  };
+}
+
+int side_effecting_selection_value_pattern(int subject, int value) { // expected-note {{declared here}}
+  return match (subject) {
+    case ++value => 1; // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+    case _ => 0;
+  };
+}
+
+struct ConstantPatternPair {
+  int first;
+  int second;
+};
+
+int nested_selection_value_patterns_are_constant(ConstantPatternPair subject,
+                                                  int value) { // expected-note {{declared here}}
+  return match (subject) {
+    case [value, _] => 1; // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+    case _ => 0;
+  };
+}
+
+bool single_pattern_tests_require_constant_values(int subject,
+                                                  int value) { // expected-note 2 {{declared here}}
+  if (case value = subject) // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+    return true;
+  return match(subject, case value); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+}
+
+template<class T>
+int dependent_selection_value_pattern(int subject, T value) { // expected-note {{declared here}}
+  return match (subject) {
+    case value => 1; // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
+    case _ => 0;
+  };
+}
+
+int instantiate_dependent_selection_value_pattern() {
+  return dependent_selection_value_pattern(1, 1); // expected-note {{in instantiation of function template specialization}}
+}
+
 int attributed_decomposition(Pair pair) {
   return match (pair) {
     case [[maybe_unused]] auto [first, second] => first + second;

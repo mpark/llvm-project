@@ -887,6 +887,32 @@ static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
   return false;
 }
 
+static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
+                                            bool Diagnose) {
+  if (Pattern->isTypeDependent() || Pattern->isValueDependent())
+    return Pattern;
+
+  ExprResult Converted = S.DefaultFunctionArrayLvalueConversion(Pattern);
+  if (Converted.isInvalid())
+    return ExprError();
+
+  Pattern = Converted.get();
+  SmallVector<PartialDiagnosticAt, 8> Notes;
+  Expr::EvalResult Result;
+  Result.Diag = &Notes;
+  if (!Pattern->EvaluateAsConstantExpr(Result, S.Context,
+                                       Expr::ConstantExprKind::Normal)) {
+    if (Diagnose) {
+      S.Diag(Pattern->getBeginLoc(), diag::err_expr_not_cce)
+          << CCEKind::PatternExpr << Pattern->getSourceRange();
+      for (const PartialDiagnosticAt &Note : Notes)
+        S.Diag(Note.first, Note.second);
+    }
+    return ExprError();
+  }
+  return ConstantExpr::Create(S.Context, Pattern, Result.Val);
+}
+
 static ExprResult buildOpenAlternativeTraitsTryCastCall(
     Sema &S, SourceLocation Loc, const AlternativeTraitsInfo &Info,
     QualType SubjectType, QualType RequestedType, Expr *Subject) {
@@ -1384,9 +1410,23 @@ Sema::ActOnWildcardPattern(SourceLocation Loc, bool IsPackExpansion) {
   return new (Context) WildcardPattern(Loc, IsPackExpansion);
 }
 
+static bool checkPatternConstantExpression(Sema &S, Expr *E) {
+  return buildConstantPatternValue(S, E, /*Diagnose=*/true).isInvalid();
+}
+
 ActionResult<MatchPattern *>
 Sema::ActOnExpressionPattern(Expr *E, bool IsPackExpansion) {
   return new (Context) ExpressionPattern(E, IsPackExpansion);
+}
+
+bool Sema::CheckConstantExpressionPatterns(MatchPattern *Pattern) {
+  if (auto *Expression = dyn_cast<ExpressionPattern>(Pattern))
+    return checkPatternConstantExpression(*this, Expression->getExpr());
+
+  bool Invalid = false;
+  for (MatchPattern *Child : Pattern->children())
+    Invalid |= CheckConstantExpressionPatterns(Child);
+  return Invalid;
 }
 
 ActionResult<MatchPattern *> Sema::ActOnParenPattern(SourceRange Parens,
@@ -2484,11 +2524,14 @@ bool Sema::CheckCompleteMatchPatternImpl(
     if (!Subject)
       return false;
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
-    ExprResult Cond =
-        ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject, P->getExpr());
-    if (Cond.isInvalid()) {
+    ExprResult ConstantPattern =
+        buildConstantPatternValue(*this, P->getExpr(), /*Diagnose=*/false);
+    Expr *PatternValue =
+        ConstantPattern.isUsable() ? ConstantPattern.get() : P->getExpr();
+    ExprResult Cond = ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject,
+                                 PatternValue);
+    if (Cond.isInvalid())
       return true;
-    }
     MatchPatternInfo &PatternInfo = State.get(P);
     PatternInfo.Condition = Cond.get();
     if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo))
