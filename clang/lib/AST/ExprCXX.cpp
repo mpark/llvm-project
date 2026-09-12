@@ -2301,7 +2301,8 @@ MatchSelectExpr *MatchSelectExpr::Create(
                       Preamble, Cases, Instantiations, Braces);
 }
 
-ArrayRef<Expr *> MatchSelectExpr::getSubjectProductElements() const {
+static ArrayRef<Expr *> getMatchSubjectProductElements(bool HasSubjectProduct,
+                                                       VarDecl *HoldingVar) {
   if (!HasSubjectProduct || !HoldingVar || !HoldingVar->hasInit())
     return {};
 
@@ -2323,6 +2324,14 @@ ArrayRef<Expr *> MatchSelectExpr::getSubjectProductElements() const {
   if (InitListExpr *Syntactic = List->getSyntacticForm())
     List = Syntactic;
   return List->inits();
+}
+
+ArrayRef<Expr *> MatchTestExpr::getSubjectProductElements() const {
+  return getMatchSubjectProductElements(HasSubjectProduct, HoldingVar);
+}
+
+ArrayRef<Expr *> MatchSelectExpr::getSubjectProductElements() const {
+  return getMatchSubjectProductElements(HasSubjectProduct, HoldingVar);
 }
 
 MatchSelectExpr *MatchSelectExpr::CreateEmpty(const ASTContext &Ctx,

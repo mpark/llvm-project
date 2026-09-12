@@ -135,7 +135,7 @@ int guard_init_statement(int value) {
 // CHECK-NEXT:    ret void
 //
 void test_match_if_without_bindings(bool value, int &result) {
-  if (value match case true)
+  if (match(value, case true))
     result = 1;
   else
     result = 2;

@@ -32,7 +32,7 @@ int declaration_lifetime_in_if(int value) {
 int declaration_lifetime_after_failed_guard() {
   int alive = 0;
   Tracked subject(&alive, 0);
-  if (subject match case auto copy if (false))
+  if (match(subject, case auto copy if (false)))
     return -1;
   return alive;
 }

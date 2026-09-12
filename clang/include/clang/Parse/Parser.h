@@ -4530,11 +4530,11 @@ private:
   bool isPrefixMatchSelection(bool StatementContext,
                               SourceLocation *MissingCasePatternLoc = nullptr,
                               bool *MissingSubjectParens = nullptr);
+  bool isPrefixMatchTestExpression();
   bool hasPossibleOrdinaryMatchCall();
   ExprResult ParseMatchSelection(bool IsStatement,
                                  bool MissingSubjectParens = false);
-  ExprResult ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
-                                     InjectedDeclSet *InjectedDecls);
+  ExprResult ParseMatchTestExpression();
   Sema::ConditionResult
   ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
                      Sema::ConditionKind CK, bool MissingOK,
