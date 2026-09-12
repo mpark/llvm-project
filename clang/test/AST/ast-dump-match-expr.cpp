@@ -3,12 +3,12 @@
 // RUN:   | FileCheck -strict-whitespace %s
 
 void test_match_dump(int x, int *p) {
-  x match case _;
-  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:16> 'bool'
-  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
-  // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
-  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
-  // CHECK-NEXT: `-WildcardPattern 0x{{[^ ]*}} <col:16>
+  match(x, case _);
+  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:18> 'bool'
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:9> col:9 implicit used 'int &' cinit
+  // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
+  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue Var 0x{{[^ ]*}} <col:9> 'int &'
+  // CHECK-NEXT: `-WildcardPattern 0x{{[^ ]*}} <col:17>
 
   match (x) { case _ if (true) => 0; } // expected-error {{match expression is not exhaustive; example of a missing case: 0}}
   // CHECK:      MatchSelectExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:38> 'void' statement
@@ -64,12 +64,12 @@ void test_case_condition_dump(int x) {
 }
 
 void test_type_pattern_dump(int x) {
-  x match case int;
-  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:16> 'bool'
-  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:3> col:3 implicit used 'int &' cinit
-  // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
-  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:3> 'int' lvalue Var 0x{{[^ ]*}} <col:3> 'int &'
-  // CHECK-NEXT: `-TypePattern 0x{{[^ ]*}} <col:16>
+  match(x, case int);
+  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:20> 'bool'
+  // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:9> col:9 implicit used 'int &' cinit
+  // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
+  // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue Var 0x{{[^ ]*}} <col:9> 'int &'
+  // CHECK-NEXT: `-TypePattern 0x{{[^ ]*}} <col:17>
   // CHECK-NEXT:   `-BuiltinType 0x{{[^ ]*}} 'int'
 }
 

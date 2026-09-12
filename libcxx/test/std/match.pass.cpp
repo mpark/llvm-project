@@ -28,53 +28,53 @@ constexpr int match_static_pointer(T* value) {
 }
 
 void test_match_test_expr() {
-  check(0 match case _);
-  check(0 match case 0);
-  check(!(0 match case 1));
+  check(match(0, case _));
+  check(match(0, case 0));
+  check(!(match(0, case 1)));
 
   int x = 0;
-  check(x match case _);
-  check(x match case 0);
+  check(match(x, case _));
+  check(match(x, case 0));
 
   int y = 1;
-  check(!(0 match case y));
-  check(!(x match case y));
+  check(!(match(0, case y)));
+  check(!(match(x, case y)));
 
-  check([]() { int* p = nullptr; return p match case _; }());
+  check([]() { int* p = nullptr; return match(p, case _); }());
 
-  check([]() { int x = 0; return x match case 0; }());
-  check(![]() { int y = 1; return 0 match case y; }());
-  check([]() { int x = 0, y = 0; return x match case y; }());
-  check(![]() { int x = 0, y = 1; return x match case y; }());
+  check([]() { int x = 0; return match(x, case 0); }());
+  check(![]() { int y = 1; return match(0, case y); }());
+  check([]() { int x = 0, y = 0; return match(x, case y); }());
+  check(![]() { int x = 0, y = 1; return match(x, case y); }());
 
-  check([]() { int x = 0; return &x match case { _ }; }());
-  check([]() { int x = 0; return &x match case { 0 }; }());
-  check(![]() { int x = 0; return &x match case { 1 }; }());
-  check([]() { int x = 0, y = 0; return &x match case { y }; }());
-  check(![]() { int x = 0, y = 1; return &x match case { y }; }());
-  check(![]() { int* p = nullptr; return p match case { _ }; }());
-  check(![]() { int* p = nullptr; return p match case { 0 }; }());
+  check([]() { int x = 0; return match(&x, case { _ }); }());
+  check([]() { int x = 0; return match(&x, case { 0 }); }());
+  check(![]() { int x = 0; return match(&x, case { 1 }); }());
+  check([]() { int x = 0, y = 0; return match(&x, case { y }); }());
+  check(![]() { int x = 0, y = 1; return match(&x, case { y }); }());
+  check(![]() { int* p = nullptr; return match(p, case { _ }); }());
+  check(![]() { int* p = nullptr; return match(p, case { 0 }); }());
 
-  check([]() { int x = 0, *p = &x; return &p match case { { _ } }; }());
-  check([]() { int x = 0, *p = &x; return &p match case { { 0 } }; }());
-  check(![]() { int x = 0, *p = &x; return &p match case { { 1 } }; }());
+  check([]() { int x = 0, *p = &x; return match(&p, case { { _ } }); }());
+  check([]() { int x = 0, *p = &x; return match(&p, case { { 0 } }); }());
+  check(![]() { int x = 0, *p = &x; return match(&p, case { { 1 } }); }());
 
-  check([]() { int x = 0, *p = &x; return &p match case { _ }; }());
-  check([]() { int x = 0, *p = &x; return &p match case { { 0 } }; }());
-  check(![]() { int x = 0, *p = &x; return &p match case { { 1 } }; }());
-  check(![]() { int** pp = nullptr; return pp match case { _ }; }());
-  check(![]() { int** pp = nullptr; return pp match case { { _ } }; }());
-  check(![]() { int** pp = nullptr; return pp match case { { 0 } }; }());
+  check([]() { int x = 0, *p = &x; return match(&p, case { _ }); }());
+  check([]() { int x = 0, *p = &x; return match(&p, case { { 0 } }); }());
+  check(![]() { int x = 0, *p = &x; return match(&p, case { { 1 } }); }());
+  check(![]() { int** pp = nullptr; return match(pp, case { _ }); }());
+  check(![]() { int** pp = nullptr; return match(pp, case { { _ } }); }());
+  check(![]() { int** pp = nullptr; return match(pp, case { { 0 } }); }());
 
   check(match_static_pointer(static_cast<int*>(nullptr)) == 11);
   check(match_static_pointer(static_cast<double*>(nullptr)) == 21);
   check(match_static_pointer(static_cast<char*>(nullptr)) == 30);
 
-  check([]() { return 0 match case auto&& _; }());
-  check([]() { return 0 match case [[maybe_unused]] auto&& x; }());
+  check([]() { return match(0, case auto&& _); }());
+  check([]() { return match(0, case [[maybe_unused]] auto&& x); }());
   check([]() {
     int x = 0;
-    return &x match case { [[maybe_unused]] auto&& bound };
+    return match(&x, case { [[maybe_unused]] auto&& bound });
   }());
 }
 
@@ -332,7 +332,7 @@ void test_tuple_like_decomposition_pattern() {
 }
 
 bool match_test_with_guard(const int (&xs)[2]) {
-  return xs match case auto&& [x, y] if (x == y);
+  return match(xs, case auto&& [x, y] if (x == y));
 }
 
 void test_match_test_with_guard() {
@@ -410,8 +410,7 @@ bool deferred_match_condition_lifetime_extended(int n) {
 
 bool deferred_match_condition_lifetime_not_extended(int n) {
   bool flag = false;
-  if ((DeferredLifetime(std::in_place_index<0>, &flag, n) match
-       case { [[maybe_unused]] auto&& value })) {
+  if ((match(DeferredLifetime(std::in_place_index<0>, &flag, n), case { [[maybe_unused]] auto&& value }))) {
     return flag;
   }
   return flag;
@@ -482,7 +481,7 @@ void test_match_default_argument_lifetime_extended() {
 
 bool match_in_if_condition_not_lifetime_extended(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match case [{ _ }, 101])) {
+  if ((match(Lifetime(&flag, n), case [{ _ }, 101]))) {
     return flag;
   } else if (n == 202) {
     return flag;
