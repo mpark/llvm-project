@@ -6,5 +6,5 @@ void check(bool b);
 // CHECK-LABEL: _Z5basicii
 void basic(int a, int b) {
   // CHECK: call void @_Z5checkb(i1 {{.*}} true)
-  check(0 match case _);
+  check(match(0, case _));
 }

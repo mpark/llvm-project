@@ -3284,13 +3284,20 @@ void StmtPrinter::PrintMatchHandler(Stmt *Handler) {
 }
 
 void StmtPrinter::VisitMatchTestExpr(MatchTestExpr *Node) {
-  Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
-                      ? Node->getHoldingVar()->getInit()
-                      : Node->getSubject();
-  PrintExpr(Subject);
-  OS << " match case ";
+  OS << "match(";
+  if (Node->hasSubjectProduct()) {
+    llvm::interleaveComma(Node->getSubjectProductElements(), OS,
+                          [&](Expr *Subject) { PrintExpr(Subject); });
+  } else {
+    Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
+                        ? Node->getHoldingVar()->getInit()
+                        : Node->getSubject();
+    PrintExpr(Subject);
+  }
+  OS << ", case ";
   PrintMatchPattern(Node->getPattern());
   PrintMatchGuard(Node->getGuard());
+  OS << ")";
 }
 
 void StmtPrinter::VisitCaseConditionExpr(CaseConditionExpr *Node) {
