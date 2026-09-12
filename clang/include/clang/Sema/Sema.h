@@ -11311,6 +11311,7 @@ public:
 private:
   SourceLocation PotentialMatchCallLoc;
   SourceLocation PotentialMatchResultTypeLoc;
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> MatchSubjectProductDecls;
 
 public:
   class MatchResultTypeDiagnosticRAII {
@@ -11344,6 +11345,10 @@ public:
   }
 
   ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
+  ExprResult ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
+                                SourceLocation MatchLoc, VarDecl *&HoldingVar,
+                                bool ForceProduct = false);
+  bool isMatchSubjectProductType(QualType Type) const;
   bool CheckMatchSubjectBindingReferences(Expr *Subject,
                                           MatchPattern *Pattern);
   struct MatchPatternState;

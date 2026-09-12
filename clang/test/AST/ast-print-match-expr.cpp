@@ -330,3 +330,14 @@ int parenthesized_pattern(int value) {
 // CHECK-NEXT: {{^        }}case ((0 || 1)) => 1;
 // CHECK-NEXT: {{^        }}case (_) => 0;
 // CHECK-NEXT: {{^    }}};
+
+int multiple_subjects(int first, long second) {
+  return match (first, static_cast<long&&>(second)) {
+    case [int x, long y] => x + y;
+  };
+}
+
+// CHECK-LABEL: int multiple_subjects(int first, long second) {
+// CHECK-NEXT: {{^    }}return match (first, static_cast<long &&>(second)) {
+// CHECK-NEXT: {{^        }}case [int x, long y] => x + y;
+// CHECK-NEXT: {{^    }}};

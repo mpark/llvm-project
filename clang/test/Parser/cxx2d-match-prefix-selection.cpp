@@ -24,6 +24,35 @@ void statement(int value) {
     match (value) { case _ => 1; }
 }
 
+constexpr int multiple_subjects(int first, int second) {
+  return match (first, second) {
+    case [0, int value] => value;
+    case [int value, 0] => value;
+    case _ => -1;
+  };
+}
+
+constexpr int comma_expression_is_one_subject(int first, int second) {
+  return match ((first, second)) {
+    case int value => value;
+  };
+}
+
+static_assert(multiple_subjects(0, 42) == 42);
+static_assert(comma_expression_is_one_subject(1, 2) == 2);
+
+void missing_subject() {
+  match () { // expected-error {{expected expression}}
+    case [] =>;
+  }
+}
+
+void invalid_multiple_subject(int value) {
+  match (value, static_cast<void>(value)) { // expected-error {{void expression cannot be an element of a multiple-subject match}}
+    case _ =>;
+  }
+}
+
 void consume(int);
 
 void statement_handlers(int value) {
