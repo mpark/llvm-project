@@ -77,40 +77,27 @@ void test_let_is_not_keyword() {
   }
 }
 
-void test_match_no_rhs(int i) {
-  42 match; // expected-error {{expected case}}
-  42 match constexpr; // expected-error {{expected case}}
-  42 match -> ; // expected-error {{expected case}}
-  42 match->i; // expected-error {{expected case}}
-  42 match -> void; // expected-error {{expected case}}
-}
-
-void test_case_is_required(int x) {
-  x match _; // expected-error {{expected case}}
-  x match { _ => 0; case _ => 0; }; // expected-error {{expected case}}
-}
-
 void test_match_structures(int x) {
-  x match case _;
-  &x match case { _ };
-  x match case 0;
+  match(x, case _);
+  match(&x, case { _ });
+  match(x, case 0);
   match (x) { case _ => 0; }
-  match (x) { case _ if (true) => 0; case _ => 0; }
+  match (x) { case _ if (true) => 0, case _ => 0; }
   match constexpr (x) { case _ => 0; }
-  match constexpr (x) { case _ if (true) => 0; case _ => 0; }
+  match constexpr (x) { case _ if (true) => 0, case _ => 0; }
   (void)match (x) -> int { case _ => 0; };
   (void)match (x) -> auto { case _ => 0; };
   (void)match (x) -> decltype(auto) { case _ => 0; };
-  (void)match (x) -> int { case _ if (true) => 0; case _ => 0; };
-  (void)match (x) -> auto { case _ if (true) => 0; case _ => 0; };
-  (void)match (x) -> decltype(auto) { case _ if (true) => 0; case _ => 0; };
+  (void)match (x) -> int { case _ if (true) => 0, case _ => 0; };
+  (void)match (x) -> auto { case _ if (true) => 0, case _ => 0; };
+  (void)match (x) -> decltype(auto) { case _ if (true) => 0, case _ => 0; };
   (void)match constexpr (x) -> int { case _ => 0; };
   (void)match constexpr (x) -> auto { case _ => 0; };
   (void)match constexpr (x) -> decltype(auto) { case _ => 0; };
-  (void)match constexpr (x) -> int { case _ if (true) => 0; case _ => 0; };
-  (void)match constexpr (x) -> auto { case _ if (true) => 0; case _ => 0; };
-  (void)match constexpr (x) -> decltype(auto) { case _ if (true) => 0; case _ => 0; };
-  match (&x) { case { _ } => 0; case _ => 1; }
+  (void)match constexpr (x) -> int { case _ if (true) => 0, case _ => 0; };
+  (void)match constexpr (x) -> auto { case _ if (true) => 0, case _ => 0; };
+  (void)match constexpr (x) -> decltype(auto) { case _ if (true) => 0, case _ => 0; };
+  match (&x) { case { _ } => 0, case _ => 1; }
 }
 
 void test_match_statement(int x) {
@@ -221,7 +208,7 @@ int test_invalid_decltype_result_without_body(int x) {
 
 static_assert(test_prefix_match_expression(0) == 1);
 static_assert(test_prefix_match_expression(3) == 2);
-static_assert((match (0) { case 0 => true; case _ => false; }));
+static_assert((match (0) { case 0 => true, case _ => false; }));
 
 namespace prefix_match_disambiguation {
 struct match {
@@ -253,9 +240,35 @@ int expression(int x) {
 
 namespace prefix_match_call_disambiguation {
 int match(int);
+int match(int, int);
 
 int call() { return match(1); }
+int call_with_two_arguments() { return match(1, 2); }
 int call_arithmetic() { return match(1) + 1; }
+
+template <class F>
+int match(F function) {
+  return function();
+}
+
+int call_with_nested_semicolon() {
+  return match([] {
+    int value = 1;
+    return value;
+  });
+}
+
+int call_with_nested_comma() {
+  return match([](int first, int second) { return first + second; }(1, 2));
+}
+
+int call_with_statement_expression() {
+  return match(({ int value = 1; value; }));
+}
+
+bool test_with_statement_expression() {
+  return match(({ int value = 1; value; }), case 1);
+}
 
 struct CallableResult {
   int operator()() const;
@@ -323,10 +336,10 @@ void statement(int x) {
 
 namespace prefix_match_missing_case_disambiguation {
 struct match {
-  match(int);
+  match (int);
 
   template<class T>
-  match(T);
+  match (T);
 };
 
 struct Pair {
@@ -370,27 +383,26 @@ int test_declaration_pattern_before_comma(PatternPair pair) {
 
 void test_match_precedence(int* p) {
   /* MatchTestExpr */ {
-    // unary is tighter than match
-    *p match case 0;
-    *p match case 0 + 1;
-    // match binds tighter than bin ops.
-    4 + 2 match case 0;
-    4 * 2 match case 0;
-    true == 2 match case 0;
-    4 * (2) match case 0;
-    2 match case 0 + 1;
-    2 match case 0 * 1;
-    2 match case 0 == 1;
-    (2) match case 0 * 1;
-    // except .* and ->*
+    // The subject and pattern delimiters contain complete expressions.
+    match(*p, case 0);
+    match(*p, case 0 + 1);
+    4 + match(2, case 0);
+    4 * match(2, case 0);
+    true == match(2, case 0);
+    4 * match((2), case 0);
+    match(2, case 0 + 1);
+    match(2, case 0 * 1);
+    match(2, case 0 == 1);
+    match((2), case 0 * 1);
     struct S { int i; } s;
-    s.*&S::i match case 0;
-    &s->*&S::i match case 0;
-    2 match case s.*&S::i;
-    2 match case &s->*&S::i;
+    match(s.*&S::i, case 0);
+    match(&s->*&S::i, case 0);
+    match(2, case s.*&S::i);
+    match(2, case &s->*&S::i);
     // unary parenthesized
-    !(p match case nullptr);
-    !((p) match case nullptr);
+    !(match(p, case nullptr));
+    !(match((p), case nullptr));
+    match(2, case 0 || 1) || true;
   }
   /* MatchSelectExpr */ {
     // unary is tighter than match
@@ -418,20 +430,20 @@ void test_match_precedence(int* p) {
 }
 
 void test_wildcard_pattern(int x) {
-  x match case _;
-  bool b = x match case _;
+  match(x, case _);
+  bool b = match(x, case _);
   match (x) { case _ => 0; }
 }
 
 void test_expression_pattern(int x, int y) {
-  x match case 0;
-  x match case (1 + 2);
-  x match case y;
+  match(x, case 0);
+  match(x, case (1 + 2));
+  match(x, case y);
   int _ = 0;
-  x match case +_;
-  x match case -_;
-  x match case y + 1;
-  x match case auto(_ + 1);
+  match(x, case +_);
+  match(x, case -_);
+  match(x, case y + 1);
+  match(x, case auto(_ + 1));
   match (x) {
     case y + 1 => 0;
     case auto(_ + 1) => 0;
@@ -439,23 +451,23 @@ void test_expression_pattern(int x, int y) {
     case auto([]<class T>(T value) { return value; }(3)) => 0;
     case _ => 0;
   }
-  x match case auto((int)y);
+  match(x, case auto((int)y));
   using Int = int;
-  x match case auto((Int)y);
-  x match case auto((Int)(y));
-  x match case auto(((Int)(y)));
+  match(x, case auto((Int)y));
+  match(x, case auto((Int)(y)));
+  match(x, case auto(((Int)(y))));
   constexpr auto id = [](auto &&x) -> auto && {
     return static_cast<decltype(x)>(x);
   };
   {
     int let = 42;
-    x match case id(let);
-    match (x) { case id(let) => 0; case _ => 0; }
+    match(x, case id(let));
+    match (x) { case id(let) => 0, case _ => 0; }
   }
   {
     constexpr int let[2] = {1, 2};
     constexpr int idx = 0;
-    match (x) { case id(let[idx]) => 0; case _ => 0; }
+    match (x) { case id(let[idx]) => 0, case _ => 0; }
   }
   match (x) {
     case y++ => 0;
@@ -467,11 +479,11 @@ void test_expression_pattern(int x, int y) {
 }
 
 void test_declaration_pattern(int i) {
-  i match case auto&& x;
+  match(i, case auto&& x);
   x; // expected-error {{use of undeclared identifier 'x'}}
   match (i) { case auto&& x => 0; }
   match (i) { case auto&& x => x; }
-  match (i) { case auto&& [x] => 0; case _ => 0; } // expected-error {{cannot bind non-class, non-array type 'int'}}
+  match (i) { case auto&& [x] => 0, case _ => 0; } // expected-error {{cannot bind non-class, non-array type 'int'}}
   int i1[1] = {0};
   match (i1) { case auto&& [x] => 0; }
   match (i1) { case auto&& [x] => x; }
@@ -486,7 +498,7 @@ template <class T>
 concept Integral = __is_integral(T);
 
 void test_constrained_declaration_pattern(int i) {
-  i match case Integral auto value;
+  match(i, case Integral auto value);
   match (i) { case Integral auto value => value; }
   match (i) { case Integral auto => 0; }
   match (i) { case Integral auto Integral => Integral; }
@@ -495,11 +507,11 @@ void test_constrained_declaration_pattern(int i) {
 constexpr int declaration_pattern_constant = 1;
 
 void test_declaration_expression_disambiguation(int value) {
-  match (value) { case int(declaration_pattern_constant) => 0; case _ => 0; }
-  match (value) { case auto(declaration_pattern_constant) => 0; case _ => 0; }
-  match (value) { case (int(declaration_pattern_constant)) => 0; case _ => 0; }
-  match (value) { case int() => 0; case _ => 0; }
-  match (value) { case (int()) => 0; case _ => 0; }
+  match (value) { case int(declaration_pattern_constant) => 0, case _ => 0; }
+  match (value) { case auto(declaration_pattern_constant) => 0, case _ => 0; }
+  match (value) { case (int(declaration_pattern_constant)) => 0, case _ => 0; }
+  match (value) { case int() => 0, case _ => 0; }
+  match (value) { case (int()) => 0, case _ => 0; }
   match (value) { case (int named) => named; }
 
   struct Owner { int member; };
@@ -536,15 +548,15 @@ void test_decomposition_pattern() {
   Empty empty;
   match (empty) { case [] => 0; }
   int nested_single[1][1] = { { 1 } };
-  nested_single match case [[_]];
+  match(nested_single, case [[_]]);
   int xs[2] = { 1, 2 };
-  xs match case [_, _];
-  xs match case [_, 3];
-  xs match case [1, 2];
-  xs match case [...];
+  match(xs, case [_, _]);
+  match(xs, case [_, 3]);
+  match(xs, case [1, 2]);
+  match(xs, case [...]);
   int xss[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
-  xss match case [[_, _, _], [_, _, _]];
-  xss match case [[1, _, _], [4, 5, _]];
+  match(xss, case [[_, _, _], [_, _, _]]);
+  match(xss, case [[1, _, _], [4, 5, _]]);
 }
 
 void test_attributed_declaration_pattern(int value) {
@@ -567,27 +579,27 @@ void test_attributed_declaration_pattern(int value) {
 void test_invalid_decomposition_pattern() {
   struct S { int a; int b; };
   S s{1, 2};
-  match (s) { case [0,] => 0; case _ => 0; } // expected-error {{expected expression}}
-  match (s) { case [0,,] => 0; case _ => 0; } // expected-error {{expected expression}}
-  match (s) { case [0 0] => 0; case _ => 0; } // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
-  match (s) { case [,] => 0; case _ => 0; } // expected-error {{expected expression}}
-  match (s) { case [int first, ..._, int last] => 0; } // expected-error {{expected ']'}} expected-note {{to match this '['}}
-  match (s) { case [int first, ...42, int last] => 0; } // expected-error {{expected ']'}} expected-note {{to match this '['}}
-  match (s) { case [int first, ...[_, _], int last] => 0; } // expected-error {{expected ']'}} expected-note {{to match this '['}}
-  match (s) { case [int first, (...), int last] => 0; } // expected-error {{expected expression}}
-  match (s) { case [int first, (auto&& ...middle), int last] => 0; } // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match (s) { case [0,] => 0, case _ => 0; } // expected-error {{expected expression}}
+  match (s) { case [0,,] => 0, case _ => 0; } // expected-error {{expected expression}}
+  match (s) { case [0 0] => 0, case _ => 0; } // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
+  match (s) { case [,] => 0, case _ => 0; } // expected-error {{expected expression}}
+  match(s, case [int first, ..._, int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  match(s, case [int first, ...42, int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  match(s, case [int first, ...[_, _], int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
+  match(s, case [int first, (...), int last]); // expected-error {{expected expression}}
+  match(s, case [int first, (auto&& ...middle), int last]); // expected-error {{expected ')'}} expected-note {{to match this '('}}
 }
 
 void test_parenthesized_pattern(int a, int b) {
   int _ = 0;
-  a match case auto(_ + 1);
-  a match case auto((a) + b);
-  a match case auto(a = b);
-  a match case auto(a ? b : 0);
-  a match case auto((a, b));
-  a match case auto([] { return 1; }());
-  a match case auto(({ int value = 1; value; }));
-  a match case ([[maybe_unused]] int value);
+  match(a, case auto(_ + 1));
+  match(a, case auto((a) + b));
+  match(a, case auto(a = b));
+  match(a, case auto(a ? b : 0));
+  match(a, case auto((a, b)));
+  match(a, case auto([] { return 1; }()));
+  match(a, case auto(({ int value = 1; value; })));
+  match(a, case ([[maybe_unused]] int value));
 
   match (a) {
     case (a + b) => 0;
@@ -704,13 +716,13 @@ void test_trailing_return_type(int x) {
 }
 
 bool test_match_test_with_guard(const int (&xs)[2]) {
-  bool result = xs match case auto&& [x, y] if (x == y);
+  bool result = match(xs, case auto&& [x, y] if (x == y));
   bool init_result =
-      xs match case auto&& [x, y] if (int sum = x + y; sum == 0);
+      match(xs, case auto&& [x, y] if (int sum = x + y; sum == 0));
   x; // expected-error {{use of undeclared identifier 'x'}}
   y; // expected-error {{use of undeclared identifier 'y'}}
   sum; // expected-error {{use of undeclared identifier 'sum'}}
-  if (xs match case auto&& [x, y] if (int sum = x + y; sum == 0)) {
+  if (match(xs, case auto&& [x, y] if (int sum = x + y; sum == 0))) {
     x; // expected-error {{use of undeclared identifier 'x'}}
     y; // expected-error {{use of undeclared identifier 'y'}}
     sum; // expected-error {{use of undeclared identifier 'sum'}}
@@ -735,87 +747,87 @@ int test_match_select_with_guards(const int (&p)[2]) {
 }
 
 void test_match_in_condition(const int *p, const int (*q)[2]) {
-  p match case { auto&& v };
+  match(p, case { auto&& v });
   v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case { auto&& v }) v; // expected-error {{use of undeclared identifier 'v'}}
+  if (match(p, case { auto&& v })) v; // expected-error {{use of undeclared identifier 'v'}}
   else v; // expected-error {{use of undeclared identifier 'v'}}
-  if (p match case { auto&& v })
+  if (match(p, case { auto&& v }))
     int v;
   else
     int v;
-  if (p match case { auto&& v }) {
+  if (match(p, case { auto&& v })) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; p match case { auto&& v }) {
+  if (int i = 0; match(p, case { auto&& v })) {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (p match case { auto&& v }) {
+  if (match(p, case { auto&& v })) {
     int v;
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case { auto&& v }) {
+      match(p, case { auto&& v })) {
     int i; // expected-error {{redefinition of 'i'}}
     int v;
   } else {
     int v;
   }
   if (int i = 0; // expected-note {{previous definition is here}}
-      p match case { auto&& v }) {
+      match(p, case { auto&& v })) {
     int v;
   } else {
     int i; // expected-error {{redefinition of 'i'}}
     int v;
   }
-  if ((p match case { auto&& v })) {
+  if ((match(p, case { auto&& v }))) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (int i = 0; (p match case { auto&& v })) {
+  if (int i = 0; (match(p, case { auto&& v }))) {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     i;
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (!(p match case { auto&& v })) {
+  if (!(match(p, case { auto&& v }))) {
     v; // expected-error {{use of undeclared identifier 'v'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
   }
-  if (q match case { [0, auto&& v] } match case auto&& w) {
-    v; // expected-error {{use of undeclared identifier 'v'}}
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  } else {
-    v; // expected-error {{use of undeclared identifier 'v'}}
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  }
-  if (p match case { 0 } match case auto&& w) {
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  } else {
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  }
-  if (p match case { (0 match case auto&& w) }) {
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  } else {
-    w; // expected-error {{use of undeclared identifier 'w'}}
-  }
-  if (q match case { [auto&& v, auto&& w] }) {
+  if (match(match(q, case { [0, auto&& v] }), case auto&& w)) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (q match case { [auto&& v, auto&& w] } + 1) {
+  if (match(match(p, case { 0 }), case auto&& w)) {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  } else {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (match(p, case { (match(0, case auto&& w)) })) {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  } else {
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (match(q, case { [auto&& v, auto&& w] })) {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  } else {
+    v; // expected-error {{use of undeclared identifier 'v'}}
+    w; // expected-error {{use of undeclared identifier 'w'}}
+  }
+  if (match(q, case { [auto&& v, auto&& w] }) + 1) {
     v; // expected-error {{use of undeclared identifier 'v'}}
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
@@ -823,29 +835,29 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
   auto next = []() -> int* { return nullptr; };
-  for (int i = 0; next() match case { auto&& elem }; ++i)
+  for (int i = 0; match(next(), case { auto&& elem }); ++i)
     elem; // expected-error {{use of undeclared identifier 'elem'}}
-  for (int i = 0; next() match case { auto&& elem }; ++i)
+  for (int i = 0; match(next(), case { auto&& elem }); ++i)
     int elem;
-  for (int i = 0; next() match case { auto&& elem }; ++i) {
+  for (int i = 0; match(next(), case { auto&& elem }); ++i) {
     elem; // expected-error {{use of undeclared identifier 'elem'}}
   }
-  for (int i = 0; next() match case { auto&& elem }; ++i) {
+  for (int i = 0; match(next(), case { auto&& elem }); ++i) {
     int elem;
   }
-  while (next() match case { auto&& elem })
+  while (match(next(), case { auto&& elem }))
     elem; // expected-error {{use of undeclared identifier 'elem'}}
-  while (next() match case { auto&& elem })
+  while (match(next(), case { auto&& elem }))
     int elem;
-  while (next() match case { auto&& elem }) {
+  while (match(next(), case { auto&& elem })) {
     elem; // expected-error {{use of undeclared identifier 'elem'}}
   }
-  while (next() match case { auto&& elem }) {
+  while (match(next(), case { auto&& elem })) {
     int elem;
   }
 
   auto f = [](int x, int y) { return true; };
-  if (q match case { [auto&& x, auto&& y] } if (bool b = f(x, y))) {
+  if (match(q, case { [auto&& x, auto&& y] } if (bool b = f(x, y)))) {
     x; // expected-error {{use of undeclared identifier 'x'}}
     y; // expected-error {{use of undeclared identifier 'y'}}
     b; // expected-error {{use of undeclared identifier 'b'}}
@@ -865,7 +877,7 @@ void test_case_condition(int value, const int (&pair)[2]) {
     break;
   }
 
-  for (int count = 0; case int copy = value; ++copy, ++count) {
+  for (int count = 0, case int copy = value; ++copy, ++count) {
     copy;
     count;
     break;
@@ -967,7 +979,7 @@ int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
 
 template <int... Is, int N>
 void test_non_pattern_pack_expansion(const int (&p)[N]) {
-  p match { case [(Is...)] => 0; }; // expected-error {{expected ')'}} expected-note {{to match this '('}}
-  p match case auto&& ...elements; // expected-error {{expected expression}}
-  p match case Is...; // expected-error {{expected expression}}
+  match(p, case [(Is...)]); // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match(p, case auto&& ...elements); // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match(p, case Is...); // expected-error {{expected ')'}} expected-note {{to match this '('}}
 }

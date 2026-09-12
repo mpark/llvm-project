@@ -6,10 +6,10 @@ void check(bool b);
 // CHECK: _Z5basicii(i32 {{.*}} %[[A:.*]], i32 {{.*}} %[[B:.*]])
 void basic(int a, int b) {
   // CHECK: call void @_Z5checkb(i1 {{.*}} true)
-  check(0 match case 0);
+  check(match(0, case 0));
   // CHECK: %[[CMP:.*]] = icmp eq i32 %[[A]], %[[B]]
   // CHECK: call void @_Z5checkb(i1 {{.*}} %[[CMP]])
-  check(a match case b);
+  check(match(a, case b));
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z14case_conditioni(

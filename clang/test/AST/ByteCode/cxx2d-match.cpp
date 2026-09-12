@@ -3,9 +3,9 @@
 void test_decltypes() {
   constexpr int x = 0;
   constexpr int y = 0;
-  static_assert(__is_same(decltype(0 match case _), bool));
-  static_assert(__is_same(decltype(x match case 0), bool));
-  static_assert(__is_same(decltype(x match case y), bool));
+  static_assert(__is_same(decltype(match(0, case _)), bool));
+  static_assert(__is_same(decltype(match(x, case 0)), bool));
+  static_assert(__is_same(decltype(match(x, case y)), bool));
 }
 
 constexpr int test_case_condition(int value) {
@@ -148,27 +148,27 @@ constexpr bool test_case_condition_lifetime() {
 
 static_assert(test_case_condition_lifetime());
 
-static_assert(0 match case _);
-static_assert(0 match case 0);
-static_assert(!(0 match case 1));
+static_assert(match(0, case _));
+static_assert(match(0, case 0));
+static_assert(!(match(0, case 1)));
 
 constexpr int x = 0;
-static_assert(x match case _);
-static_assert(x match case 0);
+static_assert(match(x, case _));
+static_assert(match(x, case 0));
 
 constexpr int y = 1;
-static_assert(!(0 match case y));
-static_assert(!(x match case y));
+static_assert(!(match(0, case y)));
+static_assert(!(match(x, case y)));
 
-static_assert([]() { return 0 match case auto&& _; }());
-static_assert([]() { return 0 match case auto&& x; }());
+static_assert([]() { return match(0, case auto&& _); }());
+static_assert([]() { return match(0, case auto&& x); }());
 
-static_assert([](int x) { return x match case _; }(0));
-static_assert([](auto x) -> bool { return x match case _; }(0));
-static_assert([](int* p) { return p match case _; }(nullptr));
-static_assert([](auto* p) -> bool { return p match case _; }((int*)nullptr));
-static_assert([](int* p) { return p match case {}; }(nullptr));
-static_assert(![](int value) { return &value match case {}; }(0));
+static_assert([](int x) { return match(x, case _); }(0));
+static_assert([](auto x) -> bool { return match(x, case _); }(0));
+static_assert([](int* p) { return match(p, case _); }(nullptr));
+static_assert([](auto* p) -> bool { return match(p, case _); }((int*)nullptr));
+static_assert([](int* p) { return match(p, case {}); }(nullptr));
+static_assert(![](int value) { return match(&value, case {}); }(0));
 
 constexpr int match_pointer(int *pointer) {
   return match (pointer) {
@@ -203,28 +203,28 @@ constexpr int match_named_pointer(int *pointer) {
 static_assert(match_named_pointer(nullptr) == -2);
 static_assert([] { int value = 43; return match_named_pointer(&value); }() == 43);
 
-static_assert([](int x) { return x match case 0; }(0));
-static_assert([](auto x) -> bool { return x match case 0; }(0));
-static_assert(![](int y) { return 0 match case y; }(1));
-static_assert(![](auto y) -> bool { return 0 match case y; }(1));
-static_assert([](int x, int y) { return x match case y; }(0, 0));
-static_assert([](auto x, auto y) -> bool { return x match case y; }(0, 0));
-static_assert(![](int x, int y) { return x match case y; }(0, 1));
-static_assert(![](auto x, auto y) -> bool { return x match case y; }(0, 1));
+static_assert([](int x) { return match(x, case 0); }(0));
+static_assert([](auto x) -> bool { return match(x, case 0); }(0));
+static_assert(![](int y) { return match(0, case y); }(1));
+static_assert(![](auto y) -> bool { return match(0, case y); }(1));
+static_assert([](int x, int y) { return match(x, case y); }(0, 0));
+static_assert([](auto x, auto y) -> bool { return match(x, case y); }(0, 0));
+static_assert(![](int x, int y) { return match(x, case y); }(0, 1));
+static_assert(![](auto x, auto y) -> bool { return match(x, case y); }(0, 1));
 
-constexpr bool test_dependent_match_0(auto x, auto y) { return x match case y; }
+constexpr bool test_dependent_match_0(auto x, auto y) { return match(x, case y); }
 
 static_assert(test_dependent_match_0(0, 0));
 static_assert(test_dependent_match_0(0.0, 0));
 static_assert(!test_dependent_match_0(1, 0));
 
-constexpr bool test_dependent_match_1(auto x) { return x match case 0; }
+constexpr bool test_dependent_match_1(auto x) { return match(x, case 0); }
 
 static_assert(test_dependent_match_1(0));
 static_assert(test_dependent_match_1(0.0));
 static_assert(!test_dependent_match_1(1));
 
-constexpr bool test_dependent_match_2(auto y) { return 0 match case y; }
+constexpr bool test_dependent_match_2(auto y) { return match(0, case y); }
 
 static_assert(test_dependent_match_2(0));
 static_assert(test_dependent_match_2(0.0));
@@ -598,7 +598,7 @@ static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 0}) == 8);
 static_assert(test_tuple_like_decomposition_pattern_dependent(Pair{2, 3}) == 6);
 
 constexpr bool test_match_test_with_guard(const int (&xs)[2]) {
-  return xs match case auto&& [x, y] if (x == y);
+  return match(xs, case auto&& [x, y] if (x == y));
 }
 
 static_assert(test_match_test_with_guard({0, 0}));
@@ -632,7 +632,7 @@ static_assert(test_match_guard_init_statement({-1, -2}) == -3);
 static_assert(test_match_guard_init_statement({4, 7}) == 11);
 
 constexpr int test_match_test_guard_init_statement(int value) {
-  if (value match case int copy if (int doubled = copy * 2; doubled == 4))
+  if (match(value, case int copy if (int doubled = copy * 2; doubled == 4)))
     return value * 2;
   return -1;
 }
@@ -842,7 +842,7 @@ static_assert(dependent_variant_match_condition_return(Variant(0.0)) ==
 constexpr int variant_match_condition_break(const Variant &var) {
   int count = 0;
   while (++count != 4) {
-    if (var match case { int value } if (value == count))
+    if (match(var, case { int value } if (value == count)))
       break;
   }
   return count;
@@ -854,7 +854,7 @@ static_assert(variant_match_condition_break(Variant(0.0)) == 4);
 constexpr int variant_match_condition_continue(const Variant &var) {
   int sum = 0;
   for (int count = 0; count != 4; ++count) {
-    if (var match case { int value } if (value == count))
+    if (match(var, case { int value } if (value == count)))
       continue;
     sum += count;
   }
@@ -945,8 +945,7 @@ constexpr const T &identity(const T &value) {
 constexpr bool test_indirect_match_subject_lifetime(int value) {
   bool alive = false;
   bool observed = false;
-  if (identity(IndirectMatchSubjectLifetime(&alive, value)) match
-      case auto&& bound if (bound.value == 1))
+  if (match(identity(IndirectMatchSubjectLifetime(&alive, value)), case auto&& bound if (bound.value == 1)))
     observed = alive;
   else
     observed = alive;
@@ -960,8 +959,8 @@ template <class T>
 constexpr bool test_dependent_indirect_match_subject_lifetime(int value) {
   bool alive = false;
   bool observed = false;
-  if (identity(T(&alive, value)) match case auto&& bound
-      if (bound.value == 1))
+  if (match(identity(T(&alive, value)), case auto&& bound
+      if (bound.value == 1)))
     observed = alive;
   else
     observed = alive;
@@ -1230,7 +1229,7 @@ constexpr int empty_decomposition_pattern(EmptyDecomposition value) {
 }
 
 static_assert(empty_decomposition_pattern({}) == 42);
-static_assert(EmptyDecomposition{} match case []);
+static_assert(match(EmptyDecomposition{}, case []));
 
 static_assert([](int value) {
   return match (value) { case int copy => copy; };
@@ -1334,14 +1333,14 @@ static_assert(successful_guard_copies_once() == 1);
 constexpr int failed_match_test_guard_copies_once() {
   int copies = 0;
   CopyCounter source{3, &copies};
-  bool matched = source match case CopyCounter copy if (false);
+  bool matched = match(source, case CopyCounter copy if (false));
   return copies + matched;
 }
 
 constexpr int successful_match_test_guard_copies_once() {
   int copies = 0;
   CopyCounter source{3, &copies};
-  bool matched = source match case CopyCounter copy if (copy.value == 3);
+  bool matched = match(source, case CopyCounter copy if (copy.value == 3));
   return copies * 10 + matched;
 }
 
@@ -1383,7 +1382,7 @@ constexpr int match_test_declaration_lifetime(bool guard) {
   int observed_destructions;
   {
     LifetimeCounter source{&copies, &destructions};
-    bool matched = source match case LifetimeCounter copy if (guard);
+    bool matched = match(source, case LifetimeCounter copy if (guard));
     observed_destructions = destructions + matched;
   }
   return copies * 100 + observed_destructions * 10 + destructions;
@@ -1879,7 +1878,7 @@ static_assert(functional_cast_is_an_expression_pattern(2) == 1);
 static_assert(functional_cast_is_an_expression_pattern(3) == 0);
 
 constexpr bool alias_cast_is_an_expression_pattern(int value) {
-  return value match case PatternInteger(declaration_pattern_expression_constant);
+  return match(value, case PatternInteger(declaration_pattern_expression_constant));
 }
 
 static_assert(alias_cast_is_an_expression_pattern(2));
@@ -1887,7 +1886,7 @@ static_assert(!alias_cast_is_an_expression_pattern(3));
 
 template<class T>
 constexpr bool default_construction_is_an_expression_pattern(T value) {
-  return value match case T();
+  return match(value, case T());
 }
 
 static_assert(default_construction_is_an_expression_pattern(0));
@@ -1895,7 +1894,7 @@ static_assert(!default_construction_is_an_expression_pattern(1));
 
 constexpr bool parenthesized_default_construction_is_an_expression_pattern(
     int value) {
-  return value match case (PatternInteger());
+  return match(value, case (PatternInteger()));
 }
 
 static_assert(parenthesized_default_construction_is_an_expression_pattern(0));
@@ -1906,7 +1905,7 @@ constexpr const int *declaration_pattern_pointer =
     &declaration_pattern_pointee;
 
 constexpr bool dereference_inside_cast_is_an_expression_pattern(int value) {
-  return value match case int(*declaration_pattern_pointer);
+  return match(value, case int(*declaration_pattern_pointer));
 }
 
 static_assert(dereference_inside_cast_is_an_expression_pattern(5));
@@ -1926,7 +1925,7 @@ constexpr bool logical_or_lhs = false;
 constexpr bool logical_or_rhs = true;
 
 constexpr bool cast_forces_logical_or_expression(bool value) {
-  return value match case bool(logical_or_lhs || logical_or_rhs);
+  return match(value, case bool(logical_or_lhs || logical_or_rhs));
 }
 
 static_assert(cast_forces_logical_or_expression(true));
@@ -1955,21 +1954,21 @@ static_assert(placeholder_cast_can_name_underscore(4));
 static_assert(!placeholder_cast_can_name_underscore(5));
 
 constexpr bool placeholder_cast_escapes_pattern_introducers(int value) {
-  return value match case auto(_ + 1);
+  return match(value, case auto(_ + 1));
 }
 
 static_assert(placeholder_cast_escapes_pattern_introducers(5));
 static_assert(!placeholder_cast_escapes_pattern_introducers(4));
 
 constexpr bool placeholder_cast_escapes_lambda_pattern(int value) {
-  return value match case auto([] { return 6; }());
+  return match(value, case auto([] { return 6; }()));
 }
 
 static_assert(placeholder_cast_escapes_lambda_pattern(6));
 static_assert(!placeholder_cast_escapes_lambda_pattern(5));
 
 constexpr bool braced_placeholder_cast_can_name_underscore(int value) {
-  return value match case auto{_};
+  return match(value, case auto{_});
 }
 
 static_assert(braced_placeholder_cast_can_name_underscore(4));
@@ -1981,7 +1980,7 @@ constexpr int T = 2;
 constexpr int x = 3;
 
 constexpr bool matches(int value) {
-  return value match case T * x;
+  return match(value, case T * x);
 }
 
 static_assert(matches(6));
@@ -1992,7 +1991,7 @@ namespace declaration {
 using T = int;
 
 constexpr bool matches(T *value) {
-  return value match case T *x;
+  return match(value, case T *x);
 }
 
 static_assert(matches(nullptr));
@@ -2000,7 +1999,7 @@ static_assert(matches(nullptr));
 } // namespace declaration_expression_lookup
 
 constexpr bool parenthesized_pattern_extends_through_or(int value) {
-  return value match case (0) || 1;
+  return match(value, case (0) || 1);
 }
 
 static_assert(parenthesized_pattern_extends_through_or(0));
@@ -2009,7 +2008,7 @@ static_assert(!parenthesized_pattern_extends_through_or(2));
 
 constexpr bool parentheses_complete_match_before_boolean_or(int value,
                                                             bool fallback) {
-  return (value match case (0)) || fallback;
+  return (match(value, case (0))) || fallback;
 }
 
 static_assert(parentheses_complete_match_before_boolean_or(0, false));

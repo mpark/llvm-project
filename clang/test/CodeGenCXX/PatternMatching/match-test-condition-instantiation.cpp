@@ -65,7 +65,7 @@ int condition_chain(Choice& first, Choice& second) {
 }
 
 bool standalone_condition(Choice& choice) {
-  return choice match case { auto&& value };
+  return match(choice, case { auto&& value });
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z22constexpr_condition_ifv

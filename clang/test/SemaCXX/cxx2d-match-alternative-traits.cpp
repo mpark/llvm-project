@@ -184,7 +184,7 @@ struct std::alternative_traits<ThrowingIndex> {
 };
 
 bool throwing_index(ThrowingIndex choice) {
-  return choice match case { .value: int value }; // expected-error {{invalid alternative protocol; 'std::alternative_traits<'ThrowingIndex'>::index' must be noexcept}}
+  return match(choice, case { .value: int value }); // expected-error {{invalid alternative protocol; 'std::alternative_traits<'ThrowingIndex'>::index' must be noexcept}}
 }
 
 struct MissingResidualStates {
@@ -730,13 +730,13 @@ int direct_single_alternative(SingleChoice choice) {
 
 template<class T>
 concept CanDirectlyProjectChar = requires(T value) {
-  value match case { char projected };
+  match(value, case { char projected });
 };
 
 static_assert(!CanDirectlyProjectChar<SingleChoice>);
 
 bool invalid_direct_single_alternative(SingleChoice choice) {
-  return choice match case { char value }; // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
+  return match(choice, case { char value }); // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
 }
 
 void single_alternative_loop_conditions(SingleChoice choice) {
@@ -768,12 +768,12 @@ int direct_generic_alternative(ChoicePair pair) {
 }
 
 bool standalone_generic_alternative(Choice choice) {
-  return choice match case { auto&& value };
+  return match(choice, case { auto&& value });
 }
 
 template<class C>
 bool dependent_standalone_generic_alternative(C choice) {
-  return choice match case { auto&& value };
+  return match(choice, case { auto&& value });
 }
 
 bool instantiate_dependent_standalone_generic_alternative(Choice choice) {
@@ -795,18 +795,18 @@ int direct_generic_guard(ChoicePair pair) {
 }
 
 bool nested_match_subject(ChoicePair pair) {
-  return (pair match case [{ auto&& value }, _]) match case true;
+  return match(match(pair, case [{ auto&& value }, _]), case true);
 }
 
 template<class T>
 concept CanDirectlyMatchChar = requires(T value) {
-  value match case [{ char c }, _];
+  match(value, case [{ char c }, _]);
 };
 
 static_assert(!CanDirectlyMatchChar<ChoicePair>);
 
 bool invalid_direct_alternative(ChoicePair pair) {
-  return pair match case [{ char c }, _]; // expected-error {{braced alternative pattern does not match any projectable state of 'ChoicePair'}}
+  return match(pair, case [{ char c }, _]); // expected-error {{braced alternative pattern does not match any projectable state of 'ChoicePair'}}
 }
 
 struct NoTraits {};
@@ -870,7 +870,7 @@ int open_type_constraint_selector(OpenChoice choice) {
 }
 
 bool open_empty(OpenChoice choice) {
-  return choice match case {};
+  return match(choice, case {});
 }
 
 template<class T>

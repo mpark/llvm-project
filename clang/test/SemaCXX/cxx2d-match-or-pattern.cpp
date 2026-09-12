@@ -16,7 +16,7 @@ struct alternative_info {
 enum class Direction { north, south, east, west };
 
 constexpr bool is_vertical(Direction direction) {
-  return direction match case Direction::north || Direction::south;
+  return match(direction, case Direction::north || Direction::south);
 }
 
 static_assert(is_vertical(Direction::north));
@@ -123,7 +123,7 @@ constexpr int guard_runs_once(Pair pair) {
 static_assert(guard_runs_once({0, 0}) == 1);
 
 constexpr bool guarded_test(Pair pair) {
-  return pair match case [0, int value] || [int value, 0] if (value > 2);
+  return match(pair, case [0, int value] || [int value, 0] if (value > 2));
 }
 
 static_assert(guarded_test({0, 3}));
@@ -312,5 +312,5 @@ struct Derived : Base {};
 struct Sibling : Base {};
 
 bool overlapping_initialization(Base& value) {
-  return value match case Derived& || Sibling&;
+  return match(value, case Derived& || Sibling&);
 }

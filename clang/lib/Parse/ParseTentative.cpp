@@ -486,6 +486,8 @@ Parser::isCXXConditionDeclarationOrInitStatement(bool CanBeInitStatement,
 
   if (CanBeInitStatement && Tok.is(tok::kw_using))
     return ConditionOrInitStatement::InitStmtDecl;
+  if (isPrefixMatchTestExpression())
+    return ConditionOrInitStatement::Expression;
   if (State.update(isCXXDeclarationSpecifier(ImplicitTypenameContext::No)))
     return State.result();
 

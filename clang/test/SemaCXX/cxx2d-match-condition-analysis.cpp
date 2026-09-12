@@ -4,11 +4,11 @@
 void use(int);
 
 bool match_condition(int value) {
-  return value match case int copy if (copy > 0);
+  return match(value, case int copy if (copy > 0));
 }
 
 void match_condition_does_not_inject_bindings(int value) {
-  if (value match case [[maybe_unused]] int copy)
+  if (match(value, case [[maybe_unused]] int copy))
     use(copy); // expected-error {{use of undeclared identifier 'copy'}}
 }
 
@@ -18,8 +18,8 @@ void case_condition(int value) {
 }
 
 void guarded_condition(int value) {
-  bool positive = value match case int copy
-      if (int doubled = copy * 2; doubled > 0);
+  bool positive = match(value, case int copy
+      if (int doubled = copy * 2; doubled > 0));
   use(positive);
 }
 
@@ -64,7 +64,7 @@ void unused_condition_binding(int value) {
 }
 
 bool irrefutable_match_condition(int value) {
-  return value match case int;
+  return match(value, case int);
 }
 
 constexpr int irrefutable_case_condition(int value) {
@@ -298,7 +298,7 @@ int refutable_decomposition_condition(Pair value) {
 
 template <class T>
 constexpr int decomposition_arity(T value) {
-  if constexpr (requires { value match case [_, _]; })
+  if constexpr (requires { match(value, case [_, _]); })
     return 2;
   else
     return 0;
