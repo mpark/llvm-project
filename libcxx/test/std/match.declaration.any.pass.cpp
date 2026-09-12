@@ -53,7 +53,7 @@ int match_empty_any(const std::any& a) {
 }
 
 bool test_empty_any(const std::any& a) {
-  return a match case {};
+  return match(a, case {});
 }
 
 bool test_nonempty_any(const std::any& a) {

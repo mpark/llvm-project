@@ -227,7 +227,7 @@ constexpr int empty_decomposition_pattern(EmptyDecomposition value) {
 }
 
 static_assert(empty_decomposition_pattern({}) == 42);
-static_assert(EmptyDecomposition{} match case []);
+static_assert(match(EmptyDecomposition{}, case []));
 
 int nonempty_decomposition_pattern(Pair value) {
   return match (value) {
@@ -557,12 +557,12 @@ static_assert(dependent_decomposition_guard(0) == 0);
 
 template<class T>
 concept MatchesIntDeclaration = requires(T value) {
-  value match case int copy;
+  match(value, case int copy);
 };
 
 template<class T>
 concept MatchesPairDecomposition = requires(T value) {
-  value match case auto &&[first, second];
+  match(value, case auto &&[first, second]);
 };
 
 static_assert(MatchesIntDeclaration<int>);
@@ -572,7 +572,7 @@ static_assert(!MatchesPairDecomposition<int>);
 
 template<class T>
 bool dependent_single_match(T value) {
-  return value match case int copy; // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
+  return match(value, case int copy); // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
 }
 
 bool instantiate_invalid_single_match() {
@@ -884,10 +884,10 @@ void binding_pack_loop_conditions(BindingPackTriple value) {
        (void)sizeof...(elements)) {
     break;
   }
-  while (value match case auto [...elements]) {
+  while (match(value, case auto [...elements])) {
     break;
   }
-  for (; value match case auto [...elements];
+  for (; match(value, case auto [...elements]);
        (void)0) {
     break;
   }

@@ -313,7 +313,7 @@ bool Parser::isNotExpressionStart() {
 
 bool Parser::isFoldOperator(prec::Level Level) const {
   return Level > prec::Unknown && Level != prec::Conditional &&
-         Level != prec::Spaceship && Level != prec::Match;
+         Level != prec::Spaceship;
 }
 
 bool Parser::isFoldOperator(const Token &Tok) const {
@@ -410,15 +410,6 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec,
       PP.EnterToken(Tok, /*IsReinject*/true);
       Tok = OpToken;
       return LHS;
-    }
-
-    // Special case handling for postfix match tests.
-    if (NextTokPrec == prec::Match) {
-      LHS = ParseRHSOfMatchTestExpr(LHS, OpToken.getLocation(), Decls);
-      NextTokPrec = getBinOpPrecedence(Tok, GreaterThanIsOperator,
-                                       getLangOpts().CPlusPlus11,
-                                       getLangOpts().PatternMatching);
-      continue;
     }
 
     // Special case handling for the ternary operator.
@@ -942,6 +933,9 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
   ParseIdentifier: {    // primary-expression: identifier
                         // unqualified-id: identifier
                         // constant: enumeration-constant
+    if (isPrefixMatchTestExpression())
+      return ParseMatchTestExpression();
+
     bool MissingSubjectParens = false;
     if (isPrefixMatchSelection(/*StatementContext=*/false,
                                /*MissingCasePatternLoc=*/nullptr,
@@ -2919,7 +2913,8 @@ ExprResult Parser::ParseExpressionWithLeadingParen(
     return Actions.ObjC().ActOnObjCBridgedCast(getCurScope(), OpenLoc, Kind,
                                                BridgeKeywordLoc, Ty.get(),
                                                RParenLoc, SubExpr.get());
-  } else if (isPrefixMatchSelection(/*StatementContext=*/false)) {
+  } else if (isPrefixMatchTestExpression() ||
+             isPrefixMatchSelection(/*StatementContext=*/false)) {
     Fallback = true;
     return ExprEmpty();
   } else if (ExprType >= ParenParseOption::CompoundLiteral &&

@@ -2788,6 +2788,7 @@ void StmtProfiler::VisitMatchTestExpr(const MatchTestExpr *S) {
     Visit(Guard.Condition);
   ID.AddBoolean(S->needsCaseInstantiation());
   ID.AddBoolean(S->hasSemanticInstantiations());
+  ID.AddBoolean(S->hasSubjectProduct());
 }
 
 void StmtProfiler::VisitCaseConditionExpr(const CaseConditionExpr *S) {

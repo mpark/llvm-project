@@ -14,6 +14,14 @@ static_assert(select_two(0, 3) == 3);
 static_assert(select_two(4, 0) == -4);
 static_assert(select_two(4, 5) == 9);
 
+constexpr bool test_two(int first, int second) {
+  return match(first, second, case [0, int value] if (value > 0));
+}
+
+static_assert(test_two(0, 3));
+static_assert(!test_two(0, -1));
+static_assert(!test_two(1, 3));
+
 constexpr int select_booleans(bool first, bool second) {
   return match (first, second) {
     case [false, false] => 0;
@@ -48,6 +56,27 @@ constexpr bool test_value_categories() {
 }
 
 static_assert(test_value_categories());
+
+constexpr bool test_value_categories_in_test(int& lvalue,
+                                             const int& constant,
+                                             int&& xvalue) {
+  return match(lvalue, constant, static_cast<int&&>(xvalue), 42,
+                case [auto&& a, auto&& b, auto&& c, auto&& d]
+                    if (__is_same(decltype(a), int&) &&
+                        __is_same(decltype(b), const int&) &&
+                        __is_same(decltype(c), int&&) &&
+                        __is_same(decltype(d), int&&)));
+}
+
+constexpr bool test_test_value_categories() {
+  int lvalue = 1;
+  const int constant = 2;
+  int xvalue = 3;
+  return test_value_categories_in_test(lvalue, constant,
+                                       static_cast<int&&>(xvalue));
+}
+
+static_assert(test_test_value_categories());
 
 constexpr bool structured_binding_declaration(int& first, int& second) {
   return match (first, second) {
@@ -127,6 +156,15 @@ static_assert(count_subjects(1) == 1);
 static_assert(count_subjects(1, 2L, 3.0) == 3);
 
 template<class... Ts>
+constexpr bool test_subject_pack(Ts&&... subjects) {
+  return match(static_cast<Ts&&>(subjects)..., case [..._]);
+}
+
+static_assert(test_subject_pack());
+static_assert(test_subject_pack(1));
+static_assert(test_subject_pack(1, 2L, 3.0));
+
+template<class... Ts>
 constexpr unsigned count_tail(Ts&&... subjects) {
   return match (0, static_cast<Ts&&>(subjects)...) {
     case [0, auto&&... elements] => sizeof...(elements);
@@ -154,3 +192,10 @@ constexpr int comma_expression_remains_one_subject(int first, int second) {
 }
 
 static_assert(comma_expression_remains_one_subject(1, 2) == 2);
+
+constexpr bool comma_expression_test_remains_one_subject(int first,
+                                                         int second) {
+  return match((first, second), case int value if (value == second));
+}
+
+static_assert(comma_expression_test_remains_one_subject(1, 2));

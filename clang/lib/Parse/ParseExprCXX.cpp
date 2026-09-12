@@ -4375,6 +4375,26 @@ bool Parser::hasPossibleOrdinaryMatchCall() {
          Sema::UnqualifiedCallCandidateStatus::None;
 }
 
+bool Parser::isPrefixMatchTestExpression() {
+  if (!getLangOpts().PatternMatching || Tok.isNot(tok::identifier) ||
+      Tok.getIdentifierInfo() != Ident_match || NextToken().isNot(tok::l_paren))
+    return false;
+
+  RevertingTentativeParsingAction Probe(*this, /*Unannotated=*/true);
+  ConsumeToken();
+  ConsumeParen();
+  // A top-level comma either separates subjects or introduces the final
+  // `case` operand. Commas in nested expressions are skipped.
+  while (SkipUntil({tok::comma, tok::r_paren}, StopBeforeMatch)) {
+    if (Tok.is(tok::r_paren))
+      return false;
+    ConsumeToken();
+    if (Tok.is(tok::kw_case))
+      return true;
+  }
+  return false;
+}
+
 bool Parser::isPrefixMatchSelection(bool StatementContext,
                                     SourceLocation *MissingCasePatternLoc,
                                     bool *MissingSubjectParens) {
@@ -4559,18 +4579,58 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
   return false;
 }
 
-ExprResult
-Parser::ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
-                                InjectedDeclSet *InjectedDecls) {
-  if (ExpectAndConsume(tok::kw_case))
-    return ExprError();
-  VarDecl *HoldingVar = nullptr;
-  if (LHS.isUsable()) {
-    LHS = Actions.ActOnMatchSubject(LHS.get(), HoldingVar);
-    if (LHS.isInvalid())
-      return ExprError();
-  }
+ExprResult Parser::ParseMatchTestExpression() {
+  SourceLocation MatchLoc = ConsumeToken();
   ParseScope MatchTestScope(this, Scope::DeclScope);
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return ExprError();
+
+  ExprVector Subjects;
+  while (true) {
+    ExprResult Subject;
+    if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
+      Diag(Tok, diag::compat_cxx11_generalized_initializer_lists);
+      Subject = ParseBraceInitializer();
+    } else {
+      Subject = ParseAssignmentExpression();
+    }
+
+    if (Tok.is(tok::ellipsis))
+      Subject = Actions.ActOnPackExpansion(Subject.get(), ConsumeToken());
+    else if (Tok.is(tok::code_completion)) {
+      cutOffParsing();
+      return ExprError();
+    }
+    if (Subject.isInvalid()) {
+      SkipUntil(tok::r_paren, StopBeforeMatch);
+      Parens.consumeClose();
+      return ExprError();
+    }
+    Subjects.push_back(Subject.get());
+
+    Token Comma = Tok;
+    if (ExpectAndConsume(tok::comma)) {
+      SkipUntil(tok::r_paren, StopBeforeMatch);
+      Parens.consumeClose();
+      return ExprError();
+    }
+    checkPotentialAngleBracketDelimiter(Comma);
+    if (Tok.is(tok::kw_case))
+      break;
+  }
+  if (ExpectAndConsume(tok::kw_case)) {
+    SkipUntil(tok::r_paren, StopBeforeMatch);
+    Parens.consumeClose();
+    return ExprError();
+  }
+
+  VarDecl *HoldingVar = nullptr;
+  ExprResult Subject =
+      Actions.ActOnMatchSubjects(Subjects, MatchLoc, HoldingVar);
+  if (Subject.isInvalid())
+    return ExprError();
+
   ActionResult<MatchPattern *> Pattern = ParsePattern();
   bool PatternNeedsAlternativeSpecialization =
       Pattern.isUsable() &&
@@ -4580,41 +4640,37 @@ Parser::ParseRHSOfMatchTestExpr(ExprResult LHS, SourceLocation MatchLoc,
   Sema::MatchProjectionCache ProjectionCache;
   Sema::MatchPatternState PatternState;
   ProjectionCache.DeferAlternativeChoices = true;
-  if (LHS.isInvalid() || Pattern.isInvalid() ||
-      Actions.CheckCompleteMatchPattern(LHS.get(), Pattern.get(), PatternState,
-                                        &ProjectionCache))
+  if (Pattern.isInvalid() ||
+      Actions.CheckCompleteMatchPattern(Subject.get(), Pattern.get(),
+                                        PatternState, &ProjectionCache))
     return ExprError();
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard =
       ParseMatchGuard(IfLoc, Pattern.get(), GuardInit);
   if (Guard.isInvalid()) {
-    SkipUntil(tok::semi, StopAtSemi | StopBeforeMatch);
-    return true;
+    SkipUntil(tok::r_paren, StopBeforeMatch);
+    return ExprError();
   }
-  if (InjectedDecls) {
-    Scope::decl_range DR = getCurScope()->decls();
-    *InjectedDecls = {DR.begin(), DR.end()};
-    for (Decl *D : *InjectedDecls) {
-      getCurScope()->RemoveDecl(D);
-      if (auto *ND = dyn_cast<NamedDecl>(D); ND && ND->getDeclName())
-        Actions.IdResolver.RemoveDecl(ND);
-    }
-  }
-  bool NeedsCaseInstantiation =
-      ProjectionCache.HasDeferredAlternativeChoices ||
-      PatternContainsBindingPack ||
-      (PatternNeedsAlternativeSpecialization && LHS.get()->isTypeDependent());
+  if (Parens.consumeClose())
+    return ExprError();
+
+  bool NeedsCaseInstantiation = ProjectionCache.HasDeferredAlternativeChoices ||
+                                PatternContainsBindingPack ||
+                                (PatternNeedsAlternativeSpecialization &&
+                                 Subject.get()->isTypeDependent());
   Sema::MatchPatternSemanticAnalysis Semantic =
       Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
   bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
   ExprResult Result = Actions.ActOnMatchTestExpr(
-      HoldingVar, LHS.get(), MatchLoc, Pattern.get(),
+      HoldingVar, Subject.get(), MatchLoc, Pattern.get(),
       MatchPatternInstantiation::Create(Actions.Context, Pattern.get(),
                                         PatternState.Infos),
       IfLoc, {GuardInit.get(), Guard.get().first, Guard.get().second},
       PatternIsIrrefutable, NeedsCaseInstantiation);
-  if (Result.isInvalid() || InjectedDecls || !NeedsCaseInstantiation ||
+  if (Result.isUsable())
+    cast<MatchTestExpr>(Result.get())->setRParenLoc(Parens.getCloseLocation());
+  if (Result.isInvalid() || !NeedsCaseInstantiation ||
       Actions.CurContext->isDependentContext())
     return Result;
   return Actions.ExpandDeferredMatchTestExpr(cast<MatchTestExpr>(Result.get()));

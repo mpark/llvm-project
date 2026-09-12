@@ -15,22 +15,22 @@ constexpr int direct(int value) {
 constexpr Pair<int, long> pair{1, 2};
 
 static_assert(direct(0) == 1);
-static_assert(0 match case int);
-static_assert(pair match case [int, long]);
+static_assert(match(0, case int));
+static_assert(match(pair, case [int, long]));
 constexpr bool declaration_equivalent_types() {
   int value = 0;
   const int constant = 0;
   int array[2] = {};
-  return (value match case int&) && (value match case const int&) &&
-         (static_cast<int&&>(value) match case int&&) &&
-         (constant match case int) && (array match case const int*);
+  return (match(value, case int&)) && (match(value, case const int&)) &&
+         (match(static_cast<int&&>(value), case int&&)) &&
+         (match(constant, case int)) && (match(array, case const int*));
 }
 
 static_assert(declaration_equivalent_types());
 
 void function_subject() noexcept;
 using Function = void();
-static_assert(function_subject match case Function*);
+static_assert(match(function_subject, case Function*));
 
 struct CopyCounter {
   int* copies;
@@ -44,21 +44,21 @@ struct CopyCounter {
 constexpr bool unnamed_value_pattern_initializes() {
   int copies = 0;
   CopyCounter value(copies);
-  bool matched = value match case CopyCounter;
+  bool matched = match(value, case CopyCounter);
   return matched && copies == 1;
 }
 
 constexpr bool unnamed_reference_pattern_does_not_copy() {
   int copies = 0;
   CopyCounter value(copies);
-  bool matched = value match case CopyCounter&;
+  bool matched = match(value, case CopyCounter&);
   return matched && copies == 0;
 }
 
 constexpr bool nested_unnamed_value_pattern_initializes() {
   int copies = 0;
   Pair<CopyCounter, int> value{CopyCounter(copies), 0};
-  bool matched = value match case [CopyCounter, int&];
+  bool matched = match(value, case [CopyCounter, int&]);
   return matched && copies == 1;
 }
 
@@ -73,7 +73,7 @@ struct MoveCounter {
 constexpr bool unnamed_value_pattern_moves_from_xvalue() {
   int moves = 0;
   MoveCounter value(moves);
-  bool matched = static_cast<MoveCounter&&>(value) match case MoveCounter;
+  bool matched = match(static_cast<MoveCounter&&>(value), case MoveCounter);
   return matched && moves == 1;
 }
 
@@ -97,8 +97,8 @@ struct Constructed {
   friend constexpr bool operator==(Constructed, Constructed) = default;
 };
 
-static_assert(Constructed{} match case static_cast<Constructed>(Constructed{}));
-static_assert(Constructed{} match case (Constructed));
+static_assert(match(Constructed{}, case static_cast<Constructed>(Constructed{})));
+static_assert(match(Constructed{}, case (Constructed)));
 
 constexpr void increment(int& value) {
   ++value;
@@ -116,7 +116,7 @@ static_assert(direct_void() == 11);
 
 constexpr bool direct_void_test() {
   int evaluations = 0;
-  bool result = increment(evaluations) match case const volatile void;
+  bool result = match(increment(evaluations), case const volatile void);
   return result && evaluations == 1;
 }
 
@@ -140,7 +140,7 @@ constexpr int dependent_result_type(T value) {
 
 template<class T>
 constexpr bool has_void_result(T value) {
-  return requires(T candidate) { candidate.f() match case void; };
+  return requires(T candidate) { match(candidate.f(), case void); };
 }
 
 static_assert(dependent_result_type(VoidResult{}) == 1);
