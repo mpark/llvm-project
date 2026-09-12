@@ -82,22 +82,22 @@ void test_match_structures(int x) {
   match(&x, case { _ });
   match(x, case 0);
   match (x) { case _ => 0; }
-  match (x) { case _ if (true) => 0, case _ => 0; }
+  match (x) { case _ if (true) => 0; case _ => 0; }
   match constexpr (x) { case _ => 0; }
-  match constexpr (x) { case _ if (true) => 0, case _ => 0; }
+  match constexpr (x) { case _ if (true) => 0; case _ => 0; }
   (void)match (x) -> int { case _ => 0; };
   (void)match (x) -> auto { case _ => 0; };
   (void)match (x) -> decltype(auto) { case _ => 0; };
-  (void)match (x) -> int { case _ if (true) => 0, case _ => 0; };
-  (void)match (x) -> auto { case _ if (true) => 0, case _ => 0; };
-  (void)match (x) -> decltype(auto) { case _ if (true) => 0, case _ => 0; };
+  (void)match (x) -> int { case _ if (true) => 0; case _ => 0; };
+  (void)match (x) -> auto { case _ if (true) => 0; case _ => 0; };
+  (void)match (x) -> decltype(auto) { case _ if (true) => 0; case _ => 0; };
   (void)match constexpr (x) -> int { case _ => 0; };
   (void)match constexpr (x) -> auto { case _ => 0; };
   (void)match constexpr (x) -> decltype(auto) { case _ => 0; };
-  (void)match constexpr (x) -> int { case _ if (true) => 0, case _ => 0; };
-  (void)match constexpr (x) -> auto { case _ if (true) => 0, case _ => 0; };
-  (void)match constexpr (x) -> decltype(auto) { case _ if (true) => 0, case _ => 0; };
-  match (&x) { case { _ } => 0, case _ => 1; }
+  (void)match constexpr (x) -> int { case _ if (true) => 0; case _ => 0; };
+  (void)match constexpr (x) -> auto { case _ if (true) => 0; case _ => 0; };
+  (void)match constexpr (x) -> decltype(auto) { case _ if (true) => 0; case _ => 0; };
+  match (&x) { case { _ } => 0; case _ => 1; }
 }
 
 void test_match_subject_requires_expression(int x) {
@@ -218,7 +218,7 @@ int test_invalid_decltype_result_without_body(int x) {
 
 static_assert(test_prefix_match_expression(0) == 1);
 static_assert(test_prefix_match_expression(3) == 2);
-static_assert((match (0) { case 0 => true, case _ => false; }));
+static_assert((match (0) { case 0 => true; case _ => false; }));
 
 namespace prefix_match_disambiguation {
 struct match {
@@ -404,7 +404,8 @@ void test_match_precedence(int* p) {
     match(2, case 0 * 1);
     match(2, case 0 == 1);
     match((2), case 0 * 1);
-    struct S { int i; } s;
+    struct S { int i; };
+    static constexpr S s{};
     match(s.*&S::i, case 0);
     match(&s->*&S::i, case 0);
     match(2, case s.*&S::i);
@@ -445,47 +446,44 @@ void test_wildcard_pattern(int x) {
   match (x) { case _ => 0; }
 }
 
-void test_expression_pattern(int x, int y) {
+void test_expression_pattern(int x, int y) { // expected-note 10 {{declared here}}
   match(x, case 0);
   match(x, case (1 + 2));
-  match(x, case y);
-  int _ = 0;
+  match(x, case y); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  constexpr int _ = 0;
   match(x, case +_);
   match(x, case -_);
-  match(x, case y + 1);
+  match(x, case y + 1); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
   match(x, case auto(_ + 1));
   match (x) {
-    case y + 1 => 0;
+    case 1 + 1 => 0;
     case auto(_ + 1) => 0;
-    case auto([] { return 2; }()) => 0;
+    case auto([] { return 4; }()) => 0;
     case auto([]<class T>(T value) { return value; }(3)) => 0;
     case _ => 0;
   }
-  match(x, case auto((int)y));
+  match(x, case auto((int)y)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
   using Int = int;
-  match(x, case auto((Int)y));
-  match(x, case auto((Int)(y)));
-  match(x, case auto(((Int)(y))));
+  match(x, case auto((Int)y)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  match(x, case auto((Int)(y))); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  match(x, case auto(((Int)(y)))); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
   constexpr auto id = [](auto &&x) -> auto && {
     return static_cast<decltype(x)>(x);
   };
   {
-    int let = 42;
+    static constexpr int let = 42;
     match(x, case id(let));
-    match (x) { case id(let) => 0, case _ => 0; }
+    match (x) { case id(let) => 0; case _ => 0; }
   }
   {
-    constexpr int let[2] = {1, 2};
+    static constexpr int let[2] = {1, 2};
     constexpr int idx = 0;
-    match (x) { case id(let[idx]) => 0, case _ => 0; }
+    match (x) { case id(let[idx]) => 0; case _ => 0; }
   }
-  match (x) {
-    case y++ => 0;
-    case y++ * 2 => 0;
-    case (y++) => 0;
-    case auto((y)++ * 2) => 0;
-    case _ => 0;
-  }
+  match(x, case y++); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  match(x, case y++ * 2); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  match(x, case (y++)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
+  match(x, case auto((y)++ * 2)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'y' with unknown value cannot be used in a constant expression}}
 }
 
 void test_declaration_pattern(int i) {
@@ -493,7 +491,7 @@ void test_declaration_pattern(int i) {
   x; // expected-error {{use of undeclared identifier 'x'}}
   match (i) { case auto&& x => 0; }
   match (i) { case auto&& x => x; }
-  match (i) { case auto&& [x] => 0, case _ => 0; } // expected-error {{cannot bind non-class, non-array type 'int'}}
+  match (i) { case auto&& [x] => 0; case _ => 0; } // expected-error {{cannot bind non-class, non-array type 'int'}}
   int i1[1] = {0};
   match (i1) { case auto&& [x] => 0; }
   match (i1) { case auto&& [x] => x; }
@@ -517,11 +515,11 @@ void test_constrained_declaration_pattern(int i) {
 constexpr int declaration_pattern_constant = 1;
 
 void test_declaration_expression_disambiguation(int value) {
-  match (value) { case int(declaration_pattern_constant) => 0, case _ => 0; }
-  match (value) { case auto(declaration_pattern_constant) => 0, case _ => 0; }
-  match (value) { case (int(declaration_pattern_constant)) => 0, case _ => 0; }
-  match (value) { case int() => 0, case _ => 0; }
-  match (value) { case (int()) => 0, case _ => 0; }
+  match (value) { case int(declaration_pattern_constant) => 0; case _ => 0; }
+  match (value) { case auto(declaration_pattern_constant) => 0; case _ => 0; }
+  match (value) { case (int(declaration_pattern_constant)) => 0; case _ => 0; }
+  match (value) { case int() => 0; case _ => 0; }
+  match (value) { case (int()) => 0; case _ => 0; }
   match (value) { case (int named) => named; }
 
   struct Owner { int member; };
@@ -589,10 +587,10 @@ void test_attributed_declaration_pattern(int value) {
 void test_invalid_decomposition_pattern() {
   struct S { int a; int b; };
   S s{1, 2};
-  match (s) { case [0,] => 0, case _ => 0; } // expected-error {{expected expression}}
-  match (s) { case [0,,] => 0, case _ => 0; } // expected-error {{expected expression}}
-  match (s) { case [0 0] => 0, case _ => 0; } // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
-  match (s) { case [,] => 0, case _ => 0; } // expected-error {{expected expression}}
+  match (s) { case [0,] => 0; case _ => 0; } // expected-error {{expected expression}}
+  match (s) { case [0,,] => 0; case _ => 0; } // expected-error {{expected expression}}
+  match (s) { case [0 0] => 0; case _ => 0; } // expected-error {{expected ']'}} expected-error {{type 'S' binds to 2 elements, but only 1 name was provided}} expected-note {{to match this '['}}
+  match (s) { case [,] => 0; case _ => 0; } // expected-error {{expected expression}}
   match(s, case [int first, ..._, int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
   match(s, case [int first, ...42, int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
   match(s, case [int first, ...[_, _], int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
@@ -600,19 +598,19 @@ void test_invalid_decomposition_pattern() {
   match(s, case [int first, (auto&& ...middle), int last]); // expected-error {{expected ')'}} expected-note {{to match this '('}}
 }
 
-void test_parenthesized_pattern(int a, int b) {
-  int _ = 0;
+void test_parenthesized_pattern(int a, int b) { // expected-note 4 {{declared here}}
+  constexpr int _ = 0;
   match(a, case auto(_ + 1));
-  match(a, case auto((a) + b));
-  match(a, case auto(a = b));
-  match(a, case auto(a ? b : 0));
-  match(a, case auto((a, b)));
+  match(a, case auto((a) + b)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'a' with unknown value cannot be used in a constant expression}}
+  match(a, case auto(a = b)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'b' with unknown value cannot be used in a constant expression}}
+  match(a, case auto(a ? b : 0)); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'a' with unknown value cannot be used in a constant expression}}
+  match(a, case auto((a, b))); // expected-error {{pattern is not a constant expression}} expected-note {{function parameter 'b' with unknown value cannot be used in a constant expression}}
   match(a, case auto([] { return 1; }()));
-  match(a, case auto(({ int value = 1; value; })));
+  match(a, case auto(({ constexpr int value = 1; value; })));
   match(a, case ([[maybe_unused]] int value));
 
   match (a) {
-    case (a + b) => 0;
+    case (1 + 2) => 0;
     case (_) => 0;
   }
 
@@ -887,7 +885,7 @@ void test_case_condition(int value, const int (&pair)[2]) {
     break;
   }
 
-  for (int count = 0, case int copy = value; ++copy, ++count) {
+  for (int count = 0; case int copy = value; ++copy, ++count) {
     copy;
     count;
     break;

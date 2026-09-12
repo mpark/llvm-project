@@ -213,7 +213,7 @@ TEST(RecursiveASTVisitorTest, MatchExpressionSourceComponents) {
   auto AST =
       tooling::buildASTFromCodeWithArgs(R"cpp(
     int subject();
-    int pattern();
+    constexpr int pattern() { return 0; }
     bool guard();
     int handler();
     int test() {

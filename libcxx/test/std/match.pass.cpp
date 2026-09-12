@@ -36,22 +36,22 @@ void test_match_test_expr() {
   check(match(x, case _));
   check(match(x, case 0));
 
-  int y = 1;
+  constexpr int y = 1;
   check(!(match(0, case y)));
   check(!(match(x, case y)));
 
   check([]() { int* p = nullptr; return match(p, case _); }());
 
   check([]() { int x = 0; return match(x, case 0); }());
-  check(![]() { int y = 1; return match(0, case y); }());
-  check([]() { int x = 0, y = 0; return match(x, case y); }());
-  check(![]() { int x = 0, y = 1; return match(x, case y); }());
+  check(![]() { constexpr int y = 1; return match(0, case y); }());
+  check([]() { int x = 0; constexpr int y = 0; return match(x, case y); }());
+  check(![]() { int x = 0; constexpr int y = 1; return match(x, case y); }());
 
   check([]() { int x = 0; return match(&x, case { _ }); }());
   check([]() { int x = 0; return match(&x, case { 0 }); }());
   check(![]() { int x = 0; return match(&x, case { 1 }); }());
-  check([]() { int x = 0, y = 0; return match(&x, case { y }); }());
-  check(![]() { int x = 0, y = 1; return match(&x, case { y }); }());
+  check([]() { int x = 0; constexpr int y = 0; return match(&x, case { y }); }());
+  check(![]() { int x = 0; constexpr int y = 1; return match(&x, case { y }); }());
   check(![]() { int* p = nullptr; return match(p, case { _ }); }());
   check(![]() { int* p = nullptr; return match(p, case { 0 }); }());
 

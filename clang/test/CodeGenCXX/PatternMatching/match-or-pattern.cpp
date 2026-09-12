@@ -16,17 +16,24 @@ int classify(int value) {
 extern bool first(int);
 extern bool second(int);
 
+struct FirstPattern {};
+struct SecondPattern {};
+
+inline constexpr FirstPattern first_pattern;
+inline constexpr SecondPattern second_pattern;
+
+bool operator==(int value, FirstPattern) { return first(value); }
+bool operator==(int value, SecondPattern) { return second(value); }
+
 // CHECK-LABEL: define{{.*}} i1 @_Z13short_circuiti(
 // CHECK-SAME: i32 {{.*}} %[[VALUE:.*]])
 // CHECK: %[[FIRST:.*]] = tail call{{.*}} i1 @_Z5firsti(i32 {{.*}} %[[VALUE]])
-// CHECK: %[[FIRST_MATCH:.*]] = icmp eq i32 %[[VALUE]],
-// CHECK: br i1 %[[FIRST_MATCH]], label %[[DONE:.*]], label %[[SECOND_BLOCK:.*]]
+// CHECK: br i1 %[[FIRST]], label %[[DONE:.*]], label %[[SECOND_BLOCK:.*]]
 // CHECK: [[SECOND_BLOCK]]:
 // CHECK: %[[SECOND:.*]] = tail call{{.*}} i1 @_Z6secondi(i32 {{.*}} %[[VALUE]])
-// CHECK: %[[SECOND_MATCH:.*]] = icmp eq i32 %[[VALUE]],
-// CHECK: br i1 %[[SECOND_MATCH]], label %[[DONE]], label
+// CHECK: br i1 %[[SECOND]], label %[[DONE]], label
 bool short_circuit(int value) {
-  return match(value, case first(value) || second(value));
+  return match(value, case first_pattern || second_pattern);
 }
 
 struct Pair {
