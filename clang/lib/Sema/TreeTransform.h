@@ -19630,6 +19630,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
       if (Pattern.isInvalid())
         return true;
       TransformedPattern = Pattern.get();
+      if (getSema().CheckConstantExpressionPatterns(TransformedPattern))
+        return true;
       return getSema().CheckCompleteMatchPattern(
           LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
     };
@@ -19946,6 +19948,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     } else if (TransformAndCheckPattern()) {
       return TransformCaseResult::Error;
     }
+
+    if (getSema().CheckConstantExpressionPatterns(TransformedPattern))
+      return TransformCaseResult::Error;
 
     getDerived().RemapSelectedOrPatternBindings(
         Case.Pattern, TransformedPattern, PatternState);

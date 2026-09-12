@@ -3983,6 +3983,8 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   if (ParsedPattern.isInvalid())
     return Sema::ConditionError();
   MatchPattern *Pattern = ParsedPattern.get();
+  if (Actions.CheckConstantExpressionPatterns(Pattern))
+    return Sema::ConditionError();
 
   SmallVector<NamedDecl *, 4> PatternDecls;
   for (Decl *D : getCurScope()->decls())
@@ -4653,6 +4655,12 @@ ExprResult Parser::ParseMatchTestExpression() {
     return ExprError();
 
   ActionResult<MatchPattern *> Pattern = ParsePattern();
+  if (Pattern.isUsable() &&
+      Actions.CheckConstantExpressionPatterns(Pattern.get())) {
+    SkipUntil(tok::r_paren, StopBeforeMatch);
+    Parens.consumeClose();
+    return ExprError();
+  }
   bool PatternNeedsAlternativeSpecialization =
       Pattern.isUsable() &&
       needsAlternativeCandidateSpecialization(Pattern.get());
@@ -4797,11 +4805,16 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
         Tok.isNot(tok::eof))
       DB << FixItHint::CreateInsertion(Tok.getLocation(), "case ");
     return true;
+  }
 
   ParseScope MatchCaseScope(this, Scope::DeclScope);
   Sema::MatchPatternState PatternState;
 
-  ActionResult<MatchPattern *> Pattern = ParsePattern();
+  ActionResult<MatchPattern *> Pattern = [&] {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+    return ParsePattern();
+  }();
   if (Pattern.isInvalid()) {
     SkipUntil(tok::kw_if, tok::equalgreater, tok::r_brace,
               StopAtSemi | StopBeforeMatch);
@@ -4828,7 +4841,11 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   SourceLocation NotReturnLoc;
   StmtResult Handler = ParseMatchHandler(OrigResultType, RetTy, IsStatement,
                                          NotReturnLoc, DeferHandlerChecking);
-  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid())
+  bool InvalidConstantPattern =
+      Pattern.isUsable() &&
+      Actions.CheckConstantExpressionPatterns(Pattern.get());
+  if (Pattern.isInvalid() || Guard.isInvalid() || Handler.isInvalid() ||
+      InvalidConstantPattern)
     return true;
   Case = {Pattern.get(), IfLoc,
           {GuardInit.get(), Guard.get().first, Guard.get().second},
@@ -5212,7 +5229,7 @@ Parser::ParseExpressionPattern(bool AllowPackExpansion, bool StopAtEqual,
   ExprResult LHS =
       ParseCastExpression(CastParseKind::AnyCastExpr,
                           /*isAddressOfOperand=*/false, CorrectionBehavior);
-  ExprResult Expr = ParseRHSOfBinaryExpression(LHS, prec::LogicalAnd);
+  ExprResult Expr = ParseRHSOfBinaryExpression(LHS, prec::InclusiveOr);
   if (Expr.isInvalid())
     return true;
   bool IsPackExpansion = AllowPackExpansion && Tok.is(tok::ellipsis);
