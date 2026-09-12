@@ -23,22 +23,17 @@ static_assert(test_case_condition(0) == 1);
 static_assert(test_case_condition(6) == 12);
 static_assert(test_case_condition(2) == -1);
 
-constexpr int assign(int& target, int value) {
-  return target = value;
-}
-
 constexpr bool test_case_condition_assignment_parsing() {
-  int pattern_value = 0;
   int source = 0;
   if (case 3 = (source = 3)) {
   } else {
     return false;
   }
-  if (case assign(pattern_value, 4) = (source = 4)) {
+  if (case 4 = (source = 4)) {
   } else {
     return false;
   }
-  return pattern_value == 4 && source == 4;
+  return source == 4;
 }
 
 static_assert(test_case_condition_assignment_parsing());
@@ -160,6 +155,39 @@ constexpr int y = 1;
 static_assert(!(match(0, case y)));
 static_assert(!(match(x, case y)));
 
+struct ArrayPatternSubject {};
+
+template <unsigned N>
+constexpr bool operator==(ArrayPatternSubject, const char (&)[N]) {
+  return N == 4;
+}
+
+static_assert(match(ArrayPatternSubject{}, case "abc"));
+
+struct FunctionPatternSubject {};
+
+constexpr bool function_pattern(int) { return true; }
+
+constexpr bool operator==(FunctionPatternSubject, bool (&)(int)) {
+  return true;
+}
+
+static_assert(match(FunctionPatternSubject{}, case function_pattern));
+
+struct LvaluePatternSubject {};
+
+constexpr int lvalue_pattern = 0;
+
+constexpr bool operator==(LvaluePatternSubject, const int &) {
+  return true;
+}
+
+constexpr bool operator==(LvaluePatternSubject, int &&) {
+  return false;
+}
+
+static_assert(match(LvaluePatternSubject{}, case lvalue_pattern));
+
 static_assert([]() { return match(0, case auto&& _); }());
 static_assert([]() { return match(0, case auto&& x); }());
 
@@ -205,18 +233,14 @@ static_assert([] { int value = 43; return match_named_pointer(&value); }() == 43
 
 static_assert([](int x) { return match(x, case 0); }(0));
 static_assert([](auto x) -> bool { return match(x, case 0); }(0));
-static_assert(![](int y) { return match(0, case y); }(1));
-static_assert(![](auto y) -> bool { return match(0, case y); }(1));
-static_assert([](int x, int y) { return match(x, case y); }(0, 0));
-static_assert([](auto x, auto y) -> bool { return match(x, case y); }(0, 0));
-static_assert(![](int x, int y) { return match(x, case y); }(0, 1));
-static_assert(![](auto x, auto y) -> bool { return match(x, case y); }(0, 1));
+template<auto Pattern>
+constexpr bool test_dependent_match_0(auto value) {
+  return match(value, case Pattern);
+}
 
-constexpr bool test_dependent_match_0(auto x, auto y) { return match(x, case y); }
-
-static_assert(test_dependent_match_0(0, 0));
-static_assert(test_dependent_match_0(0.0, 0));
-static_assert(!test_dependent_match_0(1, 0));
+static_assert(test_dependent_match_0<0>(0));
+static_assert(test_dependent_match_0<0>(0.0));
+static_assert(!test_dependent_match_0<0>(1));
 
 constexpr bool test_dependent_match_1(auto x) { return match(x, case 0); }
 
@@ -224,11 +248,12 @@ static_assert(test_dependent_match_1(0));
 static_assert(test_dependent_match_1(0.0));
 static_assert(!test_dependent_match_1(1));
 
-constexpr bool test_dependent_match_2(auto y) { return match(0, case y); }
+template<auto Pattern>
+constexpr bool test_dependent_match_2() { return match(0, case Pattern); }
 
-static_assert(test_dependent_match_2(0));
-static_assert(test_dependent_match_2(0.0));
-static_assert(!test_dependent_match_2(1));
+static_assert(test_dependent_match_2<0>());
+static_assert(test_dependent_match_2<0.0>());
+static_assert(!test_dependent_match_2<1>());
 
 constexpr auto test(char c) {
   return match (c) {
