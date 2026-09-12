@@ -409,7 +409,7 @@ static_assert(match (IndexOnlyChoice{1}) {
 
 template<unsigned I>
 constexpr bool index_only_state(IndexOnlyChoice choice) {
-  return choice match case { .[I] };
+  return match(choice, case { .[I] });
 }
 
 static_assert(index_only_state<0>({0}));

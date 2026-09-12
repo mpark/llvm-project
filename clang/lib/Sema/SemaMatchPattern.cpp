@@ -1298,7 +1298,8 @@ Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                          ArrayRef<MatchTestInstantiation> Instantiations) {
   return new (Context) MatchTestExpr(
       Context, HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc,
-      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations);
+      Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
+      isMatchSubjectProductType(Subject->getType()));
 }
 
 ExprResult Sema::ActOnCaseConditionExpr(

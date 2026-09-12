@@ -5580,6 +5580,7 @@ class MatchTestExpr : public Expr {
   VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
+  SourceLocation RParenLoc;
   MatchPattern *Pattern;
   MatchPatternInstantiation *PatternInstantiation;
   SourceLocation IfLoc;
@@ -5587,6 +5588,7 @@ class MatchTestExpr : public Expr {
   ArrayRef<MatchTestInstantiation> Instantiations;
   bool PatternIsIrrefutable;
   bool NeedsCaseInstantiation;
+  bool HasSubjectProduct;
   MatchTemplateRegionDecl *Region = nullptr;
 
 protected:
@@ -5596,12 +5598,14 @@ protected:
                          MatchPatternInstantiation *PatternInstantiation,
                          SourceLocation IfLoc, MatchGuard Guard,
                          bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-                         ArrayRef<MatchTestInstantiation> Instantiations)
+                         ArrayRef<MatchTestInstantiation> Instantiations,
+                         bool HasSubjectProduct)
       : Expr(SC, Ctx.BoolTy, VK_PRValue, OK_Ordinary), HoldingVar(HoldingVar),
         Subject(Subject), MatchLoc(MatchLoc), Pattern(Pattern),
         PatternInstantiation(PatternInstantiation), IfLoc(IfLoc), Guard(Guard),
         PatternIsIrrefutable(PatternIsIrrefutable),
-        NeedsCaseInstantiation(NeedsCaseInstantiation) {
+        NeedsCaseInstantiation(NeedsCaseInstantiation),
+        HasSubjectProduct(HasSubjectProduct) {
     if (!Instantiations.empty()) {
       auto *Storage =
           Ctx.Allocate<MatchTestInstantiation>(Instantiations.size());
@@ -5614,7 +5618,8 @@ protected:
 
   explicit MatchTestExpr(StmtClass SC, EmptyShell Empty)
       : Expr(SC, Empty), PatternInstantiation(nullptr),
-        PatternIsIrrefutable(false), NeedsCaseInstantiation(false) {}
+        PatternIsIrrefutable(false), NeedsCaseInstantiation(false),
+        HasSubjectProduct(false) {}
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
@@ -5623,11 +5628,12 @@ public:
                          MatchPatternInstantiation *PatternInstantiation,
                          SourceLocation IfLoc, MatchGuard Guard,
                          bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-                         ArrayRef<MatchTestInstantiation> Instantiations = {})
+                         ArrayRef<MatchTestInstantiation> Instantiations = {},
+                         bool HasSubjectProduct = false)
       : MatchTestExpr(MatchTestExprClass, Ctx, HoldingVar, Subject, MatchLoc,
                       Pattern, PatternInstantiation, IfLoc, Guard,
                       PatternIsIrrefutable, NeedsCaseInstantiation,
-                      Instantiations) {}
+                      Instantiations, HasSubjectProduct) {}
 
   explicit MatchTestExpr(EmptyShell Empty)
       : MatchTestExpr(MatchTestExprClass, Empty) {}
@@ -5642,9 +5648,17 @@ public:
     return MatchLoc;
   }
 
-  const MatchPattern* getPattern() const { return Pattern; }
+  SourceLocation getRParenLoc() const LLVM_READONLY { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
   MatchTemplateRegionDecl *getRegion() const { return Region; }
   void setRegion(MatchTemplateRegionDecl *D) { Region = D; }
+
+  bool hasSubjectProduct() const { return HasSubjectProduct; }
+
+  ArrayRef<Expr *> getSubjectProductElements() const;
+
+  const MatchPattern* getPattern() const { return Pattern; }
   MatchPattern* getPattern() { return Pattern; }
 
   const MatchPatternInstantiation *getPatternInstantiation() const {
@@ -5665,9 +5679,7 @@ public:
     return Instantiations;
   }
 
-  bool hasSemanticInstantiations() const {
-    return !Instantiations.empty();
-  }
+  bool hasSemanticInstantiations() const { return !Instantiations.empty(); }
 
   bool hasConditionInstantiations() const {
     return llvm::any_of(Instantiations, [](const auto &Instantiation) {
@@ -5752,15 +5764,13 @@ public:
     return findInCondition(const_cast<Expr *>(Condition));
   }
 
-  SourceLocation getBeginLoc() const LLVM_READONLY {
-    return getStmtClass() == CaseConditionExprClass
-               ? MatchLoc
-               : getSubject()->getBeginLoc();
-  }
+  SourceLocation getBeginLoc() const LLVM_READONLY { return MatchLoc; }
 
   SourceLocation getEndLoc() const LLVM_READONLY {
     if (Guard.Condition)
-      return Guard.Condition->getEndLoc();
+      return RParenLoc.isValid() ? RParenLoc : Guard.Condition->getEndLoc();
+    if (RParenLoc.isValid())
+      return RParenLoc;
     return getStmtClass() == CaseConditionExprClass ? Subject->getEndLoc()
                                                     : Pattern->getEndLoc();
   }
@@ -5790,7 +5800,8 @@ public:
       : MatchTestExpr(CaseConditionExprClass, Ctx, HoldingVar, Subject, CaseLoc,
                       Pattern, PatternInstantiation, /*IfLoc=*/{},
                       /*Guard=*/{}, PatternIsIrrefutable,
-                      NeedsCaseInstantiation, Instantiations) {}
+                      NeedsCaseInstantiation, Instantiations,
+                      /*HasSubjectProduct=*/false) {}
 
   explicit CaseConditionExpr(EmptyShell Empty)
       : MatchTestExpr(CaseConditionExprClass, Empty) {}
