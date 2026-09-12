@@ -3427,14 +3427,21 @@ void Parser::injectEmbedTokens() {
 bool Parser::ParseExpressionList(SmallVectorImpl<Expr *> &Exprs,
                                  llvm::function_ref<void()> ExpressionStarts,
                                  bool FailImmediatelyOnInvalidExpr,
-                                 bool ParsingExpansionStmtInitList) {
+                                 bool ParsingExpansionStmtInitList,
+                                 bool AllowBracedInitList) {
   bool SawError = false;
   while (true) {
     if (ExpressionStarts)
       ExpressionStarts();
 
     ExprResult Expr;
-    if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
+    if (!AllowBracedInitList && Tok.is(tok::l_brace)) {
+      Diag(Tok, diag::err_expected_expression);
+      BalancedDelimiterTracker Braces(*this, tok::l_brace);
+      Braces.consumeOpen();
+      Braces.skipToEnd();
+      Expr = ExprError();
+    } else if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
       Diag(Tok, diag::compat_cxx11_generalized_initializer_lists);
       Expr = ParseBraceInitializer();
     } else

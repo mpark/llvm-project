@@ -4273,8 +4273,20 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
       }
       return ExprError();
     }
-    if (ParseExpressionList(Subjects) || Parens.consumeClose())
+    bool InvalidSubjects =
+        ParseExpressionList(Subjects, /*ExpressionStarts=*/{},
+                            /*FailImmediatelyOnInvalidExpr=*/false,
+                            /*ParsingExpansionStmtInitList=*/false,
+                            /*AllowBracedInitList=*/false);
+    bool InvalidParens = Parens.consumeClose();
+    if (InvalidSubjects || InvalidParens) {
+      if (Tok.is(tok::l_brace)) {
+        BalancedDelimiterTracker Body(*this, tok::l_brace);
+        Body.consumeOpen();
+        Body.skipToEnd();
+      }
       return ExprError();
+    }
   }
 
   QualType RetTy;
@@ -4589,9 +4601,12 @@ ExprResult Parser::ParseMatchTestExpression() {
   ExprVector Subjects;
   while (true) {
     ExprResult Subject;
-    if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
-      Diag(Tok, diag::compat_cxx11_generalized_initializer_lists);
-      Subject = ParseBraceInitializer();
+    if (Tok.is(tok::l_brace)) {
+      Diag(Tok, diag::err_expected_expression);
+      BalancedDelimiterTracker Braces(*this, tok::l_brace);
+      Braces.consumeOpen();
+      Braces.skipToEnd();
+      Subject = ExprError();
     } else {
       Subject = ParseAssignmentExpression();
     }
@@ -4599,6 +4614,8 @@ ExprResult Parser::ParseMatchTestExpression() {
     if (Tok.is(tok::ellipsis))
       Subject = Actions.ActOnPackExpansion(Subject.get(), ConsumeToken());
     else if (Tok.is(tok::code_completion)) {
+      // The subject expression is complete. Let an enclosing caller provide
+      // any applicable completion rather than treating this as a separator.
       cutOffParsing();
       return ExprError();
     }
