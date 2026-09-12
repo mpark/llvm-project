@@ -6,7 +6,7 @@
 // CHECK-NOT: load i32
 // CHECK: ret i1 true
 bool matches_int(int value) {
-  return value match case int;
+  return match(value, case int);
 }
 
 struct Shape {
@@ -19,7 +19,7 @@ struct Circle : Shape {};
 // CHECK: call ptr @__dynamic_cast
 // CHECK: icmp ne ptr
 bool matches_circle(Shape& shape) {
-  return shape match case Circle&;
+  return match(shape, case Circle&);
 }
 
 int copies;
@@ -34,7 +34,7 @@ struct Copyable {
 // CHECK-NOT: call{{.*}}Copyable{{[CD]}}
 // CHECK: ret i1 true
 bool checks_without_copy(Copyable& value) {
-  return value match case Copyable;
+  return match(value, case Copyable);
 }
 
 struct Pair {
@@ -46,14 +46,14 @@ struct Pair {
 // CHECK-NOT: call{{.*}}Copyable{{[CD]}}
 // CHECK: ret i1 %{{.*}}
 bool nested_checks_without_copy(Pair& value) {
-  return value match case [Copyable, int];
+  return match(value, case [Copyable, int]);
 }
 
 // CHECK-LABEL: define{{.*}} i1 @_Z23reference_does_not_copyR8Copyable
 // CHECK-NOT: call{{.*}}Copyable{{[CD]}}
 // CHECK: ret i1 true
 bool reference_does_not_copy(Copyable& value) {
-  return value match case Copyable&;
+  return match(value, case Copyable&);
 }
 
 int void_evaluations;
@@ -77,5 +77,5 @@ int matches_void_once() {
 // CHECK-NOT: call void @_Z9make_voidv
 // CHECK: ret i1 true
 bool tests_void_once() {
-  return make_void() match case const volatile void;
+  return match(make_void(), case const volatile void);
 }

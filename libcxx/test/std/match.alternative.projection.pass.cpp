@@ -386,7 +386,7 @@ int test_two_variants(TwoVariants& value) {
 }
 
 bool test_direct_value(std::variant<int, double>& value) {
-  return value match case { 0 };
+  return match(value, case { 0 });
 }
 
 int subject_evaluations;
@@ -400,7 +400,7 @@ evaluate_subject_once(std::pair<std::variant<int, double>, int>& value) {
 bool test_subject_evaluated_once(
     std::pair<std::variant<int, double>, int>& value) {
   subject_evaluations = 0;
-  bool result = evaluate_subject_once(value) match case [{ _ }, _];
+  bool result = match(evaluate_subject_once(value), case [{ _ }, _]);
   return result && subject_evaluations == 1;
 }
 
