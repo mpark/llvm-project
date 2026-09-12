@@ -3304,14 +3304,19 @@ void StmtPrinter::VisitCaseConditionExpr(CaseConditionExpr *Node) {
 }
 
 void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
-  Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
-                      ? Node->getHoldingVar()->getInit()
-                      : Node->getSubject();
   OS << "match";
   if (Node->isConstexpr())
     OS << " constexpr";
   OS << " (";
-  PrintExpr(Subject);
+  if (Node->hasSubjectProduct()) {
+    llvm::interleaveComma(Node->getSubjectProductElements(), OS,
+                          [&](Expr *Subject) { PrintExpr(Subject); });
+  } else {
+    Expr *Subject = Node->getHoldingVar() && Node->getHoldingVar()->hasInit()
+                        ? Node->getHoldingVar()->getInit()
+                        : Node->getSubject();
+    PrintExpr(Subject);
+  }
   OS << ")";
   if (Node->getOrigResultType().getBeginLoc().isValid()) {
     OS << " -> ";

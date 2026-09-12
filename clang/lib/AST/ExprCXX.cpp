@@ -2262,10 +2262,10 @@ CXXExpansionSelectExpr::CXXExpansionSelectExpr(const ASTContext &C,
 
 MatchSelectExpr::MatchSelectExpr(
     VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
-    bool IsConstexpr, bool IsStatement, bool IsFullyCovered,
-    TypeLoc OrigResultType, QualType Ty, ArrayRef<Stmt *> Preamble,
-    ArrayRef<MatchCase> Cases, ArrayRef<MatchCaseInstantiation> Instantiations,
-    SourceRange Braces)
+    bool IsConstexpr, bool IsStatement, bool HasSubjectProduct,
+    bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
+    ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+    ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces)
     : Expr(MatchSelectExprClass, Ty.getNonReferenceType(),
            Ty->isLValueReferenceType()   ? VK_LValue
            : Ty->isRValueReferenceType() ? VK_XValue
@@ -2273,9 +2273,10 @@ MatchSelectExpr::MatchSelectExpr(
            OK_Ordinary),
       HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
       IsConstexpr(IsConstexpr), IsFullyCovered(IsFullyCovered),
-      IsStatement(IsStatement), OrigResultType(OrigResultType),
-      NumPreambleStatements(Preamble.size()), NumCases(Cases.size()),
-      NumCaseInstantiations(Instantiations.size()), Braces(Braces) {
+      IsStatement(IsStatement), HasSubjectProduct(HasSubjectProduct),
+      OrigResultType(OrigResultType), NumPreambleStatements(Preamble.size()),
+      NumCases(Cases.size()), NumCaseInstantiations(Instantiations.size()),
+      Braces(Braces) {
   std::uninitialized_copy(Preamble.begin(), Preamble.end(),
                           getTrailingObjects<Stmt *>());
   std::uninitialized_copy(Cases.begin(), Cases.end(),
@@ -2288,15 +2289,40 @@ MatchSelectExpr::MatchSelectExpr(
 MatchSelectExpr *MatchSelectExpr::Create(
     const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
     SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
-    bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
-    ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+    bool HasSubjectProduct, bool IsFullyCovered, TypeLoc OrigResultType,
+    QualType Ty, ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
     ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces) {
   void *Mem =
       Ctx.Allocate(totalSizeToAlloc<Stmt *, MatchCase, MatchCaseInstantiation>(
           Preamble.size(), Cases.size(), Instantiations.size()));
-  return new (Mem) MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr,
-                                   IsStatement, IsFullyCovered, OrigResultType,
-                                   Ty, Preamble, Cases, Instantiations, Braces);
+  return new (Mem)
+      MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
+                      HasSubjectProduct, IsFullyCovered, OrigResultType, Ty,
+                      Preamble, Cases, Instantiations, Braces);
+}
+
+ArrayRef<Expr *> MatchSelectExpr::getSubjectProductElements() const {
+  if (!HasSubjectProduct || !HoldingVar || !HoldingVar->hasInit())
+    return {};
+
+  Expr *Init = HoldingVar->getInit();
+  while (true) {
+    if (auto *Cleanups = dyn_cast<ExprWithCleanups>(Init))
+      Init = Cleanups->getSubExpr();
+    else if (auto *Materialized = dyn_cast<MaterializeTemporaryExpr>(Init))
+      Init = Materialized->getSubExpr();
+    else if (auto *Bound = dyn_cast<CXXBindTemporaryExpr>(Init))
+      Init = Bound->getSubExpr();
+    else if (auto *Cast = dyn_cast<CXXFunctionalCastExpr>(Init))
+      Init = Cast->getSubExpr();
+    else
+      break;
+  }
+
+  auto *List = cast<InitListExpr>(Init);
+  if (InitListExpr *Syntactic = List->getSyntacticForm())
+    List = Syntactic;
+  return List->inits();
 }
 
 MatchSelectExpr *MatchSelectExpr::CreateEmpty(const ASTContext &Ctx,
