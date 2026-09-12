@@ -1,6 +1,12 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -verify %s
 
 void valid(int first, int second) {
+  bool test = match(first, second, case [_, _]);
+  bool structured = match(first, second, case auto&& [x, y]);
+  bool wildcard = match(first, second, case _);
+  bool comma_expression =
+      match((static_cast<void>(first), second), case int);
+
   match (first, second) {
     case [_, _] =>;
   }
@@ -62,6 +68,8 @@ void constexpr_bindings() {
 }
 
 void invalid(int first, int second) {
+  match(first, second, case auto&& whole); // expected-error {{multiple match subjects require a decomposition pattern, structured binding declaration pattern, or wildcard}}
+
   match (first, second) {
     case auto&& whole =>; // expected-error {{multiple match subjects require a decomposition pattern, structured binding declaration pattern, or wildcard}}
   }
@@ -70,4 +78,9 @@ void invalid(int first, int second) {
     case [0, _] || 1 =>; // expected-error {{multiple match subjects require a decomposition pattern, structured binding declaration pattern, or wildcard}}
     case [_, _] =>;
   }
+}
+
+void malformed(int value) {
+  match(, case _); // expected-error {{expected expression}}
+  match(value, case); // expected-error {{expected expression}}
 }

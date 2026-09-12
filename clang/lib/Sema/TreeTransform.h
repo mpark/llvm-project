@@ -19560,7 +19560,16 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
     *SelectedIncrement = nullptr;
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
-  if (VarDecl *HV = E->getHoldingVar()) {
+  if (E->hasSubjectProduct()) {
+    ArrayRef<Expr *> ProductElements = E->getSubjectProductElements();
+    SmallVector<Expr *, 4> TransformedElements;
+    if (getDerived().TransformExprs(ProductElements.data(),
+                                    ProductElements.size(),
+                                    /*IsCall=*/false, TransformedElements))
+      return ExprError();
+    LHS = getSema().ActOnMatchSubjects(TransformedElements, E->getMatchLoc(),
+                                       HoldingVar, /*ForceProduct=*/true);
+  } else if (VarDecl *HV = E->getHoldingVar()) {
     assert(HV->hasInit() && "match subject holder must have an initializer");
     ExprResult Subject = getDerived().TransformExpr(HV->getInit());
     if (Subject.isInvalid())
@@ -19776,12 +19785,15 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
         Representative.PatternInstantiation,
         Representative.PatternIsIrrefutable, StillNeedsCaseInstantiation,
         Instantiations, /*HasSemanticInstantiations=*/true);
-  return getSema().ActOnMatchTestExpr(
+  ExprResult Result = getSema().ActOnMatchTestExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
       Representative.PatternInstantiation, Representative.IfLoc,
       Representative.Guard, Representative.PatternIsIrrefutable,
       StillNeedsCaseInstantiation, Instantiations,
       /*HasSemanticInstantiations=*/true);
+  if (Result.isUsable())
+    cast<MatchTestExpr>(Result.get())->setRParenLoc(E->getRParenLoc());
+  return Result;
 }
 
 template <typename Derived>

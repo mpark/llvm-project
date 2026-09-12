@@ -174,7 +174,7 @@ bool extend(int n) {
 //
 bool do_not_extend(int n) {
   bool flag = false;
-  if ((Lifetime(&flag, n) match case [_, 101])) {
+  if ((match(Lifetime(&flag, n), case [_, 101]))) {
     return flag;
   } else if (n == 202) {
     return flag;
