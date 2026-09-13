@@ -923,6 +923,19 @@ static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
   if (Pattern->isTypeDependent() || Pattern->isValueDependent())
     return Pattern;
 
+  // An overload set has no value until a use provides a target. Preserve it
+  // for equality or invocation to resolve.
+  if (Pattern->getType() == S.Context.OverloadTy)
+    return Pattern;
+
+  // A direct call to an immediate function does not form a function pointer.
+  // Preserve the function designator so consteval predicates remain usable.
+  if (const auto *DRE =
+          dyn_cast<DeclRefExpr>(Pattern->IgnoreParenImpCasts()))
+    if (const auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl());
+        FD && FD->isImmediateFunction())
+      return Pattern;
+
   Expr::EvalResult DirectResult;
   if (Pattern->EvaluateAsConstantExpr(DirectResult, S.Context,
                                       Expr::ConstantExprKind::Normal))
@@ -946,6 +959,47 @@ static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
     return ExprError();
   }
   return Pattern;
+}
+
+enum class ExpressionPatternConditionKind { Equality, Invocation };
+
+static ExprResult buildExpressionPatternCondition(
+    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
+    ExpressionPatternConditionKind Kind) {
+  ExprResult Condition;
+  switch (Kind) {
+  case ExpressionPatternConditionKind::Equality:
+    Condition =
+        S.ActOnBinOp(Scope, Loc, tok::TokenKind::equalequal, Subject, Pattern);
+    break;
+  case ExpressionPatternConditionKind::Invocation: {
+    Expr *Callee = new (S.Context) ParenExpr(Loc, Loc, Pattern);
+    Condition = S.BuildCallExpr(Scope, Callee, Loc, Subject, Loc);
+    break;
+  }
+  }
+  if (Condition.isInvalid())
+    return ExprError();
+  return S.PerformContextuallyConvertToBool(Condition.get());
+}
+
+static bool isViableExpressionPatternCondition(
+    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
+    ExpressionPatternConditionKind Kind) {
+  auto *SubjectProbe = new (S.Context)
+      OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
+                      Subject->getObjectKind(), Subject);
+  Expr *PatternProbe = Pattern;
+  if (Pattern->getType() != S.Context.OverloadTy)
+    PatternProbe = new (S.Context)
+        OpaqueValueExpr(Loc, Pattern->getType(), Pattern->getValueKind(),
+                        Pattern->getObjectKind(), Pattern);
+  EnterExpressionEvaluationContext Unevaluated(
+      S, Sema::ExpressionEvaluationContext::Unevaluated);
+  Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
+  ExprResult Condition = buildExpressionPatternCondition(
+      S, Scope, Loc, SubjectProbe, PatternProbe, Kind);
+  return Condition.isUsable() && !Trap.hasErrorOccurred();
 }
 
 static ExprResult buildOpenAlternativeTraitsTryCastCall(
@@ -2619,6 +2673,14 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return false;
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
     MatchPatternInfo &PatternInfo = State.get(P);
+    if (P->getExpr()->isTypeDependent()) {
+      ExprResult Cond = ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject,
+                                   P->getExpr());
+      if (Cond.isInvalid())
+        return true;
+      PatternInfo.Condition = Cond.get();
+      break;
+    }
     if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo,
                                         ProjectionCache))
       return true;
@@ -2629,8 +2691,25 @@ bool Sema::CheckCompleteMatchPatternImpl(
         buildConstantPatternValue(*this, P->getExpr(), /*Diagnose=*/false);
     Expr *PatternValue =
         ConstantPattern.isUsable() ? ConstantPattern.get() : P->getExpr();
-    ExprResult Cond = ActOnBinOp(S, Loc, tok::TokenKind::equalequal, Subject,
-                                 PatternValue);
+    std::optional<ExpressionPatternConditionKind> Kind;
+    if (isViableExpressionPatternCondition(
+            *this, S, Loc, Subject, PatternValue,
+            ExpressionPatternConditionKind::Equality))
+      Kind = ExpressionPatternConditionKind::Equality;
+    else if (isViableExpressionPatternCondition(
+                 *this, S, Loc, Subject, PatternValue,
+                 ExpressionPatternConditionKind::Invocation))
+      Kind = ExpressionPatternConditionKind::Invocation;
+
+    if (!Kind) {
+      Diag(Loc, diag::err_expression_pattern_not_testable)
+          << P->getExpr()->getType() << Subject->getType()
+          << P->getExpr()->getSourceRange();
+      return true;
+    }
+
+    ExprResult Cond = buildExpressionPatternCondition(
+        *this, S, Loc, Subject, PatternValue, *Kind);
     if (Cond.isInvalid())
       return true;
     PatternInfo.Condition = Cond.get();
