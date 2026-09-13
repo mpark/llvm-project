@@ -50,7 +50,7 @@ constexpr int match_partial_ordering(std::partial_ordering value) {
 constexpr int match_strong_ordering(std::strong_ordering value) {
   return match (value) {
     case std::strong_ordering::less => -1;
-    case 0 => 0;
+    case std::strong_ordering::equivalent => 0;
     case std::strong_ordering::greater => 1;
   };
 }
