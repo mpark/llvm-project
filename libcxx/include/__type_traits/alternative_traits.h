@@ -45,34 +45,25 @@ struct alternative_info {
 template <class _Tp>
 struct alternative_traits;
 
-template <class _Provider>
-struct alternative_name {
-  using provider = _Provider;
-
-  size_t index;
-
-  consteval alternative_name(size_t __index) : index(__index) {}
-};
-
 template <class _Tp>
 struct alternative_traits<_Tp*> {
-  using _AT = alternative_traits;
-
   static constexpr alternative_info alternatives[] = {
       {meta::reflect_constant(nullptr), /*empty=*/true},
       ^^_Tp,
   };
   static constexpr bool has_residual_states = false;
 
-  // This provider is inherited by nullable types and also names a nullable
-  // view of expected, so its operations act on the actual matching subject.
+  enum class state : bool { empty = false, value = true };
+
+  // The parameter is templated so nullable library types can reuse this
+  // implementation while operating on the actual matching subject.
   template <class _Self>
-  _LIBCPP_HIDE_FROM_ABI static constexpr bool index(const _Self& __self) noexcept {
-    return __self ? true : false;
+  _LIBCPP_HIDE_FROM_ABI static constexpr state index(const _Self& __self) noexcept {
+    return __self ? state::value : state::empty;
   }
 
-  template <bool _HasValue, class _Self>
-    requires(_HasValue)
+  template <state _State, class _Self>
+    requires(_State == state::value)
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
     if constexpr (is_void_v<_Tp>)
       return;
@@ -80,9 +71,6 @@ struct alternative_traits<_Tp*> {
       return *std::forward<_Self>(__self);
   }
 
-  struct names {
-    static constexpr alternative_name<_AT> none = 0, some = 1;
-  };
 };
 
 #endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)

@@ -50,32 +50,25 @@ namespace std {
 #    include <__expected/unexpected.h>
 
 #    if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
-#      include <__cstddef/size_t.h>
 #      include <__type_traits/alternative_traits.h>
-#      include <__type_traits/conditional.h>
 #      include <__utility/forward.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp, class _Ep>
 struct alternative_traits<expected<_Tp, _Ep>> {
-  using _AT = alternative_traits;
-
   static constexpr alternative_info alternatives[] = {^^_Tp, ^^_Ep};
   static constexpr bool has_residual_states = false;
 
-  struct names : alternative_traits<_Tp*>::names {
-    static constexpr alternative_name<_AT> value = 0, error = 1;
-  };
+  enum class state : bool { value = false, error = true };
 
-  _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const expected<_Tp, _Ep>& __value) noexcept {
-    return __value.has_value() ? 0 : 1;
+  _LIBCPP_HIDE_FROM_ABI static constexpr state index(const expected<_Tp, _Ep>& __value) noexcept {
+    return __value.has_value() ? state::value : state::error;
   }
 
-  template <size_t _Ip, class _Self>
-    requires(_Ip < 2)
+  template <state _State, class _Self>
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) {
-    if constexpr (_Ip == 0)
+    if constexpr (_State == state::value)
       return *std::forward<_Self>(__self);
     else
       return std::forward<_Self>(__self).error();

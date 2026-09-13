@@ -14,12 +14,6 @@ struct alternative_info {
       : info(info), empty(empty) {}
 };
 
-template<class Provider>
-struct alternative_name {
-  using provider = Provider;
-  __SIZE_TYPE__ index;
-  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
-};
 }
 
 struct Choice {
@@ -45,23 +39,20 @@ struct TupleChoice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     ^^int, ^^double
   };
   static constexpr bool has_residual_states = false;
 
-  struct names {
-    static constexpr alternative_name<AT> first = 0, second = 1;
-  };
+  enum class names : __SIZE_TYPE__ { first = 0, second = 1 };
 
-  static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
-    return choice.state;
+  static constexpr names index(const Choice& choice) noexcept {
+    return names(choice.state);
   }
 
-  template<__SIZE_TYPE__ I, class Self>
+  template<names I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
-    if constexpr (I == 0)
+    if constexpr (I == names::first)
       return (static_cast<Self&&>(choice).first);
     else
       return (static_cast<Self&&>(choice).second);
@@ -103,29 +94,22 @@ struct AnonymousProjection {
 
 struct VoidProjection {};
 
-struct MultiViewChoice {
+struct AliasedChoice {
   bool engaged;
   int value;
-  int* primary_index_calls;
-  int* nullable_index_calls;
+  int* index_calls;
 };
 
-struct NullableChoiceView {
-  static constexpr std::alternative_info alternatives[] = {
-    {^^empty_state, true}, ^^int
-  };
-  static constexpr bool has_residual_states = false;
+struct GenericSelectorChoice {
+  bool error;
+  int value;
+  long error_value;
+};
 
-  static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
-    ++*choice.nullable_index_calls;
-    return choice.engaged ? 1 : 0;
-  }
-
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I == 1)
-  static constexpr decltype(auto) get(Self&& choice) {
-    return (static_cast<Self&&>(choice).value);
-  }
+struct DirectNamedChoice {
+  bool second;
+  int first_value;
+  long second_value;
 };
 
 template<>
@@ -163,8 +147,8 @@ struct std::alternative_traits<AnonymousProjection> {
 
   static constexpr unsigned index(AnonymousProjection) noexcept { return 0; }
 
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I == 0)
+  template<auto I, class Self>
+    requires (static_cast<__SIZE_TYPE__>(I) == 0)
   static constexpr decltype(auto) get(Self&& choice) {
     return (static_cast<Self&&>(choice).value);
   }
@@ -183,28 +167,70 @@ struct std::alternative_traits<VoidProjection> {
 };
 
 template<>
-struct std::alternative_traits<MultiViewChoice> {
-  using AT = alternative_traits;
+struct std::alternative_traits<AliasedChoice> {
   static constexpr alternative_info alternatives[] = {
     ^^int, {^^empty_state, true}
   };
   static constexpr bool has_residual_states = false;
 
-  static constexpr __SIZE_TYPE__ index(const MultiViewChoice& choice) noexcept {
-    ++*choice.primary_index_calls;
-    return choice.engaged ? 0 : 1;
+  enum class names : __SIZE_TYPE__ {
+    value = 0,
+    some = 0,
+    error = 1,
+    none = 1,
+  };
+
+  static constexpr names index(const AliasedChoice& choice) noexcept {
+    ++*choice.index_calls;
+    return choice.engaged ? names::value : names::none;
   }
 
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I == 0)
+  template<names Selector, class Self>
+    requires (Selector == names::value)
   static constexpr decltype(auto) get(Self&& choice) {
     return (static_cast<Self&&>(choice).value);
   }
+};
 
-  struct names {
-    static constexpr alternative_name<AT> value = 0, error = 1;
-    static constexpr alternative_name<NullableChoiceView> none = 0, some = 1;
-  };
+template<>
+struct std::alternative_traits<GenericSelectorChoice> {
+  static constexpr alternative_info alternatives[] = {^^int, ^^long};
+  static constexpr bool has_residual_states = false;
+
+  enum discriminator : bool { value = false, error = true };
+
+  static constexpr discriminator
+  index(const GenericSelectorChoice& choice) noexcept {
+    return choice.error ? discriminator::error : discriminator::value;
+  }
+
+  template<discriminator Selector, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (Selector == discriminator::error)
+      return (static_cast<Self&&>(choice).error_value);
+    else
+      return (static_cast<Self&&>(choice).value);
+  }
+};
+
+template<>
+struct std::alternative_traits<DirectNamedChoice> {
+  static constexpr alternative_info alternatives[] = {{}, {}};
+  static constexpr bool has_residual_states = false;
+
+  enum class names : bool { first = false, second = true };
+
+  static constexpr names index(const DirectNamedChoice& choice) noexcept {
+    return choice.second ? names::second : names::first;
+  }
+
+  template<names Selector, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (Selector == names::first)
+      return (static_cast<Self&&>(choice).first_value);
+    else
+      return (static_cast<Self&&>(choice).second_value);
+  }
 };
 
 constexpr int match_choice(Choice choice) {
@@ -321,18 +347,37 @@ constexpr int match_generic_wildcard_pack(TupleChoice choice) {
   };
 }
 
-constexpr int multiple_views_cache_each_discriminator() {
-  int primary_index_calls = 0;
-  int nullable_index_calls = 0;
-  MultiViewChoice choice{
-      true, 2, &primary_index_calls, &nullable_index_calls};
+constexpr int aliases_share_one_discriminator() {
+  int index_calls = 0;
+  AliasedChoice choice{true, 2, &index_calls};
   int result = match (choice) {
     case { .value: 0 } => 0;
     case { .some: 1 } => 1;
     case { .some: int value } => value;
     case { .none } => -1;
   };
-  return primary_index_calls * 100 + nullable_index_calls * 10 + result;
+  return index_calls * 100 + result;
+}
+
+constexpr int match_generic_selector_default(GenericSelectorChoice choice) {
+  return match (choice) {
+    case { int value } => value;
+    case { long error } => static_cast<int>(error) + 10;
+  };
+}
+
+constexpr int match_generic_selector_named(GenericSelectorChoice choice) {
+  return match (choice) {
+    case { .value: int value } => value;
+    case { .error: long error } => static_cast<int>(error) + 20;
+  };
+}
+
+constexpr int match_direct_named(DirectNamedChoice choice) {
+  return match (choice) {
+    case { .first: int value } => value;
+    case { .second: long value } => static_cast<int>(value) + 30;
+  };
 }
 
 template<class T>
@@ -449,7 +494,13 @@ static_assert(match_generic_declaration_pack({0, {3}, {4, 5}}) == 4);
 static_assert(match_generic_declaration_pack({1, {3}, {4, 5}}) == 11);
 static_assert(match_generic_wildcard_pack({0, {3}, {4, 5}}) == 3);
 static_assert(match_generic_wildcard_pack({1, {3}, {4, 5}}) == 4);
-static_assert(multiple_views_cache_each_discriminator() == 112);
+static_assert(aliases_share_one_discriminator() == 102);
+static_assert(match_generic_selector_default({false, 4, 5}) == 4);
+static_assert(match_generic_selector_default({true, 4, 5}) == 15);
+static_assert(match_generic_selector_named({false, 6, 7}) == 6);
+static_assert(match_generic_selector_named({true, 6, 7}) == 27);
+static_assert(match_direct_named({false, 10, 11}) == 10);
+static_assert(match_direct_named({true, 10, 11}) == 41);
 constexpr Choice dependent_first{0, 3, 4};
 constexpr Choice dependent_second{1, 3, 4};
 static_assert(match_dependent_generic(dependent_first) == 1);

@@ -18,6 +18,4 @@
 using Expected = std::expected<int, long>;
 using Traits   = std::alternative_traits<Expected>;
 
-int& project_value(Expected& value) {
-  return Traits::get<0>(value);
-}
+int& project_value(Expected& value) { return Traits::get<Traits::state::value>(value); }
