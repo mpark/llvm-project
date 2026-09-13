@@ -298,8 +298,6 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _Tp>
 struct alternative_traits<optional<_Tp>> {
-  using _AT = alternative_traits;
-
   static constexpr alternative_info alternatives[] = {
       {^^nullopt, /*empty=*/true},
       ^^_Tp,
@@ -307,19 +305,17 @@ struct alternative_traits<optional<_Tp>> {
 
   static constexpr bool has_residual_states = false;
 
-  _LIBCPP_HIDE_FROM_ABI static constexpr bool index(const optional<_Tp>& __value) noexcept {
-    return __value.has_value();
+  enum class state : bool { empty = false, value = true };
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr state index(const optional<_Tp>& __value) noexcept {
+    return __value.has_value() ? state::value : state::empty;
   }
 
-  template <bool _HasValue, class _Self>
-    requires(_HasValue)
+  template <state _State, class _Self>
+    requires(_State == state::value)
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
     return *std::forward<_Self>(__self);
   }
-
-  struct names {
-    static constexpr alternative_name<_AT> none = 0, some = 1;
-  };
 };
 
 _LIBCPP_END_NAMESPACE_STD
