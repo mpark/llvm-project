@@ -233,3 +233,40 @@ int match_choice_product(ChoiceProduct& value) {
     case [{ auto&& first }, { auto&& second }] => combine(first, second);
   };
 }
+
+struct StateLabel {
+  unsigned value;
+};
+
+inline constexpr StateLabel first_label{0};
+inline constexpr StateLabel second_label{1};
+
+struct LabeledChoice {
+  unsigned state;
+};
+
+template<>
+struct std::alternative_traits<LabeledChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^first_label, ^^second_label
+  };
+  static constexpr bool has_residual_states = false;
+
+  static unsigned index(LabeledChoice) noexcept;
+};
+
+// Advertised values dispatch through the cached discriminator. They neither
+// require equality with the subject nor recompute index for later arms.
+// CHECK-LABEL: define{{.*}} i32 @_Z19match_labeled_value13LabeledChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
+// CHECK: icmp eq
+// CHECK: icmp eq
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
+// CHECK: ret i32
+int match_labeled_value(LabeledChoice value) {
+  return match (value) {
+    case first_label => 1;
+    case second_label => 2;
+  };
+}
