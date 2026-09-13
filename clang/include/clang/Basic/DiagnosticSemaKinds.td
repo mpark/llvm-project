@@ -14507,6 +14507,9 @@ def err_declaration_pattern_not_exact_match : Error<
   "declaration pattern of type %0 is not an exact match for subject of type %1">;
 def err_type_pattern_not_exact_match : Error<
   "type pattern of type %0 is not an exact match for subject of type %1">;
+def err_expression_pattern_not_testable : Error<
+  "expression pattern of type %0 is neither equality-comparable with a "
+  "subject of type %1 nor callable with it">;
 def err_or_pattern_binding_mismatch : Error<
   "all alternatives in an or-pattern must introduce the same bindings">;
 def note_or_pattern_binding_interface : Note<
