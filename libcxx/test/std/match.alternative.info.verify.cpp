@@ -9,7 +9,15 @@
 // UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
+#include <expected>
 #include <variant>
 
 constexpr std::alternative_info typed_empty{^^int, /*empty=*/true};
 // expected-error@-1 {{constexpr variable 'typed_empty' must be initialized by a constant expression}}
+
+int expected_has_no_empty_name(const std::expected<int, long>& value) {
+  return match (value) {
+    case { .empty } => 0; // expected-error {{alternative name 'empty' is not defined}}
+    case _ => 1;
+  };
+}

@@ -419,7 +419,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       for (unsigned Index : Info->SelectedAlternatives)
         Results.push_back(CoveragePattern::ctor(
             CtorKey::alternativeCtor(
-                Info->AlternativeProviderType, Index, Info->AlternativeTypes,
+                Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
                 Info->ProjectableAlternatives, Info->EmptyAlternatives,
                 Info->AlternativeValues, Info->IsExhaustive),
             P->getBeginLoc()));
@@ -531,7 +531,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
     CoveragePatterns Results;
     for (unsigned Index : Info->SelectedAlternatives) {
       CtorKey C = CtorKey::alternativeCtor(
-          Info->AlternativeProviderType, Index, Info->AlternativeTypes,
+          Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
           Info->ProjectableAlternatives, Info->EmptyAlternatives,
           Info->AlternativeValues, Info->IsExhaustive);
       CoveragePattern Result =
@@ -688,8 +688,8 @@ firstMissingValueInRange(const IntegralValueDomain &Domain,
 
 std::optional<SmallVector<CtorKey, 4>>
 constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
-                    const CoveragePattern &Candidate, ConstructorDomain Domain,
-                    QualType AlternativeProvider = QualType()) {
+                    const CoveragePattern &Candidate,
+                    ConstructorDomain Domain) {
   Type = Type.getNonReferenceType().getUnqualifiedType();
   SmallVector<CtorKey, 4> Ctors;
 
@@ -815,9 +815,6 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
   auto AddAlternatives = [&](const CoveragePattern &P) -> bool {
     if (P.K != CoveragePattern::Ctor || P.C.K != CtorKey::Alternative)
       return false;
-    if (!AlternativeProvider.isNull() &&
-        !S.Context.hasSameType(P.C.AlternativeOwnerType, AlternativeProvider))
-      return false;
     for (unsigned I = 0; I < P.C.AlternativeTypes.size(); ++I)
       Ctors.push_back(CtorKey::alternativeCtor(
           P.C.AlternativeOwnerType, I, P.C.AlternativeTypes,
@@ -889,17 +886,6 @@ Usefulness isUseful(Sema &S, ArrayRef<PatternRow> Matrix, PatternRow Candidate,
   if (Head.K == CoveragePattern::Opaque)
     return Usefulness::MaybeUseful;
 
-  // A complete view covers the subject independently of the provider used by
-  // a later pattern. This also catches nested candidates that switch views.
-  if (Head.K == CoveragePattern::Ctor && !Matrix.empty()) {
-    PatternRow WildCandidate;
-    for (unsigned I = 0; I < Candidate.size(); ++I)
-      WildCandidate.push_back(CoveragePattern::wild());
-    if (isUseful(S, Matrix, std::move(WildCandidate), Types, Domain, nullptr) ==
-        Usefulness::NotUseful)
-      return Usefulness::NotUseful;
-  }
-
   auto CheckConstructors = [&](ArrayRef<CtorKey> Ctors,
                                SmallVectorImpl<CtorKey> *CtorWitness) {
     bool AnyMaybeUseful = false;
@@ -960,41 +946,6 @@ Usefulness isUseful(Sema &S, ArrayRef<PatternRow> Matrix, PatternRow Candidate,
   if (Head.K == CoveragePattern::Ctor) {
     CtorKey Ctor = Head.C;
     return CheckConstructors(ArrayRef(Ctor), Witness);
-  }
-
-  SmallVector<QualType, 4> AlternativeProviders;
-  for (const PatternRow &Row : Matrix) {
-    if (Row.empty() || Row.front().K != CoveragePattern::Ctor ||
-        Row.front().C.K != CtorKey::Alternative)
-      continue;
-    QualType Provider = Row.front().C.AlternativeOwnerType;
-    if (llvm::none_of(AlternativeProviders, [&](QualType Existing) {
-          return S.Context.hasSameType(Existing, Provider);
-        }))
-      AlternativeProviders.push_back(Provider);
-  }
-
-  if (!AlternativeProviders.empty()) {
-    Usefulness Combined = Usefulness::MaybeUseful;
-    SmallVector<CtorKey, 4> FirstWitness;
-    for (QualType Provider : AlternativeProviders) {
-      auto KnownCtors =
-          constructorsForType(S, Types.front(), Matrix, Head, Domain, Provider);
-      assert(KnownCtors && "alternative provider has no constructors");
-      SmallVector<CtorKey, 4> ProviderWitness;
-      Usefulness Result =
-          CheckConstructors(*KnownCtors, Witness ? &ProviderWitness : nullptr);
-      if (Result == Usefulness::NotUseful)
-        return Usefulness::NotUseful;
-      if (Result == Usefulness::Useful) {
-        Combined = Usefulness::Useful;
-        if (FirstWitness.empty())
-          FirstWitness = std::move(ProviderWitness);
-      }
-    }
-    if (Combined == Usefulness::Useful && Witness)
-      Witness->append(FirstWitness.begin(), FirstWitness.end());
-    return Combined;
   }
 
   auto KnownCtors = constructorsForType(S, Types.front(), Matrix, Head, Domain);
