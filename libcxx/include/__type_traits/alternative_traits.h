@@ -65,12 +65,11 @@ struct alternative_traits<_Tp*> {
   template <state _State, class _Self>
     requires(_State == state::value)
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) noexcept {
-    if constexpr (is_void_v<_Tp>)
-      return;
-    else
-      return *std::forward<_Self>(__self);
+    return match constexpr (is_void_v<_Tp>) -> decltype(auto) {
+      case true => ;
+      case false => *std::forward<_Self>(__self);
+    };
   }
-
 };
 
 #endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)

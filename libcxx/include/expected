@@ -68,10 +68,10 @@ struct alternative_traits<expected<_Tp, _Ep>> {
 
   template <state _State, class _Self>
   _LIBCPP_HIDE_FROM_ABI static constexpr decltype(auto) get(_Self&& __self) {
-    if constexpr (_State == state::value)
-      return *std::forward<_Self>(__self);
-    else
-      return std::forward<_Self>(__self).error();
+    return match constexpr (_State) -> decltype(auto) {
+      case state::value => *std::forward<_Self>(__self);
+      case state::error => std::forward<_Self>(__self).error();
+    };
   }
 };
 
