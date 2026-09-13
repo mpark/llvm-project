@@ -1075,6 +1075,12 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
   if (Subject->getType()->isVoidType())
     return Subject;
 
+  // An unevaluated match has no runtime subject lifetime to preserve. Avoid
+  // inventing a variable here, particularly while parsing constraints in a
+  // record context where such a declaration would look like a data member.
+  if (isUnevaluatedContext())
+    return Subject;
+
   APValue ConstantValue;
   bool IsConstant = !Subject->isValueDependent() &&
                     Subject->isCXX11ConstantExpr(Context, ConstantValue);
