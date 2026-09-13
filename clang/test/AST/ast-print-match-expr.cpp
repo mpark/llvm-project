@@ -11,12 +11,6 @@ struct alternative_info {
       : info(info), empty(empty) {}
 };
 
-template<class Provider>
-struct alternative_name {
-  using provider = Provider;
-  __SIZE_TYPE__ index;
-  consteval alternative_name(__SIZE_TYPE__ value) : index(value) {}
-};
 }
 
 struct Pair {
@@ -39,23 +33,20 @@ struct Choice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     ^^int, ^^double
   };
   static constexpr bool has_residual_states = false;
 
-  struct names {
-    static constexpr alternative_name<AT> integer = 0, real = 1;
-  };
+  enum class names : __SIZE_TYPE__ { integer = 0, real = 1 };
 
-  static constexpr __SIZE_TYPE__ index(const Choice& value) noexcept {
-    return value.state;
+  static constexpr names index(const Choice& value) noexcept {
+    return names(value.state);
   }
 
-  template<__SIZE_TYPE__ I, class Self>
+  template<names I, class Self>
   static constexpr decltype(auto) get(Self&& value) {
-    if constexpr (I == 0)
+    if constexpr (I == names::integer)
       return (static_cast<Self&&>(value).integer);
     else
       return (static_cast<Self&&>(value).real);

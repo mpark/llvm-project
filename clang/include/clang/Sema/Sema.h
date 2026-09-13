@@ -11369,7 +11369,7 @@ public:
   /// instantiated. An empty set of constraints denotes the whole subject.
   struct MatchSemanticDomainConstraint {
     const Expr *Subject = nullptr;
-    QualType ProviderType;
+    QualType AlternativeTraitsType;
     SmallVector<unsigned, 2> Alternatives;
   };
 
