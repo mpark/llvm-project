@@ -44,8 +44,8 @@ int match_optional(const std::optional<int>& value) {
 
 int match_named_optional(const std::optional<int>& value) {
   return match (value) {
-    case { .some: const int& number } => number;
-    case { .none } => -2;
+    case { .value: const int& number } => number;
+    case { .empty } => -2;
   };
 }
 
@@ -58,8 +58,8 @@ int match_optional_reference(const std::optional<int&>& value) {
 
 int match_named_optional_reference(std::optional<int&>&& value) {
   return match (static_cast<std::optional<int&>&&>(value)) {
-    case { .some: int& number } => ++number;
-    case { .none } => -8;
+    case { .value: int& number } => ++number;
+    case { .empty } => -8;
   };
 }
 
@@ -79,15 +79,15 @@ int match_unique_ptr(const std::unique_ptr<int>& value) {
 
 int match_shared_ptr(const std::shared_ptr<int>& value) {
   return match (value) {
-    case { .some: int& number } => number;
-    case { .none } => -4;
+    case { .value: int& number } => number;
+    case { .empty } => -4;
   };
 }
 
 int match_nullable(const auto& value) {
   return match (value) {
-    case { .some: const int& number } => number;
-    case { .none } => -6;
+    case { .value: const int& number } => number;
+    case { .empty } => -6;
   };
 }
 
@@ -200,22 +200,6 @@ int match_expected(const std::expected<int, long>& value) {
   };
 }
 
-int match_nullable_expected(const std::expected<int, long>& value) {
-  return match (value) {
-    case { .some: const int& result } => result;
-    case { .none } => -5;
-  };
-}
-
-int match_complete_nullable_view_after_primary(
-    const std::expected<int, long>& value) {
-  return match (value) {
-    case { .value: 0 } => 20;
-    case { .some: const int& result } => result;
-    case { .none } => -7;
-  };
-}
-
 int match_same_type_expected(const std::expected<int, int>& value) {
   return match (value) {
     case { .value: const int& result } => result;
@@ -227,14 +211,6 @@ int match_void_expected(const std::expected<void, std::string>& value) {
   return match (value) {
     case { void } => 40;
     case { std::string } => 41;
-  };
-}
-
-int match_nullable_void_expected(
-    const std::expected<void, std::string>& value) {
-  return match (value) {
-    case { .some: void } => 42;
-    case { .none } => 43;
   };
 }
 
@@ -495,8 +471,6 @@ int main(int, char**) {
   assert(match_nullable(static_cast<int*>(nullptr)) == -6);
   assert(match_nullable(std::optional<int>(10)) == 10);
   assert(match_nullable(std::optional<int>()) == -6);
-  assert(match_nullable(std::expected<int, long>(11)) == 11);
-  assert(match_nullable(std::expected<int, long>(std::unexpected(1L))) == -6);
   assert(match_nullable(std::make_unique<int>(12)) == 12);
   assert(match_nullable(std::unique_ptr<int>()) == -6);
   assert(match_nullable(std::make_shared<int>(13)) == 13);
@@ -541,19 +515,10 @@ int main(int, char**) {
   assert(match_dependent_zero(1.0) == 85);
   assert(match_expected(10) == 10);
   assert(match_expected(std::unexpected(3L)) == 23);
-  assert(match_nullable_expected(10) == 10);
-  assert(match_nullable_expected(std::unexpected(3L)) == -5);
-  assert(match_complete_nullable_view_after_primary(0) == 20);
-  assert(match_complete_nullable_view_after_primary(10) == 10);
-  assert(match_complete_nullable_view_after_primary(std::unexpected(3L)) ==
-         -7);
   assert(match_same_type_expected(11) == 11);
   assert(match_same_type_expected(std::unexpected(4)) == 34);
   assert(match_void_expected({}) == 40);
   assert(match_void_expected(std::unexpected(std::string("error"))) == 41);
-  assert(match_nullable_void_expected({}) == 42);
-  assert(match_nullable_void_expected(
-             std::unexpected(std::string("error"))) == 43);
   std::variant<int, double> generic = 12;
   assert(match_generic_variant(generic) == 40);
   generic = 1.5;
