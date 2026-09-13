@@ -112,6 +112,31 @@ struct DirectNamedChoice {
   long second_value;
 };
 
+struct StateLabel {
+  unsigned value;
+};
+
+inline constexpr StateLabel first_label{0};
+inline constexpr StateLabel second_label{1};
+inline constexpr StateLabel residual_label{2};
+
+struct LabeledChoice {
+  unsigned state;
+};
+
+struct DuplicateLabeledChoice {
+  unsigned state;
+};
+
+struct ResidualLabeledChoice {
+  unsigned state;
+
+  friend constexpr bool operator==(ResidualLabeledChoice choice,
+                                   StateLabel label) {
+    return choice.state == label.value;
+  }
+};
+
 template<>
 struct std::alternative_traits<MaybeInt> {
   static constexpr alternative_info alternatives[] = {
@@ -230,6 +255,40 @@ struct std::alternative_traits<DirectNamedChoice> {
       return (static_cast<Self&&>(choice).first_value);
     else
       return (static_cast<Self&&>(choice).second_value);
+  }
+};
+
+template<>
+struct std::alternative_traits<LabeledChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^first_label, ^^second_label
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(LabeledChoice choice) noexcept {
+    return choice.state;
+  }
+};
+
+template<>
+struct std::alternative_traits<DuplicateLabeledChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^first_label, ^^first_label
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(DuplicateLabeledChoice choice) noexcept {
+    return choice.state;
+  }
+};
+
+template<>
+struct std::alternative_traits<ResidualLabeledChoice> {
+  static constexpr alternative_info alternatives[] = {^^first_label};
+  static constexpr bool has_residual_states = true;
+
+  static constexpr unsigned index(ResidualLabeledChoice choice) noexcept {
+    return choice.state;
   }
 };
 
@@ -380,6 +439,27 @@ constexpr int match_direct_named(DirectNamedChoice choice) {
   };
 }
 
+constexpr int match_labeled(LabeledChoice choice) {
+  return match (choice) {
+    case first_label => 10;
+    case second_label => 20;
+  };
+}
+
+constexpr int match_duplicate_label(DuplicateLabeledChoice choice) {
+  return match (choice) {
+    case first_label => 30;
+  };
+}
+
+constexpr int match_residual_label(ResidualLabeledChoice choice) {
+  return match (choice) {
+    case first_label => 40;
+    case residual_label => 50;
+    case _ => 60;
+  };
+}
+
 template<class T>
 constexpr int match_dependent_generic(T& choice) {
   return match (choice) {
@@ -501,6 +581,13 @@ static_assert(match_generic_selector_named({false, 6, 7}) == 6);
 static_assert(match_generic_selector_named({true, 6, 7}) == 27);
 static_assert(match_direct_named({false, 10, 11}) == 10);
 static_assert(match_direct_named({true, 10, 11}) == 41);
+static_assert(match_labeled({0}) == 10);
+static_assert(match_labeled({1}) == 20);
+static_assert(match_duplicate_label({0}) == 30);
+static_assert(match_duplicate_label({1}) == 30);
+static_assert(match_residual_label({0}) == 40);
+static_assert(match_residual_label({1}) == 60);
+static_assert(match_residual_label({2}) == 50);
 constexpr Choice dependent_first{0, 3, 4};
 constexpr Choice dependent_second{1, 3, 4};
 static_assert(match_dependent_generic(dependent_first) == 1);
