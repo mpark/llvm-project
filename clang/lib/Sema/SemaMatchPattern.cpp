@@ -22,6 +22,7 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/TemplateDeduction.h"
+#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
@@ -839,19 +840,40 @@ tryLookupAlternativeTraitsForValuePattern(Sema &S, SourceLocation Loc,
                                           /*AllowOpen=*/false, Info);
 }
 
-static bool alternativeValueMatchesPattern(Sema &S, SourceLocation Loc,
-                                           Expr *Pattern, Expr *Value) {
-  Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
-  ExprResult Equal = S.ActOnBinOp(S.getCurScope(), Loc,
-                                  tok::TokenKind::equalequal, Pattern, Value);
-  bool Matches = false;
-  return Equal.isUsable() && !Trap.hasErrorOccurred() &&
-         Equal.get()->EvaluateAsBooleanCondition(Matches, S.Context) && Matches;
+static bool alternativeValueMatchesPattern(Sema &S, Expr *Pattern,
+                                           Expr *Value) {
+  QualType PatternType =
+      Pattern->getType().getNonReferenceType().getUnqualifiedType();
+  QualType ValueType =
+      Value->getType().getNonReferenceType().getUnqualifiedType();
+  if (!S.Context.hasSameType(PatternType, ValueType))
+    return false;
+
+  Expr::EvalResult PatternResult;
+  Expr::EvalResult ValueResult;
+  if (!Pattern->EvaluateAsRValue(PatternResult, S.Context,
+                                 /*InConstantContext=*/true) ||
+      !Value->EvaluateAsRValue(ValueResult, S.Context,
+                               /*InConstantContext=*/true))
+    return false;
+
+  llvm::FoldingSetNodeID PatternID;
+  llvm::FoldingSetNodeID AdvertisedID;
+  PatternResult.Val.Profile(PatternID);
+  ValueResult.Val.Profile(AdvertisedID);
+  return PatternID == AdvertisedID;
 }
 
-static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
-                                            ExpressionPattern *Pattern,
-                                            MatchPatternInfo &PatternInfo) {
+static bool buildAlternativeValuePatternCondition(
+    Sema &S, SourceLocation Loc, Expr *Subject,
+    const AlternativeTraitsInfo &Traits, MatchPatternInfo &PatternInfo,
+    Sema::MatchProjectionCache *ProjectionCache);
+
+static bool
+classifyAlternativeValuePattern(Sema &S, Expr *Subject,
+                                ExpressionPattern *Pattern,
+                                MatchPatternInfo &PatternInfo,
+                                Sema::MatchProjectionCache *ProjectionCache) {
   if (Subject->isTypeDependent() || Pattern->getExpr()->isValueDependent())
     return false;
 
@@ -865,6 +887,7 @@ static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
       return false;
     const auto *Pointer = SubjectType->castAs<PointerType>();
     Traits.Type = SubjectType;
+    Traits.IndexType = S.Context.BoolTy;
     Traits.Size = 2;
     Traits.IsBuiltinPointer = true;
     Traits.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
@@ -882,9 +905,8 @@ static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
                                         Traits))
       return true;
     for (unsigned I = 0; I < Traits.Size; ++I)
-      if (Traits.Values[I] &&
-          alternativeValueMatchesPattern(S, Pattern->getBeginLoc(),
-                                         Pattern->getExpr(), Traits.Values[I]))
+      if (Traits.Values[I] && alternativeValueMatchesPattern(
+                                  S, Pattern->getExpr(), Traits.Values[I]))
         Selected.push_back(I);
     if (Selected.empty())
       return false;
@@ -892,7 +914,8 @@ static bool classifyAlternativeValuePattern(Sema &S, Expr *Subject,
 
   storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected,
                              /*IsAlternativeValuePattern=*/true);
-  return false;
+  return buildAlternativeValuePatternCondition(
+      S, Pattern->getBeginLoc(), Subject, Traits, PatternInfo, ProjectionCache);
 }
 
 static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
@@ -1653,6 +1676,108 @@ static MatchProjection *findAlternativeDiscriminatorProjection(
   return nullptr;
 }
 
+static ExprResult buildMatchProjectionCondition(Sema &S,
+                                                MatchProjection *Projection,
+                                                SourceLocation Loc);
+
+static bool initializeAlternativeStateProjection(
+    Sema &S, SourceLocation Loc, Expr *Subject,
+    const AlternativeTraitsInfo &Traits, ArrayRef<unsigned> Selected,
+    MatchProjection *Projection, Sema::MatchProjectionCache *ProjectionCache) {
+  assert(!Selected.empty() && "alternative state condition has no states");
+
+  MatchProjection *SharedHolding =
+      findAlternativeHoldingProjection(ProjectionCache, Subject);
+  MatchProjection *SharedDiscriminator = findAlternativeDiscriminatorProjection(
+      S, ProjectionCache, Subject, Traits.Type);
+  VarDecl *HoldingVar;
+  if (SharedHolding && SharedHolding != Projection) {
+    HoldingVar = SharedHolding->getHoldingVar();
+    Projection->setHoldingVar(HoldingVar);
+  } else {
+    HoldingVar =
+        BuildVarDecl(S, Loc, S.Context.getAutoRRefDeductType(), Subject);
+    if (HoldingVar->isInvalidDecl())
+      return true;
+    Projection->setHoldingVar(HoldingVar);
+  }
+
+  if (SharedDiscriminator && SharedDiscriminator != Projection)
+    Projection->setIntermediateVar(SharedDiscriminator->getIntermediateVar());
+  Expr *HoldingRef = S.BuildDeclRefExpr(
+      HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue, Loc);
+
+  VarDecl *IndexVar = Projection->getIntermediateVar();
+  if (!IndexVar) {
+    ExprResult IndexCall =
+        buildAlternativeTraitsCall(S, Loc, Traits, "index", HoldingRef);
+    if (IndexCall.isInvalid())
+      return true;
+    if (!IndexCall.get()->isInstantiationDependent() &&
+        S.canThrow(IndexCall.get()) != CT_Cannot) {
+      S.Diag(Loc, diag::err_alternative_traits_index_not_noexcept)
+          << Subject->getType().getNonReferenceType().getUnqualifiedType();
+      return true;
+    }
+    IndexVar =
+        BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), IndexCall.get());
+    if (IndexVar->isInvalidDecl())
+      return true;
+    Projection->setIntermediateVar(IndexVar);
+  }
+  Expr *IndexRef = S.BuildDeclRefExpr(
+      IndexVar, IndexVar->getType().getNonReferenceType(), VK_LValue, Loc);
+
+  ExprResult RawCondition;
+  for (unsigned I : Selected) {
+    ExprResult Target = S.ActOnIntegerConstant(Loc, I);
+    if (Target.isInvalid())
+      return true;
+    Target = S.BuildCXXNamedCast(
+        Loc, tok::kw_static_cast,
+        S.Context.getTrivialTypeSourceInfo(Traits.IndexType, Loc), Target.get(),
+        SourceRange(Loc), SourceRange(Loc));
+    if (Target.isInvalid())
+      return true;
+    ExprResult Equal =
+        S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::equalequal, IndexRef,
+                     Target.get());
+    if (Equal.isInvalid())
+      return true;
+    RawCondition =
+        RawCondition.isUnset()
+            ? Equal
+            : S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::pipepipe,
+                           RawCondition.get(), Equal.get());
+    if (RawCondition.isInvalid())
+      return true;
+  }
+
+  VarDecl *ConditionVar =
+      BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCondition.get());
+  if (ConditionVar->isInvalidDecl())
+    return true;
+  Projection->setConditionVar(ConditionVar);
+  return buildMatchProjectionCondition(S, Projection, Loc).isInvalid();
+}
+
+static bool buildAlternativeValuePatternCondition(
+    Sema &S, SourceLocation Loc, Expr *Subject,
+    const AlternativeTraitsInfo &Traits, MatchPatternInfo &PatternInfo,
+    Sema::MatchProjectionCache *ProjectionCache) {
+  constexpr unsigned ValuePatternCacheKey = ~0u;
+  MatchProjection *Projection = createMatchProjection(
+      S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+      Traits.Type, ValuePatternCacheKey);
+  PatternInfo.Projection = Projection;
+  if (initializeAlternativeStateProjection(S, Loc, Subject, Traits,
+                                           PatternInfo.SelectedAlternatives,
+                                           Projection, ProjectionCache))
+    return true;
+  PatternInfo.Condition = Projection->getConditionExpr();
+  return false;
+}
+
 static void appendProjectionPath(const MatchPattern *Pattern,
                                  SmallVectorImpl<unsigned> &Path,
                                  Sema::MatchPatternState &State) {
@@ -2395,74 +2520,13 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   PatternInfo.Projection = Projection;
 
   ExprValueKind SubjectValueKind = Subject->getValueKind();
-  MatchProjection *SharedHolding =
-      findAlternativeHoldingProjection(ProjectionCache, Subject);
-  MatchProjection *SharedDiscriminator = findAlternativeDiscriminatorProjection(
-      S, ProjectionCache, Subject, Traits.Type);
-  VarDecl *HoldingVar;
-  if (SharedHolding && SharedHolding != Projection) {
-    HoldingVar = SharedHolding->getHoldingVar();
-    Projection->setHoldingVar(HoldingVar);
-  } else {
-    HoldingVar =
-        BuildVarDecl(S, Loc, S.Context.getAutoRRefDeductType(), Subject);
-    if (HoldingVar->isInvalidDecl())
-      return true;
-    Projection->setHoldingVar(HoldingVar);
-  }
-  if (SharedDiscriminator && SharedDiscriminator != Projection)
-    Projection->setIntermediateVar(SharedDiscriminator->getIntermediateVar());
+  if (initializeAlternativeStateProjection(S, Loc, Subject, Traits, Selected,
+                                           Projection, ProjectionCache))
+    return true;
+  VarDecl *HoldingVar = Projection->getHoldingVar();
   Expr *HoldingRef = S.BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue, Loc);
   Expr *ForwardedRef = asValueKind(S, HoldingRef, SubjectValueKind);
-
-  VarDecl *IndexVar = Projection->getIntermediateVar();
-  if (!IndexVar) {
-    ExprResult IndexCall =
-        buildAlternativeTraitsCall(S, Loc, Traits, "index", HoldingRef);
-    if (IndexCall.isInvalid())
-      return true;
-    if (!IndexCall.get()->isInstantiationDependent() &&
-        S.canThrow(IndexCall.get()) != CT_Cannot) {
-      S.Diag(Loc, diag::err_alternative_traits_index_not_noexcept)
-          << SubjectType;
-      return true;
-    }
-    IndexVar =
-        BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), IndexCall.get());
-    if (IndexVar->isInvalidDecl())
-      return true;
-    Projection->setIntermediateVar(IndexVar);
-  }
-  Expr *IndexRef = S.BuildDeclRefExpr(
-      IndexVar, IndexVar->getType().getNonReferenceType(), VK_LValue, Loc);
-
-  ExprResult RawCondition;
-  for (unsigned I : Selected) {
-    ExprResult Target = S.ActOnIntegerConstant(Loc, I);
-    if (Target.isInvalid())
-      return true;
-    ExprResult Equal =
-        S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::equalequal, IndexRef,
-                     Target.get());
-    if (Equal.isInvalid())
-      return true;
-    RawCondition =
-        RawCondition.isUnset()
-            ? Equal
-            : S.ActOnBinOp(S.getCurScope(), Loc, tok::TokenKind::pipepipe,
-                           RawCondition.get(), Equal.get());
-    if (RawCondition.isInvalid())
-      return true;
-  }
-
-  VarDecl *ConditionVar =
-      BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCondition.get());
-  if (ConditionVar->isInvalidDecl())
-    return true;
-  Projection->setConditionVar(ConditionVar);
-  if (buildMatchProjectionCondition(S, Projection, Loc).isInvalid())
-    return true;
 
   if (!Pattern->getSubPattern())
     return false;
@@ -2531,6 +2595,13 @@ bool Sema::CheckCompleteMatchPatternImpl(
     if (!Subject)
       return false;
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
+    MatchPatternInfo &PatternInfo = State.get(P);
+    if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo,
+                                        ProjectionCache))
+      return true;
+    if (PatternInfo.IsAlternativeValuePattern)
+      break;
+
     ExprResult ConstantPattern =
         buildConstantPatternValue(*this, P->getExpr(), /*Diagnose=*/false);
     Expr *PatternValue =
@@ -2539,10 +2610,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
                                  PatternValue);
     if (Cond.isInvalid())
       return true;
-    MatchPatternInfo &PatternInfo = State.get(P);
     PatternInfo.Condition = Cond.get();
-    if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo))
-      return true;
     break;
   }
   case MatchPattern::ParenPatternClass: {
