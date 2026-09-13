@@ -2676,6 +2676,16 @@ RValue CodeGenFunction::EmitMatchPattern(
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
     const MatchPatternInfo *Info = Instantiation->find(PatternExpr);
     assert(Info && Info->Condition && "expected available cond-expr");
+    if (const MatchProjection *Projection = Info->Projection) {
+      assert(Projection->getKind() == MatchProjection::AlternativeProjection &&
+             "unexpected expression-pattern projection");
+      if (!LocalDeclMap.count(Projection->getHoldingVar()))
+        EmitVarDecl(*Projection->getHoldingVar());
+      if (!LocalDeclMap.count(Projection->getIntermediateVar()))
+        EmitVarDecl(*Projection->getIntermediateVar());
+      if (!LocalDeclMap.count(Projection->getConditionVar()))
+        EmitVarDecl(*Projection->getConditionVar());
+    }
     return RValue::get(EmitScalarExpr(Info->Condition));
   }
   case MatchPattern::MatchPatternClass::WildcardPatternClass: {
