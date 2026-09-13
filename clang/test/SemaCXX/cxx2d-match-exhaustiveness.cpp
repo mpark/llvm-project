@@ -369,13 +369,6 @@ struct alternative_info {
       : info(info), empty(empty) {}
 };
 
-template<class Provider>
-struct alternative_name {
-  using provider = Provider;
-  __SIZE_TYPE__ index;
-  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
-};
-
 template<>
 struct alternative_traits<int*> {
   static constexpr alternative_info alternatives[] = {
@@ -412,8 +405,8 @@ int missing_null_pointer_state(int *pointer) {
 
 int named_pointer_states_are_builtin(int *pointer) {
   return match (pointer) {
-    case { .some: int &value } => value;
-    case { .none } => 0;
+    case { .value: int &value } => value;
+    case { .empty } => 0;
   };
 }
 
@@ -640,19 +633,16 @@ struct NamedOnlyChoice {
 
 template<>
 struct std::alternative_traits<NamedOnlyChoice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     {}, {}
   };
   static constexpr bool has_residual_states = false;
 
-  static constexpr __SIZE_TYPE__ index(NamedOnlyChoice value) noexcept {
-    return value.state;
-  }
+  enum class names : __SIZE_TYPE__ { first = 0, second = 1 };
 
-  struct names {
-    static constexpr alternative_name<AT> first = 0, second = 1;
-  };
+  static constexpr names index(NamedOnlyChoice value) noexcept {
+    return names(value.state);
+  }
 };
 
 int named_only_alternative_states_are_accessible(NamedOnlyChoice value) {
@@ -752,25 +742,22 @@ struct Choice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     ^^bool, ^^int, {^^EmptyState::first, true},
     {^^EmptyState::second, true}
   };
   static constexpr bool has_residual_states = false;
 
-  struct names {
-    static constexpr alternative_name<AT> flag = 0, number = 1;
-  };
+  enum class names : __SIZE_TYPE__ { flag = 0, number = 1 };
 
-  static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
-    return choice.state;
+  static constexpr names index(const Choice& choice) noexcept {
+    return names(choice.state);
   }
 
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I < 2)
+  template<names I, class Self>
+    requires (static_cast<__SIZE_TYPE__>(I) < 2)
   static constexpr decltype(auto) get(Self&& choice) {
-    if constexpr (I == 0)
+    if constexpr (I == names::flag)
       return (static_cast<Self&&>(choice).flag);
     else
       return (static_cast<Self&&>(choice).number);
@@ -855,47 +842,32 @@ struct NullableChoice {
   int value;
 };
 
-struct NullableChoiceView {
-  static constexpr std::alternative_info alternatives[] = {
-    {^^nullable_empty_state, true}, ^^int
-  };
-  static constexpr bool has_residual_states = false;
-
-  static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
-    return choice.engaged ? 1 : 0;
-  }
-
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I == 1)
-  static constexpr decltype(auto) get(Self&& choice) {
-    return (static_cast<Self&&>(choice).value);
-  }
-};
-
 template<>
 struct std::alternative_traits<NullableChoice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
-    ^^int, ^^int
+    ^^int, {^^nullable_empty_state, true}
   };
   static constexpr bool has_residual_states = false;
 
-  static constexpr __SIZE_TYPE__ index(const NullableChoice& choice) noexcept {
-    return choice.engaged ? 0 : 1;
+  enum class names : __SIZE_TYPE__ {
+    value = 0,
+    some = 0,
+    error = 1,
+    none = 1,
+  };
+
+  static constexpr names index(const NullableChoice& choice) noexcept {
+    return choice.engaged ? names::value : names::none;
   }
 
-  template<__SIZE_TYPE__ I, class Self>
+  template<names I, class Self>
+    requires (I == names::value)
   static constexpr decltype(auto) get(Self&& choice) {
     return (static_cast<Self&&>(choice).value);
   }
-
-  struct names {
-    static constexpr alternative_name<AT> value = 0, error = 1;
-    static constexpr alternative_name<NullableChoiceView> none = 0, some = 1;
-  };
 };
 
-int complete_secondary_view_after_partial_primary(NullableChoice choice) {
+int complete_aliases_after_partial_match(NullableChoice choice) {
   return match (choice) {
     case { .value: 0 } => 0;
     case { .some: _ } => 1;
@@ -903,22 +875,22 @@ int complete_secondary_view_after_partial_primary(NullableChoice choice) {
   };
 }
 
-int partial_views_do_not_combine(NullableChoice choice) {
-  return match (choice) { // expected-error {{match expression is not exhaustive}}
+int aliases_combine_for_exhaustiveness(NullableChoice choice) {
+  return match (choice) {
     case { .value: _ } => 0;
     case { .none } => 1;
   };
 }
 
-int overlap_between_views_is_maybe_useful(NullableChoice choice) {
+int alias_of_covered_state_is_redundant(NullableChoice choice) {
   return match (choice) {
     case { .value: _ } => 0;
-    case { .some: _ } => 1;
+    case { .some: _ } => 1; // expected-error {{match case is redundant}}
     case { .none } => 2;
   };
 }
 
-int complete_view_makes_other_view_redundant(NullableChoice choice) {
+int complete_alias_set_makes_other_alias_redundant(NullableChoice choice) {
   return match (choice) {
     case { .some: _ } => 0;
     case { .none } => 1;
@@ -931,7 +903,7 @@ struct NullableChoiceProduct {
   bool flag;
 };
 
-int complete_nested_view_makes_other_view_redundant(
+int complete_nested_alias_set_makes_other_alias_redundant(
     NullableChoiceProduct value) {
   return match (value) {
     case [{ .some: _ }, _] => 0;
