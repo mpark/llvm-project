@@ -14561,7 +14561,8 @@ def err_alternative_state_not_projectable : Error<
   "alternative state %1 of type %0 has no projected value; omit the "
   "': pattern'">;
 def err_alternative_name_not_found : Error<
-  "alternative name %0 is not defined by 'std::alternative_traits<%1>::names'">;
+  "alternative name %0 is not defined by the discriminator type returned by "
+  "'std::alternative_traits<%1>::index'">;
 def err_braced_alternative_no_viable_state : Error<
   "braced alternative pattern does not match any projectable state of %0">;
 def err_empty_alternative_not_found : Error<

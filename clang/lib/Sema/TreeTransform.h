@@ -19795,8 +19795,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         return llvm::all_of(Closed, [&](const auto &Required) {
           return llvm::any_of(Candidate, [&](const auto &Actual) {
             if (Required.Subject != Actual.Subject ||
-                !getSema().Context.hasSameType(Required.ProviderType,
-                                               Actual.ProviderType))
+                !getSema().Context.hasSameType(
+                    Required.AlternativeTraitsType,
+                    Actual.AlternativeTraitsType))
               return false;
             return llvm::all_of(Actual.Alternatives, [&](unsigned Alternative) {
               return llvm::is_contained(Required.Alternatives, Alternative);

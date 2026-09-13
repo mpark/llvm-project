@@ -22,12 +22,6 @@ struct alternative_info {
       : info(info), empty(empty) {}
 };
 
-template<class Provider>
-struct alternative_name {
-  using provider = Provider;
-  __SIZE_TYPE__ index;
-  consteval alternative_name(__SIZE_TYPE__ index) : index(index) {}
-};
 }
 
 struct Choice {
@@ -38,23 +32,24 @@ struct Choice {
 
 template<>
 struct std::alternative_traits<Choice> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     ^^int, ^^double
   };
   static constexpr bool has_residual_states = false;
 
-  struct names {
-    static constexpr alternative_name<AT> integer = 0, real = 1;
+  enum class names : __SIZE_TYPE__ {
+    integer = 0,
+    real = 1,
+    out_of_range = 2,
   };
 
-  static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
-    return choice.state;
+  static constexpr names index(const Choice& choice) noexcept {
+    return names(choice.state);
   }
 
-  template<__SIZE_TYPE__ I, class Self>
+  template<names I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
-    if constexpr (I == 0)
+    if constexpr (I == names::integer)
       return (static_cast<Self&&>(choice).integer);
     else
       return (static_cast<Self&&>(choice).real);
@@ -140,18 +135,15 @@ struct ThrowingIndex {
 
 template<>
 struct std::alternative_traits<ThrowingIndex> {
-  using AT = alternative_traits;
   static constexpr alternative_info alternatives[] = {
     ^^int
   };
   static constexpr bool has_residual_states = false;
-  struct names {
-    static constexpr alternative_name<AT> value = 0;
-  };
-  static __SIZE_TYPE__ index(const ThrowingIndex&);
+  enum class names : __SIZE_TYPE__ { value = 0 };
+  static names index(const ThrowingIndex&);
 
-  template<__SIZE_TYPE__ I>
-    requires (I == 0)
+  template<names I>
+    requires (I == names::value)
   static int& get(ThrowingIndex& choice) {
     return choice.value;
   }
@@ -328,6 +320,75 @@ int named(Choice choice) {
   return match (choice) {
     case { .integer: int value } => value;
     case { .real: double value } => static_cast<int>(value);
+  };
+}
+
+struct GenericSelectorChoice {
+  bool error;
+  int value;
+  long error_value;
+};
+
+template<>
+struct std::alternative_traits<GenericSelectorChoice> {
+  static constexpr alternative_info alternatives[] = {^^int, ^^long};
+  static constexpr bool has_residual_states = false;
+
+  enum discriminator : bool { value = false, error = true };
+
+  static constexpr discriminator
+  index(const GenericSelectorChoice& choice) noexcept {
+    return choice.error ? discriminator::error : discriminator::value;
+  }
+
+  template<discriminator Selector, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (Selector == discriminator::error)
+      return (static_cast<Self&&>(choice).error_value);
+    else
+      return (static_cast<Self&&>(choice).value);
+  }
+};
+
+int generic_selector_default_projection(GenericSelectorChoice choice) {
+  return match (choice) {
+    case { int value } => value;
+    case { long error } => static_cast<int>(error);
+  };
+}
+
+int generic_selector_named_projection(GenericSelectorChoice choice) {
+  return match (choice) {
+    case { .value: int value } => value;
+    case { .error: long error } => static_cast<int>(error);
+  };
+}
+
+struct ReflectedOnlyChoice {
+  int value;
+};
+
+template<>
+struct std::alternative_traits<ReflectedOnlyChoice> {
+  static constexpr alternative_info alternatives[] = {{}};
+  static constexpr bool has_residual_states = false;
+
+  enum class names : __SIZE_TYPE__ { value = 0 };
+
+  static constexpr names index(ReflectedOnlyChoice) noexcept {
+    return names::value;
+  }
+
+  template<decltype(^^int) Selector>
+  static constexpr int& get(ReflectedOnlyChoice& choice) {
+    return choice.value;
+  }
+};
+
+int reflected_get_is_not_a_projection(ReflectedOnlyChoice choice) {
+  return match (choice) {
+    case { .value: int value } => value; // expected-error {{alternative state 0 of type 'ReflectedOnlyChoice' has no projected value}}
+    case _ => 0;
   };
 }
 
@@ -616,9 +677,30 @@ int empty(MaybeInt value) {
   };
 }
 
+int named_selector_requires_enum_discriminator(MaybeInt value) {
+  return match (value) {
+    case { .value: int number } => number; // expected-error {{alternative name 'value' is not defined by the discriminator type}}
+    case _ => 0;
+  };
+}
+
 int bad_name(Choice choice) {
   return match (choice) {
     case { .missing: int value } => value; // expected-error {{alternative name 'missing' is not defined}}
+    case _ => 0;
+  };
+}
+
+int bad_name_type(Choice choice) {
+  return match (choice) {
+    case { .not_a_name: int value } => value; // expected-error {{alternative name 'not_a_name' is not defined}}
+    case _ => 0;
+  };
+}
+
+int bad_name_index(Choice choice) {
+  return match (choice) {
+    case { .out_of_range: int value } => value; // expected-error {{alternative name 'out_of_range' is not defined}}
     case _ => 0;
   };
 }

@@ -190,8 +190,8 @@ static_assert([] {
 
 constexpr int match_named_pointer(int *pointer) {
   return match (pointer) {
-    case { .some: auto &&value } => value;
-    case { .none } => -2;
+    case { .value: auto &&value } => value;
+    case { .empty } => -2;
   };
 }
 
