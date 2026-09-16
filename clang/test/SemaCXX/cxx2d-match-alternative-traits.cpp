@@ -24,6 +24,16 @@ struct alternative_info {
 
 }
 
+struct IndexedState {
+  __SIZE_TYPE__ value;
+
+  template<__SIZE_TYPE__ I>
+  static constexpr __SIZE_TYPE__ index = I;
+
+  constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+  friend constexpr bool operator==(IndexedState, IndexedState) = default;
+};
+
 struct Choice {
   unsigned state;
   int integer;
@@ -37,17 +47,28 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  enum class names : __SIZE_TYPE__ {
-    integer = 0,
-    real = 1,
-    out_of_range = 2,
+  struct names {
+    __SIZE_TYPE__ value;
+
+    static constexpr __SIZE_TYPE__ integer = 0;
+    static constexpr __SIZE_TYPE__ real = 1;
+    static constexpr __SIZE_TYPE__ out_of_range = 2;
+
+    template<__SIZE_TYPE__ I>
+    static constexpr __SIZE_TYPE__ index = I;
+
+    template<__SIZE_TYPE__ I>
+    static constexpr __SIZE_TYPE__ alias = I % 2;
+
+    constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+    friend constexpr bool operator==(names, names) = default;
   };
 
   static constexpr names index(const Choice& choice) noexcept {
-    return names(choice.state);
+    return {choice.state};
   }
 
-  template<names I, class Self>
+  template<__SIZE_TYPE__ I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
     if constexpr (I == names::integer)
       return (static_cast<Self&&>(choice).integer);
@@ -192,7 +213,7 @@ struct std::alternative_traits<NonArrayDescriptors> {
 
 int non_array_descriptors(NonArrayDescriptors value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{'std::alternative_traits<'NonArrayDescriptors'>::alternatives' must be a constant array of 'std::alternative_info'}}
+    case { .index<0> } => 0; // expected-error {{'std::alternative_traits<'NonArrayDescriptors'>::alternatives' must be a constant array of 'std::alternative_info'}}
   };
 }
 
@@ -207,7 +228,7 @@ struct std::alternative_traits<WrongDescriptorType> {
 
 int wrong_descriptor_type(WrongDescriptorType value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{'std::alternative_traits<'WrongDescriptorType'>::alternatives' must be a constant array of 'std::alternative_info'}}
+    case { .index<0> } => 0; // expected-error {{'std::alternative_traits<'WrongDescriptorType'>::alternatives' must be a constant array of 'std::alternative_info'}}
   };
 }
 
@@ -227,7 +248,7 @@ struct std::alternative_traits<InvalidSelectorDescriptor> {
 
 int invalid_selector_descriptor(InvalidSelectorDescriptor value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{state 0 of type 'InvalidSelectorDescriptor' has an invalid reflection in its 'alternative_info' descriptor}}
+    case { .index<0> } => 0; // expected-error {{state 0 of type 'InvalidSelectorDescriptor' has an invalid reflection in its 'alternative_info' descriptor}}
   };
 }
 
@@ -244,7 +265,7 @@ struct std::alternative_traits<EmptyTypedChoice> {
 
 int empty_state_cannot_be_typed(EmptyTypedChoice value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyTypedChoice' is both empty and typed}}
+    case { .index<0> } => 0; // expected-error {{state 0 of type 'EmptyTypedChoice' is both empty and typed}}
   };
 }
 
@@ -269,7 +290,7 @@ struct std::alternative_traits<EmptyProjectedChoice> {
 
 int empty_state_cannot_be_projected(EmptyProjectedChoice value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{state 0 of type 'EmptyProjectedChoice' is both empty and projectable}}
+    case { .index<0> } => 0; // expected-error {{state 0 of type 'EmptyProjectedChoice' is both empty and projectable}}
   };
 }
 
@@ -284,7 +305,7 @@ struct std::alternative_traits<EmptyWithoutValueChoice> {
 
 int empty_state_requires_value(EmptyWithoutValueChoice value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{empty state 0 of type 'EmptyWithoutValueChoice' is not represented by a value}}
+    case { .index<0> } => 0; // expected-error {{empty state 0 of type 'EmptyWithoutValueChoice' is not represented by a value}}
   };
 }
 
@@ -312,7 +333,7 @@ struct std::alternative_traits<SingletonProjectedChoice> {
 
 int singleton_state_cannot_be_projected(SingletonProjectedChoice value) {
   return match (value) {
-    case { .[0] } => 0; // expected-error {{state 0 of type 'SingletonProjectedChoice' is both represented by a value and projectable}}
+    case { .index<0> } => 0; // expected-error {{state 0 of type 'SingletonProjectedChoice' is both represented by a value and projectable}}
   };
 }
 
@@ -462,39 +483,46 @@ int dependent_type_constraint_selector(Choice choice) {
 template int dependent_type_constraint_selector<int>(Choice);
 template int dependent_type_constraint_selector<double>(Choice);
 
-int expression_selectors(Choice choice) {
+int parameterized_names(Choice choice) {
   return match (choice) {
-    case { .[0]: int value } => value;
-    case { .[1]: double value } => static_cast<int>(value);
+    case { .index<0>: int value } => value;
+    case { .index<1>: double value } => static_cast<int>(value);
   };
 }
 
-int expression_selector_out_of_range(Choice choice) {
+int provider_defined_parameterized_name(Choice choice) {
   return match (choice) {
-    case { .[2]: _ } => 0; // expected-error {{alternative index 2 is outside the range [0, 2)}}
+    case { .alias<2>: int value } => value;
+    case { .alias<3>: double value } => static_cast<int>(value);
+  };
+}
+
+int parameterized_name_out_of_range(Choice choice) {
+  return match (choice) {
+    case { .index<2>: _ } => 0; // expected-error {{alternative index 2 is outside the range [0, 2)}}
     case _ => 1;
   };
 }
 
-int expression_selector_negative(Choice choice) {
+int parameterized_name_negative(Choice choice) {
   return match (choice) {
-    case { .[-1]: _ } => 0; // expected-error {{alternative index -1 is outside the range [0, 2)}}
+    case { .index<-1>: _ } => 0; // expected-error {{alternative index -1 is outside the range [0, 2)}}
     case _ => 1;
   };
 }
 
-int expression_selector_not_constant(Choice choice,
+int parameterized_name_not_constant(Choice choice,
                                      unsigned index) { // expected-note {{declared here}}
   return match (choice) {
-    case { .[index]: _ } => 0; // expected-error {{expression is not an integral constant expression}} expected-note {{function parameter 'index' with unknown value cannot be used in a constant expression}}
+    case { .index<index>: _ } => 0; // expected-error {{expression is not an integral constant expression}} expected-note {{function parameter 'index' with unknown value cannot be used in a constant expression}}
     case _ => 1;
   };
 }
 
-int expression_selector_requires_projection(Choice choice) {
+int parameterized_name_requires_projection(Choice choice) {
   return match (choice) {
-    case { .[1]: _ } => 0;
-    case { .[0]: _ } => 1;
+    case { .index<1>: _ } => 0;
+    case { .index<0>: _ } => 1;
   };
 }
 
@@ -507,21 +535,27 @@ struct std::alternative_traits<IndexOnlyChoice> {
   static constexpr alternative_info alternatives[] = {{}, {}};
   static constexpr bool has_residual_states = false;
 
-  static constexpr unsigned index(IndexOnlyChoice choice) noexcept {
-    return choice.state;
+  static constexpr IndexedState index(IndexOnlyChoice choice) noexcept {
+    return {choice.state};
   }
 };
 
 int index_only_states(IndexOnlyChoice choice) {
   return match (choice) {
-    case { .[0] } => 0;
-    case { .[1] } => 1;
+    case { .index<0> } => 0;
+    case { .index<1> } => 1;
+  };
+}
+
+int missing_index_only_state(IndexOnlyChoice choice) {
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { .index<1> }}}
+    case { .index<0> } => 0;
   };
 }
 
 int index_only_state_cannot_be_projected(IndexOnlyChoice choice) {
   return match (choice) {
-    case { .[0]: int value } => value; // expected-error {{alternative state 0 of type 'IndexOnlyChoice' has no projected value; omit the ': pattern'}}
+    case { .index<0>: int value } => value; // expected-error {{alternative state 0 of type 'IndexOnlyChoice' has no projected value; omit the ': pattern'}}
     case _ => 0;
   };
 }
@@ -535,10 +569,12 @@ struct std::alternative_traits<AnonymousProjection> {
   static constexpr alternative_info alternatives[] = {{}};
   static constexpr bool has_residual_states = false;
 
-  static constexpr unsigned index(AnonymousProjection) noexcept { return 0; }
+  static constexpr IndexedState index(AnonymousProjection) noexcept {
+    return {0};
+  }
 
-  template<__SIZE_TYPE__ I, class Self>
-    requires (I == 0)
+  template<IndexedState State, class Self>
+    requires (State.value == 0)
   static constexpr decltype(auto) get(Self&& choice) {
     return (static_cast<Self&&>(choice).value);
   }
@@ -546,7 +582,7 @@ struct std::alternative_traits<AnonymousProjection> {
 
 int anonymous_projection_by_index(AnonymousProjection choice) {
   return match (choice) {
-    case { .[0]: int value } => value;
+    case { .index<0>: int value } => value;
   };
 }
 
@@ -586,7 +622,9 @@ template<>
 struct std::alternative_traits<IncompatibleProjection> {
   static constexpr alternative_info alternatives[] = {^^int};
   static constexpr bool has_residual_states = false;
-  static constexpr unsigned index(IncompatibleProjection) noexcept { return 0; }
+  static constexpr IndexedState index(IncompatibleProjection) noexcept {
+    return {0};
+  }
 
   template<__SIZE_TYPE__ I, class Self>
     requires (I == 0)
@@ -603,7 +641,7 @@ int advertised_type_requires_compatible_projection(IncompatibleProjection choice
 
 double index_selector_ignores_advertised_type(IncompatibleProjection choice) {
   return match (choice) {
-    case { .[0]: double value } => value;
+    case { .index<0>: double value } => value;
   };
 }
 
@@ -684,6 +722,13 @@ int named_selector_requires_enum_discriminator(MaybeInt value) {
   };
 }
 
+int index_selector_requires_parameterized_name(MaybeInt value) {
+  return match (value) {
+    case { .index<0>: int number } => number; // expected-error {{alternative name 'index' is not defined by the discriminator type}}
+    case _ => 0;
+  };
+}
+
 int bad_name(Choice choice) {
   return match (choice) {
     case { .missing: int value } => value; // expected-error {{alternative name 'missing' is not defined}}
@@ -739,7 +784,7 @@ template<class T, unsigned I>
 int dependent_selectors(Choice choice) {
   return match (choice) {
     case { T: auto value } => static_cast<int>(value);
-    case { .[I]: auto value } => static_cast<int>(value);
+    case { .index<I>: auto value } => static_cast<int>(value);
     case _ => 0;
   };
 }
@@ -897,9 +942,9 @@ int open_type_selector(OpenChoice choice) {
   };
 }
 
-int open_expression_selector(OpenChoice choice) {
+int open_parameterized_name(OpenChoice choice) {
   return match (choice) {
-    case { .[0]: _ } => 1; // expected-error {{expression alternative selector cannot be used with open alternative type 'OpenChoice'}}
+    case { .index<0>: _ } => 1; // expected-error {{alternative name 'index' is not defined}}
     case _ => 0;
   };
 }

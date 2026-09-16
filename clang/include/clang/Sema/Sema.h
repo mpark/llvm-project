@@ -11266,6 +11266,10 @@ public:
   ActOnNamedAlternativePattern(SourceRange Braces, SourceRange NameRange,
                                IdentifierInfo *Name, SourceLocation ColonLoc,
                                MatchPattern *SubPattern);
+  ActionResult<MatchPattern *> ActOnParameterizedNamedAlternativePattern(
+      SourceRange Braces, SourceRange NameRange, IdentifierInfo *Name,
+      MatchPattern *Argument, SourceLocation ColonLoc,
+      MatchPattern *SubPattern);
   ActionResult<MatchPattern *>
   ActOnSelectedAlternativePattern(SourceRange Braces, MatchPattern *Selector,
                                   SourceLocation ColonLoc,

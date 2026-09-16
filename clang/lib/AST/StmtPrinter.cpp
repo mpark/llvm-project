@@ -3190,9 +3190,17 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
   case MatchPattern::AlternativePatternClass: {
     const auto *P = static_cast<const AlternativePattern *>(Pattern);
     OS << "{";
-    if (P->isNamed()) {
-      OS << " ." << P->getName()->getName() << ": ";
-      PrintMatchPattern(P->getSubPattern());
+    if (P->isNamed() || P->isParameterizedNamed()) {
+      OS << " ." << P->getName()->getName();
+      if (P->isParameterizedNamed()) {
+        OS << "<";
+        PrintMatchPattern(P->getSelector());
+        OS << ">";
+      }
+      if (P->getSubPattern()) {
+        OS << ": ";
+        PrintMatchPattern(P->getSubPattern());
+      }
       OS << " ";
     } else if (const ConceptReference *Constraint =
                    P->getTypeConstraintSelector()) {
@@ -3203,13 +3211,7 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
       OS << " ";
     } else if (P->isSelected()) {
       OS << " ";
-      if (P->isExpressionSelected()) {
-        OS << ".[";
-        PrintMatchPattern(P->getSelector());
-        OS << "]";
-      } else {
-        PrintMatchPattern(P->getSelector());
-      }
+      PrintMatchPattern(P->getSelector());
       if (P->getSubPattern()) {
         OS << ": ";
         PrintMatchPattern(P->getSubPattern());

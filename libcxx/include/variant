@@ -1750,8 +1750,22 @@ struct alternative_traits<variant<_Types...>> {
   static constexpr alternative_info alternatives[] = { ^^_Types... };
   static constexpr bool has_residual_states = true;
 
-  _LIBCPP_HIDE_FROM_ABI static constexpr size_t index(const variant<_Types...>& __value) noexcept {
-    return __value.index();
+  struct state {
+    size_t __value;
+
+    template <size_t _Ip>
+    static constexpr size_t index = _Ip;
+
+    _LIBCPP_HIDE_FROM_ABI constexpr operator size_t() const noexcept { return __value; }
+
+    friend _LIBCPP_HIDE_FROM_ABI _LIBCPP_ALWAYS_INLINE constexpr bool
+    operator==(state __left, state __right) noexcept {
+      return __left.__value == __right.__value;
+    }
+  };
+
+  _LIBCPP_HIDE_FROM_ABI static constexpr state index(const variant<_Types...>& __value) noexcept {
+    return {__value.index()};
   }
 
   template <size_t _Ip, class _Self>

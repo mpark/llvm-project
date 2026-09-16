@@ -4669,6 +4669,10 @@ public:
         return getSema().ActOnNamedAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), P->getName(),
             P->getColonLoc(), Sub.get());
+      if (P->isParameterizedNamed())
+        return getSema().ActOnParameterizedNamedAlternativePattern(
+            P->getBraces(), P->getDiscriminatorRange(), P->getName(), Selector,
+            P->getColonLoc(), Sub.get());
       if (P->isTypeConstraintSelected())
         return getSema().ActOnTypeConstraintAlternativePattern(
             P->getBraces(), P->getDiscriminatorRange(), Constraint,
