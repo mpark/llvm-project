@@ -205,6 +205,9 @@ constexpr bool test_variant() {
   static_assert(alternative_count<Traits> == 2);
   static_assert(Traits::has_residual_states);
   static_assert(noexcept(Traits::index(std::declval<const Variant&>())));
+  static_assert(std::is_same_v<decltype(Traits::index(std::declval<const Variant&>())), Traits::state>);
+  static_assert(Traits::state::index<0> == 0);
+  static_assert(Traits::state::index<1> == 1);
   static_assert(has_projection<Traits, 0, Variant&>);
   static_assert(has_projection<Traits, 1, Variant&>);
   static_assert(Traits::alternatives[0].info == ^^int);

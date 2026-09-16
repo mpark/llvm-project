@@ -38,13 +38,24 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  enum class names : __SIZE_TYPE__ { integer = 0, real = 1 };
+  struct names {
+    __SIZE_TYPE__ value;
+
+    static constexpr __SIZE_TYPE__ integer = 0;
+    static constexpr __SIZE_TYPE__ real = 1;
+
+    template<__SIZE_TYPE__ I>
+    static constexpr __SIZE_TYPE__ index = I;
+
+    constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+    friend constexpr bool operator==(names, names) = default;
+  };
 
   static constexpr names index(const Choice& value) noexcept {
-    return names(value.state);
+    return {value.state};
   }
 
-  template<names I, class Self>
+  template<__SIZE_TYPE__ I, class Self>
   static constexpr decltype(auto) get(Self&& value) {
     if constexpr (I == names::integer)
       return (static_cast<Self&&>(value).integer);
@@ -139,7 +150,7 @@ int alternatives(Choice choice) {
 int selected_alternatives(Choice choice) {
   return match (choice) {
     case { int: 0 } => 1;
-    case { .[1]: double value } => static_cast<int>(value);
+    case { .index<1>: double value } => static_cast<int>(value);
     case _ => 2;
   };
 }
@@ -147,21 +158,21 @@ int selected_alternatives(Choice choice) {
 // CHECK-LABEL: int selected_alternatives(Choice choice) {
 // CHECK-NEXT: {{^    }}return match (choice) {
 // CHECK-NEXT: {{^        }}case { int: 0 } => 1;
-// CHECK-NEXT: {{^        }}case { .[1]: double value } => static_cast<int>(value);
+// CHECK-NEXT: {{^        }}case { .index<1>: double value } => static_cast<int>(value);
 // CHECK-NEXT: {{^        }}case _ => 2;
 // CHECK-NEXT: {{^    }}};
 
 int state_only_alternatives(Choice choice) {
   return match (choice) {
-    case { .[0] } => 0;
-    case { .[1] } => 1;
+    case { .index<0> } => 0;
+    case { .index<1> } => 1;
   };
 }
 
 // CHECK-LABEL: int state_only_alternatives(Choice choice) {
 // CHECK-NEXT: {{^    }}return match (choice) {
-// CHECK-NEXT: {{^        }}case { .[0] } => 0;
-// CHECK-NEXT: {{^        }}case { .[1] } => 1;
+// CHECK-NEXT: {{^        }}case { .index<0> } => 0;
+// CHECK-NEXT: {{^        }}case { .index<1> } => 1;
 // CHECK-NEXT: {{^    }}};
 
 int constrained_alternative(Choice choice) {

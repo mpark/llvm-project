@@ -17,6 +17,19 @@ struct alternative_info {
 };
 }
 
+struct IndexedState {
+  __SIZE_TYPE__ value;
+
+  template<__SIZE_TYPE__ I>
+  static constexpr __SIZE_TYPE__ index = I;
+
+  constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+  __attribute__((always_inline)) friend constexpr bool
+  operator==(IndexedState left, IndexedState right) {
+    return left.value == right.value;
+  }
+};
+
 struct MaybeInt {
   bool engaged;
   int value;
@@ -89,7 +102,7 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  static __SIZE_TYPE__ index(const Choice&) noexcept;
+  static IndexedState index(const Choice&) noexcept;
 
   template<__SIZE_TYPE__ I>
   static typename ChoiceAlternative<I>::type& get(Choice&);
@@ -114,8 +127,8 @@ int match_selected_type(Choice& value) {
 // CHECK: ret i32
 int match_selected_index(Choice& value) {
   return match (value) {
-    case { .[0]: int number } => number;
-    case { .[1]: double number } => static_cast<int>(number);
+    case { .index<0>: int number } => number;
+    case { .index<1>: double number } => static_cast<int>(number);
   };
 }
 
