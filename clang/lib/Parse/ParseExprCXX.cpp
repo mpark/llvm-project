@@ -5252,53 +5252,50 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
     return Actions.ActOnEmptyAlternativePattern(T.getRange());
   }
 
-  SourceRange NameRange;
-  IdentifierInfo *Name = nullptr;
   SourceLocation ColonLoc;
   if (Tok.is(tok::period)) {
     SourceLocation PeriodLoc = ConsumeToken();
-    if (Tok.is(tok::l_square)) {
-      BalancedDelimiterTracker Index(*this, tok::l_square);
-      if (Index.expectAndConsume()) {
-        T.skipToEnd();
-        return true;
-      }
-      ExprResult IndexExpr = ParseConstantExpression();
-      if (IndexExpr.isInvalid() || Index.consumeClose()) {
-        T.skipToEnd();
-        return true;
-      }
-      ActionResult<MatchPattern *> Selector =
-          Actions.ActOnExpressionPattern(IndexExpr.get());
-      if (Selector.isInvalid()) {
-        T.skipToEnd();
-        return true;
-      }
-
-      MatchPattern *SubPattern = nullptr;
-      if (Tok.is(tok::colon)) {
-        ColonLoc = ConsumeToken();
-        ActionResult<MatchPattern *> ParsedSubPattern = ParsePattern();
-        if (ParsedSubPattern.isInvalid()) {
-          T.skipToEnd();
-          return true;
-        }
-        SubPattern = ParsedSubPattern.get();
-      }
-      if (T.consumeClose())
-        return true;
-      return Actions.ActOnSelectedAlternativePattern(
-          T.getRange(), Selector.get(), ColonLoc, SubPattern);
-    }
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected) << tok::identifier;
       T.skipToEnd();
       return true;
     }
-    Name = Tok.getIdentifierInfo();
-    NameRange = {PeriodLoc, ConsumeToken()};
+    IdentifierInfo *Name = Tok.getIdentifierInfo();
+    SourceLocation NameLoc = ConsumeToken();
+    SourceRange NameRange(PeriodLoc, NameLoc);
+
+    MatchPattern *Argument = nullptr;
+    if (Tok.is(tok::less)) {
+      SourceLocation LAngleLoc;
+      SourceLocation RAngleLoc;
+      TemplateArgList Args;
+      if (ParseTemplateIdAfterTemplateName(
+              /*ConsumeLastToken=*/true, LAngleLoc, Args, RAngleLoc)) {
+        T.skipToEnd();
+        return true;
+      }
+      NameRange.setEnd(RAngleLoc);
+      if (Args.size() != 1 ||
+          Args.front().getKind() != ParsedTemplateArgument::NonType) {
+        Diag(LAngleLoc, diag::err_expected)
+            << "a single constant expression template argument";
+        T.skipToEnd();
+        return true;
+      }
+      ActionResult<MatchPattern *> ParsedArgument =
+          Actions.ActOnExpressionPattern(Args.front().getAsExpr());
+      if (ParsedArgument.isInvalid()) {
+        T.skipToEnd();
+        return true;
+      }
+      Argument = ParsedArgument.get();
+    }
+
     if (Tok.is(tok::r_brace)) {
       T.consumeClose();
+      if (Argument)
+        return Actions.ActOnParameterizedNamedAlternativePattern(
+            T.getRange(), NameRange, Name, Argument, SourceLocation(), nullptr);
       return Actions.ActOnNamedAlternativePattern(T.getRange(), NameRange, Name,
                                                   SourceLocation(), nullptr);
     }
@@ -5307,75 +5304,85 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
       return true;
     }
     ColonLoc = PrevTokLocation;
-  }
 
-  if (!Name) {
-    bool InvalidTypeConstraint;
-    {
-      ColonProtectionRAIIObject ColonProtection(*this);
-      InvalidTypeConstraint = TryAnnotateTypeConstraint();
-    }
-    if (InvalidTypeConstraint) {
+    ActionResult<MatchPattern *> SubPattern = ParsePattern();
+    if (SubPattern.isInvalid()) {
       T.skipToEnd();
       return true;
     }
-    unsigned AfterConstraint = Tok.is(tok::annot_cxxscope) ? 2 : 1;
-    if (isTypeConstraintAnnotation() &&
-        GetLookAheadToken(AfterConstraint).is(tok::colon)) {
-      SourceLocation ConstraintBegin = Tok.getLocation();
-      CXXScopeSpec SS;
-      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                     /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false);
-      auto *Constraint =
-          static_cast<TemplateIdAnnotation *>(Tok.getAnnotationValue());
-      assert(Constraint->Kind == TNK_Concept_template &&
-             "expected a type-constraint annotation");
-      SourceRange ConstraintNameRange = ConsumeAnnotationToken();
-      SourceRange ConstraintRange(ConstraintBegin,
-                                  ConstraintNameRange.getEnd());
-      if (Actions.CheckTypeConstraint(Constraint)) {
-        T.skipToEnd();
-        return true;
-      }
+    if (T.consumeClose())
+      return true;
+    if (Argument)
+      return Actions.ActOnParameterizedNamedAlternativePattern(
+          T.getRange(), NameRange, Name, Argument, ColonLoc, SubPattern.get());
+    return Actions.ActOnNamedAlternativePattern(T.getRange(), NameRange, Name,
+                                                ColonLoc, SubPattern.get());
+  }
 
-      const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
-      if (Constraint->LAngleLoc.isValid()) {
-        TemplateArgumentListInfo Args(Constraint->LAngleLoc,
-                                      Constraint->RAngleLoc);
-        ASTTemplateArgsPtr ParsedArgs(Constraint->getTemplateArgs(),
-                                      Constraint->NumArgs);
-        Actions.translateTemplateArguments(ParsedArgs, Args);
-        ArgsAsWritten =
-            ASTTemplateArgumentListInfo::Create(Actions.Context, Args);
-      }
-
-      NamedDecl *FoundDecl;
-      if (UsingShadowDecl *USD =
-              Constraint->Template.get().getAsUsingShadowDecl())
-        FoundDecl = USD;
-      else
-        FoundDecl = cast_if_present<NamedDecl>(
-            Constraint->Template.get().getAsTemplateDecl());
-      ConceptReference *CR = ConceptReference::Create(
-          Actions.Context,
-          SS.isSet() ? SS.getWithLocInContext(Actions.Context)
-                     : NestedNameSpecifierLoc{},
-          Constraint->TemplateKWLoc,
-          DeclarationNameInfo(Constraint->Name, Constraint->TemplateNameLoc),
-          FoundDecl, Constraint->Template.get(), ArgsAsWritten);
-
-      ColonLoc = ConsumeToken();
-      ActionResult<MatchPattern *> SubPattern = ParsePattern();
-      if (SubPattern.isInvalid()) {
-        T.skipToEnd();
-        return true;
-      }
-      if (T.consumeClose())
-        return true;
-      return Actions.ActOnTypeConstraintAlternativePattern(
-          T.getRange(), ConstraintRange, CR, ColonLoc, SubPattern.get());
+  bool InvalidTypeConstraint;
+  {
+    ColonProtectionRAIIObject ColonProtection(*this);
+    InvalidTypeConstraint = TryAnnotateTypeConstraint();
+  }
+  if (InvalidTypeConstraint) {
+    T.skipToEnd();
+    return true;
+  }
+  unsigned AfterConstraint = Tok.is(tok::annot_cxxscope) ? 2 : 1;
+  if (isTypeConstraintAnnotation() &&
+      GetLookAheadToken(AfterConstraint).is(tok::colon)) {
+    SourceLocation ConstraintBegin = Tok.getLocation();
+    CXXScopeSpec SS;
+    ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                   /*ObjectHasErrors=*/false,
+                                   /*EnteringContext=*/false);
+    auto *Constraint =
+        static_cast<TemplateIdAnnotation *>(Tok.getAnnotationValue());
+    assert(Constraint->Kind == TNK_Concept_template &&
+           "expected a type-constraint annotation");
+    SourceRange ConstraintNameRange = ConsumeAnnotationToken();
+    SourceRange ConstraintRange(ConstraintBegin, ConstraintNameRange.getEnd());
+    if (Actions.CheckTypeConstraint(Constraint)) {
+      T.skipToEnd();
+      return true;
     }
+
+    const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
+    if (Constraint->LAngleLoc.isValid()) {
+      TemplateArgumentListInfo Args(Constraint->LAngleLoc,
+                                    Constraint->RAngleLoc);
+      ASTTemplateArgsPtr ParsedArgs(Constraint->getTemplateArgs(),
+                                    Constraint->NumArgs);
+      Actions.translateTemplateArguments(ParsedArgs, Args);
+      ArgsAsWritten =
+          ASTTemplateArgumentListInfo::Create(Actions.Context, Args);
+    }
+
+    NamedDecl *FoundDecl;
+    if (UsingShadowDecl *USD =
+            Constraint->Template.get().getAsUsingShadowDecl())
+      FoundDecl = USD;
+    else
+      FoundDecl = cast_if_present<NamedDecl>(
+          Constraint->Template.get().getAsTemplateDecl());
+    ConceptReference *CR = ConceptReference::Create(
+        Actions.Context,
+        SS.isSet() ? SS.getWithLocInContext(Actions.Context)
+                   : NestedNameSpecifierLoc{},
+        Constraint->TemplateKWLoc,
+        DeclarationNameInfo(Constraint->Name, Constraint->TemplateNameLoc),
+        FoundDecl, Constraint->Template.get(), ArgsAsWritten);
+
+    ColonLoc = ConsumeToken();
+    ActionResult<MatchPattern *> SubPattern = ParsePattern();
+    if (SubPattern.isInvalid()) {
+      T.skipToEnd();
+      return true;
+    }
+    if (T.consumeClose())
+      return true;
+    return Actions.ActOnTypeConstraintAlternativePattern(
+        T.getRange(), ConstraintRange, CR, ColonLoc, SubPattern.get());
   }
 
   ActionResult<MatchPattern *> Pattern = [&] {
@@ -5387,11 +5394,10 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
     return true;
   }
 
-  if (!Name && Tok.is(tok::colon)) {
+  if (Tok.is(tok::colon)) {
     auto *Selector = Pattern.get();
     if (!isa<TypePattern>(Selector)) {
-      Diag(Selector->getBeginLoc(), diag::err_expected)
-          << "a type before ':' or an index selector of the form '.[expr]'";
+      Diag(Selector->getBeginLoc(), diag::err_expected) << "a type before ':'";
       T.skipToEnd();
       return true;
     }
@@ -5410,9 +5416,6 @@ ActionResult<MatchPattern *> Parser::ParseBracedAlternativePattern() {
   if (T.consumeClose())
     return true;
 
-  if (Name)
-    return Actions.ActOnNamedAlternativePattern(T.getRange(), NameRange, Name,
-                                                ColonLoc, Pattern.get());
   return Actions.ActOnBracedAlternativePattern(T.getRange(), Pattern.get());
 }
 

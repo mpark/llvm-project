@@ -241,14 +241,6 @@ static bool lookupStdTypeTraitMember(Sema &S, LookupResult &TraitMemberLookup,
 
 // Copied from SemaDeclCXX.cpp
 static TemplateArgumentLoc
-getTrivialIntegralTemplateArgument(Sema &S, SourceLocation Loc, QualType T,
-                                   uint64_t I) {
-  TemplateArgument Arg(S.Context, S.Context.MakeIntValue(I, T), T);
-  return S.getTrivialTemplateArgumentLoc(Arg, T, Loc);
-}
-
-// Copied from SemaDeclCXX.cpp
-static TemplateArgumentLoc
 getTrivialTypeTemplateArgument(Sema &S, SourceLocation Loc, QualType T) {
   return S.getTrivialTemplateArgumentLoc(TemplateArgument(T), QualType(), Loc);
 }
@@ -288,6 +280,7 @@ struct AlternativeTraitsInfo {
   CXXRecordDecl *Record = nullptr;
   unsigned Size = 0;
   bool IsExhaustive = true;
+  bool HasParameterizedIndexName = false;
   bool IsBuiltinPointer = false;
   bool IsOpen = false;
   bool OpenHasValue = false;
@@ -521,6 +514,18 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
                                          /*AllowOpen=*/true, Info);
 }
 
+static Expr *buildAlternativeDiscriminatorObject(Sema &S, SourceLocation Loc,
+                                                 QualType Type) {
+  // Name selection is member access on the discriminator saved at runtime.
+  // Use an uninitialized stand-in here so looking up a static name does not
+  // evaluate index(subject) while the pattern is being checked.
+  TypeSourceInfo *TInfo = S.Context.getTrivialTypeSourceInfo(Type, Loc);
+  VarDecl *Decl = VarDecl::Create(S.Context, S.CurContext, Loc, Loc,
+                                  /*Id=*/nullptr, Type, TInfo, SC_None);
+  Decl->setImplicit();
+  return S.BuildDeclRefExpr(Decl, Type, VK_LValue, Loc);
+}
+
 static std::optional<unsigned>
 lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
                       const AlternativeTraitsInfo &Info, IdentifierInfo *Name) {
@@ -540,32 +545,53 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
   const auto *IndexEnumType = Info.IndexType->getAs<EnumType>();
   EnumDecl *DiscriminatorEnum =
       IndexEnumType ? IndexEnumType->getDecl() : nullptr;
-  if (!DiscriminatorEnum) {
-    S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
-    return std::nullopt;
-  }
-
-  // An enum with a fixed underlying type is a complete type before its
-  // enumerators have been instantiated. Require the enum declaration itself,
-  // not merely its type, to be complete.
-  if (S.RequireCompleteEnumDecl(DiscriminatorEnum, Loc, /*SS=*/nullptr))
-    return std::nullopt;
-
   LookupResult NameLookup(S, Name, Loc, Sema::LookupOrdinaryName);
-  S.LookupQualifiedName(NameLookup, DiscriminatorEnum);
-  EnumConstantDecl *NameDecl = nullptr;
-  for (NamedDecl *Decl : NameLookup)
-    if (auto *Enumerator =
-            dyn_cast<EnumConstantDecl>(Decl->getUnderlyingDecl())) {
-      NameDecl = Enumerator;
-      break;
+  llvm::APSInt Value(32);
+  if (DiscriminatorEnum) {
+    // An enum with a fixed underlying type is a complete type before its
+    // enumerators have been instantiated. Require the enum declaration itself,
+    // not merely its type, to be complete.
+    if (S.RequireCompleteEnumDecl(DiscriminatorEnum, Loc, /*SS=*/nullptr))
+      return std::nullopt;
+
+    S.LookupQualifiedName(NameLookup, DiscriminatorEnum);
+    EnumConstantDecl *NameDecl = nullptr;
+    for (NamedDecl *Decl : NameLookup)
+      if (auto *Enumerator =
+              dyn_cast<EnumConstantDecl>(Decl->getUnderlyingDecl())) {
+        NameDecl = Enumerator;
+        break;
+      }
+    if (!NameDecl) {
+      S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
+      return std::nullopt;
     }
-  if (!NameDecl) {
+    Value = NameDecl->getInitVal();
+  } else if (auto *DiscriminatorRecord = const_cast<CXXRecordDecl *>(
+                 Info.IndexType->getAsCXXRecordDecl())) {
+    if (S.RequireCompleteType(Loc, Info.IndexType, diag::err_incomplete_type))
+      return std::nullopt;
+    S.LookupQualifiedName(NameLookup, DiscriminatorRecord);
+    if (NameLookup.empty()) {
+      S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
+      return std::nullopt;
+    }
+    Expr *Discriminator =
+        buildAlternativeDiscriminatorObject(S, Loc, Info.IndexType);
+    CXXScopeSpec SS;
+    ExprResult NameExpr = S.BuildMemberReferenceExpr(
+        Discriminator, Info.IndexType, Loc, /*IsArrow=*/false, SS,
+        SourceLocation(), /*FirstQualifierInScope=*/nullptr,
+        DeclarationNameInfo(Name, Loc), /*TemplateArgs=*/nullptr,
+        S.getCurScope());
+    if (NameExpr.isInvalid() ||
+        S.VerifyIntegerConstantExpression(NameExpr.get(), &Value).isInvalid())
+      return std::nullopt;
+  } else {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
   }
 
-  const llvm::APSInt &Value = NameDecl->getInitVal();
   if (Value.isSigned() && Value.isNegative()) {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
@@ -578,18 +604,75 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
   return static_cast<unsigned>(Index);
 }
 
-static ExprResult buildAlternativeTraitsCall(
-    Sema &S, SourceLocation Loc, const AlternativeTraitsInfo &Info,
-    StringRef Member, Expr *Subject,
-    std::optional<unsigned> AlternativeIndex = std::nullopt) {
+static std::optional<unsigned>
+lookupParameterizedAlternativeName(Sema &S, QualType SubjectType,
+                                   const AlternativeTraitsInfo &Info,
+                                   AlternativePattern *Pattern) {
+  SourceLocation Loc = Pattern->getDiscriminatorRange().getBegin();
+  auto *DiscriminatorRecord =
+      const_cast<CXXRecordDecl *>(Info.IndexType->getAsCXXRecordDecl());
+  if (Info.IsBuiltinPointer || !DiscriminatorRecord) {
+    S.Diag(Loc, diag::err_alternative_name_not_found)
+        << Pattern->getName() << SubjectType;
+    return std::nullopt;
+  }
+  if (S.RequireCompleteType(Loc, Info.IndexType, diag::err_incomplete_type))
+    return std::nullopt;
+
+  Expr *Argument = Pattern->getParameterizedNameArgument()->getExpr();
+  if (Pattern->getName()->isStr("index")) {
+    llvm::APSInt ArgumentValue(32);
+    if (S.VerifyIntegerConstantExpression(Argument, &ArgumentValue).isInvalid())
+      return std::nullopt;
+    if (ArgumentValue.isNegative() || ArgumentValue.uge(Info.Size)) {
+      S.Diag(Argument->getExprLoc(), diag::err_alternative_index_out_of_range)
+          << toString(ArgumentValue, 10) << Info.Size;
+      return std::nullopt;
+    }
+  }
+
+  LookupResult NameLookup(S, Pattern->getName(), Loc, Sema::LookupOrdinaryName);
+  S.LookupQualifiedName(NameLookup, DiscriminatorRecord);
+  bool HasVariableTemplate = llvm::any_of(NameLookup, [](NamedDecl *Decl) {
+    return isa<VarTemplateDecl>(Decl->getUnderlyingDecl());
+  });
+  if (!HasVariableTemplate) {
+    S.Diag(Loc, diag::err_alternative_name_not_found)
+        << Pattern->getName() << SubjectType;
+    return std::nullopt;
+  }
+
+  TemplateArgumentListInfo Args(Argument->getBeginLoc(), Argument->getEndLoc());
+  Args.addArgument(TemplateArgumentLoc(
+      TemplateArgument(Argument, /*IsCanonical=*/false), Argument));
+  Expr *Discriminator =
+      buildAlternativeDiscriminatorObject(S, Loc, Info.IndexType);
+  CXXScopeSpec SS;
+  ExprResult Name = S.BuildMemberReferenceExpr(
+      Discriminator, Info.IndexType, Loc, /*IsArrow=*/false, SS,
+      SourceLocation(), /*FirstQualifierInScope=*/nullptr,
+      DeclarationNameInfo(Pattern->getName(), Loc), &Args, S.getCurScope());
+  if (Name.isInvalid())
+    return std::nullopt;
+
+  llvm::APSInt IndexValue(32);
+  if (S.VerifyIntegerConstantExpression(Name.get(), &IndexValue).isInvalid())
+    return std::nullopt;
+  if (IndexValue.isNegative() || IndexValue.uge(Info.Size)) {
+    S.Diag(Argument->getExprLoc(), diag::err_alternative_index_out_of_range)
+        << toString(IndexValue, 10) << Info.Size;
+    return std::nullopt;
+  }
+  return static_cast<unsigned>(IndexValue.getZExtValue());
+}
+
+static ExprResult buildAlternativeTraitsCall(Sema &S, SourceLocation Loc,
+                                             const AlternativeTraitsInfo &Info,
+                                             StringRef Member, Expr *Subject) {
   if (Info.IsBuiltinPointer) {
     if (Member == "index")
       return S.PerformContextuallyConvertToBool(Subject);
-    assert(Member == "get" && AlternativeIndex == 1 &&
-           "unexpected built-in pointer alternative operation");
-    if (Subject->getType()->getPointeeType()->isVoidType())
-      return S.ImpCastExprToType(Subject, S.Context.VoidTy, CK_ToVoid);
-    return S.CreateBuiltinUnaryOp(Loc, UO_Deref, Subject);
+    llvm_unreachable("unexpected built-in pointer alternative operation");
   }
 
   LookupResult MemberLookup(S, S.PP.getIdentifierInfo(Member), Loc,
@@ -600,19 +683,21 @@ static ExprResult buildAlternativeTraitsCall(
 
   CXXScopeSpec SS;
   SS.MakeTrivial(S.Context, NestedNameSpecifier(Info.Type.getTypePtr()), Loc);
-  ExprResult Callee;
-  if (AlternativeIndex) {
-    TemplateArgumentListInfo Args(Loc, Loc);
-    Args.addArgument(getTrivialIntegralTemplateArgument(
-        S, Loc, S.Context.getSizeType(), *AlternativeIndex));
-    Callee = S.BuildTemplateIdExpr(SS, SourceLocation(), MemberLookup,
-                                   /*RequiresADL=*/false, &Args);
-  } else {
-    Callee = S.BuildDeclarationNameExpr(SS, MemberLookup, false);
-  }
+  ExprResult Callee = S.BuildDeclarationNameExpr(SS, MemberLookup, false);
   if (Callee.isInvalid())
     return ExprError();
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
+}
+
+static ExprResult buildAlternativeStateValue(Sema &S, SourceLocation Loc,
+                                             QualType StateType,
+                                             unsigned Index) {
+  ExprResult Value = S.ActOnIntegerConstant(Loc, Index);
+  if (Value.isInvalid())
+    return ExprError();
+  return S.BuildCXXNamedCast(Loc, tok::kw_static_cast,
+                             S.Context.getTrivialTypeSourceInfo(StateType, Loc),
+                             Value.get(), SourceRange(Loc), SourceRange(Loc));
 }
 
 static ExprResult
@@ -632,12 +717,12 @@ buildAlternativeTraitsGetCall(Sema &S, SourceLocation Loc,
   if (GetLookup.empty())
     return ExprError();
 
-  TemplateArgumentLoc Arg =
-      getTrivialIntegralTemplateArgument(S, Loc, Info.IndexType, Index);
-  if (Arg.getArgument().isNull())
+  ExprResult State = buildAlternativeStateValue(S, Loc, Info.IndexType, Index);
+  if (State.isInvalid())
     return ExprError();
   TemplateArgumentListInfo Args(Loc, Loc);
-  Args.addArgument(Arg);
+  Args.addArgument(TemplateArgumentLoc(
+      TemplateArgument(State.get(), /*IsCanonical=*/false), State.get()));
 
   CXXScopeSpec SS;
   SS.MakeTrivial(S.Context, NestedNameSpecifier(Info.Type.getTypePtr()), Loc);
@@ -702,11 +787,21 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
       return true;
     Info.IndexType =
         IndexCall.get()->getType().getNonReferenceType().getUnqualifiedType();
-    if (!Info.IndexType->isIntegralOrEnumerationType()) {
+    if (!Info.IndexType->isStructuralType()) {
       S.Diag(Loc, diag::err_alternative_traits_member_missing)
           << Subject->getType().getNonReferenceType().getUnqualifiedType()
-          << "integral or enumeration-valued 'index'";
+          << "structural-valued 'index'";
       return true;
+    }
+    if (auto *Record =
+            const_cast<CXXRecordDecl *>(Info.IndexType->getAsCXXRecordDecl())) {
+      LookupResult IndexName(S, S.PP.getIdentifierInfo("index"), Loc,
+                             Sema::LookupOrdinaryName);
+      S.LookupQualifiedName(IndexName, Record);
+      Info.HasParameterizedIndexName =
+          llvm::any_of(IndexName, [](NamedDecl *Decl) {
+            return isa<VarTemplateDecl>(Decl->getUnderlyingDecl());
+          });
     }
   }
 
@@ -813,6 +908,7 @@ static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
   PatternInfo.SelectedAlternatives =
       ArrayRef(SelectedAlternatives, Selected.size());
   PatternInfo.IsExhaustive = Traits.IsExhaustive;
+  PatternInfo.HasParameterizedIndexName = Traits.HasParameterizedIndexName;
   PatternInfo.IsAlternativeValuePattern = IsAlternativeValuePattern;
 }
 
@@ -1624,6 +1720,13 @@ ActionResult<MatchPattern *> Sema::ActOnNamedAlternativePattern(
       AlternativePattern(Braces, NameRange, Name, ColonLoc, SubPattern);
 }
 
+ActionResult<MatchPattern *> Sema::ActOnParameterizedNamedAlternativePattern(
+    SourceRange Braces, SourceRange NameRange, IdentifierInfo *Name,
+    MatchPattern *Argument, SourceLocation ColonLoc, MatchPattern *SubPattern) {
+  return new (Context) AlternativePattern(Braces, NameRange, Name, Argument,
+                                          ColonLoc, SubPattern);
+}
+
 ActionResult<MatchPattern *> Sema::ActOnSelectedAlternativePattern(
     SourceRange Braces, MatchPattern *Selector, SourceLocation ColonLoc,
     MatchPattern *SubPattern) {
@@ -1775,13 +1878,7 @@ static bool initializeAlternativeStateProjection(
 
   ExprResult RawCondition;
   for (unsigned I : Selected) {
-    ExprResult Target = S.ActOnIntegerConstant(Loc, I);
-    if (Target.isInvalid())
-      return true;
-    Target = S.BuildCXXNamedCast(
-        Loc, tok::kw_static_cast,
-        S.Context.getTrivialTypeSourceInfo(Traits.IndexType, Loc), Target.get(),
-        SourceRange(Loc), SourceRange(Loc));
+    ExprResult Target = buildAlternativeStateValue(S, Loc, Traits.IndexType, I);
     if (Target.isInvalid())
       return true;
     ExprResult Equal =
@@ -2218,17 +2315,10 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                             Sema::MatchProjectionCache *ProjectionCache) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType SubjectType = Subject->getType().getNonReferenceType();
-  if (Pattern->isNamed()) {
+  if (Pattern->isNamed() || Pattern->isParameterizedNamed()) {
     S.Diag(Pattern->getDiscriminatorRange().getBegin(),
            diag::err_alternative_name_not_found)
         << Pattern->getName() << SubjectType;
-    return true;
-  }
-
-  if (Pattern->isExpressionSelected()) {
-    S.Diag(Pattern->getDiscriminatorRange().getBegin(),
-           diag::err_open_alternative_index_selector)
-        << SubjectType;
     return true;
   }
   if (Pattern->isTypeConstraintSelected()) {
@@ -2449,28 +2539,19 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     Selected.push_back(*Named);
   }
 
+  if (Pattern->isParameterizedNamed()) {
+    std::optional<unsigned> Named =
+        lookupParameterizedAlternativeName(S, SubjectType, Traits, Pattern);
+    if (!Named)
+      return true;
+    Selected.push_back(*Named);
+  }
+
   bool UsesAdvertisedTypes =
       Pattern->isTypeSelected() || Pattern->isTypeConstraintSelected();
   if (UsesAdvertisedTypes &&
       validateAdvertisedAlternativeProjections(S, Loc, Subject, Traits))
     return true;
-
-  if (Pattern->isExpressionSelected()) {
-    Expr *Selector = Pattern->getExpressionSelector()->getExpr();
-    if (Selector->isValueDependent()) {
-      return checkAlternativeSubPattern(S, nullptr, Pattern, State,
-                                        ProjectionCache);
-    }
-    llvm::APSInt IndexValue(32);
-    if (S.VerifyIntegerConstantExpression(Selector, &IndexValue).isInvalid())
-      return true;
-    if (IndexValue.isNegative() || IndexValue.uge(Traits.Size)) {
-      S.Diag(Selector->getExprLoc(), diag::err_alternative_index_out_of_range)
-          << toString(IndexValue, 10) << Traits.Size;
-      return true;
-    }
-    Selected.push_back(IndexValue.getZExtValue());
-  }
 
   if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
@@ -2480,7 +2561,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
       return true;
     }
-  } else if (!Pattern->isNamed() && !Pattern->isExpressionSelected()) {
+  } else if (!Pattern->isNamed() && !Pattern->isParameterizedNamed()) {
     for (unsigned I = 0; I < Traits.Size; ++I) {
       if (!Traits.Projectable[I] ||
           (UsesAdvertisedTypes && !Traits.HasAlternativeType[I]))

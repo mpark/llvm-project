@@ -58,6 +58,7 @@ struct CtorKey {
   SmallVector<unsigned char, 4> EmptyAlternatives;
   SmallVector<Expr *, 4> AlternativeValues;
   bool IsExhaustive = true;
+  bool HasParameterizedIndexName = false;
   QualType OpenAlternativeType;
   bool OpenAlternativeHasEmpty = false;
 
@@ -116,7 +117,8 @@ struct CtorKey {
                                  ArrayRef<QualType> Types,
                                  ArrayRef<unsigned char> Projectable,
                                  ArrayRef<unsigned char> Empty,
-                                 ArrayRef<Expr *> Values, bool IsExhaustive) {
+                                 ArrayRef<Expr *> Values, bool IsExhaustive,
+                                 bool HasParameterizedIndexName) {
     CtorKey C;
     C.K = Alternative;
     C.AlternativeOwnerType = OwnerType;
@@ -126,6 +128,7 @@ struct CtorKey {
     C.EmptyAlternatives.append(Empty.begin(), Empty.end());
     C.AlternativeValues.append(Values.begin(), Values.end());
     C.IsExhaustive = IsExhaustive;
+    C.HasParameterizedIndexName = HasParameterizedIndexName;
     return C;
   }
 
@@ -421,7 +424,8 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
             CtorKey::alternativeCtor(
                 Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
                 Info->ProjectableAlternatives, Info->EmptyAlternatives,
-                Info->AlternativeValues, Info->IsExhaustive),
+                Info->AlternativeValues, Info->IsExhaustive,
+                Info->HasParameterizedIndexName),
             P->getBeginLoc()));
       return Results;
     }
@@ -533,7 +537,8 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       CtorKey C = CtorKey::alternativeCtor(
           Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
           Info->ProjectableAlternatives, Info->EmptyAlternatives,
-          Info->AlternativeValues, Info->IsExhaustive);
+          Info->AlternativeValues, Info->IsExhaustive,
+          Info->HasParameterizedIndexName);
       CoveragePattern Result =
           CoveragePattern::ctor(std::move(C), P->getBeginLoc());
       if (!Info->ProjectableAlternatives[Index] || !P->getSubPattern()) {
@@ -819,7 +824,8 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
       Ctors.push_back(CtorKey::alternativeCtor(
           P.C.AlternativeOwnerType, I, P.C.AlternativeTypes,
           P.C.ProjectableAlternatives, P.C.EmptyAlternatives,
-          P.C.AlternativeValues, P.C.IsExhaustive));
+          P.C.AlternativeValues, P.C.IsExhaustive,
+          P.C.HasParameterizedIndexName));
     // A protocol can advertise an out-of-range state, such as a valueless
     // variant, without making that state required for exhaustiveness.
     if (Domain == ConstructorDomain::RequiredAndResidual && !P.C.IsExhaustive)
@@ -1048,7 +1054,9 @@ std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
       }
       return "{ " + printWitnessPattern(Context, Witness, Offset) + " }";
     }
-    return "{ .[" + llvm::utostr(C.AlternativeIndex) + "] }";
+    if (C.HasParameterizedIndexName)
+      return "{ .index<" + llvm::utostr(C.AlternativeIndex) + "> }";
+    return "_";
   }
   if (C.K == CtorKey::OpenAlternative) {
     if (Offset < Witness.size() && Witness[Offset].K == CtorKey::Wildcard) {

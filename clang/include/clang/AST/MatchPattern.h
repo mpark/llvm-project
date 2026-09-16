@@ -352,9 +352,9 @@ public:
   enum AlternativeKind {
     Generic,
     Named,
+    ParameterizedName,
     Type,
     TypeConstraint,
-    Expression,
     Empty
   };
 
@@ -390,14 +390,24 @@ public:
     setDependence(computeDependence());
   }
 
+  explicit AlternativePattern(SourceRange Braces, SourceRange NameRange,
+                              IdentifierInfo *Name, MatchPattern *Argument,
+                              SourceLocation ColonLoc, MatchPattern *Pattern)
+      : MatchPattern(AlternativePatternClass), Kind(ParameterizedName),
+        DiscriminatorRange(NameRange), Braces(Braces), Name(Name),
+        Selector(Argument), ColonLoc(ColonLoc), Pattern(Pattern) {
+    assert(isa<ExpressionPattern>(Argument) &&
+           "parameterized alternative name requires an expression argument");
+    setDependence(computeDependence() | Argument->getDependence());
+  }
+
   explicit AlternativePattern(SourceRange Braces, MatchPattern *Selector,
                               SourceLocation ColonLoc, MatchPattern *Pattern)
-      : MatchPattern(AlternativePatternClass),
-        Kind(isa<TypePattern>(Selector) ? Type : Expression),
+      : MatchPattern(AlternativePatternClass), Kind(Type),
         DiscriminatorRange(Selector->getSourceRange()), Braces(Braces),
         Selector(Selector), ColonLoc(ColonLoc), Pattern(Pattern) {
-    assert((isa<TypePattern>(Selector) || isa<ExpressionPattern>(Selector)) &&
-           "alternative selector must be a type or expression pattern");
+    assert(isa<TypePattern>(Selector) &&
+           "selected alternative pattern requires a type selector");
     setDependence(computeDependence() | Selector->getDependence());
   }
 
@@ -412,12 +422,12 @@ public:
 
   AlternativeKind getAlternativeKind() const { return Kind; }
   bool isNamed() const { return Kind == Named; }
+  bool isParameterizedNamed() const { return Kind == ParameterizedName; }
   bool isTypeSelected() const { return Kind == Type; }
   bool isTypeConstraintSelected() const { return Kind == TypeConstraint; }
-  bool isExpressionSelected() const { return Kind == Expression; }
   bool isSelected() const {
-    return isTypeSelected() || isTypeConstraintSelected() ||
-           isExpressionSelected();
+    return isParameterizedNamed() || isTypeSelected() ||
+           isTypeConstraintSelected();
   }
   bool isEmpty() const { return Kind == Empty; }
 
@@ -437,13 +447,13 @@ public:
   TypePattern *getTypeSelector() {
     return isTypeSelected() ? static_cast<TypePattern *>(Selector) : nullptr;
   }
-  const ExpressionPattern *getExpressionSelector() const {
-    return isExpressionSelected()
+  const ExpressionPattern *getParameterizedNameArgument() const {
+    return isParameterizedNamed()
                ? static_cast<const ExpressionPattern *>(Selector)
                : nullptr;
   }
-  ExpressionPattern *getExpressionSelector() {
-    return isExpressionSelected() ? static_cast<ExpressionPattern *>(Selector)
+  ExpressionPattern *getParameterizedNameArgument() {
+    return isParameterizedNamed() ? static_cast<ExpressionPattern *>(Selector)
                                   : nullptr;
   }
   SourceLocation getColonLoc() const { return ColonLoc; }
@@ -537,6 +547,7 @@ struct MatchPatternInfo {
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
   bool IsExhaustive = true;
+  bool HasParameterizedIndexName = false;
   bool IsAlternativeValuePattern = false;
   bool IsOpenAlternative = false;
   bool OpenAlternativeHasEmpty = false;
