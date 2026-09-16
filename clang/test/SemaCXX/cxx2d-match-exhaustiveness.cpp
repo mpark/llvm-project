@@ -3,6 +3,16 @@
 enum class EmptyState { first, second };
 inline constexpr int nullable_empty_state = 0;
 
+struct IndexedState {
+  __SIZE_TYPE__ value;
+
+  template<__SIZE_TYPE__ I>
+  static constexpr __SIZE_TYPE__ index = I;
+
+  constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+  friend constexpr bool operator==(IndexedState, IndexedState) = default;
+};
+
 int missing_bool(bool b) {
   return match (b) { // expected-error {{match expression is not exhaustive; example of a missing case: false}}
     case true => 1;
@@ -524,8 +534,8 @@ struct std::alternative_traits<ClassifiedChoice> {
   };
   static constexpr bool has_residual_states = false;
 
-  static constexpr __SIZE_TYPE__ index(ClassifiedChoice value) noexcept {
-    return value.state;
+  static constexpr IndexedState index(ClassifiedChoice value) noexcept {
+    return {value.state};
   }
 
 };
@@ -540,8 +550,8 @@ int unrepresented_values_do_not_contribute_to_exhaustiveness(
 
 int index_selectors_cover_unrepresented_states(ClassifiedChoice value) {
   return match (value) {
-    case { .[0] } => 0;
-    case { .[1] } => 1;
+    case { .index<0> } => 0;
+    case { .index<1> } => 1;
   };
 }
 
@@ -748,14 +758,25 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  enum class names : __SIZE_TYPE__ { flag = 0, number = 1 };
+  struct names {
+    __SIZE_TYPE__ value;
+
+    static constexpr __SIZE_TYPE__ flag = 0;
+    static constexpr __SIZE_TYPE__ number = 1;
+
+    template<__SIZE_TYPE__ I>
+    static constexpr __SIZE_TYPE__ index = I;
+
+    constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+    friend constexpr bool operator==(names, names) = default;
+  };
 
   static constexpr names index(const Choice& choice) noexcept {
-    return names(choice.state);
+    return {choice.state};
   }
 
-  template<names I, class Self>
-    requires (static_cast<__SIZE_TYPE__>(I) < 2)
+  template<__SIZE_TYPE__ I, class Self>
+    requires (I < 2)
   static constexpr decltype(auto) get(Self&& choice) {
     if constexpr (I == names::flag)
       return (static_cast<Self&&>(choice).flag);
@@ -1000,10 +1021,10 @@ int type_selectors_are_exhaustive(Choice choice) {
   };
 }
 
-int expression_selectors_are_exhaustive(Choice choice) {
+int parameterized_names_are_exhaustive(Choice choice) {
   return match (choice) {
-    case { .[0]: _ } => 0;
-    case { .[1]: _ } => 1;
+    case { .index<0>: _ } => 0;
+    case { .index<1>: _ } => 1;
     case {} => 2;
   };
 }
@@ -1011,7 +1032,7 @@ int expression_selectors_are_exhaustive(Choice choice) {
 int type_selector_makes_index_redundant(Choice choice) {
   return match (choice) {
     case { bool: _ } => 0;
-    case { .[0]: _ } => 1; // expected-error {{match case is redundant}}
+    case { .index<0>: _ } => 1; // expected-error {{match case is redundant}}
     case { int: _ } => 2;
     case {} => 3;
   };
