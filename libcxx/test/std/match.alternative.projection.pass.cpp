@@ -148,8 +148,15 @@ int match_dependent_type_constraint_selector(const auto& value) {
 
 int match_variant_index_selectors(const std::variant<int, int>& value) {
   return match (value) {
-    case { .[0]: auto integer } => integer + 20;
-    case { .[1]: auto integer } => integer + 30;
+    case { .index<0>: auto integer } => integer + 20;
+    case { .index<1>: auto integer } => integer + 30;
+  };
+}
+
+int match_variant_index_states(const std::variant<int, int>& value) {
+  return match (value) {
+    case { .index<0> } => 40;
+    case { .index<1> } => 50;
   };
 }
 
@@ -539,6 +546,10 @@ int main(int, char**) {
              std::variant<int, int>(std::in_place_index<0>, 13)) == 13);
   assert(match_repeated_variant(
              std::variant<int, int>(std::in_place_index<1>, 14)) == 14);
+  assert(match_variant_index_states(
+             std::variant<int, int>(std::in_place_index<0>, 13)) == 40);
+  assert(match_variant_index_states(
+             std::variant<int, int>(std::in_place_index<1>, 14)) == 50);
   assert(match_repeated_type(
              std::variant<int, int>(std::in_place_index<0>, 13)) == 75);
   assert(match_repeated_type(
