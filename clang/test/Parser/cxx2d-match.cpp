@@ -970,6 +970,13 @@ int test_default_is_not_a_match_arm(int value) {
   };
 }
 
+void test_old_index_selector_syntax(int* value) {
+  match (value) {
+    case { .[0] } => ; // expected-error {{expected identifier}}
+    case _ => ;
+  }
+}
+
 int test_unknown_case_attribute(int value) {
   return match (value) {
     [[unknown_match_case_attribute]] case _ => 0; // expected-warning {{unknown attribute 'unknown_match_case_attribute' ignored}}
