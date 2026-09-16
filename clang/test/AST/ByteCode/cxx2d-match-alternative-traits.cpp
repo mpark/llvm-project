@@ -16,6 +16,16 @@ struct alternative_info {
 
 }
 
+struct IndexedState {
+  __SIZE_TYPE__ value;
+
+  template<__SIZE_TYPE__ I>
+  static constexpr __SIZE_TYPE__ index = I;
+
+  constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+  friend constexpr bool operator==(IndexedState, IndexedState) = default;
+};
+
 struct Choice {
   unsigned state;
   int first;
@@ -44,13 +54,24 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  enum class names : __SIZE_TYPE__ { first = 0, second = 1 };
+  struct names {
+    __SIZE_TYPE__ value;
+
+    static constexpr __SIZE_TYPE__ first = 0;
+    static constexpr __SIZE_TYPE__ second = 1;
+
+    template<__SIZE_TYPE__ I>
+    static constexpr __SIZE_TYPE__ index = I;
+
+    constexpr operator __SIZE_TYPE__() const noexcept { return value; }
+    friend constexpr bool operator==(names, names) = default;
+  };
 
   static constexpr names index(const Choice& choice) noexcept {
-    return names(choice.state);
+    return {choice.state};
   }
 
-  template<names I, class Self>
+  template<__SIZE_TYPE__ I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
     if constexpr (I == names::first)
       return (static_cast<Self&&>(choice).first);
@@ -160,8 +181,8 @@ struct std::alternative_traits<IndexOnlyChoice> {
   static constexpr alternative_info alternatives[] = {{}, {}};
   static constexpr bool has_residual_states = false;
 
-  static constexpr unsigned index(IndexOnlyChoice value) noexcept {
-    return value.state;
+  static constexpr IndexedState index(IndexOnlyChoice value) noexcept {
+    return {value.state};
   }
 };
 
@@ -170,7 +191,9 @@ struct std::alternative_traits<AnonymousProjection> {
   static constexpr alternative_info alternatives[] = {{}};
   static constexpr bool has_residual_states = false;
 
-  static constexpr unsigned index(AnonymousProjection) noexcept { return 0; }
+  static constexpr IndexedState index(AnonymousProjection) noexcept {
+    return {0};
+  }
 
   template<auto I, class Self>
     requires (static_cast<__SIZE_TYPE__>(I) == 0)
@@ -356,10 +379,10 @@ constexpr int match_nested_type_constraint_selector(ChoiceWithTail value) {
   };
 }
 
-constexpr int match_expression_selector(Choice choice) {
+constexpr int match_parameterized_name(Choice choice) {
   return match (choice) {
-    case { .[0]: int value } => value;
-    case { .[1]: double value } => static_cast<int>(value) + 10;
+    case { .index<0>: int value } => value;
+    case { .index<1>: double value } => static_cast<int>(value) + 10;
   };
 }
 
@@ -380,9 +403,9 @@ constexpr int match_dependent_type_selector(Choice choice) {
 }
 
 template<__SIZE_TYPE__ I>
-constexpr int match_dependent_expression_selector(Choice choice) {
+constexpr int match_dependent_parameterized_name(Choice choice) {
   return match (choice) {
-    case { .[I]: auto value } => static_cast<int>(value);
+    case { .index<I>: auto value } => static_cast<int>(value);
     case _ => -1;
   };
 }
@@ -524,17 +547,17 @@ static_assert(match_choice({1, 3, 4}) == 14);
 static_assert(match_maybe({true, 5}) == 5);
 static_assert(match_maybe({false, 5}) == -1);
 static_assert(match (IndexOnlyChoice{0}) {
-  case { .[0] } => true;
-  case { .[1] } => false;
+  case { .index<0> } => true;
+  case { .index<1> } => false;
 });
 static_assert(match (IndexOnlyChoice{1}) {
-  case { .[0] } => false;
-  case { .[1] } => true;
+  case { .index<0> } => false;
+  case { .index<1> } => true;
 });
 
 template<unsigned I>
 constexpr bool index_only_state(IndexOnlyChoice choice) {
-  return match(choice, case { .[I] });
+  return match(choice, case { .index<I> });
 }
 
 static_assert(index_only_state<0>({0}));
@@ -542,7 +565,7 @@ static_assert(!index_only_state<0>({1}));
 static_assert(index_only_state<1>({1}));
 constexpr int match_anonymous_by_index(AnonymousProjection choice) {
   return match (choice) {
-    case { .[0]: int value } => value;
+    case { .index<0>: int value } => value;
   };
 }
 
@@ -562,12 +585,12 @@ static_assert(match_generic({1, 3, 4}) == 2);
 static_assert(match_type_selector({0, 0, 4}) == 20);
 static_assert(match_type_selector({0, 3, 4}) == 3);
 static_assert(match_type_selector({1, 3, 4}) == 14);
-static_assert(match_expression_selector({0, 3, 4}) == 3);
-static_assert(match_expression_selector({1, 3, 4}) == 14);
+static_assert(match_parameterized_name({0, 3, 4}) == 3);
+static_assert(match_parameterized_name({1, 3, 4}) == 14);
 static_assert(match_dependent_type_selector<int>({0, 3, 4}) == 3);
 static_assert(match_dependent_type_selector<int>({1, 3, 4}) == -1);
-static_assert(match_dependent_expression_selector<0>({0, 3, 4}) == 3);
-static_assert(match_dependent_expression_selector<0>({1, 3, 4}) == -1);
+static_assert(match_dependent_parameterized_name<0>({0, 3, 4}) == 3);
+static_assert(match_dependent_parameterized_name<0>({1, 3, 4}) == -1);
 static_assert(match_generic_binding_pack({0, {3}, {4, 5}}) == 3);
 static_assert(match_generic_binding_pack({1, {3}, {4, 5}}) == 9);
 static_assert(match_generic_declaration_pack({0, {3}, {4, 5}}) == 4);
