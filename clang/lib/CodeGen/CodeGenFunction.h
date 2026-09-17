@@ -1628,6 +1628,9 @@ private:
     Address Slot;
     JumpDest EndBlock;
     bool IsReference;
+    /// The body local that is built directly into `Slot`, if the
+    /// do-expression has an NRVO candidate. See DoExpr::getNRVOCandidate.
+    const VarDecl *NRVOCandidate;
   };
   SmallVector<DoExprEmitInfo, 4> DoExprStack;
 
