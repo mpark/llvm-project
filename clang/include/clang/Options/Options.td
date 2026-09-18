@@ -1835,6 +1835,17 @@ defm coroutines : BoolFOption<"coroutines",
           "Enable support for the C++ Coroutines">,
   NegFlag<SetFalse>>;
 
+// P2806 do expressions. On by default in C++2d and available as an extension
+// before it, the way -fcoroutines makes co_await/co_return usable in C++17.
+// Turning it on makes 'do_return' a keyword, which -Wc++2d-compat has been
+// warning about in earlier modes all along.
+defm do_expressions : BoolFOption<"do-expressions",
+  LangOpts<"DoExpressions">, Default<cpp29.KeyPath>,
+  PosFlag<SetTrue, [], [ClangOption], "Enable">,
+  NegFlag<SetFalse, [], [ClangOption], "Disable">,
+  BothFlags<[], [ClangOption, CC1Option], " support for P2806 do expressions">>,
+  ShouldParseIf<cplusplus.KeyPath>;
+
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
   LangOpts<"CoroAlignedAllocation">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
