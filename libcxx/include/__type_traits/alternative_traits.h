@@ -33,11 +33,13 @@ struct alternative_info {
 
   _LIBCPP_HIDE_FROM_ABI consteval alternative_info(meta::info __info, bool __empty = false)
       : info(__info), empty(__empty) {
-    if (meta::is_type(info)) {
-      if (empty)
-        throw "a typed alternative cannot be empty";
-    } else {
-      info = meta::constant_of(info);
+    if (info != meta::info{}) {
+      if (meta::is_type(info)) {
+        if (empty)
+          throw "a typed alternative cannot be empty";
+      } else {
+        info = meta::constant_of(info);
+      }
     }
   }
 };

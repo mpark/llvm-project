@@ -105,6 +105,8 @@ struct MaybeInt {
   int value;
 };
 
+struct AnonymousEmpty {};
+
 struct IndexOnlyChoice {
   unsigned state;
 };
@@ -174,6 +176,14 @@ struct std::alternative_traits<MaybeInt> {
   static constexpr decltype(auto) get(Self&& value) {
     return (static_cast<Self&&>(value).value);
   }
+};
+
+template<>
+struct std::alternative_traits<AnonymousEmpty> {
+  static constexpr alternative_info alternatives[] = {{{}, true}};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(AnonymousEmpty) noexcept { return 0; }
 };
 
 template<>
@@ -328,6 +338,14 @@ constexpr int match_maybe(MaybeInt value) {
     case {} => -1;
   };
 }
+
+constexpr int match_anonymous_empty(AnonymousEmpty value) {
+  return match (value) {
+    case {} => 42;
+  };
+}
+
+static_assert(match_anonymous_empty({}) == 42);
 
 constexpr int classify(const int&) { return 1; }
 constexpr int classify(const double&) { return 2; }
