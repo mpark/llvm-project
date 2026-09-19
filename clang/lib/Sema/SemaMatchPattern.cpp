@@ -409,11 +409,6 @@ static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
       return true;
     }
     bool IsEmpty = Empty.getInt().getBoolValue();
-    if (IsEmpty && !HasType && !ValueExpr) {
-      S.Diag(Loc, diag::err_alternative_info_empty_without_value)
-          << SubjectType << I;
-      return true;
-    }
     Info.Empty.push_back(IsEmpty);
   }
   return false;
