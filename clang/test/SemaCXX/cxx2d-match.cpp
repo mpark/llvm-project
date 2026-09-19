@@ -269,6 +269,9 @@ struct Square : Shape {
   int width;
 };
 
+struct PlainBase {};
+struct PlainDerived : PlainBase {};
+
 bool sees_mutable(Guarded &);
 bool sees_mutable(const Guarded &) = delete;
 
@@ -328,6 +331,46 @@ int polymorphic_rvalue_reference(Shape &&shape) {
     case Circle &&circle => circle.radius;
     case Square &&square => square.width;
     case _ => -1;
+  };
+}
+
+int derived_to_base_lvalue_reference(PlainDerived &derived) {
+  return match (derived) {
+    case PlainBase &base => &base == &derived;
+  };
+}
+
+int derived_to_base_const_reference(const PlainDerived &derived) {
+  return match (derived) {
+    case const PlainBase &base => &base == &derived;
+  };
+}
+
+int derived_to_base_rvalue_reference(PlainDerived &&derived) {
+  return match (static_cast<PlainDerived &&>(derived)) {
+    case PlainBase &&base => &base == &derived;
+  };
+}
+
+int derived_to_base_unnamed_reference(PlainDerived &derived) {
+  return match (derived) {
+    case PlainBase & => 1;
+  };
+}
+
+int derived_to_base_does_not_slice(PlainDerived derived) {
+  return match (derived) {
+    // expected-error@+1 {{declaration pattern of type 'PlainBase' is not an exact match for subject of type 'PlainDerived'}}
+    case PlainBase base => 1;
+    case _ => 0;
+  };
+}
+
+int derived_to_base_preserves_value_category(PlainDerived &&derived) {
+  return match (static_cast<PlainDerived &&>(derived)) {
+    // expected-error@+1 {{declaration pattern of type 'PlainBase &' is not an exact match for subject of type 'PlainDerived'}}
+    case PlainBase &base => 1;
+    case _ => 0;
   };
 }
 
