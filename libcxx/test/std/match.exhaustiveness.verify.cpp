@@ -73,6 +73,14 @@ int duplicate_optional_empty_state(std::optional<int> value) {
   };
 }
 
+int opaque_pattern_after_complete_optional_coverage(std::optional<int> value) {
+  return match (value) {
+    case { auto number } => number;
+    case {} => -1;
+    case 0 => 0; // expected-error {{match case is redundant}}
+  };
+}
+
 int missing_month(std::chrono::month value) {
   return match (value) { // expected-error {{match expression is not exhaustive}}
     case std::chrono::January => 1;

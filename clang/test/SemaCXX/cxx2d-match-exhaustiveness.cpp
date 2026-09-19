@@ -1053,6 +1053,8 @@ int exhaustive_nested_projection(ChoiceAndBool value) {
 
 struct OpenChoice {};
 
+bool operator==(const OpenChoice&, int);
+
 template<>
 struct std::alternative_traits<OpenChoice> {
   static bool empty(const OpenChoice&);
@@ -1084,6 +1086,13 @@ int repeated_open_empty_is_redundant(OpenChoice choice) {
     case {} => 0;
     case {} => 1; // expected-error {{match case is redundant}}
     case _ => 2;
+  };
+}
+
+int opaque_pattern_after_complete_open_coverage(OpenChoice choice) {
+  return match (choice) {
+    case _ => 0;
+    case 0 => 1; // expected-error {{match case is redundant}}
   };
 }
 
