@@ -184,21 +184,21 @@ static_assert((test_null_and_static_assert_handlers(false), true));
 auto test_null_handler_result_mismatch(int value) {
   return match (value) {
     case 0 => ;
-    case _ => 1; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
+    case _ => 1; // expected-error {{match handler yields type 'int', conflicting with previously deduced type 'void'}}
   };
 }
 
 auto test_static_assert_handler_result_mismatch(int value) {
   return match (value) {
     case 0 => static_assert(true);
-    case _ => 1; // expected-error {{'auto' in return type deduced as 'int' here but deduced as 'void' in earlier return statement}}
+    case _ => 1; // expected-error {{match handler yields type 'int', conflicting with previously deduced type 'void'}}
   };
 }
 
 auto test_value_then_null_handler_result_mismatch(int value) {
   return match (value) {
     case 0 => 1;
-    case _ => ; // expected-error {{'auto' in return type deduced as 'void' here but deduced as 'int' in earlier return statement}}
+    case _ => ; // expected-error {{match handler yields type 'void', conflicting with previously deduced type 'int'}}
   };
 }
 
@@ -768,7 +768,7 @@ static_assert(__is_same(
 constexpr auto dependent_runtime_result_mismatch(auto value) {
   return match (value) {
     case 0 => 1;
-    case _ => 2.0; // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
+    case _ => 2.0; // expected-error {{match handler yields type 'double', conflicting with previously deduced type 'int'}}
   };
 }
 
