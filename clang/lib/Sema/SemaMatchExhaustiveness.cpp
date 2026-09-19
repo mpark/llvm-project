@@ -866,8 +866,15 @@ Usefulness isUseful(Sema &S, ArrayRef<PatternRow> Matrix, PatternRow Candidate,
     return Usefulness::MaybeUseful;
 
   const CoveragePattern &Head = Candidate.front();
-  if (Head.K == CoveragePattern::Opaque)
-    return Usefulness::MaybeUseful;
+  if (Head.K == CoveragePattern::Opaque) {
+    PatternRow WildCandidate = Candidate;
+    WildCandidate.front() = CoveragePattern::wild(Head.Loc);
+    Usefulness Remaining =
+        isUseful(S, Matrix, std::move(WildCandidate), Types,
+                 ConstructorDomain::RequiredAndResidual, nullptr);
+    return Remaining == Usefulness::NotUseful ? Usefulness::NotUseful
+                                              : Usefulness::MaybeUseful;
+  }
 
   auto CheckConstructors = [&](ArrayRef<CtorKey> Ctors,
                                SmallVectorImpl<CtorKey> *CtorWitness) {
