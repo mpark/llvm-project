@@ -14603,9 +14603,6 @@ def err_alternative_info_conflicting_kind : Error<
   "invalid alternative protocol; state %1 of type %0 is both "
   "%select{empty and typed|empty and projectable|represented by a value and "
   "projectable}2">;
-def err_alternative_info_empty_without_value : Error<
-  "invalid alternative protocol; empty state %1 of type %0 is not represented "
-  "by a value">;
 def err_alternative_type_without_projection : Error<
   "invalid alternative protocol; state %1 of type %0 advertises type %2, "
   "but 'get<%1>' does not provide a compatible projection">;

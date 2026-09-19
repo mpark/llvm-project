@@ -320,18 +320,18 @@ int empty_state_cannot_be_projected(EmptyProjectedChoice value) {
   };
 }
 
-struct EmptyWithoutValueChoice {};
+struct AnonymousEmptyChoice {};
 
 template<>
-struct std::alternative_traits<EmptyWithoutValueChoice> {
+struct std::alternative_traits<AnonymousEmptyChoice> {
   static constexpr alternative_info alternatives[] = {{{}, true}};
   static constexpr bool has_residual_states = false;
-  static constexpr unsigned index(EmptyWithoutValueChoice) noexcept { return 0; }
+  static constexpr unsigned index(AnonymousEmptyChoice) noexcept { return 0; }
 };
 
-int empty_state_requires_value(EmptyWithoutValueChoice value) {
+int anonymous_empty_state(AnonymousEmptyChoice value) {
   return match (value) {
-    case { .index<0> } => 0; // expected-error {{empty state 0 of type 'EmptyWithoutValueChoice' is not represented by a value}}
+    case {} => 0;
   };
 }
 
