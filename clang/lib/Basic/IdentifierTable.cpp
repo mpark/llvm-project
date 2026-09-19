@@ -171,7 +171,12 @@ static KeywordStatus getKeywordStatusHelper(const LangOptions &LangOpts,
   case KEYDEFERTS:
     return LangOpts.DeferTS ? KS_Enabled : KS_Disabled;
   case KEYDOEXPR:
-    return LangOpts.DoExpressions ? KS_Enabled : KS_Unknown;
+    if (LangOpts.DoExpressions)
+      return KS_Enabled;
+    // 'do_return' is an ordinary identifier before C++29, but it will stop
+    // being one, so let earlier C++ modes diagnose the uses that a migration
+    // to C++29 would break. Same treatment as the C++20 keywords.
+    return LangOpts.CPlusPlus ? KS_Future : KS_Unknown;
   default:
     llvm_unreachable("Unknown KeywordStatus flag");
   }
@@ -834,6 +839,7 @@ IdentifierTable::getFutureCompatDiagKind(const IdentifierInfo &II,
                                          const LangOptions &LangOpts) {
   assert(II.isFutureCompatKeyword() && "diagnostic should not be needed");
 
+  // uint64_t, not unsigned: the keyword flag set is wider than 32 bits.
   uint64_t Flags = llvm::StringSwitch<uint64_t>(II.getName())
 #define KEYWORD(NAME, FLAGS) .Case(#NAME, FLAGS)
 #include "clang/Basic/TokenKinds.def"
@@ -850,6 +856,12 @@ IdentifierTable::getFutureCompatDiagKind(const IdentifierInfo &II,
     if (((Flags & KEYCXX20) == KEYCXX20) ||
         ((Flags & CHAR8SUPPORT) == CHAR8SUPPORT))
       return diag::warn_cxx20_keyword;
+
+    // do-expressions are not modeled as a KEYCXX29 keyword class because
+    // 'do_return' is the only one, and it is gated on the feature's own
+    // LangOpt.
+    if ((Flags & KEYDOEXPR) == KEYDOEXPR)
+      return diag::warn_cxx29_keyword;
   } else {
     if ((Flags & KEYC99) == KEYC99)
       return diag::warn_c99_keyword;
