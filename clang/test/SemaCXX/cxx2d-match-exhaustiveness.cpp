@@ -1055,47 +1055,66 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool has_value(const OpenChoice&);
+  static bool empty(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);
+
+  template<class T, class Self>
+  static int* try_init(Self&&);
 };
 
 int exhaustive_open_alternatives(OpenChoice choice) {
   return match (choice) {
-    case { int value } => value;
-    case { _ } => 1;
+    case { int: auto value } => value;
     case {} => 0;
+    case _ => 1;
   };
 }
 
 int missing_open_alternative(OpenChoice choice) {
-  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: { _ }}}
-    case { int value } => value;
+  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
+    case { int: auto value } => value;
     case {} => 0;
   };
 }
 
-int missing_open_empty_state(OpenChoice choice) {
-  return match (choice) { // expected-error {{match expression is not exhaustive; example of a missing case: {}}}
-    case { _ } => 1;
-  };
-}
-
-int projectable_wildcard_shadows_open_type(OpenChoice choice) {
+int repeated_open_empty_is_redundant(OpenChoice choice) {
   return match (choice) {
-    case { _ } => 1;
-    case { int value } => value; // expected-error {{match case is redundant}}
     case {} => 0;
+    case {} => 1; // expected-error {{match case is redundant}}
+    case _ => 2;
+  };
+}
+
+int open_wildcard_is_not_an_open_pattern(OpenChoice choice) {
+  return match (choice) {
+    case { _ } => 1; // expected-error {{open alternative protocol for type 'OpenChoice' requires an explicit non-placeholder, non-void type selector}}
+    case _ => 0;
   };
 }
 
 int open_type_coverage_ignores_cvref(OpenChoice choice) {
   return match (choice) {
-    case { const int& value } => value;
-    case { int value } => value; // expected-error {{match case is redundant}}
-    case { _ } => 1;
-    case {} => 0;
+    case { int: const int& value } => value;
+    case { int: int value } => value; // expected-error {{match case is redundant}}
+    case _ => 1;
+  };
+}
+
+int open_cast_and_initialization_are_distinct(OpenChoice choice) {
+  return match (choice) {
+    case { int: _ } => 0;
+    case { int value } => value;
+    case _ => 1;
+  };
+}
+
+int repeated_open_initialization_is_redundant(OpenChoice choice) {
+  return match (choice) {
+    case { int value } => value;
+    case { int other } => other; // expected-error {{match case is redundant}}
+    case _ => 1;
   };
 }
 
@@ -1106,38 +1125,15 @@ struct OpenChoiceAndBool {
 
 int exhaustive_nested_open_alternative(OpenChoiceAndBool value) {
   return match (value) {
-    case [{ int number }, _] => number;
-    case [{ _ }, true] => 1;
-    case [{ _ }, false] => 2;
+    case [{ int: auto number }, _] => number;
     case [{}, _] => 0;
-  };
-}
-
-int missing_nested_open_empty_state(OpenChoiceAndBool value) {
-  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: [{}, false]}}
-    case [{ _ }, _] => 1;
-    case [{}, true] => 0;
+    case [_, true] => 1;
+    case [_, false] => 2;
   };
 }
 
 int whole_wildcard_shadows_open_states(OpenChoice choice) {
   return match (choice) {
     case _ => 0;
-    case { _ } => 1; // expected-error {{match case is redundant}}
-    case {} => 2; // expected-error {{match case is redundant}}
-  };
-}
-
-struct AlwaysOpen {};
-
-template<>
-struct std::alternative_traits<AlwaysOpen> {
-  template<class T, class Self>
-  static T* try_cast(Self&&);
-};
-
-int projectable_wildcard_exhausts_nonnullable_open_choice(AlwaysOpen choice) {
-  return match (choice) {
-    case { _ } => 1;
   };
 }

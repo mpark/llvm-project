@@ -196,14 +196,24 @@ _LIBCPP_HIDE_FROM_ABI exception_ptr make_exception_ptr(_Ep __e) _NOEXCEPT {
 
 #endif // _LIBCPP_ABI_MICROSOFT
 
-// TODO #if _LIBCPP_STD_VER >= 26
-// TODO
-// TODO template <class _Ep>
-// TODO _LIBCPP_HIDE_FROM_ABI const _Ep* try_cast(const exception_ptr& __p) _NOEXCEPT {
-// TODO   return exception_ptr_cast<_Ep>(&__p);
-// TODO }
-// TODO
-// TODO #endif // _LIBCPP_STD_VER >= 26
+#if 0 // TODO(P2927): Enable once exception_ptr_cast is available.
+#  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+template <>
+struct alternative_traits<exception_ptr> {
+  _LIBCPP_HIDE_FROM_ABI static bool empty(const exception_ptr& __p) noexcept { return !__p; }
+
+  template <class _Ep>
+  _LIBCPP_HIDE_FROM_ABI static const auto* try_cast(const exception_ptr& __p) noexcept {
+    return std::exception_ptr_cast<_Ep>(__p);
+  }
+
+  template <class _Ep>
+  _LIBCPP_HIDE_FROM_ABI static const auto* try_init(const exception_ptr& __p) noexcept {
+    return std::exception_ptr_cast<remove_cvref_t<_Ep>>(__p);
+  }
+};
+#  endif // _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
+#endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
 _LIBCPP_END_UNVERSIONED_NAMESPACE_STD
