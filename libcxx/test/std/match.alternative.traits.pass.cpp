@@ -50,6 +50,10 @@ constexpr std::alternative_info index_only_state;
 static_assert(index_only_state.info == std::meta::info{});
 static_assert(!index_only_state.empty);
 
+constexpr std::alternative_info anonymous_empty_state{{}, /*empty=*/true};
+static_assert(anonymous_empty_state.info == std::meta::info{});
+static_assert(anonymous_empty_state.empty);
+
 static_assert(has_alternative_traits<int*>);
 static_assert(!has_alternative_traits<std::unique_ptr<int[]>>);
 static_assert(!has_alternative_traits<std::shared_ptr<int[]>>);
