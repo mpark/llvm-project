@@ -550,8 +550,7 @@ struct MatchPatternInfo {
   bool HasParameterizedIndexName = false;
   bool IsAlternativeValuePattern = false;
   bool IsOpenAlternative = false;
-  bool OpenAlternativeHasEmpty = false;
-  bool OpenAlternativeProjectableWildcard = false;
+  bool IsOpenAlternativeInitialization = false;
   bool TypePatternResolved = false;
   bool TypePatternMatches = false;
   bool HasExpandedPatterns = false;

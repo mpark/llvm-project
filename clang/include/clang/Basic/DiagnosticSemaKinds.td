@@ -14626,16 +14626,16 @@ def err_braced_alternative_no_viable_state : Error<
 def err_empty_alternative_not_found : Error<
   "type %0 has no non-projectable alternative state">;
 def err_open_alternative_pattern_not_type_directed : Error<
-  "open alternative protocol for type %0 requires a declaration or type "
-  "pattern with a non-placeholder, non-void type">;
+  "open alternative protocol for type %0 requires an explicit "
+  "non-placeholder, non-void type selector of the form '{ T: pattern }' or "
+  "declaration pattern of the form '{ T name }'">;
 def err_open_alternative_type_constraint_selector : Error<
   "type-constraint alternative selector cannot be used with open alternative type %0">;
 def err_type_constraint_selector_not_satisfied : Error<
   "projected type %0 does not satisfy type constraint %1">;
 def err_alternative_index_out_of_range : Error<
   "alternative index %0 is outside the range [0, %1)">;
-def err_open_alternative_try_cast_result : Error<
-  "invalid open alternative protocol for type %0; 'try_cast' must return a "
-  "pointer">;
-
+def err_open_alternative_operation_result : Error<
+  "invalid open alternative protocol for type %0; '%1' must return a "
+  "contextually Boolean-testable and dereferenceable object">;
 } // end of sema component.

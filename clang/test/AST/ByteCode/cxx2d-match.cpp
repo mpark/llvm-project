@@ -1065,37 +1065,42 @@ namespace N1 {
 
   template <typename T>
   constexpr const T* try_cast(const S& s) {
-    if constexpr (__is_same(T, int)) {
+    if constexpr (__is_same(T, int))
       return s.index == 0 ? &s.i : nullptr;
-    } else if constexpr (__is_same(T, double)) {
+    else if constexpr (__is_same(T, double))
       return s.index == 1 ? &s.d : nullptr;
-    } else {
+    else
       return nullptr;
-    }
   }
 }
 
 template <>
 struct std::alternative_traits<N1::S> {
+  static constexpr bool empty(const N1::S& value) {
+    return value.index == 2;
+  }
+
   template <typename T, typename Self>
   static constexpr auto try_cast(Self&& value) {
-    return N1::try_cast<T>(static_cast<Self&&>(value));
+    return N1::try_cast<T>(value);
   }
 };
 
-constexpr int test_try_cast_declaration_pattern(const N1::S& s) {
+constexpr int test_open_cast_type_selector(const N1::S& s) {
   return match (s) -> int {
-    case { const int& i } if (i == 0) => 0;
-    case { const int& i } => i;
-    case { const double& d } => d;
-    case { const short& value } => value;
+    case { int: const int& i } if (i == 0) => 0;
+    case { int: const int& i } => i;
+    case { double: const double& d } => d;
+    case { short: const short& value } => value;
+    case {} => -2;
     case _ => -1;
   };
 }
 
-static_assert(test_try_cast_declaration_pattern(N1::S{0, 1, 2.2}) == 1);
-static_assert(test_try_cast_declaration_pattern(N1::S{1, 1, 2.2}) == 2);
-static_assert(test_try_cast_declaration_pattern(N1::S{2, 1, 2.2}) == -1);
+static_assert(test_open_cast_type_selector(N1::S{0, 1, 2.2}) == 1);
+static_assert(test_open_cast_type_selector(N1::S{1, 1, 2.2}) == 2);
+static_assert(test_open_cast_type_selector(N1::S{2, 1, 2.2}) == -2);
+static_assert(test_open_cast_type_selector(N1::S{3, 1, 2.2}) == -1);
 
 template <typename T>
 concept arithmetic =

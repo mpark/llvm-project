@@ -652,9 +652,9 @@ void test_match_stmt_action() {
 
 int any_alternative_pattern(const std::any& a) {
   return match (a) {
-    case { const int& x } if (x == 0) => 0;
-    case { const int& x } if (x == 1) => 1;
-    case { const double& y } => (int)y + 4;
+    case { int: const int& x } if (x == 0) => 0;
+    case { int: const int& x } if (x == 1) => 1;
+    case { double: const double& y } => (int)y + 4;
     case _ => -1;
   };
 }
