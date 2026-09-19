@@ -1930,13 +1930,34 @@ static void appendProjectionPath(const MatchPattern *Pattern,
     appendProjectionPath(Child, Path, State);
 }
 
-static bool isExactDeclarationPatternMatch(Sema &S, Expr *Subject,
-                                           QualType PatternType) {
-  ImplicitConversionSequence ICS = S.TryCopyInitializationConversion(
+static ImplicitConversionSequence
+getDeclarationPatternConversion(Sema &S, Expr *Subject, QualType PatternType) {
+  return S.TryCopyInitializationConversion(
       Subject, PatternType, /*SuppressUserConversions=*/false,
       /*InOverloadResolution=*/true,
       /*AllowObjCWritebackConversion=*/false);
+}
+
+static bool isExactDeclarationPatternMatch(Sema &S, Expr *Subject,
+                                           QualType PatternType) {
+  ImplicitConversionSequence ICS =
+      getDeclarationPatternConversion(S, Subject, PatternType);
   return ICS.isStandard() && ICS.Standard.getRank() == ICR_Exact_Match;
+}
+
+static bool isDeclarationPatternApplicable(Sema &S, Expr *Subject,
+                                           QualType PatternType) {
+  ImplicitConversionSequence ICS =
+      getDeclarationPatternConversion(S, Subject, PatternType);
+  if (!ICS.isStandard())
+    return false;
+
+  const StandardConversionSequence &SCS = ICS.Standard;
+  // Direct reference binding to a base subobject preserves object identity and
+  // does not introduce the conversion ambiguity that exact matching avoids.
+  return SCS.getRank() == ICR_Exact_Match ||
+         (PatternType->isReferenceType() && SCS.ReferenceBinding &&
+          SCS.DirectBinding && SCS.Second == ICK_Derived_To_Base);
 }
 
 static bool isDeducedDeclarationPatternApplicable(Sema &S, VarDecl *Declaration,
@@ -2852,7 +2873,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
           (!Decomposition || isDecompositionDeclarationPatternApplicable(
                                  *this, Decomposition, Subject));
     } else if (!Subject->isTypeDependent()) {
-      if (!isExactDeclarationPatternMatch(*this, Subject, PatternType)) {
+      if (!isDeclarationPatternApplicable(*this, Subject, PatternType)) {
         switch (buildDeclarationLikeCastProjection(
             *this, Subject, P, PatternType, State, ProjectionCache)) {
         case CastProjectionResult::Success:
@@ -2926,7 +2947,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return false;
     }
 
-    if (isExactDeclarationPatternMatch(*this, Subject, PatternType)) {
+    if (isDeclarationPatternApplicable(*this, Subject, PatternType)) {
       if (CheckInitialization(Subject))
         return true;
       Info.TypePatternResolved = true;
