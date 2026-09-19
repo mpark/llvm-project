@@ -11,6 +11,7 @@
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
 #include <array>
+#include <any>
 #include <cassert>
 #include <concepts>
 #include <expected>
@@ -25,6 +26,15 @@ int match_pointer(int* pointer) {
   return match (pointer) {
     case { int& value } => value;
     case {} => -1;
+  };
+}
+
+int match_any(const std::any& value) {
+  return match (value) {
+    case { int: const int& integer } => integer;
+    case { std::string: const std::string& string } =>
+        static_cast<int>(string.size());
+    case _ => -2;
   };
 }
 
@@ -451,6 +461,10 @@ void test_prvalue_projection_initialization() {
 }
 
 int main(int, char**) {
+  assert(match_any(std::any{}) == -2);
+  assert(match_any(std::any{42}) == 42);
+  assert(match_any(std::any{std::string("hello")}) == 5);
+  assert(match_any(std::any{2.5}) == -2);
   int pointee = 0;
   assert(match_void_pointer(&pointee) == 1);
   assert(match_void_pointer(nullptr) == 0);

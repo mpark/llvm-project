@@ -15,9 +15,9 @@
 
 int match_any(const std::any& a) {
   return match (a) {
-    case { const int& i } if (i == 0) => 0;
-    case { const int& i } => i;
-    case { const double& d } => static_cast<int>(d) + 4;
+    case { int: const int& i } if (i == 0) => 0;
+    case { int: const int& i } => i;
+    case { double: const double& d } => static_cast<int>(d) + 4;
     case _ => -1;
   };
 }
@@ -30,15 +30,50 @@ int match_any_type_selector(const std::any& a) {
   };
 }
 
+int match_lvalue_any(std::any& a) {
+  return match (a) {
+    case { int: int& i } => ++i;
+    case _ => -1;
+  };
+}
+
 int match_rvalue_any(std::any&& a) {
   return match (static_cast<std::any&&>(a)) {
-    case { int&& i } => i;
+    case { int: int&& i } => i;
     case _ => -1;
   };
 }
 
 int match_prvalue_any() {
   return match (std::any(43)) {
+    case { int: int&& i } => i;
+    case _ => -1;
+  };
+}
+
+int match_const_rvalue_any(const std::any&& a) {
+  return match (static_cast<const std::any&&>(a)) {
+    case { int: const int&& i } => i;
+    case _ => -1;
+  };
+}
+
+int match_any_direct_declaration(std::any& a) {
+  return match (a) {
+    case { int& i } => ++i;
+    case _ => -1;
+  };
+}
+
+int match_any_direct_const_declaration(const std::any& a) {
+  return match (a) {
+    case { const int& i } => i;
+    case _ => -1;
+  };
+}
+
+int match_any_direct_rvalue_declaration(std::any&& a) {
+  return match (static_cast<std::any&&>(a)) {
     case { int&& i } => i;
     case _ => -1;
   };
@@ -47,8 +82,7 @@ int match_prvalue_any() {
 int match_empty_any(const std::any& a) {
   return match (a) {
     case {} => 0;
-    case { const int& i } => i;
-    case _ => -1;
+    case _ => 1;
   };
 }
 
@@ -56,16 +90,9 @@ bool test_empty_any(const std::any& a) {
   return match(a, case {});
 }
 
-bool test_nonempty_any(const std::any& a) {
-  return match (a) {
-    case { _ } => true;
-    case {} => false;
-  };
-}
-
 bool test_any_type_pattern(const std::any& a) {
   return match (a) {
-    case { int } => true;
+    case { int: _ } => true;
     case _ => false;
   };
 }
@@ -81,8 +108,8 @@ struct CopyCounter {
 
 int match_any_by_value(std::any& a) {
   return match (a) {
-    case { CopyCounter copy } if (copy.value == 0) => 0;
-    case { CopyCounter copy } => copy.value;
+    case { CopyCounter: auto copy } if (copy.value == 0) => 0;
+    case { CopyCounter: auto copy } => copy.value;
     case _ => -1;
   };
 }
@@ -98,14 +125,21 @@ int main(int, char**) {
   assert(match_any_type_selector(42) == 42);
   assert(match_any_type_selector(3.0) == 7);
   assert(match_any_type_selector(std::any{}) == -1);
+  std::any mutable_any = 41;
+  assert(match_lvalue_any(mutable_any) == 42);
+  assert(std::any_cast<int>(mutable_any) == 42);
   assert(match_rvalue_any(std::any(42)) == 42);
   assert(match_prvalue_any() == 43);
+  assert(match_const_rvalue_any(std::any(44)) == 44);
+  std::any direct = 45;
+  assert(match_any_direct_declaration(direct) == 46);
+  assert(std::any_cast<int>(direct) == 46);
+  assert(match_any_direct_const_declaration(direct) == 46);
+  assert(match_any_direct_rvalue_declaration(std::any(47)) == 47);
   assert(match_empty_any(std::any{}) == 0);
-  assert(match_empty_any(std::any(42)) == 42);
+  assert(match_empty_any(std::any(42)) == 1);
   assert(test_empty_any(std::any{}));
   assert(!test_empty_any(std::any(42)));
-  assert(!test_nonempty_any(std::any{}));
-  assert(test_nonempty_any(std::any(42)));
   assert(test_any_type_pattern(std::any(42)));
   assert(!test_any_type_pattern(std::any(42.0)));
 
