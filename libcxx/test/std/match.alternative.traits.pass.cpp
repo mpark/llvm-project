@@ -9,6 +9,7 @@
 // UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23, c++26
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
+#include <any>
 #include <cassert>
 #include <chrono>
 #include <compare>
@@ -28,6 +29,12 @@ concept has_alternative_info = _Traits::alternatives[_Ip].info != std::meta::inf
 
 template <class _Tp>
 concept has_alternative_traits = requires { std::alternative_traits<_Tp>::alternatives; };
+
+template <class _Traits, class _Tp, class _Self>
+concept has_open_cast = requires(_Self&& __self) { _Traits::template try_cast<_Tp>(std::forward<_Self>(__self)); };
+
+template <class _Traits, class _Tp, class _Self>
+concept has_open_init = requires(_Self&& __self) { _Traits::template try_init<_Tp>(std::forward<_Self>(__self)); };
 
 template <class _Traits>
 inline constexpr std::size_t alternative_count =
@@ -260,11 +267,40 @@ constexpr bool test_expected() {
   return true;
 }
 
+bool test_any() {
+  using Traits = std::alternative_traits<std::any>;
+  static_assert(!has_alternative_traits<std::any>);
+  static_assert(has_open_cast<Traits, int, std::any&>);
+  static_assert(has_open_init<Traits, int&, std::any&>);
+  using LvalueResult      = decltype(Traits::try_cast<int>(std::declval<std::any&>()));
+  using ConstLvalueResult = decltype(Traits::try_cast<int>(std::declval<const std::any&>()));
+  using RvalueResult      = decltype(Traits::try_cast<int>(std::declval<std::any&&>()));
+  using ConstRvalueResult = decltype(Traits::try_cast<int>(std::declval<const std::any&&>()));
+  using InitLvalueResult  = decltype(Traits::try_init<int&>(std::declval<std::any&>()));
+  using InitConstResult   = decltype(Traits::try_init<const int&>(std::declval<const std::any&>()));
+  static_assert(std::is_same_v<decltype(*std::declval<LvalueResult&&>()), int&>);
+  static_assert(std::is_same_v<decltype(*std::declval<ConstLvalueResult&&>()), const int&>);
+  static_assert(std::is_same_v<decltype(*std::declval<RvalueResult&&>()), int&&>);
+  static_assert(std::is_same_v<decltype(*std::declval<ConstRvalueResult&&>()), const int&&>);
+  static_assert(std::is_same_v<decltype(*std::declval<InitLvalueResult&&>()), int&>);
+  static_assert(std::is_same_v<decltype(*std::declval<InitConstResult&&>()), const int&>);
+
+  std::any value = 42;
+  assert(Traits::empty(std::any{}));
+  assert(!Traits::empty(value));
+  auto integer = Traits::try_cast<int>(value);
+  assert(integer);
+  assert(*std::move(integer) == 42);
+  assert(!Traits::try_cast<double>(value));
+  return true;
+}
+
 int main(int, char**) {
   static_assert(test_pointer());
   static_assert(test_optional());
   static_assert(test_variant());
   static_assert(test_expected());
   static_assert(test_finite_value_traits());
+  assert(test_any());
   return 0;
 }

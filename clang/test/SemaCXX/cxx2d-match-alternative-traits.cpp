@@ -953,18 +953,20 @@ struct OpenNonCopyable {
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool has_value(const OpenChoice&);
+  static bool empty(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);
+
+  template<class T, class Self>
+  static int* try_init(Self&&);
 };
 
 int open_alternatives(OpenChoice choice) {
   return match (choice) {
-    case { int value } => value;
-    case { double } => 2;
-    case { _ } => 1;
-    case {} => 0;
+    case { int: auto value } => value;
+    case { double: _ } => 2;
+    case _ => 1;
   };
 }
 
@@ -992,7 +994,7 @@ int open_type_selector_does_not_initialize(OpenChoice choice) {
 int open_type_constraint_selector(OpenChoice choice) {
   return match (choice) {
     case { Integral: _ } => 1; // expected-error {{type-constraint alternative selector cannot be used with open alternative type 'OpenChoice'}}
-    case { _ } => 0;
+    case _ => 0;
   };
 }
 
@@ -1003,7 +1005,7 @@ bool open_empty(OpenChoice choice) {
 template<class T>
 int dependent_open_type(OpenChoice choice) {
   return match (choice) {
-    case { T value } => static_cast<int>(value);
+    case { T: auto value } => static_cast<int>(value);
     case _ => 0;
   };
 }
@@ -1012,9 +1014,57 @@ int instantiate_dependent_open_type(OpenChoice choice) {
   return dependent_open_type<int>(choice);
 }
 
-int open_requires_type_direction(OpenChoice choice) {
+int open_declaration_pattern(OpenChoice choice) {
   return match (choice) {
-    case { auto&& value } => 1; // expected-error {{open alternative protocol for type 'OpenChoice' requires a declaration or type pattern with a non-placeholder, non-void type}}
+    case { int value } => value;
+    case _ => 0;
+  };
+}
+
+int open_unnamed_declaration_pattern(OpenChoice choice) {
+  return match (choice) {
+    case { int } => 1;
+    case _ => 0;
+  };
+}
+
+int open_reference_declaration_pattern(OpenChoice choice) {
+  return match (choice) {
+    case { int& value } => value;
+    case _ => 0;
+  };
+}
+
+struct ReferenceInitializationOpen {};
+
+template<>
+struct std::alternative_traits<ReferenceInitializationOpen> {
+  template<class T, class Self>
+  static T* try_cast(Self&&);
+
+  template<class T, class Self>
+    requires __is_same(T, int&)
+  static int* try_init(Self&&);
+};
+
+int open_initialization_preserves_cvref(ReferenceInitializationOpen choice) {
+  return match (choice) {
+    case { int& value } => value;
+    case _ => 0;
+  };
+}
+
+struct CastOnlyOpen {};
+
+template<>
+struct std::alternative_traits<CastOnlyOpen> {
+  template<class T, class Self>
+  static T* try_cast(Self&&);
+};
+
+int open_declaration_requires_try_init(CastOnlyOpen choice) {
+  return match (choice) {
+    case { int value } => value; // expected-error {{does not provide a usable 'try_init' member}}
     case _ => 0;
   };
 }
@@ -1027,16 +1077,83 @@ struct std::alternative_traits<AlwaysOpen> {
   static T* try_cast(Self&&);
 };
 
-int always_open(AlwaysOpen choice) {
+int open_wildcard_is_not_supported(AlwaysOpen choice) {
   return match (choice) {
-    case { _ } => 1;
+    case { _ } => 1; // expected-error {{open alternative protocol for type 'AlwaysOpen' requires an explicit non-placeholder, non-void type selector}}
+    case _ => 0;
   };
 }
 
 int always_open_has_no_empty_state(AlwaysOpen choice) {
   return match (choice) {
     case {} => 0; // expected-error {{type 'AlwaysOpen' has no non-projectable alternative state}}
-    case { _ } => 1;
+    case _ => 1;
+  };
+}
+
+struct CarrierOpenChoice {};
+
+template<class T>
+struct LvalueCastResult {
+  explicit operator bool() const;
+  T& operator*() &&;
+};
+
+template<>
+struct std::alternative_traits<CarrierOpenChoice> {
+  template<class T, class Self>
+  static LvalueCastResult<T> try_cast(Self&&);
+};
+
+int open_carrier_need_not_be_a_pointer(CarrierOpenChoice choice) {
+  return match (choice) {
+    case { int: auto value } => value;
+    case _ => 0;
+  };
+}
+
+int open_carrier_preserves_lvalue_projection(CarrierOpenChoice&& choice) {
+  return match (static_cast<CarrierOpenChoice&&>(choice)) {
+    case { int: int& value } => value;
+    case _ => 0;
+  };
+}
+
+struct RvalueCarrierOpenChoice {};
+
+template<class T>
+struct RvalueCastResult {
+  explicit operator bool() const;
+  T&& operator*() &&;
+};
+
+template<>
+struct std::alternative_traits<RvalueCarrierOpenChoice> {
+  template<class T, class Self>
+  static RvalueCastResult<T> try_cast(Self&&);
+};
+
+int open_carrier_preserves_rvalue_projection(
+    RvalueCarrierOpenChoice& choice) {
+  return match (choice) {
+    case { int: int&& value } => value;
+    case _ => 0;
+  };
+}
+
+struct RefSelectedOpenChoice {};
+
+template<>
+struct std::alternative_traits<RefSelectedOpenChoice> {
+  template<class T, class Self>
+    requires __is_same(T, int&)
+  static int* try_cast(Self&&);
+};
+
+int open_selector_preserves_cvref(RefSelectedOpenChoice choice) {
+  return match (choice) {
+    case { int&: int& value } => value;
+    case _ => 0;
   };
 }
 
@@ -1051,8 +1168,8 @@ struct std::alternative_traits<ConstOpenChoice> {
 int mutable_reference_does_not_bind_to_const_projection(
     ConstOpenChoice choice) {
   return match (choice) {
-    case { int& value } => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'const int'}}
-    case { _ } => 0;
+    case { int: int& value } => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'const int'}}
+    case _ => 0;
   };
 }
 
@@ -1066,8 +1183,26 @@ struct std::alternative_traits<InvalidOpen> {
 
 int invalid_open_protocol(InvalidOpen choice) {
   return match (choice) {
-    case { int } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'try_cast' must return a pointer}}
-    case { _ } => 0;
+    case { int: _ } => 1; // expected-error {{invalid open alternative protocol for type 'InvalidOpen'; 'try_cast' must return a contextually Boolean-testable and dereferenceable object}}
+    case _ => 0;
+  };
+}
+
+struct InvalidOpenInitialization {};
+
+template<>
+struct std::alternative_traits<InvalidOpenInitialization> {
+  template<class T, class Self>
+  static T* try_cast(Self&&);
+
+  template<class T, class Self>
+  static int try_init(Self&&);
+};
+
+int invalid_open_initialization_protocol(InvalidOpenInitialization choice) {
+  return match (choice) {
+    case { int value } => value; // expected-error {{invalid open alternative protocol for type 'InvalidOpenInitialization'; 'try_init' must return a contextually Boolean-testable and dereferenceable object}}
+    case _ => 0;
   };
 }
 
@@ -1078,7 +1213,7 @@ struct std::alternative_traits<IncompleteOpen> {};
 
 int incomplete_open_protocol(IncompleteOpen choice) {
   return match (choice) {
-    case { int } => 1; // expected-error {{does not provide a usable either 'alternatives' or 'try_cast' member}}
+    case { int: _ } => 1; // expected-error {{does not provide a usable either 'alternatives' or 'try_cast' member}}
     case _ => 0;
   };
 }

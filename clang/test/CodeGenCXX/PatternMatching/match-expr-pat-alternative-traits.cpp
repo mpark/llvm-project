@@ -201,24 +201,59 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool has_value(const OpenChoice&);
+  static bool empty(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);
+
+  template<class T, class Self>
+  static int* try_init(Self&&);
 };
 
 // CHECK-LABEL: define{{.*}} i32 @_Z22match_open_alternativeR10OpenChoice
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_cast
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_cast
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
 // CHECK: ret i32
 int match_open_alternative(OpenChoice& value) {
   return match (value) {
+    case { int: int& number } if (number == 0) => 0;
+    case { int: int& number } => number;
+    case _ => -2;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z33match_open_initialization_patternR10OpenChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_init
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_init
+// CHECK: ret i32
+int match_open_initialization_pattern(OpenChoice& value) {
+  return match (value) {
     case { int& number } if (number == 0) => 0;
     case { int& number } => number;
-    case { _ } => -2;
+    case _ => -2;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z30match_distinct_open_operationsR10OpenChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_cast
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE8try_init
+// CHECK: ret i32
+int match_distinct_open_operations(OpenChoice& value) {
+  return match (value) {
+    case { int: _ } if (false) => 0;
+    case { int& number } => number;
+    case _ => -2;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z22match_open_empty_stateR10OpenChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE5emptyERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE5emptyERKS0_
+// CHECK: ret i32
+int match_open_empty_state(OpenChoice& value) {
+  return match (value) {
     case {} => -1;
+    case _ => 0;
   };
 }
 

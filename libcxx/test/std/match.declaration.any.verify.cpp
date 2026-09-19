@@ -21,6 +21,21 @@ int naked_declaration_does_not_inspect_any(std::any& value) {
 
 int mutable_reference_does_not_bind_through_const_any(const std::any& value) {
   return match (value) {
+    case { int: int& i } => i; // expected-error {{declaration pattern of type 'int &' is not an exact match}}
+    case _ => 0;
+  };
+}
+
+int mutable_reference_does_not_bind_to_const_selector(std::any& value) {
+  return match (value) {
+    case { const int: int& i } => i; // expected-error {{declaration pattern of type 'int &' is not an exact match}}
+    case _ => 0;
+  };
+}
+
+int direct_mutable_reference_does_not_bind_through_const_any(
+    const std::any& value) {
+  return match (value) {
     case { int& i } => i; // expected-error {{declaration pattern of type 'int &' is not an exact match}}
     case _ => 0;
   };
