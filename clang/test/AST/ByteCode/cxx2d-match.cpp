@@ -370,6 +370,60 @@ constexpr int test_nested_decomposition_preserves_lvalues() {
 
 static_assert(test_nested_decomposition_preserves_lvalues() == 74);
 
+struct DecompositionLvalueReferenceMember {
+  int& value;
+};
+
+struct DecompositionRvalueReferenceMember {
+  int&& value;
+};
+
+constexpr bool test_decomposition_preserves_reference_member_category() {
+  int value = 42;
+  const int constant = 43;
+  DecompositionLvalueReferenceMember lvalue{value};
+  DecompositionRvalueReferenceMember rvalue{static_cast<int&&>(value)};
+  struct ConstReferenceMember {
+    const int& value;
+  } const_reference{constant};
+  struct ValueMember {
+    int value;
+  } object{44};
+  const ValueMember const_object{45};
+
+  bool lvalue_reference_matches =
+      match (static_cast<DecompositionLvalueReferenceMember&&>(lvalue)) {
+        case [int& projected] => &projected == &value;
+      };
+  bool rvalue_reference_matches =
+      match (static_cast<DecompositionRvalueReferenceMember&&>(rvalue)) {
+        case [int& projected] => &projected == &value;
+      };
+  bool const_reference_matches =
+      match (static_cast<const ConstReferenceMember&&>(const_reference)) {
+        case [const int& projected] => &projected == &constant;
+      };
+  bool lvalue_matches = match (object) {
+    case [auto&& projected] => __is_same(decltype(projected), int&);
+  };
+  bool const_lvalue_matches = match (const_object) {
+    case [auto&& projected] => __is_same(decltype(projected), const int&);
+  };
+  bool xvalue_matches = match (static_cast<ValueMember&&>(object)) {
+    case [auto&& projected] => __is_same(decltype(projected), int&&);
+  };
+  bool const_xvalue_matches =
+      match (static_cast<const ValueMember&&>(const_object)) {
+        case [auto&& projected] =>
+          __is_same(decltype(projected), const int&&);
+      };
+  return lvalue_reference_matches && rvalue_reference_matches &&
+         const_reference_matches && lvalue_matches && const_lvalue_matches &&
+         xvalue_matches && const_xvalue_matches;
+}
+
+static_assert(test_decomposition_preserves_reference_member_category());
+
 enum State { FizzBuzz, Fizz, Buzz, N };
 constexpr int Size = 15;
 

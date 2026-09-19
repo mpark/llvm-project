@@ -2129,6 +2129,14 @@ static Expr *asValueKind(Sema &S, Expr *E, ExprValueKind ValueKind) {
 static Expr *getDecompositionElement(Sema &S, Expr *Subject,
                                      BindingDecl *Binding) {
   ExprValueKind ValueKind = Subject->isLValue() ? VK_LValue : VK_XValue;
+  // Accessing a genuine reference member is always an lvalue, including
+  // through an xvalue object. Synthetic product fields instead encode the
+  // original category of each match subject and are handled below.
+  if (const auto *Member =
+          dyn_cast<MemberExpr>(Binding->getBinding()->IgnoreParenImpCasts()))
+    if (const auto *Field = dyn_cast<FieldDecl>(Member->getMemberDecl());
+        Field && Field->getType()->isReferenceType())
+      ValueKind = Binding->getBinding()->getValueKind();
   if (S.isMatchSubjectProductType(Subject->getType())) {
     const auto *Member =
         dyn_cast<MemberExpr>(Binding->getBinding()->IgnoreParenImpCasts());
