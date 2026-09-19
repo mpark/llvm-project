@@ -129,6 +129,13 @@ infrastructure are described first, followed by tool-specific sections.
 
 #### New checks
 
+- New {doc}`modernize-use-do-expr
+  <clang-tidy/checks/modernize/use-do-expr>` check.
+
+  Finds immediately-invoked lambda expressions and classifies each one by
+  whether, and why, it could be spelled as a `do` expression instead, and
+  rewrites the ones that can be.
+
 - New {doc}`llvm-invalid-regex-pattern
   <clang-tidy/checks/llvm/invalid-regex-pattern>` check.
 
