@@ -73,6 +73,17 @@ int duplicate_optional_empty_state(std::optional<int> value) {
   };
 }
 
+struct SelectorBase {};
+struct SelectorDerived : SelectorBase {};
+
+int alternative_type_selector_remains_exact(
+    std::variant<SelectorDerived, int> value) {
+  return match (value) {
+    case { SelectorBase: _ } => 1; // expected-error {{braced alternative pattern does not match any projectable state}}
+    case { _ } => 0;
+  };
+}
+
 int opaque_pattern_after_complete_optional_coverage(std::optional<int> value) {
   return match (value) {
     case { auto number } => number;
