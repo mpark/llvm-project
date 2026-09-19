@@ -14570,6 +14570,8 @@ def err_case_switch_condition : Error<
   "a pattern condition is not permitted in a switch statement">;
 def err_match_not_exhaustive : Error<
   "match expression is not exhaustive%select{|; example of a missing case: %1}0">;
+def err_match_handler_type_mismatch : Error<
+  "match handler yields type %0, conflicting with previously deduced type %1">;
 def err_dependent_match_result_type_missing_body : Error<
   "expected '{' after match result type">;
 def err_declaration_pattern_not_exact_match : Error<

@@ -11679,8 +11679,11 @@ public:
 
   TypeLoc getReturnTypeLoc(FunctionDecl *FD) const;
 
+  enum class AutoTypeDeductionContext { ReturnStatement, MatchHandler };
+
   bool DeduceAutoTypeFromExpr(TypeLoc OrigResultType, SourceLocation ReturnLoc,
-                              Expr *E, QualType &Deduced, const AutoType *AT);
+                              Expr *E, QualType &Deduced, const AutoType *AT,
+                              AutoTypeDeductionContext DeductionContext);
 
   /// Deduce the return type for a function from a returned expression, per
   /// C++1y [dcl.spec.auto]p6.

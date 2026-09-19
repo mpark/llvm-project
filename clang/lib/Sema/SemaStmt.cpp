@@ -3880,7 +3880,8 @@ TypeLoc Sema::getReturnTypeLoc(FunctionDecl *FD) const {
 
 bool Sema::DeduceAutoTypeFromExpr(TypeLoc OrigResultType,
                                   SourceLocation ReturnLoc, Expr *E,
-                                  QualType &Deduced, const AutoType *AT) {
+                                  QualType &Deduced, const AutoType *AT,
+                                  AutoTypeDeductionContext DeductionContext) {
   if (isa_and_nonnull<InitListExpr>(E)) {
     //  If the deduction is for a return statement and the initializer is
     //  a braced-init-list, the program is ill-formed.
@@ -3934,7 +3935,10 @@ bool Sema::DeduceAutoTypeFromExpr(TypeLoc OrigResultType,
       //  each return statement. [...] if the type deduced is not the same in
       //  each deduction, the program is ill-formed.
       const LambdaScopeInfo *LambdaSI = getCurLambda();
-      if (LambdaSI && LambdaSI->HasImplicitReturnType)
+      if (DeductionContext == AutoTypeDeductionContext::MatchHandler)
+        Diag(ReturnLoc, diag::err_match_handler_type_mismatch)
+            << Info.SecondArg << Info.FirstArg;
+      else if (LambdaSI && LambdaSI->HasImplicitReturnType)
         Diag(ReturnLoc, diag::err_typecheck_missing_return_type_incompatible)
             << Info.SecondArg << Info.FirstArg << true /*IsLambda*/;
       else
@@ -3977,7 +3981,8 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
 
   TypeLoc OrigResultType = getReturnTypeLoc(FD);
   QualType Deduced;
-  if (DeduceAutoTypeFromExpr(OrigResultType, ReturnLoc, RetExpr, Deduced, AT)) {
+  if (DeduceAutoTypeFromExpr(OrigResultType, ReturnLoc, RetExpr, Deduced, AT,
+                             AutoTypeDeductionContext::ReturnStatement)) {
     return true;
   }
 
