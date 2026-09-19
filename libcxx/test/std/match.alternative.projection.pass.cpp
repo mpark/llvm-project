@@ -285,6 +285,33 @@ struct Shape {
 
 struct Circle : Shape {};
 
+struct ProjectionBase {
+  int value;
+};
+
+struct ProjectionPadding {
+  int value;
+};
+
+struct ProjectionFirst : ProjectionPadding, ProjectionBase {};
+struct ProjectionSecond : ProjectionBase {};
+
+int match_variant_base_reference(
+    std::variant<ProjectionFirst, ProjectionSecond, int>& value) {
+  return match (value) {
+    case { ProjectionBase& base } => base.value;
+    case { int integer } => integer;
+  };
+}
+
+int match_variant_const_base_reference(
+    const std::variant<ProjectionFirst, ProjectionSecond, int>& value) {
+  return match (value) {
+    case { const ProjectionBase& base } => base.value;
+    case { int integer } => integer;
+  };
+}
+
 int match_pointer_downcast(Shape* value) {
   return match (value) {
     case { Circle& } => 74;
@@ -576,6 +603,16 @@ int main(int, char**) {
   assert(match_projected_downcast(std::variant<Shape*, int>(&circle)) == 77);
   assert(match_projected_downcast(std::variant<Shape*, int>(&shape)) == 78);
   assert(match_projected_downcast(std::variant<Shape*, int>(0)) == 78);
+  std::variant<ProjectionFirst, ProjectionSecond, int> projected_base(
+      ProjectionFirst{{0}, {79}});
+  assert(match_variant_base_reference(projected_base) == 79);
+  assert(match_variant_const_base_reference(projected_base) == 79);
+  projected_base = ProjectionSecond{{80}};
+  assert(match_variant_base_reference(projected_base) == 80);
+  assert(match_variant_const_base_reference(projected_base) == 80);
+  projected_base.emplace<2>(81);
+  assert(match_variant_base_reference(projected_base) == 81);
+  assert(match_variant_const_base_reference(projected_base) == 81);
   assert(match_repeated_value(
              std::variant<int, int>(std::in_place_index<0>, 0)) == 100);
   assert(match_repeated_value(
