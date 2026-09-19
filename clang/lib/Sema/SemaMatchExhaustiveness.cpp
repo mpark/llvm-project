@@ -26,11 +26,6 @@ namespace {
 enum class Usefulness { NotUseful, MaybeUseful, Useful };
 enum class ConstructorDomain { Required, RequiredAndResidual };
 
-QualType typeIdType(ASTContext &Context, QualType Type) {
-  Qualifiers Quals;
-  return Context.getUnqualifiedArrayType(Type.getNonReferenceType(), Quals);
-}
-
 struct CtorKey {
   enum Kind {
     Wildcard,
@@ -60,7 +55,7 @@ struct CtorKey {
   bool IsExhaustive = true;
   bool HasParameterizedIndexName = false;
   QualType OpenAlternativeType;
-  bool OpenAlternativeHasEmpty = false;
+  bool IsOpenAlternativeInitialization = false;
 
   static CtorKey wildcardCtor() {
     CtorKey C;
@@ -140,20 +135,19 @@ struct CtorKey {
   }
 
   static CtorKey openAlternativeCtor(QualType OwnerType, QualType Type,
-                                     bool HasEmpty) {
+                                     bool IsInitialization = false) {
     CtorKey C;
     C.K = OpenAlternative;
     C.AlternativeOwnerType = OwnerType;
     C.OpenAlternativeType = Type;
-    C.OpenAlternativeHasEmpty = HasEmpty;
+    C.IsOpenAlternativeInitialization = IsInitialization;
     return C;
   }
 
-  static CtorKey openAlternativeRestCtor(QualType OwnerType, bool HasEmpty) {
+  static CtorKey openAlternativeRestCtor(QualType OwnerType) {
     CtorKey C;
     C.K = OpenAlternativeRest;
     C.AlternativeOwnerType = OwnerType;
-    C.OpenAlternativeHasEmpty = HasEmpty;
     return C;
   }
 
@@ -161,7 +155,6 @@ struct CtorKey {
     CtorKey C;
     C.K = OpenAlternativeEmpty;
     C.AlternativeOwnerType = OwnerType;
-    C.OpenAlternativeHasEmpty = true;
     return C;
   }
 
@@ -194,7 +187,9 @@ struct CtorKey {
       return AlternativeOwnerType.getCanonicalType() ==
                  Other.AlternativeOwnerType.getCanonicalType() &&
              OpenAlternativeType.getCanonicalType() ==
-                 Other.OpenAlternativeType.getCanonicalType();
+                 Other.OpenAlternativeType.getCanonicalType() &&
+             IsOpenAlternativeInitialization ==
+                 Other.IsOpenAlternativeInitialization;
     case OpenAlternativeRest:
     case OpenAlternativeEmpty:
       return AlternativeOwnerType.getCanonicalType() ==
@@ -211,7 +206,7 @@ struct CoveragePattern {
     SourceLocation Loc;
   };
 
-  enum Kind { Wild, Ctor, OpenProjectable, Opaque } K = Opaque;
+  enum Kind { Wild, Ctor, Opaque } K = Opaque;
   CtorKey C = CtorKey::productCtor(0);
   SmallVector<std::shared_ptr<CoveragePattern>, 4> Fields;
   SmallVector<QualType, 4> FieldTypes;
@@ -240,13 +235,6 @@ struct CoveragePattern {
     return P;
   }
 
-  static CoveragePattern openProjectable(CtorKey C, SourceLocation Loc = {}) {
-    CoveragePattern P;
-    P.K = OpenProjectable;
-    P.C = std::move(C);
-    P.Loc = Loc;
-    return P;
-  }
 };
 
 using PatternRow = SmallVector<CoveragePattern, 4>;
@@ -501,17 +489,12 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       if (P->isEmpty())
         return {CoveragePattern::ctor(CtorKey::openAlternativeEmptyCtor(Type),
                                       P->getBeginLoc())};
-      if (Info->OpenAlternativeProjectableWildcard)
-        return {CoveragePattern::openProjectable(
-            CtorKey::openAlternativeRestCtor(Type,
-                                             Info->OpenAlternativeHasEmpty),
-            P->getBeginLoc())};
       if (Info->OpenAlternativeType.isNull())
         return {CoveragePattern::opaque(P->getBeginLoc())};
 
-      CtorKey C = CtorKey::openAlternativeCtor(
-          Type, typeIdType(S.Context, Info->OpenAlternativeType),
-          Info->OpenAlternativeHasEmpty);
+      CtorKey C =
+          CtorKey::openAlternativeCtor(Type, Info->OpenAlternativeType,
+                                       Info->IsOpenAlternativeInitialization);
       CoveragePattern Initial =
           CoveragePattern::ctor(std::move(C), P->getBeginLoc());
       CoveragePatterns Results;
@@ -638,13 +621,6 @@ bool specializePattern(const CoveragePattern &P, const CtorKey &C,
   case CoveragePattern::Wild:
     appendCtorFields(P, C, OutPatterns, OutTypes);
     return true;
-  case CoveragePattern::OpenProjectable:
-    if (C.K == CtorKey::OpenAlternative) {
-      OutPatterns.push_back(CoveragePattern::wild(P.Loc));
-      OutTypes.push_back(C.OpenAlternativeType);
-      return true;
-    }
-    return C.K == CtorKey::OpenAlternativeRest;
   case CoveragePattern::Ctor:
     if (!(P.C == C))
       return false;
@@ -841,22 +817,25 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
   }
 
   std::optional<CtorKey> OpenPrototype;
-  SmallVector<QualType, 4> OpenTypes;
+  SmallVector<std::pair<QualType, bool>, 4> OpenTypes;
+  bool HasOpenEmpty = false;
   auto AddOpenAlternative = [&](const CoveragePattern &P) {
-    bool IsOpen = P.K == CoveragePattern::OpenProjectable ||
-                  (P.K == CoveragePattern::Ctor &&
-                   (P.C.K == CtorKey::OpenAlternative ||
-                    P.C.K == CtorKey::OpenAlternativeRest ||
-                    P.C.K == CtorKey::OpenAlternativeEmpty));
+    bool IsOpen =
+        P.K == CoveragePattern::Ctor && (P.C.K == CtorKey::OpenAlternative ||
+                                         P.C.K == CtorKey::OpenAlternativeRest ||
+                                         P.C.K == CtorKey::OpenAlternativeEmpty);
     if (!IsOpen)
       return;
     if (!OpenPrototype)
       OpenPrototype = P.C;
     if (P.K == CoveragePattern::Ctor && P.C.K == CtorKey::OpenAlternative &&
-        llvm::none_of(OpenTypes, [&](QualType Type) {
-          return S.Context.hasSameType(Type, P.C.OpenAlternativeType);
+        llvm::none_of(OpenTypes, [&](const auto &Entry) {
+          return Entry.second == P.C.IsOpenAlternativeInitialization &&
+                 S.Context.hasSameType(Entry.first, P.C.OpenAlternativeType);
         }))
-      OpenTypes.push_back(P.C.OpenAlternativeType);
+      OpenTypes.emplace_back(P.C.OpenAlternativeType,
+                             P.C.IsOpenAlternativeInitialization);
+    HasOpenEmpty |= P.C.K == CtorKey::OpenAlternativeEmpty;
   };
 
   AddOpenAlternative(Candidate);
@@ -864,14 +843,12 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
     if (!Row.empty())
       AddOpenAlternative(Row.front());
   if (OpenPrototype) {
-    for (QualType Type : OpenTypes)
+    for (auto [Type, IsInitialization] : OpenTypes)
       Ctors.push_back(CtorKey::openAlternativeCtor(
-          OpenPrototype->AlternativeOwnerType, Type,
-          OpenPrototype->OpenAlternativeHasEmpty));
-    Ctors.push_back(CtorKey::openAlternativeRestCtor(
-        OpenPrototype->AlternativeOwnerType,
-        OpenPrototype->OpenAlternativeHasEmpty));
-    if (OpenPrototype->OpenAlternativeHasEmpty)
+          OpenPrototype->AlternativeOwnerType, Type, IsInitialization));
+    Ctors.push_back(
+        CtorKey::openAlternativeRestCtor(OpenPrototype->AlternativeOwnerType));
+    if (HasOpenEmpty)
       Ctors.push_back(CtorKey::openAlternativeEmptyCtor(
           OpenPrototype->AlternativeOwnerType));
     return Ctors;
@@ -1059,14 +1036,17 @@ std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
     return "_";
   }
   if (C.K == CtorKey::OpenAlternative) {
+    if (C.IsOpenAlternativeInitialization)
+      return "{ " + printTypePattern(Context, C.OpenAlternativeType) + " _ }";
     if (Offset < Witness.size() && Witness[Offset].K == CtorKey::Wildcard) {
       ++Offset;
-      return "{ " + printTypePattern(Context, C.OpenAlternativeType) + " }";
+      return "{ " + printTypePattern(Context, C.OpenAlternativeType) + ": _ }";
     }
-    return "{ " + printWitnessPattern(Context, Witness, Offset) + " }";
+    return "{ " + printTypePattern(Context, C.OpenAlternativeType) + ": " +
+           printWitnessPattern(Context, Witness, Offset) + " }";
   }
   if (C.K == CtorKey::OpenAlternativeRest)
-    return "{ _ }";
+    return "_";
   if (C.K == CtorKey::OpenAlternativeEmpty)
     return "{}";
   if (C.K != CtorKey::Product)
