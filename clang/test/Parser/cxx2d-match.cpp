@@ -691,25 +691,25 @@ void test_jump_from_guard_into_match_handler(int value) {
 void test_deduced_return_type(int x) {
   (void)match (x) {
     case 0 => 0;
-    case 1 => 0.0;     // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
-    case 2 => 'c';     // expected-error {{'auto' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
-    case 3 => "hello"; // expected-error {{'auto' in return type deduced as 'const char *' here but deduced as 'int' in earlier return statement}}
+    case 1 => 0.0;     // expected-error {{match handler yields type 'double', conflicting with previously deduced type 'int'}}
+    case 2 => 'c';     // expected-error {{match handler yields type 'char', conflicting with previously deduced type 'int'}}
+    case 3 => "hello"; // expected-error {{match handler yields type 'const char *', conflicting with previously deduced type 'int'}}
     case _ => 0;
   };
 
   (void)match (x) -> auto {
     case 0 => 0;
-    case 1 => 0.0;     // expected-error {{'auto' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
-    case 2 => 'c';     // expected-error {{'auto' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
-    case 3 => "hello"; // expected-error {{'auto' in return type deduced as 'const char *' here but deduced as 'int' in earlier return statement}}
+    case 1 => 0.0;     // expected-error {{match handler yields type 'double', conflicting with previously deduced type 'int'}}
+    case 2 => 'c';     // expected-error {{match handler yields type 'char', conflicting with previously deduced type 'int'}}
+    case 3 => "hello"; // expected-error {{match handler yields type 'const char *', conflicting with previously deduced type 'int'}}
     case _ => 0;
   };
 
   (void)match (x) -> decltype(auto) {
     case 0 => 0;
-    case 1 => 0.0;     // expected-error {{'decltype(auto)' in return type deduced as 'double' here but deduced as 'int' in earlier return statement}}
-    case 2 => 'c';     // expected-error {{'decltype(auto)' in return type deduced as 'char' here but deduced as 'int' in earlier return statement}}
-    case 3 => "hello"; // expected-error {{'decltype(auto)' in return type deduced as 'const char (&)[6]' here but deduced as 'int' in earlier return statement}}
+    case 1 => 0.0;     // expected-error {{match handler yields type 'double', conflicting with previously deduced type 'int'}}
+    case 2 => 'c';     // expected-error {{match handler yields type 'char', conflicting with previously deduced type 'int'}}
+    case 3 => "hello"; // expected-error {{match handler yields type 'const char (&)[6]', conflicting with previously deduced type 'int'}}
     case _ => 0;
   };
 }

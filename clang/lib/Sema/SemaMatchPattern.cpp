@@ -1424,7 +1424,8 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   }
   if (const AutoType *AT = RetTy->getContainedAutoType()) {
     QualType Deduced;
-    if (DeduceAutoTypeFromExpr(OrigResultType, Loc, E, Deduced, AT)) {
+    if (DeduceAutoTypeFromExpr(OrigResultType, Loc, E, Deduced, AT,
+                               AutoTypeDeductionContext::MatchHandler)) {
       return StmtError();
     }
     RetTy = Deduced;
