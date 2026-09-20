@@ -4608,7 +4608,6 @@ private:
   bool isDeclarationPatternSyntax();
   ActionResult<MatchPattern *>
   ParseWildcardPattern();
-  void ParsePatternDeclaratorId(Declarator &D);
   ActionResult<MatchPattern *>
   ParseDeclarationPattern(bool AllowPackExpansion = false);
   ActionResult<MatchPattern *>
@@ -9146,7 +9145,7 @@ public:
   ///         '<' identifier-list '>'
   TPResult TryParseProtocolQualifiers();
 
-  TPResult TryParsePtrOperatorSeq();
+  TPResult TryParsePtrOperatorSeq(bool *HadPtrOperator = nullptr);
 
   /// \verbatim
   ///         operator-function-id:
