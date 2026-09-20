@@ -14583,6 +14583,9 @@ def err_expression_pattern_not_testable : Error<
   "subject of type %1 nor callable with it">;
 def err_or_pattern_binding_mismatch : Error<
   "all alternatives in an or-pattern must introduce the same bindings">;
+def err_declaration_pattern_pack_not_in_decomposition : Error<
+  "declaration pattern pack must appear directly within a decomposition "
+  "pattern">;
 def note_or_pattern_binding_interface : Note<
   "binding interface established by this alternative">;
 def err_or_pattern_no_viable_alternative : Error<

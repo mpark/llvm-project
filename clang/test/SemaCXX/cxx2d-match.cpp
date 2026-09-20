@@ -406,6 +406,64 @@ int forwarding(int &&value) {
   };
 }
 
+constexpr bool functional_cast_is_an_expression_pattern(bool value) {
+  constexpr bool expected = true;
+  return match (value) {
+    case bool(expected) => true;
+    case _ => false;
+  };
+}
+
+static_assert(functional_cast_is_an_expression_pattern(true));
+static_assert(!functional_cast_is_an_expression_pattern(false));
+
+constexpr int answer() { return 42; }
+
+constexpr int named_function_pointer(int (*pointer)()) {
+  return match (pointer) {
+    case auto (*selected)() => selected();
+  };
+}
+
+constexpr bool unnamed_function_pointer(int (*pointer)()) {
+  return match (pointer) {
+    case int (*)() => true;
+  };
+}
+
+static_assert(named_function_pointer(answer) == 42);
+static_assert(unnamed_function_pointer(answer));
+
+constexpr int named_array_reference(int (&array)[2]) {
+  return match (array) {
+    case int (&selected)[2] => selected[0] + selected[1];
+  };
+}
+
+constexpr bool unnamed_array_reference(int (&array)[2]) {
+  return match (array) {
+    case int (&)[2] => true;
+  };
+}
+
+constexpr bool test_array_reference_patterns() {
+  int array[] = {1, 2};
+  return named_array_reference(array) == 3 &&
+         unnamed_array_reference(array);
+}
+
+static_assert(test_array_reference_patterns());
+
+struct CallableResult {
+  int value;
+  constexpr int operator()() const { return value; }
+};
+
+constexpr int expression_operand = 42;
+constexpr const int *expression_operand_pointer = &expression_operand;
+static_assert(match(
+    42, case auto(CallableResult(*expression_operand_pointer)())));
+
 int decomposition(Pair pair) {
   return match (pair) {
     case auto [first, second] => first + second;

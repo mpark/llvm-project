@@ -535,19 +535,17 @@ void test_declaration_expression_disambiguation(int value) {
   match (array) { case Array& reference => &reference == &array; }
 }
 
-void test_direct_function_and_array_declarators_are_not_patterns() {
+void test_direct_function_and_array_declarators() {
   using Function = int(double);
   Function *function = nullptr;
   match (function) {
-    case int (*copy)(double) => 0; // expected-error {{use of undeclared identifier 'copy'}} expected-error {{expected '(' for function-style cast or type construction}}
-    case _ => 0;
+    case int (*copy)(double) => (void)copy;
   }
 
   using Array = int[2];
   Array array{};
   match (array) {
-    case int (&copy)[2] => 0; // expected-error {{use of undeclared identifier 'copy'}}
-    case _ => 0;
+    case int (&copy)[2] => (void)copy;
   }
 }
 
@@ -595,7 +593,7 @@ void test_invalid_decomposition_pattern() {
   match(s, case [int first, ...42, int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
   match(s, case [int first, ...[_, _], int last]); // expected-error {{expected ']'}} expected-note {{to match this '['}}
   match(s, case [int first, (...), int last]); // expected-error {{expected expression}}
-  match(s, case [int first, (auto&& ...middle), int last]); // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match(s, case [int first, (auto&& ...middle), int last]); // expected-error {{declaration pattern pack must appear directly within a decomposition pattern}}
 }
 
 void test_parenthesized_pattern(int a, int b) { // expected-note 4 {{declared here}}
@@ -995,6 +993,6 @@ int test_pack_expansion_in_decomposition_pattern(const int (&p)[N]) {
 template <int... Is, int N>
 void test_non_pattern_pack_expansion(const int (&p)[N]) {
   match(p, case [(Is...)]); // expected-error {{expected ')'}} expected-note {{to match this '('}}
-  match(p, case auto&& ...elements); // expected-error {{expected ')'}} expected-note {{to match this '('}}
+  match(p, case auto&& ...elements); // expected-error {{declaration pattern pack must appear directly within a decomposition pattern}}
   match(p, case Is...); // expected-error {{expected ')'}} expected-note {{to match this '('}}
 }
