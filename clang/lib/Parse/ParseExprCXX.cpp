@@ -5091,12 +5091,31 @@ Parser::DeclarationPatternKind Parser::TryParseDeclarationPatternSyntax() {
   if (!HasTypeSpecifier)
     return DeclarationPatternKind::Expression;
 
+  // A terminal parenthesized declarator such as `bool(value)` is a
+  // functional-cast expression pattern. It is a declaration pattern when a
+  // function or array suffix extends that parenthesized declarator, as in
+  // `int (*fn)()` or `int (&array)[5]`. Parse the enclosed ptr-declarator
+  // recursively so that redundant parentheses, as in `int ((*fn))()`, do not
+  // affect the result.
+  if (Tok.is(tok::l_paren)) {
+    ConsumeParen();
+    TPResult Result = TryParseDeclarator(
+        /*mayBeAbstract=*/true, /*mayHaveIdentifier=*/true,
+        /*mayHaveDirectInit=*/false, /*mayHaveTrailingReturnType=*/true);
+    if (Result == TPResult::Error)
+      return DeclarationPatternKind::Error;
+    if (Result == TPResult::False || Tok.isNot(tok::r_paren))
+      return DeclarationPatternKind::Expression;
+    ConsumeParen();
+    return Tok.isOneOf(tok::l_paren, tok::l_square)
+               ? DeclarationPatternKind::Pattern
+               : DeclarationPatternKind::Expression;
+  }
+
   if (TryParsePtrOperatorSeq() == TPResult::Error)
     return DeclarationPatternKind::Error;
 
-  // A parenthesized or braced token following the type begins a functional
-  // cast. Neither token can continue a conversion-declarator.
-  if (Tok.isOneOf(tok::l_paren, tok::l_brace))
+  if (Tok.is(tok::l_brace))
     return DeclarationPatternKind::Expression;
 
   return DeclarationPatternKind::Pattern;
@@ -5168,28 +5187,6 @@ Parser::ParseWildcardPattern() {
   return Actions.ActOnWildcardPattern(ConsumeToken());
 }
 
-void Parser::ParsePatternDeclaratorId(Declarator &D) {
-  // A declaration pattern has a conversion-declarator followed by either one
-  // identifier or a structured binding, rather than a full direct-declarator.
-  if (Tok.is(tok::l_square)) {
-    ParseDecompositionDeclarator(D);
-    return;
-  }
-
-  if (Tok.is(tok::ellipsis) && D.isPatternPackAllowed())
-    D.setEllipsisLoc(ConsumeToken());
-
-  if (Tok.is(tok::identifier)) {
-    D.SetIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
-    D.SetRangeEnd(Tok.getLocation());
-    ConsumeToken();
-    MaybeParseCXX11Attributes(D);
-    return;
-  }
-
-  D.SetIdentifier(nullptr, Tok.getLocation());
-}
-
 ActionResult<MatchPattern *>
 Parser::ParseDeclarationPattern(bool AllowPackExpansion) {
   ParsedAttributes DeclAttrs(AttrFactory);
@@ -5206,7 +5203,13 @@ Parser::ParseDeclarationPattern(bool AllowPackExpansion) {
     D.setPatternPackAllowed();
   if (TemplateInfo.TemplateParams)
     D.setTemplateParameterLists(*TemplateInfo.TemplateParams);
-  ParseDeclaratorInternal(D, &Parser::ParsePatternDeclaratorId);
+  ParseDeclarator(D);
+  if (D.hasEllipsis() && !AllowPackExpansion) {
+    Diag(D.getEllipsisLoc(),
+         diag::err_declaration_pattern_pack_not_in_decomposition);
+    D.complete(nullptr);
+    return true;
+  }
   if (D.isInvalidType() || ParseAsmAttributesAfterDeclarator(D)) {
     D.complete(nullptr);
     return true;
