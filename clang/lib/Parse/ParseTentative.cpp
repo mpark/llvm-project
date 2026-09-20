@@ -882,7 +882,9 @@ bool Parser::hasLambdaLikeContinuation() {
   }
 }
 
-Parser::TPResult Parser::TryParsePtrOperatorSeq() {
+Parser::TPResult Parser::TryParsePtrOperatorSeq(bool *HadPtrOperator) {
+  if (HadPtrOperator)
+    *HadPtrOperator = false;
   while (true) {
     if (TryAnnotateOptionalCXXScopeToken(true))
       return TPResult::Error;
@@ -890,6 +892,8 @@ Parser::TPResult Parser::TryParsePtrOperatorSeq() {
     if (Tok.isOneOf(tok::star, tok::amp, tok::caret, tok::ampamp) ||
         (Tok.is(tok::annot_cxxscope) && NextToken().is(tok::star))) {
       // ptr-operator
+      if (HadPtrOperator)
+        *HadPtrOperator = true;
       ConsumeAnyToken();
 
       // Skip attributes.
