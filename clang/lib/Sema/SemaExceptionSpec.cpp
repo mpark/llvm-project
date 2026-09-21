@@ -1032,10 +1032,13 @@ static CanThrowResult canMatchTestThrow(Sema &Self, const MatchTestExpr *E) {
 
 static CanThrowResult canMatchSelectThrow(Sema &Self,
                                           const MatchSelectExpr *E) {
+  CanThrowResult R = CT_Cannot;
+  if (const Stmt *Init = E->getInitStmt())
+    R = mergeCanThrow(R, canSubStmtsThrow(Self, Init));
   const Expr *Subject = E->getHoldingVar() && E->getHoldingVar()->getInit()
                             ? E->getHoldingVar()->getInit()
                             : E->getSubject();
-  CanThrowResult R = Self.canThrow(Subject);
+  R = mergeCanThrow(R, Self.canThrow(Subject));
   for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
     R = mergeCanThrow(
         R, canMatchPatternThrow(Self, Case.Pattern, Case.PatternInstantiation));
