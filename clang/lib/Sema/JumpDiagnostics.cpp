@@ -554,6 +554,8 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
 
   case Stmt::MatchSelectExprClass: {
     auto *ME = cast<MatchSelectExpr>(S);
+    if (Stmt *Init = ME->getInitStmt())
+      BuildScopeInformation(Init, ParentScope);
     BuildScopeInformation(ME->getHoldingVar() && ME->getHoldingVar()->hasInit()
                               ? ME->getHoldingVar()->getInit()
                               : ME->getSubject(),

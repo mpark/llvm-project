@@ -3087,6 +3087,11 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   // controlled statement as a handler.
   RunCleanupsScope MatchScope(*this);
 
+  if (const Stmt *Init = S.getInitStmt()) {
+    EmitStmt(Init);
+    EnsureInsertPoint();
+  }
+
   if (const VarDecl *HoldingVar = S.getHoldingVar())
     EmitVarDecl(*HoldingVar);
   else if (S.getSubject()->getType()->isVoidType())

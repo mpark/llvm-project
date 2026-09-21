@@ -4552,6 +4552,24 @@ void Sema::CheckVirtualDtorCall(CXXDestructorDecl *dtor, SourceLocation Loc,
   }
 }
 
+static ExprResult buildConditionVariableExpr(Sema &S, VarDecl *ConditionVar) {
+  if (ConditionVar->isInvalidDecl())
+    return ExprError();
+
+  QualType T = ConditionVar->getType();
+  if (T->isFunctionType())
+    return ExprError(S.Diag(ConditionVar->getLocation(),
+                            diag::err_invalid_use_of_function_type)
+                     << ConditionVar->getSourceRange());
+  if (T->isArrayType())
+    return ExprError(
+        S.Diag(ConditionVar->getLocation(), diag::err_invalid_use_of_array_type)
+        << ConditionVar->getSourceRange());
+
+  return S.BuildDeclRefExpr(ConditionVar, T.getNonReferenceType(), VK_LValue,
+                            ConditionVar->getLocation());
+}
+
 Sema::ConditionResult Sema::ActOnConditionVariable(Decl *ConditionVar,
                                                    SourceLocation StmtLoc,
                                                    ConditionKind CK) {
@@ -4567,25 +4585,9 @@ Sema::ConditionResult Sema::ActOnConditionVariable(Decl *ConditionVar,
 ExprResult Sema::CheckConditionVariable(VarDecl *ConditionVar,
                                         SourceLocation StmtLoc,
                                         ConditionKind CK) {
-  if (ConditionVar->isInvalidDecl())
+  ExprResult Condition = buildConditionVariableExpr(*this, ConditionVar);
+  if (Condition.isInvalid())
     return ExprError();
-
-  QualType T = ConditionVar->getType();
-
-  // C++ [stmt.select]p2:
-  //   The declarator shall not specify a function or an array.
-  if (T->isFunctionType())
-    return ExprError(Diag(ConditionVar->getLocation(),
-                          diag::err_invalid_use_of_function_type)
-                       << ConditionVar->getSourceRange());
-  else if (T->isArrayType())
-    return ExprError(Diag(ConditionVar->getLocation(),
-                          diag::err_invalid_use_of_array_type)
-                     << ConditionVar->getSourceRange());
-
-  ExprResult Condition = BuildDeclRefExpr(
-      ConditionVar, ConditionVar->getType().getNonReferenceType(), VK_LValue,
-      ConditionVar->getLocation());
 
   switch (CK) {
   case ConditionKind::Boolean:

@@ -2806,6 +2806,9 @@ void StmtProfiler::VisitCaseConditionExpr(const CaseConditionExpr *S) {
 
 void StmtProfiler::VisitMatchSelectExpr(const MatchSelectExpr *S) {
   VisitStmt(S);
+  ID.AddBoolean(S->getInitStmt());
+  if (S->getInitStmt())
+    Visit(S->getInitStmt());
   Visit(S->getHoldingVar() && S->getHoldingVar()->getInit()
             ? S->getHoldingVar()->getInit()
             : S->getSubject());

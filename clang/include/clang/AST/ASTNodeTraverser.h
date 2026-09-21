@@ -1074,6 +1074,8 @@ public:
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
+    if (const Stmt *Init = Node->getInitStmt())
+      Visit(Init);
     if (const VarDecl *HoldingVar = Node->getHoldingVar())
       Visit(HoldingVar);
     Visit(Node->getSubject());
