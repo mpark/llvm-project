@@ -2261,7 +2261,7 @@ CXXExpansionSelectExpr::CXXExpansionSelectExpr(const ASTContext &C,
 }
 
 MatchSelectExpr::MatchSelectExpr(
-    VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
+    Stmt *InitStmt, VarDecl *HoldingVar, Expr *Subject, SourceLocation MatchLoc,
     bool IsConstexpr, bool IsStatement, bool HasSubjectProduct,
     bool IsFullyCovered, TypeLoc OrigResultType, QualType Ty,
     ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
@@ -2271,7 +2271,8 @@ MatchSelectExpr::MatchSelectExpr(
            : Ty->isRValueReferenceType() ? VK_XValue
                                          : VK_PRValue,
            OK_Ordinary),
-      HoldingVar(HoldingVar), Subject(Subject), MatchLoc(MatchLoc),
+      InitStmt(InitStmt), HoldingVar(HoldingVar), Subject(Subject),
+      MatchLoc(MatchLoc),
       IsConstexpr(IsConstexpr), IsFullyCovered(IsFullyCovered),
       IsStatement(IsStatement), HasSubjectProduct(HasSubjectProduct),
       OrigResultType(OrigResultType), NumPreambleStatements(Preamble.size()),
@@ -2287,18 +2288,19 @@ MatchSelectExpr::MatchSelectExpr(
 }
 
 MatchSelectExpr *MatchSelectExpr::Create(
-    const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
+    const ASTContext &Ctx, Stmt *InitStmt, VarDecl *HoldingVar, Expr *Subject,
     SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
     bool HasSubjectProduct, bool IsFullyCovered, TypeLoc OrigResultType,
-    QualType Ty, ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+    QualType Ty,
+    ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
     ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces) {
   void *Mem =
       Ctx.Allocate(totalSizeToAlloc<Stmt *, MatchCase, MatchCaseInstantiation>(
           Preamble.size(), Cases.size(), Instantiations.size()));
-  return new (Mem)
-      MatchSelectExpr(HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
-                      HasSubjectProduct, IsFullyCovered, OrigResultType, Ty,
-                      Preamble, Cases, Instantiations, Braces);
+  return new (Mem) MatchSelectExpr(
+      InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
+      HasSubjectProduct, IsFullyCovered, OrigResultType, Ty, Preamble, Cases,
+      Instantiations, Braces);
 }
 
 static ArrayRef<Expr *> getMatchSubjectProductElements(bool HasSubjectProduct,

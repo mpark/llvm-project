@@ -10018,6 +10018,12 @@ public:
 
   bool VisitMatchSelectExpr(const MatchSelectExpr *E) {
     BlockScopeRAII MatchScope(Info);
+    if (const Stmt *Init = E->getInitStmt()) {
+      APValue InitValue;
+      StmtResult InitResult = {InitValue, nullptr};
+      if (EvaluateStmt(InitResult, Info, Init) != ESR_Succeeded)
+        return false;
+    }
     if (E->getHoldingVar() && !EvaluateDecl(Info, E->getHoldingVar()))
       return false;
     if (!E->getHoldingVar() && E->getSubject()->getType()->isVoidType() &&

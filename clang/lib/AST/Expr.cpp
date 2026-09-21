@@ -3916,6 +3916,8 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case MatchSelectExprClass: {
     const auto *ME = cast<MatchSelectExpr>(this);
     SideEffectFinder Finder(Ctx, IncludePossibleEffects);
+    if (const Stmt *Init = ME->getInitStmt())
+      Finder.Visit(Init);
     Finder.Visit(ME->getHoldingVar() && ME->getHoldingVar()->getInit()
                      ? ME->getHoldingVar()->getInit()
                      : ME->getSubject());

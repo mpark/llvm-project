@@ -2190,9 +2190,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
     SourceLocation LParen = ConsumeParen(), RParen = LParen;
     if (SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch))
       RParen = ConsumeParen();
-    Diag(DeclOut->getLocation(),
-         diag::err_expected_init_in_condition_lparen)
-      << SourceRange(LParen, RParen);
+    Diag(DeclOut->getLocation(), diag::err_expected_init_in_condition_lparen)
+        << SourceRange(LParen, RParen);
   } else {
     Diag(DeclOut->getLocation(), diag::err_expected_init_in_condition);
   }
@@ -4257,6 +4256,7 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
   ParseScope MatchScope(this, Scope::DeclScope);
   bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
 
+  StmtResult InitStmt;
   ExprResult Subject;
   ExprVector Subjects;
   if (MissingSubjectParens) {
@@ -4279,11 +4279,67 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
       }
       return ExprError();
     }
-    bool InvalidSubjects =
-        ParseExpressionList(Subjects, /*ExpressionStarts=*/{},
-                            /*FailImmediatelyOnInvalidExpr=*/false,
-                            /*ParsingExpansionStmtInitList=*/false,
-                            /*AllowBracedInitList=*/false);
+
+    bool HasInitStatement = false;
+    {
+      RevertingTentativeParsingAction Probe(*this);
+      if (SkipUntil(tok::semi, tok::r_paren, StopBeforeMatch))
+        HasInitStatement = Tok.is(tok::semi);
+    }
+
+    ParsedAttributes Attrs(AttrFactory);
+    MaybeParseCXX11Attributes(Attrs);
+    bool InvalidSubjects = false;
+    if (HasInitStatement) {
+      ConditionOrInitStatement ClauseKind =
+          isCXXConditionDeclarationOrInitStatement(
+              /*InitStmt=*/true, /*CanBeForRangeDecl=*/false);
+      if (ClauseKind == ConditionOrInitStatement::InitStmtDecl) {
+        DeclGroupPtrTy DG;
+        SourceLocation DeclStart = Tok.getLocation(), DeclEnd;
+        if (Tok.is(tok::kw_using))
+          DG = ParseAliasDeclarationInInitStatement(
+              DeclaratorContext::SelectionInit, Attrs);
+        else {
+          ParsedAttributes DeclSpecAttrs(AttrFactory);
+          DG = ParseSimpleDeclaration(DeclaratorContext::SelectionInit, DeclEnd,
+                                      Attrs, DeclSpecAttrs,
+                                      /*RequireSemi=*/true);
+        }
+        InitStmt = Actions.ActOnDeclStmt(DG, DeclStart, DeclEnd);
+      } else if (ClauseKind == ConditionOrInitStatement::Expression) {
+        ProhibitAttributes(Attrs);
+        if (Tok.is(tok::semi)) {
+          SourceLocation SemiLoc = ConsumeToken();
+          InitStmt = Actions.ActOnNullStmt(SemiLoc);
+        } else {
+          ExprResult Init = ParseExpression();
+          if (Init.isInvalid())
+            InvalidSubjects = true;
+          else
+            InitStmt = Actions.ActOnExprStmt(Init.get());
+          if (ExpectAndConsume(tok::semi, diag::err_expected_semi_after_expr))
+            InvalidSubjects = true;
+        }
+      } else {
+        InvalidSubjects = true;
+      }
+
+      if (!InvalidSubjects)
+        InvalidSubjects =
+            ParseExpressionList(Subjects, /*ExpressionStarts=*/{},
+                                /*FailImmediatelyOnInvalidExpr=*/false,
+                                /*ParsingExpansionStmtInitList=*/false,
+                                /*AllowBracedInitList=*/false);
+    } else {
+      ProhibitAttributes(Attrs);
+      InvalidSubjects =
+          ParseExpressionList(Subjects, /*ExpressionStarts=*/{},
+                              /*FailImmediatelyOnInvalidExpr=*/false,
+                              /*ParsingExpansionStmtInitList=*/false,
+                              /*AllowBracedInitList=*/false);
+    }
+
     bool InvalidParens = Parens.consumeClose();
     if (InvalidSubjects || InvalidParens) {
       if (Tok.is(tok::l_brace)) {
@@ -4365,8 +4421,9 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
       RetTy = Actions.Context.DependentTy;
   }
   return Actions.ActOnMatchSelectExpr(
-      HoldingVar, Subject.get(), MatchLoc, IsConstexpr, IsStatement,
-      OrigResultType, RetTy, Preamble, Cases, Braces, HasDeferredCases);
+      InitStmt.get(), HoldingVar, Subject.get(), MatchLoc, IsConstexpr,
+      IsStatement, OrigResultType, RetTy, Preamble, Cases, Braces,
+      HasDeferredCases);
 }
 
 bool Parser::hasPossibleOrdinaryMatchCall() {

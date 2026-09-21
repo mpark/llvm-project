@@ -3404,6 +3404,11 @@ CFGBlock *CFGBuilder::VisitMatchTestExpr(MatchTestExpr *E, AddStmtChoice asc) {
 
 CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
                                            AddStmtChoice asc) {
+  SaveAndRestore save_scope_pos(ScopePos);
+  if (Stmt *Init = E->getInitStmt())
+    addLocalScopeForStmt(Init);
+  addAutomaticObjHandling(ScopePos, save_scope_pos.get(), E);
+
   CFGBlock *ConfluenceBlock = Block ? Block : createBlock();
   if (!E->getType()->isVoidType() && asc.alwaysAdd(*this, E))
     appendStmt(ConfluenceBlock, E);
@@ -3479,9 +3484,15 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
 
   Succ = NextCaseBlock;
   Block = nullptr;
+  CFGBlock *EntryBlock;
   if (VarDecl *HoldingVar = E->getHoldingVar())
-    return addStmt(HoldingVar->getInit());
-  return addStmt(E->getSubject());
+    EntryBlock = addStmt(HoldingVar->getInit());
+  else
+    EntryBlock = addStmt(E->getSubject());
+
+  if (Stmt *Init = E->getInitStmt())
+    EntryBlock = addStmt(Init);
+  return EntryBlock;
 }
 
 CFGBlock *CFGBuilder::VisitDeclStmt(DeclStmt *DS) {

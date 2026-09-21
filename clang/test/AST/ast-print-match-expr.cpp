@@ -350,3 +350,14 @@ int multiple_subjects(int first, long second) {
 // CHECK-NEXT: {{^    }}return match (first, static_cast<long &&>(second)) {
 // CHECK-NEXT: {{^        }}case [int x, long y] => x + y;
 // CHECK-NEXT: {{^    }}};
+
+int init_statement_subject(int input) {
+  return match (int value = input; value) {
+    case int result => result;
+  };
+}
+
+// CHECK-LABEL: int init_statement_subject(int input) {
+// CHECK-NEXT: {{^    }}return match (int value = input; value) {
+// CHECK-NEXT: {{^        }}case int result => result;
+// CHECK-NEXT: {{^    }}};
