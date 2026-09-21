@@ -3356,6 +3356,7 @@ DEF_TRAVERSE_STMT(CaseConditionExpr, {
   TRY_TO(TraverseMatchPattern(S->getPattern()));
 })
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getInitStmt());
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
                                           S->getHoldingVar()->getInit()
                                       ? S->getHoldingVar()->getInit()

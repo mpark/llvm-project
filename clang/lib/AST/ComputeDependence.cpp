@@ -1242,6 +1242,8 @@ ExprDependence clang::computeDependence(MatchTestExpr *E) {
 ExprDependence clang::computeDependence(MatchSelectExpr *E) {
   ExprDependence D =
       toExprDependenceForImpliedType(E->getType()->getDependence());
+  if (const Stmt *Init = E->getInitStmt())
+    D |= turnTypeToValueDependence(getMatchStmtDependence(Init));
   D |= turnTypeToValueDependence(E->getSubject()->getDependence());
   for (const Stmt *Statement : E->getPreamble())
     D |= turnTypeToValueDependence(getMatchStmtDependence(Statement));

@@ -19861,6 +19861,10 @@ ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   LocalInstantiationScope MatchScope(getSema(),
                                      /*CombineWithOuterScope=*/true);
+  StmtResult Init = getDerived().TransformStmt(E->getInitStmt());
+  if (Init.isInvalid())
+    return ExprError();
+
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS;
   bool IsSubjectProduct = E->hasSubjectProduct();
@@ -20224,7 +20228,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   }
 
   return getSema().ActOnMatchSelectExpr(
-      HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
+      Init.get(), HoldingVar, LHS.get(), E->getMatchLoc(), E->isConstexpr(),
       E->isStatement(), E->getOrigResultType(), RetTy, Preamble, SourceCases,
       E->getBraces(),
       /*ExpandDeferredCases=*/false,

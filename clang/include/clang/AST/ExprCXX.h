@@ -5846,6 +5846,7 @@ class MatchSelectExpr final
                                     MatchCaseInstantiation> {
   friend class TrailingObjects;
 
+  Stmt *InitStmt;
   VarDecl *HoldingVar;
   Expr *Subject;
   SourceLocation MatchLoc;
@@ -5863,7 +5864,7 @@ class MatchSelectExpr final
   unsigned NumCaseInstantiations;
   SourceRange Braces;
 
-  explicit MatchSelectExpr(VarDecl *HoldingVar, Expr *Subject,
+  explicit MatchSelectExpr(Stmt *InitStmt, VarDecl *HoldingVar, Expr *Subject,
                            SourceLocation MatchLoc, bool IsConstexpr,
                            bool IsStatement, bool HasSubjectProduct,
                            bool IsFullyCovered, TypeLoc OrigResultType,
@@ -5874,7 +5875,8 @@ class MatchSelectExpr final
 
   explicit MatchSelectExpr(unsigned NumPreambleStatements, unsigned NumCases,
                            unsigned NumCaseInstantiations, EmptyShell Empty)
-      : Expr(MatchSelectExprClass, Empty), IsConstexpr(false),
+      : Expr(MatchSelectExprClass, Empty), InitStmt(nullptr),
+        HoldingVar(nullptr), Subject(nullptr), IsConstexpr(false),
         IsFullyCovered(false), IsStatement(false), HasSubjectProduct(false),
         NumPreambleStatements(NumPreambleStatements), NumCases(NumCases),
         NumCaseInstantiations(NumCaseInstantiations) {}
@@ -5893,16 +5895,20 @@ public:
   }
 
   static MatchSelectExpr *
-  Create(const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
-         SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
-         bool HasSubjectProduct, bool IsFullyCovered, TypeLoc OrigResultType,
-         QualType Ty, ArrayRef<Stmt *> Preamble, ArrayRef<MatchCase> Cases,
+  Create(const ASTContext &Ctx, Stmt *InitStmt, VarDecl *HoldingVar,
+         Expr *Subject, SourceLocation MatchLoc, bool IsConstexpr,
+         bool IsStatement, bool HasSubjectProduct, bool IsFullyCovered,
+         TypeLoc OrigResultType, QualType Ty, ArrayRef<Stmt *> Preamble,
+         ArrayRef<MatchCase> Cases,
          ArrayRef<MatchCaseInstantiation> Instantiations, SourceRange Braces);
 
   static MatchSelectExpr *CreateEmpty(const ASTContext &Ctx,
                                       unsigned NumPreambleStatements,
                                       unsigned NumCases,
                                       unsigned NumCaseInstantiations);
+
+  const Stmt *getInitStmt() const { return InitStmt; }
+  Stmt *getInitStmt() { return InitStmt; }
 
   const VarDecl *getHoldingVar() const { return HoldingVar; }
   VarDecl *getHoldingVar() { return HoldingVar; }
