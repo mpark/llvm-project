@@ -3322,6 +3322,13 @@ void StmtPrinter::VisitMatchSelectExpr(MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";
   OS << " (";
+  if (Stmt *Init = Node->getInitStmt()) {
+    if (auto *DS = dyn_cast<DeclStmt>(Init))
+      PrintRawDeclStmt(DS);
+    else if (auto *E = dyn_cast<Expr>(Init))
+      PrintExpr(E);
+    OS << "; ";
+  }
   if (Node->hasSubjectProduct()) {
     llvm::interleaveComma(Node->getSubjectProductElements(), OS,
                           [&](Expr *Subject) { PrintExpr(Subject); });
