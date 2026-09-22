@@ -191,7 +191,7 @@ static_assert([] {
 constexpr int match_named_pointer(int *pointer) {
   return match (pointer) {
     case { .value: auto &&value } => value;
-    case { .empty } => -2;
+    case { .null } => -2;
   };
 }
 
@@ -1076,8 +1076,8 @@ namespace N1 {
 
 template <>
 struct std::alternative_traits<N1::S> {
-  static constexpr bool empty(const N1::S& value) {
-    return value.index == 2;
+  static constexpr bool has_value(const N1::S& value) {
+    return value.index != 2;
   }
 
   template <typename T, typename Self>

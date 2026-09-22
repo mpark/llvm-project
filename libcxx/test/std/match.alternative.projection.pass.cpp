@@ -55,7 +55,7 @@ int match_optional(const std::optional<int>& value) {
 int match_named_optional(const std::optional<int>& value) {
   return match (value) {
     case { .value: const int& number } => number;
-    case { .empty } => -2;
+    case { .null } => -2;
   };
 }
 
@@ -69,7 +69,7 @@ int match_optional_reference(const std::optional<int&>& value) {
 int match_named_optional_reference(std::optional<int&>&& value) {
   return match (static_cast<std::optional<int&>&&>(value)) {
     case { .value: int& number } => ++number;
-    case { .empty } => -8;
+    case { .null } => -8;
   };
 }
 
@@ -90,14 +90,14 @@ int match_unique_ptr(const std::unique_ptr<int>& value) {
 int match_shared_ptr(const std::shared_ptr<int>& value) {
   return match (value) {
     case { .value: int& number } => number;
-    case { .empty } => -4;
+    case { .null } => -4;
   };
 }
 
 int match_nullable(const auto& value) {
   return match (value) {
     case { .value: const int& number } => number;
-    case { .empty } => -6;
+    case { .null } => -6;
   };
 }
 

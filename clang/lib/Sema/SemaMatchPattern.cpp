@@ -283,7 +283,7 @@ struct AlternativeTraitsInfo {
   bool HasParameterizedIndexName = false;
   bool IsBuiltinPointer = false;
   bool IsOpen = false;
-  bool OpenHasEmpty = false;
+  bool OpenHasValue = false;
   llvm::SmallVector<QualType, 4> AdvertisedTypes;
   llvm::SmallVector<bool, 4> HasAlternativeType;
   llvm::SmallVector<QualType, 4> ProjectionTypes;
@@ -438,10 +438,10 @@ static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
     }
     Info.IsOpen = true;
     Info.IsExhaustive = false;
-    LookupResult EmptyLookup(S, S.PP.getIdentifierInfo("empty"), Loc,
-                             Sema::LookupOrdinaryName);
-    S.LookupQualifiedName(EmptyLookup, Info.Record);
-    Info.OpenHasEmpty = !EmptyLookup.empty();
+    LookupResult HasValueLookup(S, S.PP.getIdentifierInfo("has_value"), Loc,
+                                Sema::LookupOrdinaryName);
+    S.LookupQualifiedName(HasValueLookup, Info.Record);
+    Info.OpenHasValue = !HasValueLookup.empty();
     return false;
   }
 
@@ -526,7 +526,7 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
                       const AlternativeTraitsInfo &Info, IdentifierInfo *Name) {
   if (Info.IsBuiltinPointer) {
     unsigned Index;
-    if (Name->isStr("empty"))
+    if (Name->isStr("null"))
       Index = 0;
     else if (Name->isStr("value"))
       Index = 1;
@@ -2320,7 +2320,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   };
 
   if (Pattern->isEmpty()) {
-    if (!Traits.OpenHasEmpty) {
+    if (!Traits.OpenHasValue) {
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
       return true;
     }
@@ -2346,18 +2346,25 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
         HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
         Loc);
     Expr *ForwardedRef = asValueKind(S, HoldingRef, SubjectValueKind);
-    ExprResult EmptyCall =
-        buildAlternativeTraitsCall(S, Loc, Traits, "empty", ForwardedRef);
-    if (EmptyCall.isInvalid())
+    ExprResult HasValueCall =
+        buildAlternativeTraitsCall(S, Loc, Traits, "has_value", ForwardedRef);
+    if (HasValueCall.isInvalid())
       return true;
-    VarDecl *EmptyVar =
-        BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), EmptyCall.get());
-    if (EmptyVar->isInvalidDecl())
+    VarDecl *HasValueVar = BuildVarDecl(
+        S, Loc, S.Context.getAutoDeductType(), HasValueCall.get());
+    if (HasValueVar->isInvalidDecl())
       return true;
-    Projection->setIntermediateVar(EmptyVar);
-    Expr *EmptyRef = S.BuildDeclRefExpr(
-        EmptyVar, EmptyVar->getType().getNonReferenceType(), VK_LValue, Loc);
-    ExprResult RawCondition = S.CheckBooleanCondition(Loc, EmptyRef);
+    Projection->setIntermediateVar(HasValueVar);
+    Expr *HasValueRef =
+        S.BuildDeclRefExpr(HasValueVar,
+                           HasValueVar->getType().getNonReferenceType(),
+                           VK_LValue, Loc);
+    ExprResult HasValueCondition =
+        S.CheckBooleanCondition(Loc, HasValueRef);
+    if (HasValueCondition.isInvalid())
+      return true;
+    ExprResult RawCondition =
+        S.CreateBuiltinUnaryOp(Loc, UO_LNot, HasValueCondition.get());
     if (RawCondition.isInvalid())
       return true;
     VarDecl *ConditionVar =

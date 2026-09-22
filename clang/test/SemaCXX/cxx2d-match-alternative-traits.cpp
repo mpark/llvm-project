@@ -953,7 +953,7 @@ struct OpenNonCopyable {
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool empty(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);

@@ -573,7 +573,7 @@ struct alternative_traits<any> {
     }
   };
 
-  _LIBCPP_HIDE_FROM_ABI static bool empty(const any& __value) noexcept { return !__value.has_value(); }
+  _LIBCPP_HIDE_FROM_ABI static bool has_value(const any& __value) noexcept { return __value.has_value(); }
 
   template <class _Tp, class _Self>
   _LIBCPP_HIDE_FROM_ABI static auto try_cast(_Self&& __self) noexcept {
