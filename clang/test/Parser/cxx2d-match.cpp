@@ -663,6 +663,19 @@ int test_structured_jump_statements(char c) {
   }
 }
 
+int test_expression_goto(char c) {
+retry:
+  (void)match (c) {
+    case 'a' => goto retry;
+    case 'b' => goto done;
+    case _ => 0;
+  };
+  return 1;
+
+done:
+  return 0;
+}
+
 void test_jump_into_match_handler(int value) {
   goto handler; // expected-error {{cannot jump from this goto statement to its label}}
   match (value) {

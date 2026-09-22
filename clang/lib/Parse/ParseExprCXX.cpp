@@ -5010,10 +5010,10 @@ StmtResult Parser::ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
     Result = ParseDoReturnStatement();
     SemiError = "do_return";
     break;
-  case tok::kw_goto: {
-    Diag(Tok, diag::err_goto_into_protected_scope);
-    return StmtError();
-  }
+  case tok::kw_goto:
+    Result = ParseGotoStatement();
+    SemiError = "goto";
+    break;
   case tok::kw_return:
     Result = ParseReturnStatement();
     SemiError = "return";
