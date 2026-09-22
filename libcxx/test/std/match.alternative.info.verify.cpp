@@ -15,9 +15,9 @@
 constexpr std::alternative_info typed_empty{^^int, /*empty=*/true};
 // expected-error@-1 {{constexpr variable 'typed_empty' must be initialized by a constant expression}}
 
-int expected_has_no_empty_name(const std::expected<int, long>& value) {
+int expected_has_no_null_name(const std::expected<int, long>& value) {
   return match (value) {
-    case { .empty } => 0; // expected-error {{alternative name 'empty' is not defined}}
+    case { .null } => 0; // expected-error {{alternative name 'null' is not defined}}
     case _ => 1;
   };
 }
