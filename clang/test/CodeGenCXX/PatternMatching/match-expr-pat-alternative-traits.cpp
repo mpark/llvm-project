@@ -201,7 +201,7 @@ struct OpenChoice {};
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool empty(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);
@@ -247,8 +247,8 @@ int match_distinct_open_operations(OpenChoice& value) {
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z22match_open_empty_stateR10OpenChoice
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE5emptyERKS0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE5emptyERKS0_
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI10OpenChoiceE9has_valueERKS0_
 // CHECK: ret i32
 int match_open_empty_state(OpenChoice& value) {
   return match (value) {

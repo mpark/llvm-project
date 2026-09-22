@@ -305,10 +305,10 @@ struct alternative_traits<optional<_Tp>> {
 
   static constexpr bool has_residual_states = false;
 
-  enum class state : bool { empty = false, value = true };
+  enum class state : bool { null = false, value = true };
 
   _LIBCPP_HIDE_FROM_ABI static constexpr state index(const optional<_Tp>& __value) noexcept {
-    return __value.has_value() ? state::value : state::empty;
+    return __value.has_value() ? state::value : state::null;
   }
 
   template <state _State, class _Self>
