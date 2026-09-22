@@ -416,7 +416,7 @@ int missing_null_pointer_state(int *pointer) {
 int named_pointer_states_are_builtin(int *pointer) {
   return match (pointer) {
     case { .value: int &value } => value;
-    case { .empty } => 0;
+    case { .null } => 0;
   };
 }
 
@@ -1057,7 +1057,7 @@ bool operator==(const OpenChoice&, int);
 
 template<>
 struct std::alternative_traits<OpenChoice> {
-  static bool empty(const OpenChoice&);
+  static bool has_value(const OpenChoice&);
 
   template<class T, class Self>
   static T* try_cast(Self&&);
