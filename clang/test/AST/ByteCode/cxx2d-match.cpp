@@ -1601,14 +1601,27 @@ constexpr int declaration_subpattern_pack(DeclarationPackFour value) {
 
 static_assert(declaration_subpattern_pack({1, 2, 3, 4}) == 12);
 
-constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
+template<class... Types>
+constexpr bool fixed_type_subpattern_pack(DeclarationPackFour value) {
   return match (value) {
-    case [int first, int ...middle, int last] =>
-        first + (... + middle) + last;
+    case [Types...] => true;
+    case _ => false;
   };
 }
 
-static_assert(typed_declaration_subpattern_pack({1, 2, 3, 4}) == 10);
+static_assert(fixed_type_subpattern_pack<int, int, int, int>({1, 2, 3, 4}));
+static_assert(!fixed_type_subpattern_pack<int, long, int, int>({1, 2, 3, 4}));
+
+template<auto... Values>
+constexpr bool fixed_value_subpattern_pack(DeclarationPackFour value) {
+  return match (value) {
+    case [Values...] => true;
+    case _ => false;
+  };
+}
+
+static_assert(fixed_value_subpattern_pack<1, 2, 3, 4>({1, 2, 3, 4}));
+static_assert(!fixed_value_subpattern_pack<1, 2, 3, 5>({1, 2, 3, 4}));
 
 constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
   return match (value) {

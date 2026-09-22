@@ -4702,6 +4702,84 @@ public:
         return Declaration && Declaration->getDeclaration()->isParameterPack();
       });
       for (MatchPattern *C : Children) {
+        auto *TP = dyn_cast<TypePattern>(C);
+        auto *DP = dyn_cast<DeclarationPattern>(C);
+        QualType ExpansionType;
+        if (TP)
+          ExpansionType = TP->getType();
+        else if (DP && DP->getDeclaration()->isParameterPack())
+          ExpansionType = DP->getDeclaration()->getType();
+        if (!ExpansionType.isNull() &&
+            isa<PackExpansionType>(ExpansionType) &&
+            cast<PackExpansionType>(ExpansionType)
+                ->getPattern()
+                ->containsUnexpandedParameterPack()) {
+          const auto *Expansion = cast<PackExpansionType>(ExpansionType);
+          QualType PackPattern = Expansion->getPattern();
+          SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+          getSema().collectUnexpandedParameterPacks(PackPattern, Unexpanded);
+
+          auto BuildPattern = [&](TypeSourceInfo *TInfo) {
+            if (TP)
+              return getSema().ActOnTypePattern(TInfo);
+            VarDecl *Old = DP->getDeclaration();
+            VarDecl *VD = VarDecl::Create(
+                getSema().Context, getSema().CurContext,
+                Old->getInnerLocStart(), Old->getLocation(),
+                Old->getIdentifier(), TInfo->getType(), TInfo,
+                Old->getStorageClass());
+            if (Old->isImplicit())
+              VD->setImplicit();
+            if (Old->hasAttrs())
+              VD->setAttrs(Old->getAttrs());
+            return getSema().ActOnDeclarationPattern(VD, C->getSourceRange());
+          };
+
+          bool Expand = true;
+          bool RetainExpansion = false;
+          UnsignedOrNone OrigNumExpansions = Expansion->getNumExpansions();
+          UnsignedOrNone NumExpansions = OrigNumExpansions;
+          if (getDerived().TryExpandParameterPacks(
+                  C->getEndLoc(), C->getSourceRange(), Unexpanded,
+                  /*FailOnPackProducingTemplates=*/true, Expand,
+                  RetainExpansion, NumExpansions))
+            return true;
+
+          if (Expand) {
+            for (unsigned I = 0; I != *NumExpansions; ++I) {
+              Sema::ArgPackSubstIndexRAII SubstIndex(getSema(), I);
+              QualType Type = getDerived().TransformType(PackPattern);
+              if (Type.isNull())
+                return true;
+              if (Type->containsUnexpandedParameterPack())
+                Type = getSema().Context.getPackExpansionType(
+                    Type, OrigNumExpansions);
+              TypeSourceInfo *TInfo =
+                  getSema().Context.getTrivialTypeSourceInfo(
+                      Type, C->getBeginLoc());
+              ActionResult<MatchPattern *> NewPattern = BuildPattern(TInfo);
+              if (NewPattern.isInvalid())
+                return true;
+              Patterns.push_back(NewPattern.get());
+            }
+
+            if (RetainExpansion) {
+              ForgetPartiallySubstitutedPackRAII Forget(getDerived());
+              TypeSourceInfo *OldTInfo =
+                  TP ? TP->getTypeSourceInfo()
+                     : DP->getDeclaration()->getTypeSourceInfo();
+              TypeSourceInfo *TInfo = getDerived().TransformType(OldTInfo);
+              if (!TInfo)
+                return true;
+              ActionResult<MatchPattern *> NewPattern = BuildPattern(TInfo);
+              if (NewPattern.isInvalid())
+                return true;
+              Patterns.push_back(NewPattern.get());
+            }
+            continue;
+          }
+        }
+
         if (auto *EP = dyn_cast<ExpressionPattern>(C);
             EP && EP->isPackExpansion()) {
           Expr *E = EP->getExpr();

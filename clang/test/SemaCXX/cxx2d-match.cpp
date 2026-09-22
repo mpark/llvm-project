@@ -899,7 +899,7 @@ static_assert(declaration_subpattern_pack({1, 2, 3, 4}) == 12);
 
 constexpr int unnamed_declaration_subpattern_pack(DeclarationPackFour value) {
   return match (value) {
-    case [auto&& ...] => 1;
+    case [auto ...] => 1;
   };
 }
 
@@ -918,38 +918,39 @@ static_assert(
     dependent_unnamed_declaration_subpattern_pack(EmptyDecomposition{}) == 1);
 static_assert(dependent_unnamed_declaration_subpattern_pack(0) == -1);
 
-struct InitializationCounter {
-  mutable int copies = 0;
-
-  constexpr InitializationCounter() = default;
-  constexpr InitializationCounter(const InitializationCounter& other) {
-    ++other.copies;
-  }
-};
-
-struct InitializationCounterPair {
-  InitializationCounter first;
-  InitializationCounter second;
-};
-
-constexpr int unnamed_declaration_subpattern_pack_does_not_initialize() {
-  InitializationCounterPair value;
-  match (value) {
-    case [InitializationCounter ...] => ;
-  }
-  return value.first.copies + value.second.copies;
-}
-
-static_assert(unnamed_declaration_subpattern_pack_does_not_initialize() == 0);
-
-constexpr int typed_declaration_subpattern_pack(DeclarationPackFour value) {
+int concrete_declaration_subpattern_packs_are_rejected(
+    DeclarationPackFour value) {
   return match (value) {
-    case [int first, int ...middle, int last] =>
-        first + (... + middle) + last;
+    case [int ...] => 0; // expected-error {{arity-inferred declaration pattern pack requires a placeholder type}}
   };
 }
 
-static_assert(typed_declaration_subpattern_pack({1, 2, 3, 4}) == 10);
+template<class... Types>
+constexpr bool fixed_type_subpattern_pack(DeclarationPackFour value) {
+  return match (value) {
+    case [Types...] => true;
+    case _ => false;
+  };
+}
+
+static_assert(fixed_type_subpattern_pack<int, int, int, int>({1, 2, 3, 4}));
+static_assert(!fixed_type_subpattern_pack<int, long, int, int>({1, 2, 3, 4}));
+
+template<auto... Values>
+constexpr bool fixed_value_subpattern_pack(DeclarationPackFour value) {
+  return match (value) {
+    case [Values...] => true;
+    case _ => false;
+  };
+}
+
+static_assert(fixed_value_subpattern_pack<1, 2, 3, 4>({1, 2, 3, 4}));
+static_assert(!fixed_value_subpattern_pack<1, 2, 3, 5>({1, 2, 3, 4}));
+
+template<class... Types>
+void named_fixed_type_subpattern_pack_is_rejected(DeclarationPackFour value) {
+  match(value, case [Types ...elements]); // expected-error {{fixed declaration pattern pack cannot introduce a name}}
+}
 
 constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
   return match (value) {
