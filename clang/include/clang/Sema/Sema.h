@@ -11582,6 +11582,7 @@ public:
   CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                             MatchPatternState &State,
                             MatchProjectionCache *ProjectionCache = nullptr);
+  void DiscardUninitializedMatchPatternDeclarations(MatchPattern *Pattern);
   bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache);
