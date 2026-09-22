@@ -44,7 +44,7 @@ template <class _Traits>
 concept has_value_name = requires { _Traits::state::value; };
 
 template <class _Traits>
-concept has_empty_name = requires { _Traits::state::empty; };
+concept has_null_name = requires { _Traits::state::null; };
 
 constexpr std::alternative_info index_only_state;
 static_assert(index_only_state.info == std::meta::info{});
@@ -64,7 +64,7 @@ constexpr bool test_pointer() {
   static_assert(!Traits::has_residual_states);
   static_assert(noexcept(Traits::index(std::declval<int* const&>())));
   static_assert(std::is_same_v<decltype(Traits::index(std::declval<int* const&>())), Traits::state>);
-  static_assert(Traits::state::empty == Traits::state(false));
+  static_assert(Traits::state::null == Traits::state(false));
   static_assert(Traits::state::value == Traits::state(true));
   static_assert(has_alternative_info<Traits, 0>);
   static_assert(has_alternative_info<Traits, 1>);
@@ -75,7 +75,7 @@ constexpr bool test_pointer() {
   static_assert(Traits::alternatives[1].info == ^^int);
   static_assert(!has_projection<Traits, Traits::state(0), int*&>);
   static_assert(has_projection<Traits, Traits::state(1), int*&>);
-  static_assert(!has_projection<Traits, Traits::state::empty, int*&>);
+  static_assert(!has_projection<Traits, Traits::state::null, int*&>);
   static_assert(has_projection<Traits, Traits::state::value, int*&>);
   static_assert(std::is_same_v<decltype(Traits::get<Traits::state::value>(std::declval<int*&>())), int&>);
 
@@ -91,7 +91,7 @@ constexpr bool test_pointer() {
   assert(Traits::index(pointer) == Traits::state::value);
   assert(Traits::get<Traits::state::value>(pointer) == 42);
   pointer = nullptr;
-  assert(Traits::index(pointer) == Traits::state::empty);
+  assert(Traits::index(pointer) == Traits::state::null);
   return true;
 }
 
@@ -103,7 +103,7 @@ constexpr bool test_optional() {
   static_assert(std::is_same_v<decltype(Traits::index(std::declval<const std::optional<int>&>())), Traits::state>);
   static_assert(!has_projection<Traits, Traits::state(0), std::optional<int>&>);
   static_assert(has_projection<Traits, Traits::state(1), std::optional<int>&>);
-  static_assert(!has_projection<Traits, Traits::state::empty, std::optional<int>&>);
+  static_assert(!has_projection<Traits, Traits::state::null, std::optional<int>&>);
   static_assert(has_projection<Traits, Traits::state::value, std::optional<int>&>);
   static_assert(has_alternative_info<Traits, 0>);
   static_assert(has_alternative_info<Traits, 1>);
@@ -111,7 +111,7 @@ constexpr bool test_optional() {
   static_assert([:Traits::alternatives[0].info:] == std::nullopt);
   static_assert(Traits::alternatives[0].empty);
   static_assert(!Traits::alternatives[1].empty);
-  static_assert(Traits::index(std::nullopt) == Traits::state::empty);
+  static_assert(Traits::index(std::nullopt) == Traits::state::null);
   static_assert(Traits::alternatives[1].info == ^^int);
   static_assert(std::is_same_v<decltype(Traits::get<Traits::state::value>(std::declval<std::optional<int>&>())), int&>);
   static_assert(
@@ -121,13 +121,13 @@ constexpr bool test_optional() {
   assert(Traits::index(value) == Traits::state::value);
   assert(Traits::get<Traits::state::value>(value) == 42);
   value.reset();
-  assert(Traits::index(value) == Traits::state::empty);
+  assert(Traits::index(value) == Traits::state::null);
 
   using RefTraits = std::alternative_traits<std::optional<int&>>;
   static_assert(alternative_count<RefTraits> == 2);
   static_assert(!RefTraits::has_residual_states);
   static_assert(RefTraits::alternatives[1].info == ^^int&);
-  static_assert(RefTraits::state::empty == RefTraits::state(false));
+  static_assert(RefTraits::state::null == RefTraits::state(false));
   static_assert(RefTraits::state::value == RefTraits::state(true));
   static_assert(has_value_name<RefTraits>);
   static_assert(
@@ -150,7 +150,7 @@ constexpr bool test_optional() {
   RefTraits::get<RefTraits::state::value>(std::move(reference)) = 8;
   assert(referred == 8);
   reference.reset();
-  assert(RefTraits::index(reference) == RefTraits::state::empty);
+  assert(RefTraits::index(reference) == RefTraits::state::null);
   return true;
 }
 
@@ -250,7 +250,7 @@ constexpr bool test_expected() {
   static_assert(has_projection<Traits, Traits::state::error, Expected&>);
   static_assert(Traits::state::value == Traits::state(false));
   static_assert(Traits::state::error == Traits::state(true));
-  static_assert(!has_empty_name<Traits>);
+  static_assert(!has_null_name<Traits>);
   static_assert(Traits::alternatives[0].info == ^^int);
   static_assert(Traits::alternatives[1].info == ^^long);
   static_assert(std::is_same_v<decltype(Traits::get<Traits::state::value>(std::declval<Expected&>())), int&>);
@@ -290,8 +290,8 @@ bool test_any() {
   static_assert(std::is_same_v<decltype(*std::declval<InitConstResult&&>()), const int&>);
 
   std::any value = 42;
-  assert(Traits::empty(std::any{}));
-  assert(!Traits::empty(value));
+  assert(!Traits::has_value(std::any{}));
+  assert(Traits::has_value(value));
   auto integer = Traits::try_cast<int>(value);
   assert(integer);
   assert(*std::move(integer) == 42);

@@ -55,13 +55,13 @@ struct alternative_traits<_Tp*> {
   };
   static constexpr bool has_residual_states = false;
 
-  enum class state : bool { empty = false, value = true };
+  enum class state : bool { null = false, value = true };
 
   // The parameter is templated so nullable library types can reuse this
   // implementation while operating on the actual matching subject.
   template <class _Self>
   _LIBCPP_HIDE_FROM_ABI static constexpr state index(const _Self& __self) noexcept {
-    return __self ? state::value : state::empty;
+    return __self ? state::value : state::null;
   }
 
   template <state _State, class _Self>

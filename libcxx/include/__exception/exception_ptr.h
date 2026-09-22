@@ -200,7 +200,7 @@ _LIBCPP_HIDE_FROM_ABI exception_ptr make_exception_ptr(_Ep __e) _NOEXCEPT {
 #  if _LIBCPP_STD_VER >= 29 && __has_feature(pattern_matching)
 template <>
 struct alternative_traits<exception_ptr> {
-  _LIBCPP_HIDE_FROM_ABI static bool empty(const exception_ptr& __p) noexcept { return !__p; }
+  _LIBCPP_HIDE_FROM_ABI static bool has_value(const exception_ptr& __p) noexcept { return bool(__p); }
 
   template <class _Ep>
   _LIBCPP_HIDE_FROM_ABI static const auto* try_cast(const exception_ptr& __p) noexcept {
