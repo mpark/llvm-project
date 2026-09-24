@@ -19781,7 +19781,12 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
           CandidateExpr = getSema().ActOnCaseConditionExpr(
               HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
               PatternInstantiation, PatternIsIrrefutable,
-              /*NeedsCaseInstantiation=*/false);
+              /*NeedsCaseInstantiation=*/false,
+              /*Instantiations=*/{},
+              /*HasSemanticInstantiations=*/false,
+              cast<CaseConditionExpr>(E)->isPatternDeclaration(),
+              cast<CaseConditionExpr>(E)
+                  ->shouldDiagnoseRedundantPatternDeclarationElse());
         else
           CandidateExpr = getSema().ActOnMatchTestExpr(
               HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
@@ -19864,7 +19869,10 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
         HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
         Representative.PatternInstantiation,
         Representative.PatternIsIrrefutable, StillNeedsCaseInstantiation,
-        Instantiations, /*HasSemanticInstantiations=*/true);
+        Instantiations, /*HasSemanticInstantiations=*/true,
+        cast<CaseConditionExpr>(E)->isPatternDeclaration(),
+        cast<CaseConditionExpr>(E)
+            ->shouldDiagnoseRedundantPatternDeclarationElse());
   ExprResult Result = getSema().ActOnMatchTestExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
       Representative.PatternInstantiation, Representative.IfLoc,
