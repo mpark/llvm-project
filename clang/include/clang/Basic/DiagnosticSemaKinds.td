@@ -7169,6 +7169,8 @@ def note_enters_do_expression : Note<
   "jump enters a do-expression">;
 def note_enters_match_handler : Note<
   "jump enters a match handler">;
+def note_enters_pattern_condition_handler : Note<
+  "jump enters a statement controlled by a pattern condition">;
 
 def note_exits_cleanup : Note<
   "jump exits scope of variable with __attribute__((cleanup))">;
