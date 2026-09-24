@@ -11256,16 +11256,24 @@ public:
       bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
       ArrayRef<MatchTestInstantiation> Instantiations = {},
       bool HasSemanticInstantiations = false);
-  ExprResult
-  ActOnCaseConditionExpr(VarDecl *HoldingVar, Expr *Subject,
-                         SourceLocation CaseLoc, MatchPattern *Pattern,
-                         MatchPatternInstantiation *PatternInstantiation,
-                         bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-                         ArrayRef<MatchTestInstantiation> Instantiations = {},
-                         bool HasSemanticInstantiations = false);
+  ExprResult ActOnCaseConditionExpr(
+      VarDecl *HoldingVar, Expr *Subject, SourceLocation CaseLoc,
+      MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
+      bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
+      ArrayRef<MatchTestInstantiation> Instantiations = {},
+      bool HasSemanticInstantiations = false, bool IsPatternDeclaration = false,
+      bool DiagnoseRedundantPatternDeclarationElse = true);
   ExprResult BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS, Expr *RHS);
   ExprResult AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
                                       Expr *Increment = nullptr);
+  bool CheckPatternDeclarationScope(Scope *S, ArrayRef<Decl *> Declarations);
+  bool CheckPatternDeclarationElse(Stmt *Else, SourceLocation ElseLoc);
+  struct MatchExhaustivenessResult {
+    bool IsExhaustive;
+    bool IsFullyCovered;
+  };
+  std::optional<MatchExhaustivenessResult>
+  GetPatternDeclarationExhaustiveness(CaseConditionExpr *Condition);
   ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
   ExprResult ActOnMatchSelectExpr(
@@ -11400,11 +11408,13 @@ public:
   bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
                                      MatchPatternState &State,
                                      MatchProjectionCache *ProjectionCache);
-  /// Diagnose required exhaustiveness and return whether the cases also cover
-  /// every residual runtime state.
-  bool CheckMatchSelectExhaustiveness(
+  /// Diagnose required exhaustiveness and report both required and residual
+  /// coverage.
+  std::optional<MatchExhaustivenessResult> CheckMatchExhaustiveness(
       Expr *Subject, ArrayRef<MatchCase> Cases,
-      ArrayRef<MatchCaseInstantiation> Instantiations);
+      ArrayRef<MatchCaseInstantiation> Instantiations,
+      bool DiagnoseExhaustiveness = true,
+      bool UseResolvedInstantiationDependentPatterns = false);
 
   ///@}
 

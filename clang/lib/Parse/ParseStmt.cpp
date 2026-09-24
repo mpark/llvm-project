@@ -314,6 +314,8 @@ Retry:
   }
 
   case tok::kw_case:                // C99 6.8.1: labeled-statement
+    if (getLangOpts().PatternMatching && isPatternDeclaration())
+      return ParsePatternDeclaration(StmtCtx);
     return ParseCaseStatement(StmtCtx);
 
   case tok::kw_default:             // C99 6.8.1: labeled-statement
@@ -647,6 +649,118 @@ StmtResult Parser::ParseMatchStatement(bool MissingSubjectParens) {
   if (Expr.isInvalid())
     return Actions.ActOnExprStmtError();
   return Actions.ActOnExprStmt(Expr, /*DiscardedValue=*/true);
+}
+
+bool Parser::isPatternDeclaration() {
+  assert(Tok.is(tok::kw_case) && "not at a case introducer");
+  if (!NextToken().isOneOf(tok::l_square, tok::l_brace))
+    return false;
+
+  TentativeParsingAction TPA(*this);
+  ConsumeToken();
+  tok::TokenKind Open = Tok.getKind();
+  BalancedDelimiterTracker Delimiter(*this, Open);
+  if (Delimiter.consumeOpen()) {
+    TPA.Revert();
+    return false;
+  }
+  Delimiter.skipToEnd();
+  bool Result = Tok.is(tok::equal);
+  TPA.Revert();
+  return Result;
+}
+
+StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
+  assert(Tok.is(tok::kw_case) && "not at a pattern declaration");
+  SourceLocation CaseLoc = Tok.getLocation();
+
+  if ((StmtCtx & ParsedStmtContext::AllowDeclarationsInC) ==
+      ParsedStmtContext()) {
+    Diag(CaseLoc, diag::err_pattern_declaration_requires_compound_scope);
+    return StmtError();
+  }
+
+  InjectedDeclSet PatternDecls;
+  Sema::ConditionResult Condition = ParseCaseCondition(
+      /*InitStmt=*/nullptr, CaseLoc, Sema::ConditionKind::Boolean,
+      /*MissingOK=*/false, &PatternDecls);
+  if (Condition.isInvalid())
+    return StmtError();
+  SmallVector<Decl *, 4> PatternDeclList(PatternDecls.begin(),
+                                         PatternDecls.end());
+  llvm::sort(PatternDeclList, [&](Decl *LHS, Decl *RHS) {
+    return PP.getSourceManager().isBeforeInTranslationUnit(LHS->getLocation(),
+                                                           RHS->getLocation());
+  });
+  bool InvalidScope =
+      Actions.CheckPatternDeclarationScope(getCurScope(), PatternDeclList);
+
+  auto *Match = dyn_cast_or_null<CaseConditionExpr>(
+      MatchTestExpr::findInCondition(Condition.get().second));
+  if (!Match)
+    return StmtError();
+
+  MatchPattern *Pattern = Match->getPattern()->IgnoreParens();
+  if (!isa<DecompositionPattern, AlternativePattern>(Pattern)) {
+    Diag(Pattern->getBeginLoc(), diag::err_pattern_declaration_top_level);
+    return StmtError();
+  }
+
+  SourceLocation ElseLoc;
+  StmtResult Failure;
+  if (TryConsumeToken(tok::kw_else, ElseLoc)) {
+    Failure = ParseStatement();
+    if (Failure.isInvalid())
+      return StmtError();
+  } else {
+    if (ExpectAndConsumeSemi(diag::err_expected_semi_after_expr))
+      return StmtError();
+  }
+
+  // A pattern declaration governs the remainder of its compound statement.
+  // Parse that continuation with the introduced names in scope so deferred
+  // alternative candidates can instantiate it as their handler.
+  for (Decl *D : PatternDecls)
+    if (auto *ND = dyn_cast<NamedDecl>(D);
+        ND && ND->getDeclName() && !ND->isInvalidDecl())
+      Actions.PushOnScopeChains(ND, getCurScope(), /*AddToContext=*/false);
+
+  SourceLocation ContinuationBegin = Tok.getLocation();
+  StmtVector ContinuationStmts;
+  bool LastIsError = false;
+  ParseCompoundStatementSequence(ContinuationStmts, StmtCtx, LastIsError);
+  StmtResult Continuation = Actions.ActOnCompoundStmt(
+      ContinuationBegin, Tok.getLocation(), ContinuationStmts,
+      /*isStmtExpr=*/false);
+  if (Continuation.isInvalid())
+    return StmtError();
+
+  if (Failure.isUsable() &&
+      Actions.CheckPatternDeclarationElse(Failure.get(), ElseLoc))
+    return StmtError();
+  if (InvalidScope)
+    return StmtError();
+
+  bool DiagnoseRedundantElse =
+      !Match->getSubject()->isTypeDependent() &&
+      !static_cast<bool>(Pattern->getDependence() &
+                         ExprDependence::Instantiation);
+  Match->setIsPatternDeclaration(DiagnoseRedundantElse);
+  if (AttachCaseCondition(Condition, CaseLoc, Continuation.get()))
+    return StmtError();
+
+  StmtResult Result = Actions.ActOnIfStmt(
+      CaseLoc, IfStatementKind::Ordinary,
+      /*LParenLoc=*/{}, /*InitStmt=*/nullptr, Condition,
+      /*RParenLoc=*/{}, Continuation.get(), ElseLoc, Failure.get());
+  if (Result.isInvalid())
+    return Result;
+
+  if (auto *Deferred = MatchTestExpr::findCaseConditionRequiringInstantiation(
+          Condition.get().second);
+      Deferred && !Actions.CurContext->isDependentContext())
+    return Actions.ExpandDeferredMatchConditionStmt(Result.get(), CaseLoc);
+  return Result;
 }
 
 StmtResult Parser::ParseSEHTryBlock() {
@@ -1185,6 +1299,69 @@ StmtResult Parser::handleExprStmt(ExprResult E, ParsedStmtContext StmtCtx) {
   return Actions.ActOnExprStmt(E, /*DiscardedValue=*/!IsStmtExprResult);
 }
 
+void Parser::ParseCompoundStatementSequence(StmtVector &Stmts,
+                                            ParsedStmtContext StmtCtx,
+                                            bool &LastIsError) {
+  while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&
+         Tok.isNot(tok::eof)) {
+    if (Tok.is(tok::annot_pragma_unused)) {
+      HandlePragmaUnused();
+      continue;
+    }
+
+    if (ConsumeNullStmt(Stmts))
+      continue;
+
+    StmtResult R;
+    if (Tok.isNot(tok::kw___extension__)) {
+      R = ParseStatementOrDeclaration(Stmts, StmtCtx);
+    } else {
+      // __extension__ can start declarations and it can also be a unary
+      // operator for expressions.  Consume multiple __extension__ markers here
+      // until we can determine which is which.
+      // FIXME: This loses extension expressions in the AST!
+      SourceLocation ExtLoc = ConsumeToken();
+      while (Tok.is(tok::kw___extension__))
+        ConsumeToken();
+
+      ParsedAttributes attrs(AttrFactory);
+      MaybeParseCXX11Attributes(attrs, /*MightBeObjCMessageSend*/ true);
+
+      // If this is the start of a declaration, parse it as such.
+      if (isDeclarationStatement()) {
+        // __extension__ silences extension warnings in the subdeclaration.
+        // FIXME: Save the __extension__ on the decl as a node somehow?
+        ExtensionRAIIObject O(Diags);
+
+        SourceLocation DeclStart = Tok.getLocation(), DeclEnd;
+        ParsedAttributes DeclSpecAttrs(AttrFactory);
+        DeclGroupPtrTy Res = ParseDeclaration(DeclaratorContext::Block, DeclEnd,
+                                              attrs, DeclSpecAttrs);
+        R = Actions.ActOnDeclStmt(Res, DeclStart, DeclEnd);
+      } else {
+        // Otherwise this was a unary __extension__ marker.
+        ExprResult Res(ParseExpressionWithLeadingExtension(ExtLoc));
+
+        if (Res.isInvalid()) {
+          SkipUntil(tok::semi);
+          continue;
+        }
+
+        // Eat the semicolon at the end of stmt and convert the expr into a
+        // statement.
+        ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
+        R = handleExprStmt(Res, StmtCtx);
+        if (R.isUsable())
+          R = Actions.ActOnAttributedStmt(attrs, R.get());
+      }
+    }
+
+    if (R.isUsable())
+      Stmts.push_back(R.get());
+    LastIsError = R.isInvalid();
+  }
+}
+
 StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr, bool isDoExpr) {
   PrettyStackTraceLoc CrashInfo(PP.getSourceManager(),
                                 Tok.getLocation(),
@@ -1243,64 +1420,7 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr, bool isDoExpr) {
       (isDoExpr ? ParsedStmtContext::InDoExpr : ParsedStmtContext());
 
   bool LastIsError = false;
-  while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&
-         Tok.isNot(tok::eof)) {
-    if (Tok.is(tok::annot_pragma_unused)) {
-      HandlePragmaUnused();
-      continue;
-    }
-
-    if (ConsumeNullStmt(Stmts))
-      continue;
-
-    StmtResult R;
-    if (Tok.isNot(tok::kw___extension__)) {
-      R = ParseStatementOrDeclaration(Stmts, SubStmtCtx);
-    } else {
-      // __extension__ can start declarations and it can also be a unary
-      // operator for expressions.  Consume multiple __extension__ markers here
-      // until we can determine which is which.
-      // FIXME: This loses extension expressions in the AST!
-      SourceLocation ExtLoc = ConsumeToken();
-      while (Tok.is(tok::kw___extension__))
-        ConsumeToken();
-
-      ParsedAttributes attrs(AttrFactory);
-      MaybeParseCXX11Attributes(attrs, /*MightBeObjCMessageSend*/ true);
-
-      // If this is the start of a declaration, parse it as such.
-      if (isDeclarationStatement()) {
-        // __extension__ silences extension warnings in the subdeclaration.
-        // FIXME: Save the __extension__ on the decl as a node somehow?
-        ExtensionRAIIObject O(Diags);
-
-        SourceLocation DeclStart = Tok.getLocation(), DeclEnd;
-        ParsedAttributes DeclSpecAttrs(AttrFactory);
-        DeclGroupPtrTy Res = ParseDeclaration(DeclaratorContext::Block, DeclEnd,
-                                              attrs, DeclSpecAttrs);
-        R = Actions.ActOnDeclStmt(Res, DeclStart, DeclEnd);
-      } else {
-        // Otherwise this was a unary __extension__ marker.
-        ExprResult Res(ParseExpressionWithLeadingExtension(ExtLoc));
-
-        if (Res.isInvalid()) {
-          SkipUntil(tok::semi);
-          continue;
-        }
-
-        // Eat the semicolon at the end of stmt and convert the expr into a
-        // statement.
-        ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
-        R = handleExprStmt(Res, SubStmtCtx);
-        if (R.isUsable())
-          R = Actions.ActOnAttributedStmt(attrs, R.get());
-      }
-    }
-
-    if (R.isUsable())
-      Stmts.push_back(R.get());
-    LastIsError = R.isInvalid();
-  }
+  ParseCompoundStatementSequence(Stmts, SubStmtCtx, LastIsError);
   // StmtExpr needs to do copy initialization for last statement.
   // If last statement is invalid, the last statement in `Stmts` will be
   // incorrect. Then the whole compound statement should also be marked as

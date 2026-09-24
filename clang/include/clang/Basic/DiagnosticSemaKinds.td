@@ -14574,6 +14574,14 @@ def err_case_init_statement : Error<
   "a pattern condition cannot be used as an init-statement">;
 def err_case_switch_condition : Error<
   "a pattern condition is not permitted in a switch statement">;
+def err_pattern_declaration_top_level : Error<
+  "a pattern declaration must begin with a decomposition or alternative pattern">;
+def err_pattern_declaration_requires_else : Error<
+  "refutable pattern declaration requires an 'else' statement">;
+def err_pattern_declaration_else_fallthrough : Error<
+  "'else' statement of a pattern declaration must not complete normally">;
+def err_pattern_declaration_requires_compound_scope : Error<
+  "a pattern declaration must appear directly in a compound statement">;
 def err_match_not_exhaustive : Error<
   "match expression is not exhaustive%select{|; example of a missing case: %1}0">;
 def err_match_handler_type_mismatch : Error<

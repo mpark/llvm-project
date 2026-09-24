@@ -1002,7 +1002,15 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
     }
 
     JumpDest Cont = getJumpDestInCurrentScope("if.end");
-    JumpDest Failed = Else ? getJumpDestInCurrentScope("if.else") : Cont;
+    const auto *PatternDeclaration = dyn_cast_or_null<CaseConditionExpr>(
+        MatchTestExpr::findInCondition(S.getCond()));
+    bool HasUnreachableFailure = !Else && PatternDeclaration &&
+                                 PatternDeclaration->isFailureUnreachable();
+    JumpDest Failed =
+        Else ? getJumpDestInCurrentScope("if.else")
+        : HasUnreachableFailure
+            ? getJumpDestInCurrentScope("pattern.declaration.unreachable")
+            : Cont;
     EmitCaseConditionChain(
         S.getCond(),
         [&](const MatchTestInstantiation *Instantiation) {
@@ -1021,6 +1029,10 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
       EmitStmt(Else);
       if (HaveInsertPoint())
         EmitBranchThroughCleanup(Cont);
+    }
+    if (HasUnreachableFailure) {
+      EmitBlock(Failed.getBlock(), true);
+      Builder.CreateUnreachable();
     }
     EmitBlock(Cont.getBlock(), true);
     return;
