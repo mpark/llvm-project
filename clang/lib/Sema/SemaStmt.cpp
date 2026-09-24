@@ -989,6 +989,28 @@ StmtResult Sema::ActOnIfStmt(SourceLocation IfLoc,
   Expr *CondExpr = Cond.get().second;
   assert((CondExpr || ConstevalOrNegatedConsteval) &&
          "If statement: missing condition");
+  if (auto *Match = dyn_cast_or_null<CaseConditionExpr>(
+          MatchTestExpr::findInCondition(CondExpr));
+      Match && Match->isPatternDeclaration() &&
+      !Match->needsCaseInstantiation() &&
+      !Match->getSubject()->isTypeDependent()) {
+    if (std::optional<MatchExhaustivenessResult> Exhaustiveness =
+            GetPatternDeclarationExhaustiveness(Match)) {
+      if (!elseStmt && !Exhaustiveness->IsExhaustive) {
+        Diag(Match->getPattern()->getBeginLoc(),
+             diag::err_pattern_declaration_requires_else);
+        return StmtError();
+      }
+      if (elseStmt && Exhaustiveness->IsFullyCovered &&
+          Match->shouldDiagnoseRedundantPatternDeclarationElse()) {
+        Diag(ElseLoc, diag::err_match_case_redundant);
+        return StmtError();
+      }
+      if (Exhaustiveness->IsFullyCovered ||
+          (!elseStmt && Exhaustiveness->IsExhaustive))
+        Match->setFailureUnreachable();
+    }
+  }
   // Only call the CommaVisitor when not C89 due to differences in scope flags.
   if (CondExpr && (getLangOpts().C99 || getLangOpts().CPlusPlus) &&
       !Diags.isIgnored(diag::warn_comma_operator, CondExpr->getExprLoc()))

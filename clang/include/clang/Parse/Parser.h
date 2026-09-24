@@ -7594,6 +7594,12 @@ public:
   StmtResult ParseExprStatement(ParsedStmtContext StmtCtx);
 
   StmtResult ParseMatchStatement(bool MissingSubjectParens = false);
+  bool isPatternDeclaration();
+  StmtResult ParsePatternDeclaration(ParsedStmtContext StmtCtx);
+
+  void ParseCompoundStatementSequence(StmtVector &Stmts,
+                                      ParsedStmtContext StmtCtx,
+                                      bool &LastIsError);
 
   /// ParseLabeledStatement - We have an identifier and a ':' after it.
   ///

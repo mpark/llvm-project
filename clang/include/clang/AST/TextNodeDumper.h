@@ -445,6 +445,7 @@ public:
   void VisitAtomicExpr(const AtomicExpr *AE);
   void VisitConvertVectorExpr(const ConvertVectorExpr *S);
   void VisitMatchTestExpr(const MatchTestExpr *Node);
+  void VisitCaseConditionExpr(const CaseConditionExpr *Node);
   void VisitMatchSelectExpr(const MatchSelectExpr *Node);
   void Visit(const MatchPattern *Node);
 };
