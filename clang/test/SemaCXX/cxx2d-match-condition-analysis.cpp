@@ -99,6 +99,32 @@ struct Pair {
   int second;
 };
 
+void jump_into_if_condition(Pair pair) {
+  goto success; // expected-error {{cannot jump from this goto statement to its label}}
+  if (case [int first, int second] = pair) { // expected-note {{jump enters a statement controlled by a pattern condition}}
+  success:
+    use(first + second);
+  }
+}
+
+void jump_into_while_condition(Pair pair) {
+  goto body; // expected-error {{cannot jump from this goto statement to its label}}
+  while (case [0, int value] = pair) { // expected-note {{jump enters a statement controlled by a pattern condition}}
+  body:
+    use(value);
+    break;
+  }
+}
+
+void jump_into_for_condition(Pair pair) {
+  goto body; // expected-error {{cannot jump from this goto statement to its label}}
+  for (; case [0, int value] = pair;) { // expected-note {{jump enters a statement controlled by a pattern condition}}
+  body:
+    use(value);
+    break;
+  }
+}
+
 void or_pattern_condition_bindings(Pair pair) {
   if (case [0, int value] || [int value, 0] = pair)
     use(value);

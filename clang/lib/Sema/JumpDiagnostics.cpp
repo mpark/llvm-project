@@ -85,6 +85,8 @@ private:
                              unsigned &ParentScope);
   void BuildScopeInformation(CompoundLiteralExpr *CLE, unsigned &ParentScope);
   void BuildScopeInformation(Stmt *S, unsigned &origParentScope);
+  void BuildPatternConditionHandlers(Expr *Condition, Stmt *FallbackHandler,
+                                     unsigned ParentScope);
 
   void VerifyJumps();
   void VerifyIndirectJumps();
@@ -347,6 +349,47 @@ void JumpScopeChecker::BuildScopeInformation(CompoundLiteralExpr *CLE,
   ParentScope = Scopes.size() - 1;
 }
 
+static void collectPatternConditionHandlers(Expr *Condition,
+                                            SmallVectorImpl<Stmt *> &Handlers) {
+  if (!Condition)
+    return;
+  Condition = Condition->IgnoreParens();
+  if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
+    Condition = Constant->getSubExpr()->IgnoreParens();
+  if (auto *And = dyn_cast<BinaryOperator>(Condition);
+      And && And->getOpcode() == BO_LAnd) {
+    collectPatternConditionHandlers(And->getLHS(), Handlers);
+    collectPatternConditionHandlers(And->getRHS(), Handlers);
+    return;
+  }
+  auto *Match = dyn_cast<CaseConditionExpr>(Condition);
+  if (!Match)
+    return;
+  for (const MatchTestInstantiation &Instantiation :
+       Match->getInstantiations()) {
+    collectPatternConditionHandlers(Instantiation.Condition, Handlers);
+    if (Instantiation.Handler &&
+        !llvm::is_contained(Handlers, Instantiation.Handler))
+      Handlers.push_back(Instantiation.Handler);
+  }
+}
+
+void JumpScopeChecker::BuildPatternConditionHandlers(Expr *Condition,
+                                                     Stmt *FallbackHandler,
+                                                     unsigned ParentScope) {
+  SmallVector<Stmt *, 4> Handlers;
+  collectPatternConditionHandlers(Condition, Handlers);
+  if (Handlers.empty())
+    Handlers.push_back(FallbackHandler);
+  for (Stmt *Handler : Handlers) {
+    unsigned HandlerScope = Scopes.size();
+    Scopes.emplace_back(ParentScope,
+                        diag::note_enters_pattern_condition_handler,
+                        /*OutDiag=*/0, Handler->getBeginLoc());
+    BuildScopeInformation(Handler, HandlerScope);
+  }
+}
+
 /// BuildScopeInformation - The statements from CI to CE are known to form a
 /// coherent VLA scope with a specified parent node.  Walk through the
 /// statements, adding any labels or gotos to LabelAndGotoScopes and recursively
@@ -419,11 +462,25 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
 
   case Stmt::IfStmtClass: {
     IfStmt *IS = cast<IfStmt>(S);
+    bool PatternCondition = MatchTestExpr::containsCaseCondition(IS->getCond());
     bool AMDGPUPredicate = false;
     if (!(IS->isConstexpr() || IS->isConsteval() ||
           IS->isObjCAvailabilityCheck() ||
-          (AMDGPUPredicate = this->S.AMDGPU().IsPredicate(IS->getCond()))))
+          (AMDGPUPredicate = this->S.AMDGPU().IsPredicate(IS->getCond())) ||
+          PatternCondition))
       break;
+
+    if (PatternCondition && !IS->isConstexpr() && !IS->isConsteval()) {
+      if (Stmt *Init = IS->getInit())
+        BuildScopeInformation(Init, ParentScope);
+      if (VarDecl *Var = IS->getConditionVariable())
+        BuildScopeInformation(Var, ParentScope);
+      BuildScopeInformation(IS->getCond(), ParentScope);
+      BuildPatternConditionHandlers(IS->getCond(), IS->getThen(), ParentScope);
+      if (Stmt *Else = IS->getElse())
+        BuildScopeInformation(Else, ParentScope);
+      return;
+    }
 
     unsigned Diag = diag::note_protected_by_if_available;
     if (IS->isConstexpr())
@@ -452,6 +509,32 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
       Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getBeginLoc()));
       BuildScopeInformation(Else, NewParentScope);
     }
+    return;
+  }
+
+  case Stmt::WhileStmtClass: {
+    auto *WS = cast<WhileStmt>(S);
+    if (!MatchTestExpr::containsCaseCondition(WS->getCond()))
+      break;
+    if (VarDecl *Var = WS->getConditionVariable())
+      BuildScopeInformation(Var, ParentScope);
+    BuildScopeInformation(WS->getCond(), ParentScope);
+    BuildPatternConditionHandlers(WS->getCond(), WS->getBody(), ParentScope);
+    return;
+  }
+
+  case Stmt::ForStmtClass: {
+    auto *FS = cast<ForStmt>(S);
+    if (!MatchTestExpr::containsCaseCondition(FS->getCond()))
+      break;
+    if (Stmt *Init = FS->getInit())
+      BuildScopeInformation(Init, ParentScope);
+    if (VarDecl *Var = FS->getConditionVariable())
+      BuildScopeInformation(Var, ParentScope);
+    BuildScopeInformation(FS->getCond(), ParentScope);
+    if (Expr *Increment = FS->getInc())
+      BuildScopeInformation(Increment, ParentScope);
+    BuildPatternConditionHandlers(FS->getCond(), FS->getBody(), ParentScope);
     return;
   }
 
