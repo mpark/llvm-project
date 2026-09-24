@@ -333,6 +333,8 @@ std::optional<CoveragePatterns> constantPatternsFor(Sema &S, Expr *Condition,
   auto *Comparison = dyn_cast_or_null<BinaryOperator>(Condition);
   if (!Comparison || Comparison->getOpcode() != BO_EQ)
     return std::nullopt;
+  if (Comparison->getRHS()->isValueDependent())
+    return std::nullopt;
 
   Expr::EvalResult Result;
   if (!Comparison->getRHS()->EvaluateAsInt(Result, S.Context))
@@ -1078,18 +1080,47 @@ bool hasGuard(const MatchCaseInstantiation &Case) {
   return Case.Guard.hasGuard() || Case.IfLoc.isValid();
 }
 
+bool isResolvedForExhaustiveness(
+    MatchPattern *Pattern,
+    const MatchPatternInstantiation *PatternInstantiation) {
+  ExprDependence Dependence = Pattern->getDependence();
+  if (static_cast<bool>(Dependence & ExprDependence::Error))
+    return false;
+  if (!static_cast<bool>(Dependence & ExprDependence::Instantiation))
+    return true;
+
+  Pattern = Pattern->IgnoreParens();
+  auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
+  if (!Decomposition)
+    return false;
+
+  const MatchPatternInfo *Info = PatternInstantiation->find(Decomposition);
+  if (!Info || !Info->HasExpandedPatterns)
+    return false;
+  return llvm::all_of(
+      PatternInstantiation->getDecompositionPatterns(Decomposition),
+      [&](MatchPattern *Element) {
+        return isResolvedForExhaustiveness(Element, PatternInstantiation);
+      });
+}
+
 } // namespace
 
-bool Sema::CheckMatchSelectExhaustiveness(
-    Expr *Subject, ArrayRef<MatchCase> Cases,
-    ArrayRef<MatchCaseInstantiation> Instantiations) {
+std::optional<Sema::MatchExhaustivenessResult>
+Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
+                               ArrayRef<MatchCaseInstantiation> Instantiations,
+                               bool DiagnoseExhaustiveness,
+                               bool UseResolvedInstantiationDependentPatterns) {
   if (!Subject || Subject->isTypeDependent() ||
-      llvm::any_of(Instantiations, [](const MatchCaseInstantiation &Case) {
-        ExprDependence Dependence = Case.Pattern->getDependence();
-        return static_cast<bool>(Dependence & (ExprDependence::Instantiation |
-                                               ExprDependence::Error));
+      llvm::any_of(Instantiations, [&](const MatchCaseInstantiation &Case) {
+        if (!UseResolvedInstantiationDependentPatterns)
+          return static_cast<bool>(
+              Case.Pattern->getDependence() &
+              (ExprDependence::Instantiation | ExprDependence::Error));
+        return !isResolvedForExhaustiveness(Case.Pattern,
+                                            Case.PatternInstantiation);
       }))
-    return false;
+    return std::nullopt;
 
   QualType SubjectType = Subject->getType();
   SmallVector<PatternRow, 8> DefiniteMatrix;
@@ -1185,12 +1216,16 @@ bool Sema::CheckMatchSelectExhaustiveness(
   SmallVector<CtorKey, 4> Witness;
   Usefulness Exhaustive = isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
                                    ConstructorDomain::Required, &Witness);
-  if (Exhaustive == Usefulness::Useful) {
+  if (DiagnoseExhaustiveness && Exhaustive == Usefulness::Useful) {
     Diag(Subject->getBeginLoc(), diag::err_match_not_exhaustive)
         << true << printWitness(Context, Witness);
   }
 
-  return isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
-                  ConstructorDomain::RequiredAndResidual,
-                  nullptr) == Usefulness::NotUseful;
+  bool IsFullyCovered =
+      isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
+               ConstructorDomain::RequiredAndResidual,
+               nullptr) == Usefulness::NotUseful;
+  return MatchExhaustivenessResult{
+      .IsExhaustive = Exhaustive == Usefulness::NotUseful,
+      .IsFullyCovered = IsFullyCovered};
 }

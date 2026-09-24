@@ -3450,6 +3450,12 @@ void TextNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {
     OS << " instantiated";
 }
 
+void TextNodeDumper::VisitCaseConditionExpr(const CaseConditionExpr *Node) {
+  VisitMatchTestExpr(Node);
+  if (Node->isPatternDeclaration())
+    OS << " pattern_declaration";
+}
+
 void TextNodeDumper::VisitMatchSelectExpr(const MatchSelectExpr *Node) {
   if (Node->isConstexpr())
     OS << " constexpr";

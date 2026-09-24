@@ -5790,21 +5790,43 @@ public:
 };
 
 class CaseConditionExpr final : public MatchTestExpr {
+  bool IsPatternDeclaration;
+  bool DiagnoseRedundantPatternDeclarationElse;
+  bool FailureIsUnreachable = false;
+
 public:
   explicit CaseConditionExpr(
       const ASTContext &Ctx, VarDecl *HoldingVar, Expr *Subject,
       SourceLocation CaseLoc, MatchPattern *Pattern,
       MatchPatternInstantiation *PatternInstantiation,
       bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
-      ArrayRef<MatchTestInstantiation> Instantiations = {})
+      ArrayRef<MatchTestInstantiation> Instantiations = {},
+      bool IsPatternDeclaration = false,
+      bool DiagnoseRedundantPatternDeclarationElse = true)
       : MatchTestExpr(CaseConditionExprClass, Ctx, HoldingVar, Subject, CaseLoc,
                       Pattern, PatternInstantiation, /*IfLoc=*/{},
                       /*Guard=*/{}, PatternIsIrrefutable,
                       NeedsCaseInstantiation, Instantiations,
-                      /*HasSubjectProduct=*/false) {}
+                      /*HasSubjectProduct=*/false),
+        IsPatternDeclaration(IsPatternDeclaration),
+        DiagnoseRedundantPatternDeclarationElse(
+            DiagnoseRedundantPatternDeclarationElse) {}
 
   explicit CaseConditionExpr(EmptyShell Empty)
-      : MatchTestExpr(CaseConditionExprClass, Empty) {}
+      : MatchTestExpr(CaseConditionExprClass, Empty),
+        IsPatternDeclaration(false),
+        DiagnoseRedundantPatternDeclarationElse(true) {}
+
+  bool isPatternDeclaration() const { return IsPatternDeclaration; }
+  void setIsPatternDeclaration(bool DiagnoseRedundantElse = true) {
+    IsPatternDeclaration = true;
+    DiagnoseRedundantPatternDeclarationElse = DiagnoseRedundantElse;
+  }
+  bool shouldDiagnoseRedundantPatternDeclarationElse() const {
+    return DiagnoseRedundantPatternDeclarationElse;
+  }
+  bool isFailureUnreachable() const { return FailureIsUnreachable; }
+  void setFailureUnreachable() { FailureIsUnreachable = true; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CaseConditionExprClass;
