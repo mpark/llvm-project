@@ -3490,7 +3490,19 @@ ExprResult Sema::BuildDeclarationNameExpr(
   // In 'T ...V;', the type of the declaration 'V' is 'T...', but the type of
   // a reference to 'V' is simply (unexpanded) 'T'. The type, like the value,
   // is expanded by some outer '...' in the context of the use.
-  type = type.getNonPackExpansionType();
+  //
+  // An arity-inferred declaration pattern pack has no enclosing template pack
+  // from which to obtain that type until its decomposition is checked. Keep
+  // references to its source declaration dependent; transforming the match
+  // later replaces each reference with the corresponding expanded variable.
+  const auto *Pack = dyn_cast<PackExpansionType>(type);
+  const AutoType *PackAuto =
+      Pack ? Pack->getPattern()->getContainedAutoType() : nullptr;
+  if (PackAuto && !PackAuto->isDeduced() &&
+      !Pack->getPattern()->containsUnexpandedParameterPack())
+    type = Context.DependentTy;
+  else
+    type = type.getNonPackExpansionType();
 
   switch (D->getKind()) {
     // Ignore all the non-ValueDecl kinds.
