@@ -100,6 +100,48 @@ int declaration_pack(Five value) {
   return first + (... + middle) + last;
 }
 
+namespace forwarding_declaration_pack {
+template <class T>
+constexpr T&& forward(__remove_reference_t(T)& value) noexcept {
+  return static_cast<T&&>(value);
+}
+
+template <class...>
+struct types {};
+
+void accept(types<int&, int&>);
+void accept(types<int&&, int&&>);
+void accept(types<const int&, const int&>);
+void accept(types<const int&&, const int&&>);
+
+template <class T>
+void pattern_declaration(T&& value) {
+  case [auto&& ...args] = static_cast<T&&>(value);
+  accept(types<decltype(forward<decltype(args)>(args))...>{});
+}
+
+template <class T>
+void match_case(T&& value) {
+  match (static_cast<T&&>(value)) {
+    case [auto&& ...args] =>
+      accept(types<decltype(forward<decltype(args)>(args))...>{});
+  }
+}
+
+void instantiate() {
+  Pair value{};
+  const Pair const_value{};
+  pattern_declaration(value);
+  pattern_declaration(static_cast<Pair&&>(value));
+  pattern_declaration(const_value);
+  pattern_declaration(static_cast<const Pair&&>(const_value));
+  match_case(value);
+  match_case(static_cast<Pair&&>(value));
+  match_case(const_value);
+  match_case(static_cast<const Pair&&>(const_value));
+}
+} // namespace forwarding_declaration_pack
+
 void unnamed_pack(Five value) {
   case [...] = value;
 }
