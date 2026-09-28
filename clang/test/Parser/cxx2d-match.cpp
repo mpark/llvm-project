@@ -413,7 +413,7 @@ void test_match_precedence(int* p) {
     // unary parenthesized
     !(match(p, case nullptr));
     !(match((p), case nullptr));
-    match(2, case 0 || 1) || true;
+    match(2, case 0 or 1) || true;
   }
   /* MatchSelectExpr */ {
     // unary is tighter than match
