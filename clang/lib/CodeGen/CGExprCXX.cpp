@@ -2469,7 +2469,8 @@ void CodeGenFunction::EmitAlternativeDiscriminator(
 
 RValue CodeGenFunction::EmitAlternativePattern(
     const AlternativePattern *AltPattern,
-    const MatchPatternInstantiation *Instantiation) {
+    const MatchPatternInstantiation *Instantiation,
+    StagedPatternDeclarations *StagedDeclarations) {
   const MatchPatternInfo *Info = Instantiation->find(AltPattern);
   const MatchProjection *Projection = Info ? Info->Projection : nullptr;
   EmitAlternativeDiscriminator(AltPattern, Instantiation);
@@ -2505,8 +2506,8 @@ RValue CodeGenFunction::EmitAlternativePattern(
         SelectorInfo ? SelectorInfo->Projection : nullptr;
     if (SelectorProjection &&
         SelectorProjection->getKind() == MatchProjection::CastProjection) {
-      RValue SelectorResult =
-          EmitMatchPattern(Selector, Instantiation, nullptr);
+      RValue SelectorResult = EmitMatchPattern(Selector, Instantiation, nullptr,
+                                               StagedDeclarations);
       llvm::BasicBlock *SelectorPassBB =
           createBasicBlock("match.alt.selector.pass");
       Builder.CreateCondBr(SelectorResult.getScalarVal(), SelectorPassBB,
@@ -2516,10 +2517,11 @@ RValue CodeGenFunction::EmitAlternativePattern(
     }
   }
 
-  RValue MatchResult = !AltPattern->getSubPattern()
-                           ? RValue::get(Builder.getTrue())
-                           : EmitMatchPattern(AltPattern->getSubPattern(),
-                                              Instantiation, nullptr);
+  RValue MatchResult =
+      !AltPattern->getSubPattern()
+          ? RValue::get(Builder.getTrue())
+          : EmitMatchPattern(AltPattern->getSubPattern(), Instantiation,
+                             nullptr, StagedDeclarations);
   Builder.CreateStore(MatchResult.getScalarVal(), AltResultAddr);
   EmitBranch(AltEndBB);
 
@@ -2533,7 +2535,8 @@ RValue CodeGenFunction::EmitAlternativePattern(
 
 RValue CodeGenFunction::EmitDecompositionPattern(
     const DecompositionPattern *DecompPattern,
-    const MatchPatternInstantiation *Instantiation) {
+    const MatchPatternInstantiation *Instantiation,
+    StagedPatternDeclarations *StagedDeclarations) {
   RawAddress FinalDecompResultAddr = CreateTempAlloca(
       Builder.getInt1Ty(), getPointerAlign(), "match.decomp.result");
 
@@ -2563,7 +2566,8 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   }
 
   for (auto *SubPattern : Patterns) {
-    RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr);
+    RValue MatchResult = EmitMatchPattern(SubPattern, Instantiation, nullptr,
+                                          StagedDeclarations);
     llvm::BasicBlock *NextPatternBB =
         createBasicBlock("match.decomp.next_pattern");
     Builder.CreateCondBr(MatchResult.getScalarVal(), NextPatternBB,
@@ -2585,16 +2589,83 @@ RValue CodeGenFunction::EmitDecompositionPattern(
   return RValue::get(Builder.CreateLoad(FinalDecompResultAddr));
 }
 
+static bool
+hasPatternDeclarations(const MatchPattern *Pattern,
+                       const MatchPatternInstantiation *Instantiation);
+
+void CodeGenFunction::StagedPatternDeclarations::begin(CodeGenFunction &CGF) {
+  Scopes.push_back(std::make_unique<RunCleanupsScope>(CGF));
+  RawAddress Active = CGF.CreateTempAlloca(
+      CGF.Builder.getInt1Ty(), CharUnits::One(), "match.decl.active");
+  CGF.setBeforeOutermostConditional(CGF.Builder.getFalse(), Active, CGF);
+  ActiveFlags.push_back(Active);
+}
+
+void CodeGenFunction::StagedPatternDeclarations::markInitialized(
+    CodeGenFunction &CGF) {
+  assert(!ActiveFlags.empty());
+  CGF.Builder.CreateStore(CGF.Builder.getTrue(), ActiveFlags.back());
+}
+
+void CodeGenFunction::StagedPatternDeclarations::emitCleanups(
+    CodeGenFunction &CGF) {
+  assert(Scopes.size() == ActiveFlags.size());
+  for (auto [Scope, Active] :
+       llvm::reverse(llvm::zip_equal(Scopes, ActiveFlags))) {
+    llvm::BasicBlock *CleanupBB = CGF.createBasicBlock("match.decl.cleanup");
+    llvm::BasicBlock *DoneBB = CGF.createBasicBlock("match.decl.cleanup.done");
+    CGF.Builder.CreateCondBr(CGF.Builder.CreateLoad(Active), CleanupBB, DoneBB);
+    CGF.EmitBlock(CleanupBB);
+    Scope->ForceCleanup();
+    CGF.EmitBranch(DoneBB);
+    CGF.EmitBlock(DoneBB);
+  }
+}
+
 RValue CodeGenFunction::EmitMatchPattern(
     const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
-    const Expr *Subject) {
+    const Expr *Subject, StagedPatternDeclarations *StagedDeclarations) {
   MatchPattern::MatchPatternClass PatternStyle =
       Pattern->getMatchPatternClass();
   switch (PatternStyle) {
   case MatchPattern::MatchPatternClass::ParenPatternClass:
     return EmitMatchPattern(
         static_cast<const ParenPattern *>(Pattern)->getSubPattern(),
-        Instantiation, Subject);
+        Instantiation, Subject, StagedDeclarations);
+  case MatchPattern::MatchPatternClass::AndPatternClass: {
+    const auto *And = static_cast<const AndPattern *>(Pattern);
+    RawAddress Result = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
+                                         "match.and.result");
+    llvm::BasicBlock *FailBB = createBasicBlock("match.and.fail");
+    llvm::BasicBlock *PassBB = createBasicBlock("match.and.pass");
+    llvm::BasicBlock *EndBB = createBasicBlock("match.and.end");
+    for (auto [I, Conjunct] : llvm::enumerate(And->conjuncts())) {
+      RValue ConjunctResult = EmitMatchPattern(Conjunct, Instantiation, Subject,
+                                               StagedDeclarations);
+      llvm::BasicBlock *NextBB = I + 1 == And->conjuncts().size()
+                                     ? PassBB
+                                     : createBasicBlock("match.and.next");
+      Builder.CreateCondBr(ConjunctResult.getScalarVal(), NextBB, FailBB);
+      EmitBlock(NextBB);
+      if (I + 1 != And->conjuncts().size()) {
+        EmitSharedDeclarationProjections(Conjunct, Instantiation);
+        bool HasDeclarations = hasPatternDeclarations(Conjunct, Instantiation);
+        if (StagedDeclarations && HasDeclarations)
+          StagedDeclarations->begin(*this);
+        EmitMatchPatternDeclarations(Conjunct, Instantiation);
+        if (StagedDeclarations && HasDeclarations)
+          StagedDeclarations->markInitialized(*this);
+      }
+    }
+
+    Builder.CreateStore(Builder.getTrue(), Result);
+    EmitBranch(EndBB);
+    EmitBlock(FailBB);
+    Builder.CreateStore(Builder.getFalse(), Result);
+    EmitBranch(EndBB);
+    EmitBlock(EndBB);
+    return RValue::get(Builder.CreateLoad(Result));
+  }
   case MatchPattern::MatchPatternClass::OrPatternClass: {
     const auto *Or = static_cast<const OrPattern *>(Pattern);
     SmallVector<const MatchPattern *, 4> Viable;
@@ -2603,15 +2674,16 @@ RValue CodeGenFunction::EmitMatchPattern(
         Viable.push_back(Alternative);
     assert(!Viable.empty() && "or-pattern has no viable alternatives");
     if (Viable.size() == 1)
-      return EmitMatchPattern(Viable.front(), Instantiation, Subject);
+      return EmitMatchPattern(Viable.front(), Instantiation, Subject,
+                              StagedDeclarations);
 
     RawAddress Result = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
                                          "match.or.result");
     llvm::BasicBlock *PassBB = createBasicBlock("match.or.pass");
     llvm::BasicBlock *EndBB = createBasicBlock("match.or.end");
     for (auto [I, Alternative] : llvm::enumerate(Viable)) {
-      RValue AlternativeResult =
-          EmitMatchPattern(Alternative, Instantiation, Subject);
+      RValue AlternativeResult = EmitMatchPattern(Alternative, Instantiation,
+                                                  Subject, StagedDeclarations);
       llvm::BasicBlock *FailBB =
           I + 1 == Viable.size() ? nullptr : createBasicBlock("match.or.next");
       if (FailBB) {
@@ -2634,7 +2706,7 @@ RValue CodeGenFunction::EmitMatchPattern(
   }
   case MatchPattern::MatchPatternClass::AlternativePatternClass: {
     auto *AltExpr = static_cast<const AlternativePattern *>(Pattern);
-    return EmitAlternativePattern(AltExpr, Instantiation);
+    return EmitAlternativePattern(AltExpr, Instantiation, StagedDeclarations);
   }
   case MatchPattern::MatchPatternClass::DeclarationPatternClass: {
     const auto *Declaration = static_cast<const DeclarationPattern *>(Pattern);
@@ -2670,7 +2742,8 @@ RValue CodeGenFunction::EmitMatchPattern(
   }
   case MatchPattern::MatchPatternClass::DecompositionPatternClass: {
     auto *DecompExpr = static_cast<const DecompositionPattern *>(Pattern);
-    return EmitDecompositionPattern(DecompExpr, Instantiation);
+    return EmitDecompositionPattern(DecompExpr, Instantiation,
+                                    StagedDeclarations);
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);
@@ -2699,9 +2772,9 @@ RValue CodeGenFunction::EmitMatchPattern(
 
 bool hasMatchGuard(const MatchGuard &MG) { return MG.hasGuard(); }
 
-static void
-emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
-                        const MatchPatternInstantiation *Instantiation) {
+void CodeGenFunction::EmitMatchPatternDeclarations(
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
     const MatchPatternInfo *Info = Instantiation->find(P);
     if (Info && Info->Projection &&
@@ -2711,26 +2784,28 @@ emitPatternDeclarations(CodeGenFunction &CGF, const MatchPattern *Pattern,
       if (Declaration != Info->Projection->getDecomposedDecl())
         for (BindingDecl *Binding : Declaration->bindings())
           if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
-            CGF.MaybeEmitDeferredVarDeclInit(Nested);
+            MaybeEmitDeferredVarDeclInit(Nested);
       return;
     }
-    CGF.EmitVarDecl(*P->getDeclaration());
-    CGF.MaybeEmitDeferredVarDeclInit(P->getDeclaration());
+    if (LocalDeclMap.count(P->getDeclaration()))
+      return;
+    EmitVarDecl(*P->getDeclaration());
+    MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     return;
   }
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
       if (Instantiation->isViableOrAlternative(Or, I))
-        emitPatternDeclarations(CGF, Alternative, Instantiation);
+        EmitMatchPatternDeclarations(Alternative, Instantiation);
     return;
   }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
-      emitPatternDeclarations(CGF, Child, Instantiation);
+      EmitMatchPatternDeclarations(Child, Instantiation);
   } else {
     for (const MatchPattern *Child : Pattern->children())
-      emitPatternDeclarations(CGF, Child, Instantiation);
+      EmitMatchPatternDeclarations(Child, Instantiation);
   }
 }
 
@@ -2863,6 +2938,34 @@ hasPatternDeclarations(const MatchPattern *Pattern,
   });
 }
 
+static bool hasStagedAndPatternDeclarations(
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation) {
+  if (const auto *And = dyn_cast<AndPattern>(Pattern))
+    if (llvm::any_of(And->conjuncts().drop_back(),
+                     [&](const MatchPattern *Conjunct) {
+                       return hasPatternDeclarations(Conjunct, Instantiation);
+                     }))
+      return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::any_of(llvm::enumerate(Or->alternatives()),
+                        [&](auto IndexedAlternative) {
+                          return Instantiation->isViableOrAlternative(
+                                     Or, IndexedAlternative.index()) &&
+                                 hasStagedAndPatternDeclarations(
+                                     IndexedAlternative.value(), Instantiation);
+                        });
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
+                        [&](const MatchPattern *Child) {
+                          return hasStagedAndPatternDeclarations(Child,
+                                                                 Instantiation);
+                        });
+  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
+    return hasStagedAndPatternDeclarations(Child, Instantiation);
+  });
+}
+
 RValue CodeGenFunction::EmitMatchGuard(const MatchGuard &MG,
                                        llvm::Value *PatBoolRes) {
   const VarDecl *VD = MG.ConditionVariable;
@@ -2909,8 +3012,8 @@ void CodeGenFunction::EmitSelectedMatchTestInstantiation(
 
   EmitSelectedMatchPatternProjections(Instantiation.Pattern,
                                       Instantiation.PatternInstantiation);
-  emitPatternDeclarations(*this, Instantiation.Pattern,
-                          Instantiation.PatternInstantiation);
+  EmitMatchPatternDeclarations(Instantiation.Pattern,
+                               Instantiation.PatternInstantiation);
   EmitSuccess();
 }
 
@@ -2952,20 +3055,43 @@ void CodeGenFunction::EmitMatchTestDispatch(
             ? NoMatchBB
             : createBasicBlock("match.test.next_pattern");
 
-    RValue PatternResult =
-        EmitMatchPattern(Instantiation.Pattern,
-                         Instantiation.PatternInstantiation, S.getSubject());
+    bool HasStagedDeclarations = hasStagedAndPatternDeclarations(
+        Instantiation.Pattern, Instantiation.PatternInstantiation);
+    StagedPatternDeclarations StagedDeclarations;
+    std::optional<RunCleanupsScope> OrdinaryCaseScope;
+    RawAddress RetryPattern = RawAddress::invalid();
+    llvm::BasicBlock *PatternFailedBB = NextPatternBB;
+    llvm::BasicBlock *CaseFailedBB = nullptr;
+    if (HasStagedDeclarations) {
+      RetryPattern = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
+                                      "match.test.retry");
+      PatternFailedBB = createBasicBlock("match.test.pattern_failed");
+      CaseFailedBB = createBasicBlock("match.test.failed");
+    }
+    ConditionalEvaluation Conditional(*this);
+    if (HasStagedDeclarations)
+      Conditional.begin(*this);
+    RValue PatternResult = EmitMatchPattern(
+        Instantiation.Pattern, Instantiation.PatternInstantiation,
+        S.getSubject(), HasStagedDeclarations ? &StagedDeclarations : nullptr);
+    RawAddress CaseSelected = CreateTempAlloca(
+        Builder.getInt1Ty(), getPointerAlign(), "match.test.selected");
     Builder.CreateCondBr(PatternResult.getScalarVal(), InitializePatternBB,
-                         NextPatternBB);
+                         PatternFailedBB);
 
     EmitBlock(InitializePatternBB);
     EmitSharedDeclarationProjections(Instantiation.Pattern,
                                      Instantiation.PatternInstantiation);
-    RawAddress CaseSelected = CreateTempAlloca(
-        Builder.getInt1Ty(), getPointerAlign(), "match.test.selected");
-    RunCleanupsScope CaseScope(*this);
-    emitPatternDeclarations(*this, Instantiation.Pattern,
-                            Instantiation.PatternInstantiation);
+    if (HasStagedDeclarations)
+      StagedDeclarations.begin(*this);
+    else
+      OrdinaryCaseScope.emplace(*this);
+    EmitMatchPatternDeclarations(Instantiation.Pattern,
+                                 Instantiation.PatternInstantiation);
+    if (HasStagedDeclarations) {
+      StagedDeclarations.markInitialized(*this);
+      Conditional.end(*this);
+    }
     RValue GuardResult = RValue::get(Builder.getTrue());
     if (hasMatchGuard(Instantiation.Guard))
       GuardResult =
@@ -2977,17 +3103,37 @@ void CodeGenFunction::EmitMatchTestDispatch(
     EmitSuccess(Instantiation);
     if (HaveInsertPoint()) {
       Builder.CreateStore(Builder.getTrue(), CaseSelected);
+      if (HasStagedDeclarations)
+        Builder.CreateStore(Builder.getFalse(), RetryPattern);
       EmitBranch(CleanupBB);
     }
 
     EmitBlock(GuardFailedBB);
     Builder.CreateStore(Builder.getFalse(), CaseSelected);
+    if (HasStagedDeclarations)
+      Builder.CreateStore(Builder.getFalse(), RetryPattern);
     EmitBranch(CleanupBB);
 
+    if (HasStagedDeclarations) {
+      EmitBlock(PatternFailedBB);
+      Builder.CreateStore(Builder.getFalse(), CaseSelected);
+      Builder.CreateStore(Builder.getTrue(), RetryPattern);
+      EmitBranch(CleanupBB);
+    }
+
     EmitBlock(CleanupBB);
-    CaseScope.ForceCleanup();
+    if (HasStagedDeclarations)
+      StagedDeclarations.emitCleanups(*this);
+    else
+      OrdinaryCaseScope->ForceCleanup();
     Builder.CreateCondBr(Builder.CreateLoad(CaseSelected), CaseSucceededBB,
-                         NoMatchBB);
+                         HasStagedDeclarations ? CaseFailedBB : NoMatchBB);
+
+    if (HasStagedDeclarations) {
+      EmitBlock(CaseFailedBB);
+      Builder.CreateCondBr(Builder.CreateLoad(RetryPattern), NextPatternBB,
+                           NoMatchBB);
+    }
 
     EmitBlock(CaseSucceededBB);
     EmitBranchThroughCleanup(SuccessDest);
@@ -3029,20 +3175,32 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
         return MatchResult;
       }
 
-      RValue PatternResult = EmitMatchPattern(
-          S.getPattern(), S.getPatternInstantiation(), Subject);
       RawAddress FinalResult = CreateTempAlloca(
           Builder.getInt1Ty(), getPointerAlign(), "match.test.result");
       llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
       llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
       llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
+      bool HasStagedDeclarations = hasStagedAndPatternDeclarations(
+          S.getPattern(), S.getPatternInstantiation());
+      StagedPatternDeclarations StagedDeclarations;
+      ConditionalEvaluation Conditional(*this);
+      if (HasStagedDeclarations)
+        Conditional.begin(*this);
+      RValue PatternResult = EmitMatchPattern(
+          S.getPattern(), S.getPatternInstantiation(), Subject,
+          HasStagedDeclarations ? &StagedDeclarations : nullptr);
       Builder.CreateCondBr(PatternResult.getScalarVal(), InitBB, FailBB);
 
       EmitBlock(InitBB);
       EmitSharedDeclarationProjections(S.getPattern(),
                                        S.getPatternInstantiation());
-      emitPatternDeclarations(*this, S.getPattern(),
-                              S.getPatternInstantiation());
+      if (HasStagedDeclarations)
+        StagedDeclarations.begin(*this);
+      EmitMatchPatternDeclarations(S.getPattern(), S.getPatternInstantiation());
+      if (HasStagedDeclarations) {
+        StagedDeclarations.markInitialized(*this);
+        Conditional.end(*this);
+      }
       RValue MatchResult = RValue::get(Builder.getTrue());
       if (hasMatchGuard(S.getGuard()))
         MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
@@ -3054,7 +3212,10 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
       EmitBranch(EndBB);
 
       EmitBlock(EndBB);
-      return RValue::get(Builder.CreateLoad(FinalResult));
+      llvm::Value *Result = Builder.CreateLoad(FinalResult);
+      if (HasStagedDeclarations)
+        StagedDeclarations.emitCleanups(*this);
+      return RValue::get(Result);
     };
 
     if (NeedsCleanup) {
@@ -3206,8 +3367,25 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
         continue;
       }
 
+      bool HasStagedDeclarations = hasStagedAndPatternDeclarations(
+          MatchC.Pattern, MatchC.PatternInstantiation);
+      StagedPatternDeclarations StagedDeclarations;
+      std::optional<RunCleanupsScope> OrdinaryCaseScope;
+      RawAddress RetryPattern = RawAddress::invalid();
+      llvm::BasicBlock *PatternFailedBB = NextPatternBB;
+      llvm::BasicBlock *CaseFailedBB = nullptr;
+      if (HasStagedDeclarations) {
+        RetryPattern = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
+                                        "match.case.retry");
+        PatternFailedBB = createBasicBlock("match.select.pattern_failed");
+        CaseFailedBB = createBasicBlock("match.select.case_failed");
+      }
+      ConditionalEvaluation Conditional(*this);
+      if (HasStagedDeclarations)
+        Conditional.begin(*this);
       RValue MatchResult = EmitMatchPattern(
-          MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject());
+          MatchC.Pattern, MatchC.PatternInstantiation, S.getSubject(),
+          HasStagedDeclarations ? &StagedDeclarations : nullptr);
       RawAddress CaseSelected = CreateTempAlloca(
           Builder.getInt1Ty(), getPointerAlign(), "match.case.selected");
       llvm::BasicBlock *InitializePatternBB =
@@ -3220,14 +3398,20 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       llvm::Value *PatternCondition =
           ApplyCaseLikelihood(MatchResult.getScalarVal(), MatchC);
       Builder.CreateCondBr(PatternCondition, InitializePatternBB,
-                           NextPatternBB);
+                           PatternFailedBB);
 
       EmitBlock(InitializePatternBB);
       EmitSharedDeclarationProjections(MatchC.Pattern,
                                        MatchC.PatternInstantiation);
-      RunCleanupsScope CaseScope(*this);
-      emitPatternDeclarations(*this, MatchC.Pattern,
-                              MatchC.PatternInstantiation);
+      if (HasStagedDeclarations)
+        StagedDeclarations.begin(*this);
+      else
+        OrdinaryCaseScope.emplace(*this);
+      EmitMatchPatternDeclarations(MatchC.Pattern, MatchC.PatternInstantiation);
+      if (HasStagedDeclarations) {
+        StagedDeclarations.markInitialized(*this);
+        Conditional.end(*this);
+      }
       RValue GuardResult = RValue::get(Builder.getTrue());
       if (hasMatchGuard(MatchC.Guard)) {
         GuardResult = EmitMatchGuard(MatchC.Guard, GuardResult.getScalarVal());
@@ -3241,17 +3425,39 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       EmitCaseHandler(MatchC);
       if (HaveInsertPoint()) {
         Builder.CreateStore(Builder.getTrue(), CaseSelected);
+        if (HasStagedDeclarations)
+          Builder.CreateStore(Builder.getFalse(), RetryPattern);
         EmitBranch(CleanupBB);
       }
 
       EmitBlock(GuardFailedBB);
       Builder.CreateStore(Builder.getFalse(), CaseSelected);
+      if (HasStagedDeclarations)
+        Builder.CreateStore(Builder.getFalse(), RetryPattern);
       EmitBranch(CleanupBB);
 
+      if (HasStagedDeclarations) {
+        EmitBlock(PatternFailedBB);
+        Builder.CreateStore(Builder.getFalse(), CaseSelected);
+        Builder.CreateStore(Builder.getTrue(), RetryPattern);
+        EmitBranch(CleanupBB);
+      }
+
       EmitBlock(CleanupBB);
-      CaseScope.ForceCleanup();
+      if (HasStagedDeclarations)
+        StagedDeclarations.emitCleanups(*this);
+      else
+        OrdinaryCaseScope->ForceCleanup();
       llvm::Value *Selected = Builder.CreateLoad(CaseSelected);
-      Builder.CreateCondBr(Selected, SelectEndBB, NextSourceCaseBB);
+      Builder.CreateCondBr(Selected, SelectEndBB,
+                           HasStagedDeclarations ? CaseFailedBB
+                                                 : NextSourceCaseBB);
+
+      if (HasStagedDeclarations) {
+        EmitBlock(CaseFailedBB);
+        Builder.CreateCondBr(Builder.CreateLoad(RetryPattern), NextPatternBB,
+                             NextSourceCaseBB);
+      }
 
       EmitBlock(NextPatternBB);
     }

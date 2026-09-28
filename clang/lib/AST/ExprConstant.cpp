@@ -1956,14 +1956,17 @@ static bool
 EvaluateMatchPattern(const MatchPattern *E,
                      const MatchPatternInstantiation *Instantiation,
                      bool &Result, EvalInfo &Info,
-                     MatchProjectionEvaluationCache *ProjectionCache = nullptr);
-static bool
-EvaluatePatternDeclarations(const MatchPattern *Pattern,
-                            const MatchPatternInstantiation *Instantiation,
-                            EvalInfo &Info);
+                     MatchProjectionEvaluationCache *ProjectionCache = nullptr,
+                     std::optional<BlockScopeRAII> *DeclarationScope = nullptr);
+static bool EvaluatePatternDeclarations(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    EvalInfo &Info, MatchProjectionEvaluationCache &ProjectionCache);
 static bool EvaluateSharedDeclarationProjections(
     const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     EvalInfo &Info, MatchProjectionEvaluationCache &ProjectionCache);
+static bool
+hasMatchPatternDeclarations(const MatchPattern *Pattern,
+                            const MatchPatternInstantiation *Instantiation);
 
 //===----------------------------------------------------------------------===//
 // Misc utilities
@@ -6129,9 +6132,10 @@ static EvalStmtResult EvaluateCaseConditionChain(
           const MatchPatternInstantiation *PatternInstantiation,
           const MatchGuard &Guard, const MatchTestInstantiation *Instantiation)
       -> std::optional<EvalStmtResult> {
+    std::optional<BlockScopeRAII> CaseScope;
     bool PatternMatched;
     if (!EvaluateMatchPattern(Pattern, PatternInstantiation, PatternMatched,
-                              Info, &ProjectionCache))
+                              Info, &ProjectionCache, &CaseScope))
       return ESR_Failed;
     bool PatternSelected = PatternMatched;
     if (PatternMatched &&
@@ -6139,9 +6143,11 @@ static EvalStmtResult EvaluateCaseConditionChain(
                                               Info, ProjectionCache))
       return ESR_Failed;
 
-    BlockScopeRAII CaseScope(Info);
+    if (PatternMatched && !CaseScope)
+      CaseScope.emplace(Info);
     if (PatternMatched &&
-        !EvaluatePatternDeclarations(Pattern, PatternInstantiation, Info))
+        !EvaluatePatternDeclarations(Pattern, PatternInstantiation, Info,
+                                     ProjectionCache))
       return ESR_Failed;
     if (PatternMatched && Guard.Init) {
       APValue InitValue;
@@ -6171,7 +6177,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
       ESR = OnSuccess(Instantiation);
     }
 
-    if (ESR != ESR_Failed && !CaseScope.destroy())
+    if (ESR != ESR_Failed && CaseScope && !CaseScope->destroy())
       ESR = ESR_Failed;
     Matched = CandidateMatched;
     if (ESR != ESR_Succeeded || CandidateMatched)
@@ -10034,17 +10040,20 @@ public:
     for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
       if (RejectedCase && *RejectedCase == Case.CaseIndex)
         continue;
+      std::optional<BlockScopeRAII> Scope;
       if (!EvaluateMatchPattern(Case.Pattern, Case.PatternInstantiation, Result,
-                                Info, &ProjectionCache))
+                                Info, &ProjectionCache, &Scope))
         return false;
       bool PatternSelected = Result;
       if (Result &&
           !EvaluateSharedDeclarationProjections(
               Case.Pattern, Case.PatternInstantiation, Info, ProjectionCache))
         return false;
-      BlockScopeRAII Scope(Info);
-      if (Result && !EvaluatePatternDeclarations(
-                        Case.Pattern, Case.PatternInstantiation, Info))
+      if (Result && !Scope)
+        Scope.emplace(Info);
+      if (Result &&
+          !EvaluatePatternDeclarations(Case.Pattern, Case.PatternInstantiation,
+                                       Info, ProjectionCache))
         return false;
       if (Result && Case.Guard.Init) {
         APValue InitValue;
@@ -10075,7 +10084,7 @@ public:
             return false;
           }
           if (ESR != ESR_Succeeded) {
-            if (!Scope.destroy() || !MatchScope.destroy())
+            if ((Scope && !Scope->destroy()) || !MatchScope.destroy())
               return false;
             Info.PendingExprControlFlow = static_cast<unsigned>(ESR);
             if ((ESR == ESR_Returned || ESR == ESR_DoReturn) &&
@@ -10084,12 +10093,12 @@ public:
             return false;
           }
         }
-        if (!Scope.destroy())
+        if (Scope && !Scope->destroy())
           return false;
         MatchScope.extendToFullExpression();
         return true;
       }
-      if (!Scope.destroy())
+      if (Scope && !Scope->destroy())
         return false;
       if (PatternSelected)
         RejectedCase = Case.CaseIndex;
@@ -21320,7 +21329,8 @@ static bool
 EvaluateMatchPattern(const MatchPattern *Pattern,
                      const MatchPatternInstantiation *Instantiation,
                      bool &Result, EvalInfo &Info,
-                     MatchProjectionEvaluationCache *ProjectionCache) {
+                     MatchProjectionEvaluationCache *ProjectionCache,
+                     std::optional<BlockScopeRAII> *DeclarationScope) {
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::WildcardPatternClass:
     return Result = true;
@@ -21359,7 +21369,30 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
   case MatchPattern::ParenPatternClass: {
     const auto *P = static_cast<const ParenPattern *>(Pattern);
     return EvaluateMatchPattern(P->getSubPattern(), Instantiation, Result, Info,
-                                ProjectionCache);
+                                ProjectionCache, DeclarationScope);
+  }
+  case MatchPattern::AndPatternClass: {
+    const auto *P = static_cast<const AndPattern *>(Pattern);
+    assert(ProjectionCache && "and-pattern evaluation requires a cache");
+    Result = true;
+    for (auto [I, Conjunct] : llvm::enumerate(P->conjuncts())) {
+      if (!EvaluateMatchPattern(Conjunct, Instantiation, Result, Info,
+                                ProjectionCache, DeclarationScope))
+        return false;
+      if (!Result)
+        return true;
+      if (I + 1 != P->conjuncts().size()) {
+        if (DeclarationScope && !DeclarationScope->has_value() &&
+            hasMatchPatternDeclarations(Conjunct, Instantiation))
+          DeclarationScope->emplace(Info);
+        if (!EvaluateSharedDeclarationProjections(Conjunct, Instantiation, Info,
+                                                  *ProjectionCache) ||
+            !EvaluatePatternDeclarations(Conjunct, Instantiation, Info,
+                                         *ProjectionCache))
+          return false;
+      }
+    }
+    return true;
   }
   case MatchPattern::OrPatternClass: {
     const auto *P = static_cast<const OrPattern *>(Pattern);
@@ -21368,7 +21401,7 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
       if (!Instantiation->isViableOrAlternative(P, I))
         continue;
       if (!EvaluateMatchPattern(Alternative, Instantiation, Result, Info,
-                                ProjectionCache))
+                                ProjectionCache, DeclarationScope))
         return false;
       if (Result)
         return true;
@@ -21393,7 +21426,8 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
                      Instantiation->find(Selector);
                  if (SelectorInfo && SelectorInfo->Projection) {
                    if (!EvaluateMatchPattern(Selector, Instantiation, Result,
-                                             Info, ProjectionCache))
+                                             Info, ProjectionCache,
+                                             DeclarationScope))
                      return false;
                    if (!Result)
                      return true;
@@ -21404,7 +21438,8 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
                }
                return !P->getSubPattern() ||
                       EvaluateMatchPattern(P->getSubPattern(), Instantiation,
-                                           Result, Info, ProjectionCache);
+                                           Result, Info, ProjectionCache,
+                                           DeclarationScope);
              })()));
   }
   case MatchPattern::DecompositionPatternClass: {
@@ -21417,8 +21452,8 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
       return false;
     Result = true;
     for (const MatchPattern *C : Instantiation->getDecompositionPatterns(P)) {
-      if (!EvaluateMatchPattern(C, Instantiation, Result, Info,
-                                ProjectionCache)) {
+      if (!EvaluateMatchPattern(C, Instantiation, Result, Info, ProjectionCache,
+                                DeclarationScope)) {
         return false;
       }
       if (!Result) {
@@ -21432,9 +21467,32 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
 }
 
 static bool
-EvaluatePatternDeclarations(const MatchPattern *Pattern,
-                            const MatchPatternInstantiation *Instantiation,
-                            EvalInfo &Info) {
+hasMatchPatternDeclarations(const MatchPattern *Pattern,
+                            const MatchPatternInstantiation *Instantiation) {
+  if (isa<DeclarationPattern>(Pattern))
+    return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::any_of(llvm::enumerate(Or->alternatives()),
+                        [&](auto IndexedAlternative) {
+                          return Instantiation->isViableOrAlternative(
+                                     Or, IndexedAlternative.index()) &&
+                                 hasMatchPatternDeclarations(
+                                     IndexedAlternative.value(), Instantiation);
+                        });
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
+                        [&](const MatchPattern *Child) {
+                          return hasMatchPatternDeclarations(Child,
+                                                             Instantiation);
+                        });
+  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
+    return hasMatchPatternDeclarations(Child, Instantiation);
+  });
+}
+
+static bool EvaluatePatternDeclarations(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    EvalInfo &Info, MatchProjectionEvaluationCache &ProjectionCache) {
   if (const auto *P = dyn_cast<DeclarationPattern>(Pattern)) {
     const MatchPatternInfo *PatternInfo = Instantiation->find(P);
     if (PatternInfo && PatternInfo->Projection &&
@@ -21449,31 +21507,37 @@ EvaluatePatternDeclarations(const MatchPattern *Pattern,
       return true;
     }
     const VarDecl *Declaration = P->getDeclaration();
+    if (!ProjectionCache.Declarations.insert(Declaration).second)
+      return true;
     Info.MatchExprLocalVarDecls.insert(Declaration);
     if (!EvaluateDecl(Info, Declaration))
       return false;
     if (const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
       for (const BindingDecl *Binding : Decomposition->all_bindings())
         if (const VarDecl *HoldingVar = Binding->getHoldingVar())
-          if (!EvaluateDecl(Info, HoldingVar))
+          if (ProjectionCache.Declarations.insert(HoldingVar).second &&
+              !EvaluateDecl(Info, HoldingVar))
             return false;
     return true;
   }
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
       if (Instantiation->isViableOrAlternative(Or, I) &&
-          !EvaluatePatternDeclarations(Alternative, Instantiation, Info))
+          !EvaluatePatternDeclarations(Alternative, Instantiation, Info,
+                                       ProjectionCache))
         return false;
     return true;
   }
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
-      if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
+      if (!EvaluatePatternDeclarations(Child, Instantiation, Info,
+                                       ProjectionCache))
         return false;
   } else {
     for (const MatchPattern *Child : Pattern->children())
-      if (!EvaluatePatternDeclarations(Child, Instantiation, Info))
+      if (!EvaluatePatternDeclarations(Child, Instantiation, Info,
+                                       ProjectionCache))
         return false;
   }
   return true;
@@ -21554,23 +21618,24 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
 
     MatchProjectionEvaluationCache ProjectionCache;
     for (const MatchTestInstantiation &Instantiation : E->getInstantiations()) {
+      std::optional<BlockScopeRAII> Scope;
       bool Result;
       if (!EvaluateMatchPattern(Instantiation.Pattern,
                                 Instantiation.PatternInstantiation, Result,
-                                Info, &ProjectionCache))
+                                Info, &ProjectionCache, &Scope))
         return false;
       bool PatternSelected = Result;
+      if (Result && !Scope)
+        Scope.emplace(Info);
       if (Result &&
           !EvaluateSharedDeclarationProjections(
               Instantiation.Pattern, Instantiation.PatternInstantiation, Info,
               ProjectionCache))
         return false;
-      std::optional<BlockScopeRAII> Scope;
-      if (!isa<CaseConditionExpr>(E))
-        Scope.emplace(Info);
       if (Result &&
-          !EvaluatePatternDeclarations(
-              Instantiation.Pattern, Instantiation.PatternInstantiation, Info))
+          !EvaluatePatternDeclarations(Instantiation.Pattern,
+                                       Instantiation.PatternInstantiation, Info,
+                                       ProjectionCache))
         return false;
       if (Result && Instantiation.Guard.Init) {
         APValue InitValue;
@@ -21590,7 +21655,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
           return false;
         Result = ContinuationMatched;
       }
-      if (Scope && !Scope->destroy())
+      if (Result && isa<CaseConditionExpr>(E))
+        Scope->extendToFullExpression();
+      else if (Scope && !Scope->destroy())
         return false;
       if (Result)
         return Finish(Success(true, E));
@@ -21618,8 +21685,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                       E->getPattern(), E->getPatternInstantiation(), Info,
                       ProjectionCache))
       return false;
-    if (Result && !EvaluatePatternDeclarations(
-                      E->getPattern(), E->getPatternInstantiation(), Info))
+    if (Result && !EvaluatePatternDeclarations(E->getPattern(),
+                                               E->getPatternInstantiation(),
+                                               Info, ProjectionCache))
       return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;
@@ -21644,8 +21712,9 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                       E->getPattern(), E->getPatternInstantiation(), Info,
                       ProjectionCache))
       return false;
-    if (Result && !EvaluatePatternDeclarations(
-                      E->getPattern(), E->getPatternInstantiation(), Info))
+    if (Result && !EvaluatePatternDeclarations(E->getPattern(),
+                                               E->getPatternInstantiation(),
+                                               Info, ProjectionCache))
       return false;
     if (Result && E->getGuard().Init) {
       APValue InitValue;

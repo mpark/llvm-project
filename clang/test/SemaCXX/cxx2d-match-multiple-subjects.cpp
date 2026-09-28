@@ -20,12 +20,12 @@ void valid(int first, int second) {
   }
 
   match (first, second) {
-    case ([0, _] || [_, 0]) =>;
+    case ([0, _] or [_, 0]) =>;
     case [_, _] =>;
   }
 
   match (first, second) {
-    case [0, _] || _ =>;
+    case [0, _] or _ =>;
   }
 
   match (first, second) {
@@ -75,7 +75,7 @@ void invalid(int first, int second) {
   }
 
   match (first, second) {
-    case [0, _] || 1 =>; // expected-error {{multiple match subjects require a decomposition pattern, structured binding declaration pattern, or wildcard}}
+    case [0, _] or 1 =>; // expected-error {{multiple match subjects require a decomposition pattern, structured binding declaration pattern, or wildcard}}
     case [_, _] =>;
   }
 }

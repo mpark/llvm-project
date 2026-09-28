@@ -430,6 +430,71 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
                         static_cast<ParenPattern *>(Pattern)->getSubPattern(),
                         Instantiation, Type);
 
+  case MatchPattern::AndPatternClass: {
+    auto Intersect = [&](const CoveragePattern &LHS, const CoveragePattern &RHS,
+                         auto &Recurse) -> CoveragePatterns {
+      if (LHS.K == CoveragePattern::Wild)
+        return {RHS};
+      if (RHS.K == CoveragePattern::Wild)
+        return {LHS};
+      if (LHS.K == CoveragePattern::Opaque ||
+          RHS.K == CoveragePattern::Opaque) {
+        CoveragePattern Result =
+            CoveragePattern::opaque(LHS.Loc.isValid() ? LHS.Loc : RHS.Loc);
+        llvm::append_range(Result.OrAlternatives, LHS.OrAlternatives);
+        llvm::append_range(Result.OrAlternatives, RHS.OrAlternatives);
+        return {std::move(Result)};
+      }
+      if (!(LHS.C == RHS.C))
+        return {};
+
+      CoveragePattern Initial = LHS;
+      Initial.Fields.clear();
+      Initial.FieldTypes.clear();
+      llvm::append_range(Initial.OrAlternatives, RHS.OrAlternatives);
+      CoveragePatterns Results = {std::move(Initial)};
+      unsigned NumFields = std::max(LHS.Fields.size(), RHS.Fields.size());
+      for (unsigned I = 0; I != NumFields; ++I) {
+        CoveragePattern L = I < LHS.Fields.size()
+                                ? *LHS.Fields[I]
+                                : CoveragePattern::wild(LHS.Loc);
+        CoveragePattern R = I < RHS.Fields.size()
+                                ? *RHS.Fields[I]
+                                : CoveragePattern::wild(RHS.Loc);
+        CoveragePatterns Fields = Recurse(L, R, Recurse);
+        CoveragePatterns Expanded;
+        for (const CoveragePattern &Result : Results)
+          for (const CoveragePattern &Field : Fields) {
+            CoveragePattern Copy = Result;
+            Copy.Fields.push_back(std::make_shared<CoveragePattern>(Field));
+            QualType FieldType = I < LHS.FieldTypes.size()   ? LHS.FieldTypes[I]
+                                 : I < RHS.FieldTypes.size() ? RHS.FieldTypes[I]
+                                                             : QualType();
+            Copy.FieldTypes.push_back(FieldType);
+            Expanded.push_back(std::move(Copy));
+          }
+        Results = std::move(Expanded);
+      }
+      for (CoveragePattern &Result : Results)
+        if (Result.C.K == CtorKey::Product)
+          Result.C.FieldTypes = Result.FieldTypes;
+      return Results;
+    };
+
+    auto *P = static_cast<AndPattern *>(Pattern);
+    CoveragePatterns Results =
+        makePatterns(S, P->conjuncts().front(), Instantiation, Type);
+    for (MatchPattern *Conjunct : P->conjuncts().drop_front()) {
+      CoveragePatterns RHS = makePatterns(S, Conjunct, Instantiation, Type);
+      CoveragePatterns Expanded;
+      for (const CoveragePattern &Left : Results)
+        for (const CoveragePattern &Right : RHS)
+          llvm::append_range(Expanded, Intersect(Left, Right, Intersect));
+      Results = std::move(Expanded);
+    }
+    return Results;
+  }
+
   case MatchPattern::OrPatternClass: {
     auto *P = static_cast<OrPattern *>(Pattern);
     CoveragePatterns Results;

@@ -14619,6 +14619,10 @@ def err_guarded_declaration_pattern_move : Error<
   "guarded declaration pattern of type %0 invokes a non-trivial move "
   "constructor before its guard; bind a reference and move in the handler "
   "instead">;
+def err_and_pattern_declaration_move : Error<
+  "declaration pattern of type %0 invokes a non-trivial move constructor "
+  "before a later operand of an and-pattern; bind a reference and move in "
+  "the handler instead">;
 def err_alternative_traits_missing : Error<
   "type %0 does not provide a usable 'std::alternative_traits' specialization">;
 def err_alternative_traits_alternatives_invalid : Error<

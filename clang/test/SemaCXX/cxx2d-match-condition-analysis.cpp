@@ -126,10 +126,10 @@ void jump_into_for_condition(Pair pair) {
 }
 
 void or_pattern_condition_bindings(Pair pair) {
-  if (case [0, int value] || [int value, 0] = pair)
+  if (case [0, int value] or [int value, 0] = pair)
     use(value);
 
-  if (case [0, int unused] || [int unused, 0] = pair) { // expected-warning {{unused variable 'unused'}}
+  if (case [0, int unused] or [int unused, 0] = pair) { // expected-warning {{unused variable 'unused'}}
   }
 }
 

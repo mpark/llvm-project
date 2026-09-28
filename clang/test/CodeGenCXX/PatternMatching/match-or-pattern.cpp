@@ -8,7 +8,7 @@
 // CHECK: ret i32 %[[RESULT]]
 int classify(int value) {
   return match (value) {
-    case 0 || 1 => 1;
+    case 0 or 1 => 1;
     case _ => 0;
   };
 }
@@ -33,7 +33,7 @@ bool operator==(int value, SecondPattern) { return second(value); }
 // CHECK: %[[SECOND:.*]] = tail call{{.*}} i1 @_Z6secondi(i32 {{.*}} %[[VALUE]])
 // CHECK: br i1 %[[SECOND]], label %[[DONE]], label
 bool short_circuit(int value) {
-  return match(value, case first_pattern || second_pattern);
+  return match(value, case first_pattern or second_pattern);
 }
 
 struct Pair {
@@ -44,14 +44,14 @@ struct Pair {
 // CHECK-LABEL: define{{.*}} i32 @_Z16bind_from_either4Pair(
 int bind_from_either(Pair pair) {
   return match (pair) {
-    case [0, int value] || [int value, 0] => value;
+    case [0, int value] or [int value, 0] => value;
     case _ => -1;
   };
 }
 
 // CHECK-LABEL: define{{.*}} i32 @_Z22case_condition_binding4Pair(
 int case_condition_binding(Pair pair) {
-  if (case [0, int value] || [int value, 0] = pair)
+  if (case [0, int value] or [int value, 0] = pair)
     return value;
   return -1;
 }
@@ -65,7 +65,7 @@ struct Triple {
 // CHECK-LABEL: define{{.*}} i32 @_Z25bind_pack_from_either_end6Triple(
 int bind_pack_from_either_end(Triple triple) {
   return match (triple) {
-    case [0, auto&& ...values] || [auto&& ...values, 0] =>
+    case [0, auto&& ...values] or [auto&& ...values, 0] =>
         (... + values);
     case _ => -1;
   };

@@ -3182,6 +3182,14 @@ void StmtPrinter::PrintMatchPattern(const MatchPattern *Pattern) {
     P->getTypeSourceInfo()->getType().print(OS, Policy);
     return;
   }
+  case MatchPattern::AndPatternClass: {
+    const auto *P = static_cast<const AndPattern *>(Pattern);
+    llvm::interleave(
+        P->conjuncts(),
+        [&](const MatchPattern *Conjunct) { PrintMatchPattern(Conjunct); },
+        [&] { OS << " && "; });
+    return;
+  }
   case MatchPattern::OrPatternClass: {
     const auto *P = static_cast<const OrPattern *>(Pattern);
     llvm::interleave(

@@ -89,6 +89,7 @@ public:
     ParenPatternClass,
     DeclarationPatternClass,
     TypePatternClass,
+    AndPatternClass,
     OrPatternClass,
     AlternativePatternClass,
     DecompositionPatternClass,
@@ -344,6 +345,39 @@ public:
 
   llvm::iterator_range<const MatchPattern *const *> children() const {
     return const_cast<OrPattern *>(this)->children();
+  }
+};
+
+class AndPattern final : public MatchPattern {
+  MutableArrayRef<MatchPattern *> Conjuncts;
+  ArrayRef<SourceLocation> AndLocs;
+
+public:
+  explicit AndPattern(MutableArrayRef<MatchPattern *> Conjuncts,
+                      ArrayRef<SourceLocation> AndLocs)
+      : MatchPattern(AndPatternClass), Conjuncts(Conjuncts), AndLocs(AndLocs) {
+    assert(Conjuncts.size() >= 2 && AndLocs.size() + 1 == Conjuncts.size());
+    setDependence(computeDependence());
+  }
+
+  static bool classof(const MatchPattern *P) {
+    return P->getMatchPatternClass() == AndPatternClass;
+  }
+
+  ArrayRef<MatchPattern *> conjuncts() const { return Conjuncts; }
+  ArrayRef<SourceLocation> andLocations() const { return AndLocs; }
+
+  SourceLocation getBeginLoc() const {
+    return Conjuncts.front()->getBeginLoc();
+  }
+  SourceLocation getEndLoc() const { return Conjuncts.back()->getEndLoc(); }
+
+  llvm::iterator_range<MatchPattern **> children() {
+    return {Conjuncts.begin(), Conjuncts.end()};
+  }
+
+  llvm::iterator_range<const MatchPattern *const *> children() const {
+    return const_cast<AndPattern *>(this)->children();
   }
 };
 

@@ -5061,9 +5061,26 @@ Parser::ParsePattern(bool AllowPackExpansion,
                      bool AllowUnnamedPack) {
   auto ParseAlternative = [&](SmallVectorImpl<Decl *> &Declarations) {
     ParseScope AlternativeScope(this, Scope::DeclScope);
+    ActionResult<MatchPattern *> First = ParsePrimaryPattern(
+        AllowPackExpansion, StopAtEqual, CorrectionBehavior, AllowUnnamedPack);
+    if (First.isInvalid())
+      return First;
+
+    SmallVector<MatchPattern *, 4> Conjuncts = {First.get()};
+    SmallVector<SourceLocation, 4> AndLocs;
+    while (Tok.is(tok::ampamp)) {
+      AndLocs.push_back(ConsumeToken());
+      ActionResult<MatchPattern *> Next =
+          ParsePrimaryPattern(AllowPackExpansion, StopAtEqual,
+                              CorrectionBehavior, AllowUnnamedPack);
+      if (Next.isInvalid())
+        return Next;
+      Conjuncts.push_back(Next.get());
+    }
+
     ActionResult<MatchPattern *> Result =
-        ParsePrimaryPattern(AllowPackExpansion, StopAtEqual, CorrectionBehavior,
-                            AllowUnnamedPack);
+        Conjuncts.size() == 1 ? First
+                              : Actions.ActOnAndPattern(Conjuncts, AndLocs);
     if (Result.isUsable())
       llvm::append_range(Declarations, getCurScope()->decls());
     AlternativeScope.Exit(/*DiagnoseDecls=*/false);

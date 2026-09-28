@@ -5382,20 +5382,35 @@ public:
       llvm::function_ref<void()> EmitSuccess);
   RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
   LValue EmitMatchSelectExprLValue(const MatchSelectExpr *E);
-  RValue EmitMatchPattern(const MatchPattern *Pattern,
-                          const MatchPatternInstantiation *Instantiation,
-                          const Expr *Subject);
+  struct StagedPatternDeclarations {
+    SmallVector<std::unique_ptr<RunCleanupsScope>, 2> Scopes;
+    SmallVector<RawAddress, 2> ActiveFlags;
+
+    void begin(CodeGenFunction &CGF);
+    void markInitialized(CodeGenFunction &CGF);
+    void emitCleanups(CodeGenFunction &CGF);
+  };
+  RValue
+  EmitMatchPattern(const MatchPattern *Pattern,
+                   const MatchPatternInstantiation *Instantiation,
+                   const Expr *Subject,
+                   StagedPatternDeclarations *StagedDeclarations = nullptr);
   RValue
   EmitDecompositionPattern(const DecompositionPattern *Pattern,
-                           const MatchPatternInstantiation *Instantiation);
+                           const MatchPatternInstantiation *Instantiation,
+                           StagedPatternDeclarations *StagedDeclarations);
   RValue EmitAlternativePattern(const AlternativePattern *Pattern,
-                                const MatchPatternInstantiation *Instantiation);
+                                const MatchPatternInstantiation *Instantiation,
+                                StagedPatternDeclarations *StagedDeclarations);
   void
   EmitAlternativeDiscriminator(const AlternativePattern *Pattern,
                                const MatchPatternInstantiation *Instantiation);
   void EmitSharedDeclarationProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
+  void
+  EmitMatchPatternDeclarations(const MatchPattern *Pattern,
+                               const MatchPatternInstantiation *Instantiation);
   void EmitSelectedMatchPatternProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);

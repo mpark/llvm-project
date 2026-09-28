@@ -4611,6 +4611,23 @@ public:
         return Pattern;
       return getSema().ActOnTypePattern(TInfo);
     }
+    case MatchPattern::AndPatternClass: {
+      auto *P = static_cast<AndPattern *>(Pattern);
+      SmallVector<MatchPattern *, 4> Conjuncts;
+      Conjuncts.reserve(P->conjuncts().size());
+      bool Changed = false;
+      for (MatchPattern *Conjunct : P->conjuncts()) {
+        ActionResult<MatchPattern *> Transformed =
+            TransformPattern(Conjunct, Rebuild);
+        if (Transformed.isInvalid())
+          return true;
+        Changed |= Transformed.get() != Conjunct;
+        Conjuncts.push_back(Transformed.get());
+      }
+      if (!Changed)
+        return Pattern;
+      return getSema().ActOnAndPattern(Conjuncts, P->andLocations());
+    }
     case MatchPattern::OrPatternClass: {
       auto *P = static_cast<OrPattern *>(Pattern);
       SmallVector<MatchPattern *, 4> Alternatives;
