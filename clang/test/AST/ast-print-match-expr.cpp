@@ -316,7 +316,7 @@ int match_preamble(PreambleKind kind) {
 
 int or_pattern(int value) {
   return match (value) {
-    case 0 || 1 || 2 => 1;
+    case 0 or 1 or 2 => 1;
     case _ => 0;
   };
 }
@@ -327,9 +327,22 @@ int or_pattern(int value) {
 // CHECK-NEXT: {{^        }}case _ => 0;
 // CHECK-NEXT: {{^    }}};
 
+int and_pattern(int value) {
+  return match (value) {
+    case 0 and 0 or 1 and _ => 1;
+    case _ => 0;
+  };
+}
+
+// CHECK-LABEL: int and_pattern(int value) {
+// CHECK-NEXT: {{^    }}return match (value) {
+// CHECK-NEXT: {{^        }}case 0 && 0 || 1 && _ => 1;
+// CHECK-NEXT: {{^        }}case _ => 0;
+// CHECK-NEXT: {{^    }}};
+
 int parenthesized_pattern(int value) {
   return match (value) {
-    case ((0 || 1)) => 1;
+    case ((0 or 1)) => 1;
     case (_) => 0;
   };
 }
