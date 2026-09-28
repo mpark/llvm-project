@@ -3309,6 +3309,10 @@ bool RecursiveASTVisitor<Derived>::TraverseMatchPattern(MatchPattern *P) {
   case MatchPattern::TypePatternClass:
     return getDerived().TraverseTypeLoc(
         static_cast<TypePattern *>(P)->getTypeSourceInfo()->getTypeLoc());
+  case MatchPattern::AndPatternClass:
+    for (MatchPattern *Child : P->children())
+      TRY_TO(getDerived().TraverseMatchPattern(Child));
+    return true;
   case MatchPattern::OrPatternClass:
     for (VarDecl *Binding : static_cast<OrPattern *>(P)->bindings())
       TRY_TO(getDerived().TraverseDecl(Binding));

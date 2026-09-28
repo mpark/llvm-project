@@ -11348,6 +11348,7 @@ public:
                                           MatchPattern *Pattern);
   struct MatchPatternState;
   void CheckGuardedMatchPattern(MatchPattern *Pattern);
+  void CheckAndMatchPattern(MatchPattern *Pattern);
 
   StmtResult ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
                                    ExprResult ER);
@@ -11408,6 +11409,9 @@ public:
                           VarDecl *PackSourceDeclaration = nullptr);
   ActionResult<MatchPattern *> ActOnTypePattern(TypeSourceInfo *TInfo);
   ActionResult<MatchPattern *>
+  ActOnAndPattern(ArrayRef<MatchPattern *> Conjuncts,
+                  ArrayRef<SourceLocation> AndLocs);
+  ActionResult<MatchPattern *>
   ActOnOrPattern(ArrayRef<MatchPattern *> Alternatives,
                  ArrayRef<SourceLocation> OrLocs);
   ActionResult<MatchPattern *>
@@ -11463,6 +11467,7 @@ public:
   struct MatchPatternState {
     SmallVector<MatchPatternInfo, 8> Infos;
     bool CheckedBindingReferences = false;
+    bool CheckedAndPatternMoves = false;
 
     MatchPatternInfo &get(MatchPattern *Pattern) {
       for (MatchPatternInfo &Info : Infos)
