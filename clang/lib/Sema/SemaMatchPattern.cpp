@@ -1391,13 +1391,41 @@ static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
          !Construct->getConstructor()->isTrivial();
 }
 
+static void collectAndPatternLeftDeclarations(
+    MatchPattern *Pattern,
+    llvm::SmallPtrSetImpl<const VarDecl *> &Declarations) {
+  if (auto *And = dyn_cast<AndPattern>(Pattern)) {
+    for (MatchPattern *Conjunct : And->conjuncts().drop_back())
+      forEachPatternDeclaration(Conjunct,
+                                [&](MatchPattern *, VarDecl *Declaration) {
+                                  Declarations.insert(Declaration);
+                                });
+  }
+  for (MatchPattern *Child : Pattern->children())
+    collectAndPatternLeftDeclarations(Child, Declarations);
+}
+
 } // namespace
 
-void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
+void Sema::CheckAndMatchPattern(MatchPattern *Pattern) {
+  llvm::SmallPtrSet<const VarDecl *, 8> Declarations;
+  collectAndPatternLeftDeclarations(Pattern, Declarations);
   forEachPatternDeclaration(
-      Pattern,
-      [&](MatchPattern *P, VarDecl *Declaration) {
-        if (isNonTriviallyMoveInitialized(Declaration))
+      Pattern, [&](MatchPattern *P, VarDecl *Declaration) {
+        if (Declarations.contains(Declaration) &&
+            isNonTriviallyMoveInitialized(Declaration))
+          Diag(P->getBeginLoc(), diag::err_and_pattern_declaration_move)
+              << Declaration->getType();
+      });
+}
+
+void Sema::CheckGuardedMatchPattern(MatchPattern *Pattern) {
+  llvm::SmallPtrSet<const VarDecl *, 8> AndLeftDeclarations;
+  collectAndPatternLeftDeclarations(Pattern, AndLeftDeclarations);
+  forEachPatternDeclaration(
+      Pattern, [&](MatchPattern *P, VarDecl *Declaration) {
+        if (!AndLeftDeclarations.contains(Declaration) &&
+            isNonTriviallyMoveInitialized(Declaration))
           Diag(P->getBeginLoc(), diag::err_guarded_declaration_pattern_move)
               << Declaration->getType();
       });
@@ -1804,6 +1832,28 @@ static bool isDecompositionPatternPack(MatchPattern *Pattern) {
   if (auto *Expression = dyn_cast<ExpressionPattern>(Pattern->IgnoreParens()))
     return Expression->isPackExpansion();
   return false;
+}
+
+ActionResult<MatchPattern *>
+Sema::ActOnAndPattern(ArrayRef<MatchPattern *> Conjuncts,
+                      ArrayRef<SourceLocation> AndLocs) {
+  for (MatchPattern *Conjunct : Conjuncts) {
+    if (!isDecompositionPatternPack(Conjunct))
+      continue;
+    Diag(Conjunct->getBeginLoc(), diag::err_decomp_pattern_pack_in_or_pattern);
+    for (MatchPattern *Pattern : Conjuncts)
+      DiscardUninitializedMatchPatternDeclarations(Pattern);
+    return true;
+  }
+
+  MatchPattern **ConjunctStorage =
+      Context.Allocate<MatchPattern *>(Conjuncts.size());
+  llvm::copy(Conjuncts, ConjunctStorage);
+  SourceLocation *LocationStorage =
+      Context.Allocate<SourceLocation>(AndLocs.size());
+  llvm::copy(AndLocs, LocationStorage);
+  return new (Context) AndPattern({ConjunctStorage, Conjuncts.size()},
+                                  {LocationStorage, AndLocs.size()});
 }
 
 ActionResult<MatchPattern *>
@@ -3202,6 +3252,13 @@ bool Sema::CheckCompleteMatchPatternImpl(
     }
     break;
   }
+  case MatchPattern::AndPatternClass: {
+    auto *P = static_cast<AndPattern *>(Pattern);
+    for (MatchPattern *Conjunct : P->conjuncts())
+      if (CheckCompleteMatchPattern(Subject, Conjunct, State, ProjectionCache))
+        return true;
+    break;
+  }
   case MatchPattern::OrPatternClass: {
     auto *P = static_cast<OrPattern *>(Pattern);
     SmallVector<unsigned char, 4> Viable(P->alternatives().size(), 0);
@@ -3456,6 +3513,8 @@ static bool isMatchSubjectProductPattern(MatchPattern *Pattern) {
     return isa<DecompositionDecl>(Declaration->getDeclaration());
   if (auto *Or = dyn_cast<OrPattern>(Pattern))
     return llvm::all_of(Or->alternatives(), isMatchSubjectProductPattern);
+  if (auto *And = dyn_cast<AndPattern>(Pattern))
+    return llvm::all_of(And->conjuncts(), isMatchSubjectProductPattern);
   return false;
 }
 
@@ -3474,9 +3533,13 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
     if (checkPatternBindingReferences(*this, Pattern))
       return true;
   }
+  bool CheckAndPatternMoves = !State.CheckedAndPatternMoves;
+  State.CheckedAndPatternMoves = true;
   State.get(Pattern);
   bool Invalid = CheckCompleteMatchPatternImpl(Subject, Pattern, State,
                                                ProjectionCache);
+  if (!Invalid && CheckAndPatternMoves)
+    CheckAndMatchPattern(Pattern);
   if (Invalid)
     DiscardUninitializedMatchPatternDeclarations(Pattern);
   return Invalid;
@@ -3525,6 +3588,19 @@ Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
           Info->Projection->getKind() == MatchProjection::CastProjection)
         return MatchPatternRefutability::Refutable;
       return MatchPatternRefutability::Irrefutable;
+
+    case MatchPattern::AndPatternClass: {
+      MatchPatternRefutability Refutability =
+          MatchPatternRefutability::Irrefutable;
+      for (MatchPattern *Conjunct : static_cast<AndPattern *>(P)->conjuncts()) {
+        MatchPatternRefutability Child = Recurse(Conjunct, Recurse);
+        if (Child == MatchPatternRefutability::Impossible)
+          return Child;
+        if (Child == MatchPatternRefutability::Refutable)
+          Refutability = Child;
+      }
+      return Refutability;
+    }
 
     case MatchPattern::OrPatternClass: {
       auto *Or = static_cast<OrPattern *>(P);

@@ -40,7 +40,7 @@ static_assert(test_case_condition_assignment_parsing());
 
 constexpr bool test_parenthesized_patterns(int value) {
   return match (value) {
-    case ((0 || 1)) => true;
+    case ((0 or 1)) => true;
     case (_) => false;
   };
 }
@@ -2096,7 +2096,7 @@ static_assert(matches(nullptr));
 } // namespace declaration_expression_lookup
 
 constexpr bool parenthesized_pattern_extends_through_or(int value) {
-  return match(value, case (0) || 1);
+  return match(value, case (0) or 1);
 }
 
 static_assert(parenthesized_pattern_extends_through_or(0));

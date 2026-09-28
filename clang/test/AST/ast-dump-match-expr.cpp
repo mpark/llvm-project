@@ -93,7 +93,7 @@ void test_declaration_expression_disambiguation_dump(int x) {
 }
 
 void test_or_pattern_dump(int x) {
-  match (x) { case 0 || 1 || 2 => 0; case _ => 1; }
+  match (x) { case 0 or 1 or 2 => 0; case _ => 1; }
   // CHECK:      OrPattern 0x{{[^ ]*}} <col:20, col:30>
   // CHECK-NEXT: |-ExpressionPattern 0x{{[^ ]*}} <col:20>
   // CHECK-NEXT: | `-IntegerLiteral 0x{{[^ ]*}} <col:20> 'int' 0
@@ -103,8 +103,18 @@ void test_or_pattern_dump(int x) {
   // CHECK-NEXT:   `-IntegerLiteral 0x{{[^ ]*}} <col:30> 'int' 2
 }
 
+void test_and_pattern_dump(int x) {
+  match (x) { case 0 and 0 and _ => 0; case _ => 1; }
+  // CHECK:      AndPattern 0x{{[^ ]*}} <col:20, col:32>
+  // CHECK-NEXT: |-ExpressionPattern 0x{{[^ ]*}} <col:20>
+  // CHECK-NEXT: | `-IntegerLiteral 0x{{[^ ]*}} <col:20> 'int' 0
+  // CHECK-NEXT: |-ExpressionPattern 0x{{[^ ]*}} <col:26>
+  // CHECK-NEXT: | `-IntegerLiteral 0x{{[^ ]*}} <col:26> 'int' 0
+  // CHECK-NEXT: `-WildcardPattern 0x{{[^ ]*}} <col:32>
+}
+
 void test_paren_pattern_dump(int x) {
-  match (x) { case ((0 || 1)) => 0; case _ => 1; }
+  match (x) { case ((0 or 1)) => 0; case _ => 1; }
   // CHECK:      ParenPattern 0x{{[^ ]*}} <col:20, col:29>
   // CHECK-NEXT: `-ParenPattern 0x{{[^ ]*}} <col:21, col:28>
   // CHECK-NEXT:   `-OrPattern 0x{{[^ ]*}} <col:22, col:27>

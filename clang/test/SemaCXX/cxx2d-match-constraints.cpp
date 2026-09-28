@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -fsyntax-only -fpattern-matching -verify %s
 
 template <int Value>
-  requires(match(Value, case 0 || 1))
+  requires(match(Value, case 0 or 1))
 constexpr bool namespace_constraint() {
   return true;
 }
@@ -15,7 +15,7 @@ static_assert(!accepts_namespace_constraint<2>);
 
 struct constrained_members {
   template <int Value>
-    requires(match(Value, case 0 || 1))
+    requires(match(Value, case 0 or 1))
   static constexpr bool accepts_zero_or_one() {
     return true;
   }
