@@ -388,7 +388,8 @@ static Expected<ResolvedInputs> resolveArchiveMembers(
           return ChildBufferOrErr.takeError();
         // Include archive name in buffer identifier for better diagnostics.
         std::string BufferIdentifier =
-            (*Filename + "(" + ChildBufferOrErr->getBufferIdentifier() + ")")
+            (Twine(*Filename) + "(" +
+             ChildBufferOrErr->getBufferIdentifier() + ")")
                 .str();
         std::unique_ptr<MemoryBuffer> ChildBuffer =
             MemoryBuffer::getMemBufferCopy(ChildBufferOrErr->getBuffer(),

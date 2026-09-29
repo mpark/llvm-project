@@ -483,7 +483,8 @@ public:
     if (std::optional<std::string> Str = lookup(S))
       return Str;
     if (std::optional<std::string> Str = Visit(S->getLHS()))
-      return (*Str + " " + BinaryOperator::getOpcodeStr(S->getOpcode()) + " " +
+      return (Twine(*Str) + " " +
+              BinaryOperator::getOpcodeStr(S->getOpcode()) + " " +
               std::to_string(S->getRHS()->getLimitedValue()) +
               (S->getRHS()->isUnsigned() ? "U" : ""))
           .str();
@@ -495,8 +496,8 @@ public:
       return Str;
     if (std::optional<std::string> Str1 = Visit(S->getLHS()))
       if (std::optional<std::string> Str2 = Visit(S->getRHS()))
-        return (*Str1 + " " + BinaryOperator::getOpcodeStr(S->getOpcode()) +
-                " " + *Str2)
+        return (Twine(*Str1) + " " +
+                BinaryOperator::getOpcodeStr(S->getOpcode()) + " " + *Str2)
             .str();
     return std::nullopt;
   }
@@ -505,7 +506,7 @@ public:
     if (std::optional<std::string> Str = lookup(S))
       return Str;
     if (std::optional<std::string> Str = Visit(S->getOperand()))
-      return (UnaryOperator::getOpcodeStr(S->getOpcode()) + *Str).str();
+      return (Twine(UnaryOperator::getOpcodeStr(S->getOpcode())) + *Str).str();
     return std::nullopt;
   }
 
