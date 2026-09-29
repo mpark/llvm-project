@@ -155,8 +155,10 @@ class Interpreter {
 protected:
   // Derived classes can use an extended interface of the Interpreter.
   Interpreter(std::unique_ptr<CompilerInstance> Instance, llvm::Error &Err,
-              std::unique_ptr<IncrementalExecutorBuilder> IEB = nullptr,
-              std::unique_ptr<clang::ASTConsumer> Consumer = nullptr);
+              std::unique_ptr<IncrementalExecutorBuilder> IEB = nullptr);
+  Interpreter(std::unique_ptr<CompilerInstance> Instance, llvm::Error &Err,
+              std::unique_ptr<IncrementalExecutorBuilder> IEB,
+              std::unique_ptr<clang::ASTConsumer> Consumer);
 
   // Create the internal IncrementalExecutor, or re-create it after calling
   // ResetExecutor().
