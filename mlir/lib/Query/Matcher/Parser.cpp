@@ -494,7 +494,7 @@ Parser::getNamedValueCompletions(llvm::ArrayRef<ArgKind> acceptedTypes) {
   std::vector<MatcherCompletion> result;
   for (const auto &entry : *namedValues) {
     std::string decl =
-        (entry.getValue().getTypeAsString() + " " + entry.getKey()).str();
+        entry.getValue().getTypeAsString() + " " + entry.getKey();
     result.emplace_back(entry.getKey(), decl);
   }
   return result;

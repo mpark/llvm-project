@@ -438,7 +438,7 @@ int main(int argc, char **argv) {
   bool LinkDyLib = !!LLVM_LINK_DYLIB;
 
   if (BuiltDyLib) {
-    std::string path((SharedDir + DirSep + DyLibName).str());
+    std::string path((Twine(SharedDir) + DirSep + DyLibName).str());
     if (DirSep == "\\")
       llvm::replace(path, '/', '\\');
     DyLibExists = sys::fs::exists(path);
@@ -500,9 +500,9 @@ int main(int argc, char **argv) {
   auto GetComponentLibraryPath = [&](const StringRef &Name, const bool Shared) {
     auto LibFileName = GetComponentLibraryFileName(Name, Shared);
     if (Shared)
-      return (SharedDir + DirSep + LibFileName).str();
+      return (Twine(SharedDir) + DirSep + LibFileName).str();
     else
-      return (StaticDir + DirSep + LibFileName).str();
+      return (Twine(StaticDir) + DirSep + LibFileName).str();
   };
 
   raw_ostream &OS = outs();

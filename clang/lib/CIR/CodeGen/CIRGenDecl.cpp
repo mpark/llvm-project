@@ -794,7 +794,7 @@ Address CIRGenModule::createUnnamedGlobalFrom(const VarDecl &d,
     if (d.hasGlobalStorage())
       name = getMangledName(&d).str() + ".const";
     else if (const DeclContext *dc = d.getParentFunctionOrMethod())
-      name = ("__const." + functionName(dc) + "." + d.getName()).str();
+      name = "__const." + functionName(dc) + "." + d.getName();
     else
       llvm_unreachable("local variable has no parent function or method");
 

@@ -659,10 +659,10 @@ FailureOr<Attribute> TargetFeaturesAttr::query(DataLayoutEntryKey key) {
   if (contains(stringKey))
     return UnitAttr::get(getContext());
 
-  if (contains((std::string("+") + stringKey.strref()).str()))
+  if (contains(std::string("+") + stringKey.strref()))
     return BoolAttr::get(getContext(), true);
 
-  if (contains((std::string("-") + stringKey.strref()).str()))
+  if (contains(std::string("-") + stringKey.strref()))
     return BoolAttr::get(getContext(), false);
 
   return failure();

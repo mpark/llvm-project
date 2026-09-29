@@ -31,7 +31,7 @@ static void writeCFGToDotFile(const AnalysisOptions &Opts, Function &F,
                               BranchProbabilityInfo *BPI, uint64_t MaxFreq,
                               bool CFGOnly = false) {
   std::string Filename =
-      (Opts.cfg_dot_filename_prefix + "." + F.getName() + ".dot").str();
+      (Twine(Opts.cfg_dot_filename_prefix) + "." + F.getName() + ".dot").str();
   errs() << "Writing '" << Filename << "'...";
 
   std::error_code EC;

@@ -85,7 +85,7 @@ bool CodeGenCoverage::emit(StringRef CoveragePrefix,
     // more than one process is ever writing to the same file at the same time.
     std::string Pid = llvm::to_string(sys::Process::getProcessId());
 
-    std::string CoverageFilename = (CoveragePrefix + Pid).str();
+    std::string CoverageFilename = (CoveragePrefix + Twine(Pid)).str();
 
     std::error_code EC;
     sys::fs::OpenFlags OpenFlags = sys::fs::OF_Append;

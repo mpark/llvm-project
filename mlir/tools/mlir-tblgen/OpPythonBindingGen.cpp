@@ -1162,8 +1162,7 @@ static void populateBuilderRegions(const Operator &op,
 
   const NamedRegion &region = op.getRegion(op.getNumRegions() - 1);
   std::string name =
-      ("num_" + region.name.take_front().lower() + region.name.drop_front())
-          .str();
+      "num_" + region.name.take_front().lower() + region.name.drop_front();
   builderArgs.push_back(name);
   builderLines.push_back(
       formatv("regions = {0} + {1}", op.getNumRegions() - 1, name));

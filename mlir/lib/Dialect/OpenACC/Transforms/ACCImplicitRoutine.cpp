@@ -91,7 +91,7 @@ private:
   acc::RoutineOp createRoutineOp(OpBuilder &builder, Location loc,
                                  FunctionOpInterface &callee) {
     std::string routineName =
-        (accRoutinePrefix + std::to_string(routineCounter++)).str();
+        accRoutinePrefix + std::to_string(routineCounter++);
     auto routineOp = acc::RoutineOp::create(
         builder, loc,
         /* sym_name=*/builder.getStringAttr(routineName),
