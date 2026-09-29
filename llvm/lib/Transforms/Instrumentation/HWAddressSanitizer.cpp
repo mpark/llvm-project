@@ -619,8 +619,7 @@ void HWAddressSanitizer::initializeCallbacks(Module &M) {
 
     HwasanMemoryAccessCallbackSized[AccessIsWrite] =
         M.getOrInsertFunction((Opts.hwasan_memory_access_callback_prefix +
-                               TypeStr + "N" + MatchAllStr + EndingStr)
-                                  .str(),
+                               TypeStr + "N" + MatchAllStr + EndingStr),
                               HwasanMemoryAccessCallbackSizedFnTy);
 
     for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
@@ -628,8 +627,7 @@ void HWAddressSanitizer::initializeCallbacks(Module &M) {
       HwasanMemoryAccessCallback[AccessIsWrite][AccessSizeIndex] =
           M.getOrInsertFunction((Opts.hwasan_memory_access_callback_prefix +
                                  TypeStr + itostr(1ULL << AccessSizeIndex) +
-                                 MatchAllStr + EndingStr)
-                                    .str(),
+                                 MatchAllStr + EndingStr),
                                 HwasanMemoryAccessCallbackFnTy);
     }
   }

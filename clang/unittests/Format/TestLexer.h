@@ -51,7 +51,7 @@ inline TokenList uneof(const TokenList &Tokens) {
 inline std::string text(ArrayRef<FormatToken *> Tokens) {
   return std::accumulate(Tokens.begin(), Tokens.end(), std::string(),
                          [](const std::string &R, FormatToken *Tok) {
-                           return (R + Tok->TokenText).str();
+                           return (Twine(R) + Tok->TokenText).str();
                          });
 }
 

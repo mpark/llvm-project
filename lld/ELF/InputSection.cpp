@@ -36,7 +36,7 @@ using namespace lld::elf;
 
 // Returns a string to construct an error message.
 std::string elf::toStr(Ctx &ctx, const InputSectionBase *sec) {
-  return (toStr(ctx, sec->file) + ":(" + sec->name + ")").str();
+  return toStr(ctx, sec->file) + ":(" + sec->name + ")";
 }
 
 const ELFSyncStream &elf::operator<<(const ELFSyncStream &s,

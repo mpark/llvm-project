@@ -1263,7 +1263,7 @@ static llvm::Function *emitParallelOrTeamsOutlinedFunction(
 
 std::string CGOpenMPRuntime::getOutlinedHelperName(StringRef Name) const {
   std::string Suffix = getName({"omp_outlined"});
-  return (Name + Suffix).str();
+  return (Twine(Name) + Suffix).str();
 }
 
 std::string CGOpenMPRuntime::getOutlinedHelperName(CodeGenFunction &CGF) const {
@@ -1272,7 +1272,7 @@ std::string CGOpenMPRuntime::getOutlinedHelperName(CodeGenFunction &CGF) const {
 
 std::string CGOpenMPRuntime::getReductionFuncName(StringRef Name) const {
   std::string Suffix = getName({"omp", "reduction", "reduction_func"});
-  return (Name + Suffix).str();
+  return (Twine(Name) + Suffix).str();
 }
 
 llvm::Function *CGOpenMPRuntime::emitParallelOutlinedFunction(

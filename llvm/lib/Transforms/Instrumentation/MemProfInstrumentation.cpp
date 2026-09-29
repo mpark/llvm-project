@@ -497,8 +497,7 @@ void MemProfiler::initializeCallbacks(Module &M) {
 
     SmallVector<Type *, 2> Args1{1, IntptrTy};
     MemProfMemoryAccessCallback[AccessIsWrite] = M.getOrInsertFunction(
-        (Opts.memprof_memory_access_callback_prefix + HistPrefix + TypeStr)
-            .str(),
+        (Opts.memprof_memory_access_callback_prefix + HistPrefix + TypeStr),
         FunctionType::get(IRB.getVoidTy(), Args1, false));
   }
   MemProfMemmove = M.getOrInsertFunction(
