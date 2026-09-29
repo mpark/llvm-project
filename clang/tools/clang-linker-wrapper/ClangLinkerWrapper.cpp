@@ -212,7 +212,7 @@ Expected<StringRef> createOutputFile(const Twine &Prefix, StringRef Extension) {
   std::string PrefixStr = clang::sanitizeTargetIDInFileName(Prefix.str());
 
   if (SaveTemps) {
-    (PrefixStr + "." + Extension).toNullTerminatedStringRef(OutputFile);
+    (Twine(PrefixStr) + "." + Extension).toNullTerminatedStringRef(OutputFile);
   } else {
     if (std::error_code EC = sys::fs::createTemporaryFile(
             sys::path::filename(PrefixStr), Extension, OutputFile))

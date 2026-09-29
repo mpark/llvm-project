@@ -38,7 +38,8 @@ static cl::opt<bool>
 
 static void writeMCFGToDotFile(MachineFunction &MF) {
   std::string Filename =
-      (MCFGDotFilenamePrefix + "." + MF.getName() + ".dot").str();
+      (Twine(MCFGDotFilenamePrefix.getValue()) + "." + MF.getName() + ".dot")
+          .str();
   errs() << "Writing '" << Filename << "'...";
 
   std::error_code EC;

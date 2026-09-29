@@ -56,7 +56,7 @@ static ThreadSafeModule extractSubModule(ThreadSafeModule &TSM,
 
   auto NewTSM = cloneToNewContext(TSM, ShouldExtract, DeleteExtractedDefs);
   NewTSM.withModuleDo([&](Module &M) {
-    M.setModuleIdentifier((M.getModuleIdentifier() + Suffix).str());
+    M.setModuleIdentifier((Twine(M.getModuleIdentifier()) + Suffix).str());
   });
 
   return NewTSM;
