@@ -5381,6 +5381,7 @@ public:
       const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
       llvm::function_ref<void()> EmitSuccess);
   RValue EmitMatchSelectExpr(const MatchSelectExpr &S);
+  RValue EmitMatchSelectExpr(const MatchSelectExpr &S, AggValueSlot Dest);
   LValue EmitMatchSelectExprLValue(const MatchSelectExpr *E);
   struct StagedPatternDeclarations {
     SmallVector<std::unique_ptr<RunCleanupsScope>, 2> Scopes;
