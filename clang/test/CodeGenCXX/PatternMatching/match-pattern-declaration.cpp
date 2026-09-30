@@ -80,3 +80,39 @@ int refutable(Pair pair) {
   case [0, int value] = pair else return -1;
   return value;
 }
+
+struct Single {
+  int value;
+};
+
+template <>
+struct std::alternative_traits<Single> {
+  static constexpr alternative_info alternatives[] = {^^int};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const Single&) noexcept { return 0; }
+
+  template <__SIZE_TYPE__, class Self>
+  static constexpr decltype(auto) get(Self&& single) {
+    return (static_cast<Self&&>(single).value);
+  }
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z10sequential6SingleS_
+// CHECK-NOT: call void @llvm.trap()
+// CHECK: add nsw i32
+int sequential(Single first, Single second) {
+  case { int& x } = first;
+  case { int& y } = second;
+  return x + y;
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z15nested_deferred4PairR6Choice
+// CHECK: call{{.*}} i32 @_Z8classifyRi
+// CHECK: call{{.*}} i32 @_Z8classifyRd
+// CHECK: add nsw i32
+int nested_deferred(Pair pair, Choice& choice) {
+  case [int first, int second] = pair;
+  case { auto&& value } = choice;
+  return first + second + classify(value);
+}
