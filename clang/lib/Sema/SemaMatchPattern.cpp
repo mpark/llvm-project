@@ -3263,20 +3263,25 @@ bool Sema::CheckCompleteMatchPatternImpl(
     auto *P = static_cast<OrPattern *>(Pattern);
     SmallVector<unsigned char, 4> Viable(P->alternatives().size(), 0);
 
-    auto PerformsInitialization = [&](const MatchPattern *Current,
-                                      auto &Recurse) -> bool {
-      if (isa<DeclarationPattern>(Current))
+    auto RequiresSelectedAlternative = [&](const MatchPattern *Current,
+                                           auto &Recurse) -> bool {
+      if (isa<DeclarationPattern, TypePattern>(Current))
         return true;
+      if (auto *Alternative = dyn_cast<AlternativePattern>(Current))
+        if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+            Alternative->isTypeSelected() ||
+            Alternative->isTypeConstraintSelected())
+          return true;
       return llvm::any_of(Current->children(), [&](const MatchPattern *Child) {
         return Recurse(Child, Recurse);
       });
     };
     bool NeedsSelectedAlternative =
-        PerformsInitialization(P, PerformsInitialization);
+        RequiresSelectedAlternative(P, RequiresSelectedAlternative);
 
-    // Declaration initialization belongs to the selected alternative. Defer
-    // such or-patterns so each viable child receives its own semantic arm
-    // instantiation and therefore its own guard and handler instantiation.
+    // Alternative projection and declaration initialization belong to the
+    // selected alternative. Defer such or-patterns so each viable child
+    // receives its own semantic arm instantiation.
     if (Subject && NeedsSelectedAlternative && ProjectionCache &&
         ProjectionCache->DeferAlternativeChoices) {
       SmallVector<unsigned, 4> Alternatives;
