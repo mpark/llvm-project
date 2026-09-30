@@ -925,16 +925,19 @@ objcopy::parseObjcopyOptions(ArrayRef<const char *> ArgsArr,
       return createStringError(
           errc::invalid_argument,
           "'--gap-fill' is only supported for binary output");
-    ErrorOr<uint64_t> Val = getAsInteger<uint64_t>(A->getValue());
-    if (!Val)
-      return createStringError(Val.getError(), "--gap-fill: bad number: %s",
-                               A->getValue());
-    uint8_t ByteVal = Val.get();
-    if (ByteVal != Val.get())
-      return createStringError(std::errc::value_too_large,
-                               "gap-fill value %s is out of range (0 to 0xff)",
-                               A->getValue());
-    Config.GapFill = ByteVal;
+    match (getAsInteger<uint64_t>(A->getValue())) {
+      case { std::error_code EC } =>
+        return createStringError(EC, "--gap-fill: bad number: %s",
+                                 A->getValue());
+      case { uint64_t Val } => {
+        uint8_t ByteVal = Val;
+        if (ByteVal != Val)
+          return createStringError(
+              std::errc::value_too_large,
+              "gap-fill value %s is out of range (0 to 0xff)", A->getValue());
+        Config.GapFill = ByteVal;
+      }
+    }
   }
 
   if (const auto *A = InputArgs.getLastArg(OBJCOPY_pad_to)) {
@@ -942,11 +945,12 @@ objcopy::parseObjcopyOptions(ArrayRef<const char *> ArgsArr,
       return createStringError(
           errc::invalid_argument,
           "'--pad-to' is only supported for binary output");
-    ErrorOr<uint64_t> Addr = getAsInteger<uint64_t>(A->getValue());
-    if (!Addr)
-      return createStringError(Addr.getError(), "--pad-to: bad number: %s",
-                               A->getValue());
-    Config.PadTo = *Addr;
+    match (getAsInteger<uint64_t>(A->getValue())) {
+      case { std::error_code EC } =>
+        return createStringError(EC, "--pad-to: bad number: %s",
+                                 A->getValue());
+      case { uint64_t Addr } => Config.PadTo = Addr;
+    }
   }
 
   if (const auto *Arg = InputArgs.getLastArg(OBJCOPY_change_section_lma)) {

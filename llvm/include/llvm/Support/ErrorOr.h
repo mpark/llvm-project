@@ -269,4 +269,34 @@ operator==(const ErrorOr<T> &Err, E Code) {
 
 } // end namespace llvm
 
+#ifdef __clang__
+#  if __has_feature(pattern_matching)
+
+namespace std {
+
+template <class T>
+struct alternative_traits<llvm::ErrorOr<T>> {
+  static constexpr alternative_info alternatives[] = {^^T, ^^error_code};
+  static constexpr bool has_residual_states = false;
+
+  enum class state : bool { value = false, error = true };
+
+  static state index(const llvm::ErrorOr<T> &Result) noexcept {
+    return Result ? state::value : state::error;
+  }
+
+  template <state State, class Self>
+  static decltype(auto) get(Self &&Result) {
+    return match constexpr (State) -> decltype(auto) {
+      case state::value => *std::forward<Self>(Result);
+      case state::error => Result.getError();
+    };
+  }
+};
+
+} // namespace std
+
+#  endif // __has_feature(pattern_matching)
+#endif   // __clang__
+
 #endif // LLVM_SUPPORT_ERROROR_H
