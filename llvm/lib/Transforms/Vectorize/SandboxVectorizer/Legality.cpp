@@ -250,8 +250,7 @@ const LegalityResult &LegalityAnalysis::canVectorize(BndlRef<Value *> Bndl,
 
   auto CollectDescrs = getHowToCollectValues(Bndl);
   if (CollectDescrs.hasVectorInputs()) {
-    if (auto ValueShuffleOpt = CollectDescrs.getSingleInput()) {
-      auto [Vec, Mask] = *ValueShuffleOpt;
+    if (case { auto [Vec, Mask] } = CollectDescrs.getSingleInput()) {
       if (Mask.isIdentity())
         return createLegalityResult<DiamondReuse>(Vec);
       return createLegalityResult<DiamondReuseWithShuffle>(Vec, Mask);

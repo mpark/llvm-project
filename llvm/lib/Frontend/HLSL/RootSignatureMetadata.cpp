@@ -51,14 +51,6 @@ static std::optional<StringRef> extractMdStringValue(MDNode *Node,
 
 namespace {
 
-// We use the OverloadVisit with std::visit to ensure the compiler catches if a
-// new RootElement variant type is added but it's metadata generation isn't
-// handled.
-template <class... Ts> struct OverloadedVisit : Ts... {
-  using Ts::operator()...;
-};
-template <class... Ts> OverloadedVisit(Ts...) -> OverloadedVisit<Ts...>;
-
 struct FmtRange {
   dxil::ResourceClass Type;
   uint32_t Register;
@@ -106,29 +98,15 @@ extractEnumValue(MDNode *Node, unsigned int OpId, StringRef ErrText,
 }
 
 MDNode *MetadataBuilder::BuildRootSignature() {
-  const auto Visitor = OverloadedVisit{
-      [this](const dxbc::RootFlags &Flags) -> MDNode * {
-        return BuildRootFlags(Flags);
-      },
-      [this](const RootConstants &Constants) -> MDNode * {
-        return BuildRootConstants(Constants);
-      },
-      [this](const RootDescriptor &Descriptor) -> MDNode * {
-        return BuildRootDescriptor(Descriptor);
-      },
-      [this](const DescriptorTableClause &Clause) -> MDNode * {
-        return BuildDescriptorTableClause(Clause);
-      },
-      [this](const DescriptorTable &Table) -> MDNode * {
-        return BuildDescriptorTable(Table);
-      },
-      [this](const StaticSampler &Sampler) -> MDNode * {
-        return BuildStaticSampler(Sampler);
-      },
-  };
-
   for (const RootElement &Element : Elements) {
-    MDNode *ElementMD = std::visit(Visitor, Element);
+    MDNode *ElementMD = match (Element) {
+      case { const dxbc::RootFlags &Flags } => BuildRootFlags(Flags);
+      case { const RootConstants &Constants } => BuildRootConstants(Constants);
+      case { const RootDescriptor &Descriptor } => BuildRootDescriptor(Descriptor);
+      case { const DescriptorTableClause &Clause } => BuildDescriptorTableClause(Clause);
+      case { const DescriptorTable &Table } => BuildDescriptorTable(Table);
+      case { const StaticSampler &Sampler } => BuildStaticSampler(Sampler);
+    };
     assert(ElementMD != nullptr &&
            "Root Element must be initialized and validated");
     GeneratedMetadata.push_back(ElementMD);

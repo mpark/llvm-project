@@ -1306,35 +1306,35 @@ void MCCFIInstruction::replaceRegister(unsigned FromReg, unsigned ToReg) {
     if (Reg == FromReg)
       Reg = ToReg;
   };
-  auto Visitor = makeVisitor(
-      [=](CommonFields &F) {
+  match (ExtraFields) {
+    case { CommonFields &F } => {
         ReplaceReg(F.Register);
         ReplaceReg(F.Register2);
-      },
-      [](EscapeFields &) {}, [](LabelFields &) {},
-      [=](RegisterPairFields &F) {
+    }
+    case { EscapeFields: _ } or { LabelFields: _ } => ;
+    case { RegisterPairFields &F } => {
         ReplaceReg(F.Register);
         ReplaceReg(F.Reg1);
         ReplaceReg(F.Reg2);
-      },
-      [=](VectorRegistersFields &F) {
+    }
+    case { VectorRegistersFields &F } => {
         ReplaceReg(F.Register);
         for (VectorRegisterWithLane &VRL : F.VectorRegisters)
           ReplaceReg(VRL.Register);
-      },
-      [=](VectorOffsetFields &F) {
+    }
+    case { VectorOffsetFields &F } => {
         ReplaceReg(F.Register);
         ReplaceReg(F.MaskRegister);
-      },
-      [=](VectorRegisterMaskFields &F) {
+    }
+    case { VectorRegisterMaskFields &F } => {
         ReplaceReg(F.Register);
         ReplaceReg(F.SpillRegister);
         ReplaceReg(F.MaskRegister);
-      },
-      [](LLVMSetRAStateFields &) {
-        llvm_unreachable(".cfi_set_ra_state does not have registers");
-      });
-  std::visit(Visitor, ExtraFields);
+    }
+    case { LLVMSetRAStateFields: _ } => {
+      llvm_unreachable(".cfi_set_ra_state does not have registers");
+    }
+  }
 }
 
 static int getDataAlignmentFactor(MCStreamer &streamer) {
