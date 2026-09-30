@@ -661,17 +661,14 @@ static Error writeELFBinaryToFile(StringRef FilePath, const IFSStub &Stub,
   std::vector<uint8_t> Buf(Builder.getSize());
   Builder.write(Buf.data());
 
-  if (WriteIfChanged) {
-    if (ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrError =
-            MemoryBuffer::getFile(FilePath)) {
-      // Compare Stub output with existing Stub file.
-      // If Stub file unchanged, abort updating.
-      if ((*BufOrError)->getBufferSize() == Builder.getSize() &&
-          !memcmp((*BufOrError)->getBufferStart(), Buf.data(),
-                  Builder.getSize()))
-        return Error::success();
-    }
-  }
+  // Compare Stub output with the existing file and avoid updating it when it
+  // is unchanged.
+  if (WriteIfChanged &&
+      case { .value: { MemoryBuffer &Buffer } } =
+          MemoryBuffer::getFile(FilePath) &&
+      Buffer.getBufferSize() == Builder.getSize() &&
+      !memcmp(Buffer.getBufferStart(), Buf.data(), Builder.getSize()))
+    return Error::success();
 
   Expected<std::unique_ptr<FileOutputBuffer>> BufOrError =
       FileOutputBuffer::create(FilePath, Builder.getSize());
