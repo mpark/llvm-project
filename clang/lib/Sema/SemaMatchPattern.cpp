@@ -32,6 +32,60 @@
 using namespace clang;
 using namespace sema;
 
+bool Sema::MatchAlternativeSelectionPlan::isRequired(
+    const MatchPattern *Pattern) {
+  auto PerformsDeclarationInitialization = [](const MatchPattern *Current,
+                                              auto &Recurse) -> bool {
+    if (isa<DeclarationPattern, TypePattern>(Current))
+      return true;
+    return llvm::any_of(Current->children(), [&](const MatchPattern *Child) {
+      return Recurse(Child, Recurse);
+    });
+  };
+
+  if (isa<OrPattern>(Pattern) &&
+      PerformsDeclarationInitialization(Pattern,
+                                        PerformsDeclarationInitialization))
+    return true;
+  if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
+    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+        Alternative->isTypeSelected() ||
+        Alternative->isTypeConstraintSelected())
+      return true;
+  return llvm::any_of(Pattern->children(), [](const MatchPattern *Child) {
+    return isRequired(Child);
+  });
+}
+
+void Sema::MatchAlternativeSelectionPlan::beginCandidate(
+    MatchProjectionCache &Cache) const {
+  Cache.AlternativeChoices.clear();
+  Cache.PlannedAlternativeSelections = Selections;
+  Cache.NextPlannedAlternativeSelection = 0;
+  Cache.CurrentProjectionPath.clear();
+  Cache.CurrentDiscriminatorPath.clear();
+}
+
+bool Sema::MatchAlternativeSelectionPlan::advance(
+    const MatchProjectionCache &Cache) {
+  SawAlternativeChoice |= !Cache.AlternativeChoices.empty();
+  SmallVector<unsigned, 4> NextSelections;
+  for (unsigned I = Cache.AlternativeChoices.size(); I-- > 0;) {
+    const auto &Choice = Cache.AlternativeChoices[I];
+    auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
+    assert(Selected != Choice.Alternatives.end() &&
+           "selected alternative is not a candidate");
+    if (std::next(Selected) == Choice.Alternatives.end())
+      continue;
+    for (unsigned J = 0; J < I; ++J)
+      NextSelections.push_back(Cache.AlternativeChoices[J].Selected);
+    NextSelections.push_back(*std::next(Selected));
+    Selections = std::move(NextSelections);
+    return true;
+  }
+  return false;
+}
+
 static void
 collectPatternBindings(MatchPattern *Pattern,
                        llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
@@ -2856,10 +2910,10 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
                                               Traits.AdvertisedTypes[Chosen],
                                               State, ProjectionCache);
     }
-    if (ProjectionCache->NextForcedAlternativeSelection <
-        ProjectionCache->ForcedAlternativeSelections.size()) {
-      Chosen = ProjectionCache->ForcedAlternativeSelections
-                   [ProjectionCache->NextForcedAlternativeSelection++];
+    if (ProjectionCache->NextPlannedAlternativeSelection <
+        ProjectionCache->PlannedAlternativeSelections.size()) {
+      Chosen = ProjectionCache->PlannedAlternativeSelections
+                   [ProjectionCache->NextPlannedAlternativeSelection++];
       if (!llvm::is_contained(Selected, Chosen))
         return true;
     }
@@ -3262,21 +3316,12 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::OrPatternClass: {
     auto *P = static_cast<OrPattern *>(Pattern);
     SmallVector<unsigned char, 4> Viable(P->alternatives().size(), 0);
-
-    auto PerformsInitialization = [&](const MatchPattern *Current,
-                                      auto &Recurse) -> bool {
-      if (isa<DeclarationPattern>(Current))
-        return true;
-      return llvm::any_of(Current->children(), [&](const MatchPattern *Child) {
-        return Recurse(Child, Recurse);
-      });
-    };
     bool NeedsSelectedAlternative =
-        PerformsInitialization(P, PerformsInitialization);
+        MatchAlternativeSelectionPlan::isRequired(P);
 
-    // Declaration initialization belongs to the selected alternative. Defer
-    // such or-patterns so each viable child receives its own semantic arm
-    // instantiation and therefore its own guard and handler instantiation.
+    // Alternative projection and declaration initialization belong to the
+    // selected alternative. Defer such or-patterns so each viable child
+    // receives its own semantic arm instantiation.
     if (Subject && NeedsSelectedAlternative && ProjectionCache &&
         ProjectionCache->DeferAlternativeChoices) {
       SmallVector<unsigned, 4> Alternatives;
@@ -3301,10 +3346,10 @@ bool Sema::CheckCompleteMatchPatternImpl(
       for (unsigned I = 0; I != P->alternatives().size(); ++I)
         Alternatives.push_back(I);
       unsigned Chosen = Alternatives.front();
-      if (ProjectionCache->NextForcedAlternativeSelection <
-          ProjectionCache->ForcedAlternativeSelections.size())
-        Chosen = ProjectionCache->ForcedAlternativeSelections
-                     [ProjectionCache->NextForcedAlternativeSelection++];
+      if (ProjectionCache->NextPlannedAlternativeSelection <
+          ProjectionCache->PlannedAlternativeSelections.size())
+        Chosen = ProjectionCache->PlannedAlternativeSelections
+                     [ProjectionCache->NextPlannedAlternativeSelection++];
       if (!llvm::is_contained(Alternatives, Chosen))
         return true;
       ProjectionCache->AlternativeChoices.push_back({Alternatives, Chosen});
@@ -3332,8 +3377,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
           ProjectionCache ? ProjectionCache->Entries.size() : 0;
       size_t SavedChoiceCount =
           ProjectionCache ? ProjectionCache->AlternativeChoices.size() : 0;
-      unsigned SavedForcedSelection =
-          ProjectionCache ? ProjectionCache->NextForcedAlternativeSelection : 0;
+      unsigned SavedPlannedSelection =
+          ProjectionCache ? ProjectionCache->NextPlannedAlternativeSelection
+                          : 0;
       bool SavedDeferredChoices =
           ProjectionCache && ProjectionCache->HasDeferredAlternativeChoices;
 
@@ -3356,7 +3402,8 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (ProjectionCache) {
         ProjectionCache->Entries.resize(SavedProjectionCount);
         ProjectionCache->AlternativeChoices.resize(SavedChoiceCount);
-        ProjectionCache->NextForcedAlternativeSelection = SavedForcedSelection;
+        ProjectionCache->NextPlannedAlternativeSelection =
+            SavedPlannedSelection;
         ProjectionCache->HasDeferredAlternativeChoices = SavedDeferredChoices;
       }
     }
