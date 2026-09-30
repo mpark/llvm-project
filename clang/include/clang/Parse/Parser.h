@@ -688,6 +688,10 @@ private:
   /// function call.
   bool CalledSignatureHelp = false;
 
+  /// Whether a block-scope pattern declaration is parsing the continuation
+  /// that will become its successful handler.
+  bool ParsingPatternDeclarationContinuation = false;
+
   bool isTokenSEHExcept();
 
   /// Whether to skip parsing of function bodies.
