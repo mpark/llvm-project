@@ -70,3 +70,72 @@ int bind_pack_from_either_end(Triple triple) {
     case _ => -1;
   };
 }
+
+namespace std {
+template <class T>
+struct alternative_traits;
+
+struct alternative_info {
+  decltype(^^int) info = {};
+  bool empty = false;
+
+  consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
+      : info(info), empty(empty) {}
+};
+} // namespace std
+
+struct A {};
+struct B {};
+struct C {};
+struct D {};
+struct E {};
+struct F {};
+
+struct Choice {
+  unsigned active;
+  A a;
+  B b;
+  C c;
+  D d;
+  E e;
+  F f;
+};
+
+template <>
+struct std::alternative_traits<Choice> {
+  static constexpr alternative_info alternatives[] = {
+      ^^A, ^^B, ^^C, ^^D, ^^E, ^^F};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const Choice& choice) noexcept {
+    return choice.active;
+  }
+
+  template <__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(choice).a);
+    else if constexpr (I == 1)
+      return (static_cast<Self&&>(choice).b);
+    else if constexpr (I == 2)
+      return (static_cast<Self&&>(choice).c);
+    else if constexpr (I == 3)
+      return (static_cast<Self&&>(choice).d);
+    else if constexpr (I == 4)
+      return (static_cast<Self&&>(choice).e);
+    else
+      return (static_cast<Self&&>(choice).f);
+  }
+};
+
+// CHECK-LABEL: define{{.*}} void @_Z20ignored_alternativesRK6Choice
+void ignored_alternatives(const Choice& choice) {
+  match (choice) {
+    case { const B & } => ;
+    case { const C & } => ;
+    case { const E & } => ;
+    case { const F & } => ;
+    case { const A & } or
+         { const D & } => ;
+  }
+}
