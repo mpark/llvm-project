@@ -11535,8 +11535,8 @@ public:
 
     SmallVector<Entry, 8> Entries;
     SmallVector<AlternativeChoice, 4> AlternativeChoices;
-    SmallVector<unsigned, 4> ForcedAlternativeSelections;
-    unsigned NextForcedAlternativeSelection = 0;
+    ArrayRef<unsigned> PlannedAlternativeSelections;
+    unsigned NextPlannedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
     bool RequiresTemplateRegion = false;
@@ -11545,6 +11545,18 @@ public:
     }
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
+  };
+  /// Enumerates the semantic candidates produced by generic alternative and
+  /// declaration-bearing or-pattern choices. Each completed check records the
+  /// choices it encountered in the projection cache; advance selects the next
+  /// unexplored path in depth-first order.
+  struct MatchAlternativeSelectionPlan {
+    SmallVector<unsigned, 4> Selections;
+    bool SawAlternativeChoice = false;
+
+    static bool isRequired(const MatchPattern *Pattern);
+    void beginCandidate(MatchProjectionCache &Cache) const;
+    bool advance(const MatchProjectionCache &Cache);
   };
   struct MatchPatternState {
     SmallVector<MatchPatternInfo, 8> Infos;

@@ -4476,14 +4476,9 @@ public:
       if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
         VarDecl *Variable = Declaration->getDeclaration();
         if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
-          for (BindingDecl *Binding : Decomposition->leaf_bindings()) {
-            if (!Binding->getDeclName())
-              continue;
-            if (Binding->isParameterPack() && Binding->getBinding())
-              llvm::append_range(Bindings, Binding->getBindingPackDecls());
-            else
+          for (BindingDecl *Binding : Decomposition->leaf_bindings())
+            if (Binding->getDeclName())
               Bindings.push_back(Binding);
-          }
         } else if (Variable->getDeclName()) {
           Bindings.push_back(Variable);
         }
@@ -19746,44 +19741,13 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
 
   Sema::MatchProjectionCache ProjectionCache;
   SmallVector<MatchTestInstantiation, 4> Instantiations;
-  SmallVector<unsigned, 4> ForcedSelections;
-  bool SawAlternativeChoice = false;
+  Sema::MatchAlternativeSelectionPlan SelectionPlan;
 
-  auto PerformsDeclarationInitialization = [](MatchPattern *Pattern,
-                                              auto &Recurse) -> bool {
-    if (isa<DeclarationPattern, TypePattern>(Pattern))
-      return true;
-    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
-      return Recurse(Child, Recurse);
-    });
-  };
-  auto HasAlternativeChoice = [&](MatchPattern *Pattern,
-                                  auto &Recurse) -> bool {
-    if (isa<OrPattern>(Pattern) &&
-        PerformsDeclarationInitialization(Pattern,
-                                          PerformsDeclarationInitialization))
-      return true;
-    if (Pattern->getMatchPatternClass() ==
-        MatchPattern::AlternativePatternClass) {
-      auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->isTypeSelected() ||
-          Alternative->isTypeConstraintSelected())
-        return true;
-    }
-    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
-      return Recurse(Child, Recurse);
-    });
-  };
   bool PatternHasAlternativeChoice =
-      HasAlternativeChoice(E->getPattern(), HasAlternativeChoice);
+      Sema::MatchAlternativeSelectionPlan::isRequired(E->getPattern());
 
   while (true) {
-    ProjectionCache.AlternativeChoices.clear();
-    ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
-    ProjectionCache.NextForcedAlternativeSelection = 0;
-    ProjectionCache.CurrentProjectionPath.clear();
-    ProjectionCache.CurrentDiscriminatorPath.clear();
+    SelectionPlan.beginCandidate(ProjectionCache);
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
     MatchCandidateInstantiationScope CandidateScope(getSema(), E->getRegion());
@@ -19903,28 +19867,12 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
            TransformedContinuation.Increment});
     }
 
-    SawAlternativeChoice |= !ProjectionCache.AlternativeChoices.empty();
-    SmallVector<unsigned, 4> NextSelections;
-    bool HasNextSelection = false;
-    for (unsigned I = ProjectionCache.AlternativeChoices.size(); I-- > 0;) {
-      const auto &Choice = ProjectionCache.AlternativeChoices[I];
-      auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
-      if (std::next(Selected) == Choice.Alternatives.end())
-        continue;
-      for (unsigned J = 0; J < I; ++J)
-        NextSelections.push_back(
-            ProjectionCache.AlternativeChoices[J].Selected);
-      NextSelections.push_back(*std::next(Selected));
-      HasNextSelection = true;
+    if (!SelectionPlan.advance(ProjectionCache))
       break;
-    }
-    if (!HasNextSelection)
-      break;
-    ForcedSelections = std::move(NextSelections);
   }
 
   if (Instantiations.empty()) {
-    if (SawAlternativeChoice)
+    if (SelectionPlan.SawAlternativeChoice)
       getSema().Diag(E->getPattern()->getBeginLoc(),
                      diag::err_braced_alternative_no_viable_state)
           << LHS.get()->getType();
@@ -20067,32 +20015,6 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           });
         });
       };
-  auto PerformsDeclarationInitialization = [](MatchPattern *Pattern,
-                                              auto &Recurse) -> bool {
-    if (isa<DeclarationPattern, TypePattern>(Pattern))
-      return true;
-    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
-      return Recurse(Child, Recurse);
-    });
-  };
-  auto HasAlternativeChoice = [&](MatchPattern *Pattern,
-                                  auto &Recurse) -> bool {
-    if (isa<OrPattern>(Pattern) &&
-        PerformsDeclarationInitialization(Pattern,
-                                          PerformsDeclarationInitialization))
-      return true;
-    if (Pattern->getMatchPatternClass() ==
-        MatchPattern::AlternativePatternClass) {
-      auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-          Alternative->isTypeSelected() ||
-          Alternative->isTypeConstraintSelected())
-        return true;
-    }
-    return llvm::any_of(Pattern->children(), [&](MatchPattern *Child) {
-      return Recurse(Child, Recurse);
-    });
-  };
   auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
                            MatchCaseInstantiation &Transformed,
                            std::optional<bool> &ConstexprConditionValue,
@@ -20120,7 +20042,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     SourceCases[CaseIndex].MaybeUseful |= IsSubstitutionDependent;
     bool AllowsSubstitutionFailure =
         IsSubstitutionDependent ||
-        HasAlternativeChoice(Case.Pattern, HasAlternativeChoice);
+        Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
     if (AllowsSubstitutionFailure) {
       Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
       if (TransformAndCheckPattern())
@@ -20267,15 +20189,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
 
   bool ConstexprSelectionComplete = false;
   for (const auto &[CaseIndex, Case] : CasesToTransform) {
+    Sema::MatchAlternativeSelectionPlan SelectionPlan;
     bool SawViableCandidate = false;
-    bool SawAlternativeChoice = false;
-    SmallVector<unsigned, 4> ForcedSelections;
     while (true) {
-      ProjectionCache.AlternativeChoices.clear();
-      ProjectionCache.ForcedAlternativeSelections = ForcedSelections;
-      ProjectionCache.NextForcedAlternativeSelection = 0;
-      ProjectionCache.CurrentProjectionPath.clear();
-      ProjectionCache.CurrentDiscriminatorPath.clear();
+      SelectionPlan.beginCandidate(ProjectionCache);
       size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
       std::optional<bool> ConstexprConditionValue;
@@ -20300,27 +20217,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         assert(Result == TransformCaseResult::Dominated);
         SawViableCandidate = true;
       }
-      SawAlternativeChoice |= !ProjectionCache.AlternativeChoices.empty();
-
-      SmallVector<unsigned, 4> NextSelections;
-      bool HasNextSelection = false;
-      for (unsigned I = ProjectionCache.AlternativeChoices.size(); I-- > 0;) {
-        const auto &Choice = ProjectionCache.AlternativeChoices[I];
-        auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
-        if (std::next(Selected) == Choice.Alternatives.end())
-          continue;
-        for (unsigned J = 0; J < I; ++J)
-          NextSelections.push_back(
-              ProjectionCache.AlternativeChoices[J].Selected);
-        NextSelections.push_back(*std::next(Selected));
-        HasNextSelection = true;
+      if (!SelectionPlan.advance(ProjectionCache))
         break;
-      }
-      if (!HasNextSelection)
-        break;
-      ForcedSelections = std::move(NextSelections);
     }
-    if (!SawViableCandidate && SawAlternativeChoice &&
+    if (!SawViableCandidate && SelectionPlan.SawAlternativeChoice &&
         !E->getSubject()->isTypeDependent()) {
       getSema().Diag(Case.Pattern->getBeginLoc(),
                      diag::err_braced_alternative_no_viable_state)
