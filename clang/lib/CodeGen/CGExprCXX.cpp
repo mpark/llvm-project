@@ -3255,6 +3255,11 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
 }
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
+  return EmitMatchSelectExpr(S, AggValueSlot::ignored());
+}
+
+RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
+                                            AggValueSlot Dest) {
   // FIXME: check if we can constant fold to simple integer,
   // just like switch does. Is this already handled in Sema?
   llvm::ArrayRef<MatchCaseInstantiation> Cases = S.getCaseInstantiations();
@@ -3277,11 +3282,21 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   bool IgnoreResult = S.getType()->isVoidType();
   bool IsReference = S.isGLValue();
   Address MatchResAddr = Address::invalid();
+  AggValueSlot MatchResSlot = AggValueSlot::ignored();
   if (IsReference) {
     QualType PtrTy = getContext().getPointerType(S.getType());
     MatchResAddr = CreateMemTemp(PtrTy, "match.select.refresult");
   } else if (!IgnoreResult) {
-    MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+    if (getEvaluationKind(S.getType()) == TEK_Aggregate && !Dest.isIgnored()) {
+      MatchResAddr = Dest.getAddress();
+      MatchResSlot = Dest;
+    } else {
+      MatchResAddr = CreateMemTemp(S.getType(), "match.select.result");
+      MatchResSlot = AggValueSlot::forAddr(
+          MatchResAddr, Qualifiers(), AggValueSlot::IsDestructed,
+          AggValueSlot::DoesNotNeedGCBarriers, AggValueSlot::IsNotAliased,
+          getOverlapForReturnValue());
+    }
   }
 
   auto EmitHandler = [&](const Expr *E) {
@@ -3309,11 +3324,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
       break;
     }
     case TEK_Aggregate:
-      EmitAggExpr(
-          E, AggValueSlot::forAddr(
-                 MatchResAddr, Qualifiers(), AggValueSlot::IsDestructed,
-                 AggValueSlot::DoesNotNeedGCBarriers,
-                 AggValueSlot::IsNotAliased, getOverlapForReturnValue()));
+      EmitAggExpr(E, MatchResSlot);
       break;
     }
   };

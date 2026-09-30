@@ -20,7 +20,6 @@ struct Result {
 // CHECK-NEXT:    [[RETVAL:%.*]] = alloca [[STRUCT_RESULT:%.*]], align 4
 // CHECK-NEXT:    [[S_ADDR:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT:%.*]] = alloca [[STRUCT_RESULT]], align 4
 // CHECK-NEXT:    [[MATCH_DECOMP_RESULT:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[TMP1:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[MATCH_DECOMP_RESULT1:%.*]] = alloca i1, align 8
@@ -69,18 +68,18 @@ struct Result {
 // CHECK-NEXT:    br label %[[MATCH_DECOMP_END9]]
 // CHECK:       [[MATCH_DECOMP_END9]]:
 // CHECK-NEXT:    [[TMP11:%.*]] = load i1, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br i1 [[TMP11]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br i1 [[TMP11]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_CASE:.*]]
 // CHECK:       [[MATCH_SELECT_INIT]]:
 // CHECK-NEXT:    [[TMP12:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[COLOR:%.*]] = getelementptr inbounds nuw [[STRUCT_S]], ptr [[TMP12]], i32 0, i32 0
 // CHECK-NEXT:    store ptr [[COLOR]], ptr [[C]], align 8
 // CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
-// CHECK-NEXT:    [[COLOR10:%.*]] = getelementptr inbounds nuw [[STRUCT_RESULT]], ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
+// CHECK-NEXT:    [[COLOR10:%.*]] = getelementptr inbounds nuw [[STRUCT_RESULT]], ptr [[RETVAL]], i32 0, i32 0
 // CHECK-NEXT:    [[TMP13:%.*]] = load ptr, ptr [[C]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[TMP14:%.*]] = load i32, ptr [[TMP13]], align 4
 // CHECK-NEXT:    store i32 [[TMP14]], ptr [[COLOR10]], align 4
-// CHECK-NEXT:    [[I:%.*]] = getelementptr inbounds nuw [[STRUCT_RESULT]], ptr [[MATCH_SELECT_RESULT]], i32 0, i32 1
+// CHECK-NEXT:    [[I:%.*]] = getelementptr inbounds nuw [[STRUCT_RESULT]], ptr [[RETVAL]], i32 0, i32 1
 // CHECK-NEXT:    store i32 -1, ptr [[I]], align 4
 // CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
@@ -89,21 +88,20 @@ struct Result {
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
 // CHECK:       [[MATCH_SELECT_CLEANUP]]:
 // CHECK-NEXT:    [[TMP15:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP15]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_PATTERN]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
+// CHECK-NEXT:    br i1 [[TMP15]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_CASE]]
+// CHECK:       [[MATCH_SELECT_NEXT_CASE]]:
 // CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION11:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION11]]:
-// CHECK-NEXT:    [[EXCEPTION:%.*]] = call ptr @__cxa_allocate_exception(i64 4) #[[ATTR2:[0-9]+]]
+// CHECK-NEXT:    [[EXCEPTION:%.*]] = call ptr @__cxa_allocate_exception(i64 4) #[[ATTR3:[0-9]+]]
 // CHECK-NEXT:    store i32 0, ptr [[EXCEPTION]], align 16
-// CHECK-NEXT:    call void @__cxa_throw(ptr [[EXCEPTION]], ptr @_ZTIi, ptr null) #[[ATTR3:[0-9]+]]
+// CHECK-NEXT:    call void @__cxa_throw(ptr [[EXCEPTION]], ptr @_ZTIi, ptr null) #[[ATTR4:[0-9]+]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[THROW_CONT:.*:]]
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    call void @llvm.memcpy.p0.p0.i64(ptr align 4 [[RETVAL]], ptr align 4 [[MATCH_SELECT_RESULT]], i64 8, i1 false)
 // CHECK-NEXT:    [[TMP16:%.*]] = load i64, ptr [[RETVAL]], align 4
 // CHECK-NEXT:    ret i64 [[TMP16]]
 //
@@ -112,6 +110,119 @@ auto nested_decomposition_pattern(const S& s) {
     case [auto&& c, [0, 0]] => {c, -1};
     case _ => throw 0;
   };
+}
+
+struct MoveOnly {
+  int value;
+  MoveOnly(int);
+  MoveOnly(MoveOnly&&);
+  MoveOnly(const MoveOnly&) = delete;
+  ~MoveOnly();
+};
+
+// A move-only aggregate result is constructed directly in the caller's slot.
+// CHECK-LABEL: define dso_local void @_Z16select_move_onlybO8MoveOnlyS0_(
+// CHECK-SAME: ptr dead_on_unwind noalias writable sret([[STRUCT_MOVEONLY:%.*]]) align 4 [[AGG_RESULT:%.*]], i1 noundef zeroext [[FIRST:%.*]], ptr noundef nonnull align 4 dereferenceable(4) [[X:%.*]], ptr noundef nonnull align 4 dereferenceable(4) [[Y:%.*]]) #[[ATTR0]] {
+// CHECK-NEXT:  [[ENTRY:.*:]]
+// CHECK-NEXT:    [[RESULT_PTR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[FIRST_ADDR:%.*]] = alloca i8, align 1
+// CHECK-NEXT:    [[X_ADDR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[Y_ADDR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    store ptr [[AGG_RESULT]], ptr [[RESULT_PTR]], align 8
+// CHECK-NEXT:    [[STOREDV:%.*]] = zext i1 [[FIRST]] to i8
+// CHECK-NEXT:    store i8 [[STOREDV]], ptr [[FIRST_ADDR]], align 1
+// CHECK-NEXT:    store ptr [[X]], ptr [[X_ADDR]], align 8
+// CHECK-NEXT:    store ptr [[Y]], ptr [[Y_ADDR]], align 8
+// CHECK-NEXT:    store ptr [[FIRST_ADDR]], ptr [[TMP0]], align 8
+// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
+// CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP2]], 0
+// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_CASE:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[X_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[TMP3]])
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
+// CHECK:       [[MATCH_SELECT_NEXT_CASE]]:
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    [[TMP5:%.*]] = load i8, ptr [[TMP4]], align 1
+// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP5]], 0
+// CHECK-NEXT:    [[CONV2:%.*]] = zext i1 [[LOADEDV1]] to i32
+// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[CONV2]], 0
+// CHECK-NEXT:    br i1 [[CMP3]], label %[[MATCH_SELECT_ACTION4:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION4]]:
+// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[TMP6]])
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_SELECT_NO_MATCH]]:
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
+// CHECK-NEXT:    unreachable
+// CHECK:       [[MATCH_SELECT_END]]:
+// CHECK-NEXT:    ret void
+//
+MoveOnly select_move_only(bool first, MoveOnly&& x, MoveOnly&& y) {
+  return match (first) -> MoveOnly {
+    case true => static_cast<MoveOnly&&>(x);
+    case false => static_cast<MoveOnly&&>(y);
+  };
+}
+
+// CHECK-LABEL: define dso_local void @_Z16select_or_returnbO8MoveOnlyS0_(
+// CHECK-SAME: ptr dead_on_unwind noalias writable sret([[STRUCT_MOVEONLY:%.*]]) align 4 [[AGG_RESULT:%.*]], i1 noundef zeroext [[RESOLVED:%.*]], ptr noundef nonnull align 4 dereferenceable(4) [[X:%.*]], ptr noundef nonnull align 4 dereferenceable(4) [[Y:%.*]]) #[[ATTR0]] {
+// CHECK-NEXT:  [[ENTRY:.*:]]
+// CHECK-NEXT:    [[RESULT_PTR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[RESOLVED_ADDR:%.*]] = alloca i8, align 1
+// CHECK-NEXT:    [[X_ADDR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[Y_ADDR:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[RESULT:%.*]] = alloca [[STRUCT_MOVEONLY]], align 4
+// CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    store ptr [[AGG_RESULT]], ptr [[RESULT_PTR]], align 8
+// CHECK-NEXT:    [[STOREDV:%.*]] = zext i1 [[RESOLVED]] to i8
+// CHECK-NEXT:    store i8 [[STOREDV]], ptr [[RESOLVED_ADDR]], align 1
+// CHECK-NEXT:    store ptr [[X]], ptr [[X_ADDR]], align 8
+// CHECK-NEXT:    store ptr [[Y]], ptr [[Y_ADDR]], align 8
+// CHECK-NEXT:    store ptr [[RESOLVED_ADDR]], ptr [[TMP0]], align 8
+// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
+// CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP2]], 0
+// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_CASE:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[X_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[TMP3]])
+// CHECK-NEXT:    br label %[[RETURN:.*]]
+// CHECK:       [[MATCH_SELECT_NEXT_CASE]]:
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    [[TMP5:%.*]] = load i8, ptr [[TMP4]], align 1
+// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP5]], 0
+// CHECK-NEXT:    [[CONV2:%.*]] = zext i1 [[LOADEDV1]] to i32
+// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[CONV2]], 0
+// CHECK-NEXT:    br i1 [[CMP3]], label %[[MATCH_SELECT_ACTION4:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION4]]:
+// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[TMP6]])
+// CHECK-NEXT:    br label %[[DOEXPR_END:.*]]
+// CHECK:       [[DOEXPR_END]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
+// CHECK:       [[MATCH_SELECT_NO_MATCH]]:
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
+// CHECK-NEXT:    unreachable
+// CHECK:       [[MATCH_SELECT_END]]:
+// CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[RESULT]])
+// CHECK-NEXT:    call void @_ZN8MoveOnlyD1Ev(ptr noundef nonnull align 4 dead_on_return(4) dereferenceable(4) [[RESULT]]) #[[ATTR3]]
+// CHECK-NEXT:    br label %[[RETURN]]
+// CHECK:       [[RETURN]]:
+// CHECK-NEXT:    ret void
+//
+MoveOnly select_or_return(bool resolved, MoveOnly&& x, MoveOnly&& y) {
+  auto result = match (resolved) -> MoveOnly {
+    case true => return static_cast<MoveOnly&&>(x);
+    case false => do { do_return static_cast<MoveOnly&&>(y); };
+  };
+  return result;
 }
 
 //.

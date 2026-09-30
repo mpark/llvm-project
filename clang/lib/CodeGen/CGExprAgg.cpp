@@ -252,9 +252,7 @@ public:
       EmitFinalDestCopy(IE->getType(), LV);
       return;
     }
-    RValue Res = CGF.EmitMatchSelectExpr(*IE);
-    // TODO: handle dtors
-    EmitFinalDestCopy(IE->getType(), Res);
+    CGF.EmitMatchSelectExpr(*IE, Dest);
   }
 };
 } // end anonymous namespace.
