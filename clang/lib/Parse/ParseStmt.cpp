@@ -673,6 +673,7 @@ bool Parser::isPatternDeclaration() {
 StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
   assert(Tok.is(tok::kw_case) && "not at a pattern declaration");
   SourceLocation CaseLoc = Tok.getLocation();
+  bool IsNestedPatternDeclaration = ParsingPatternDeclarationContinuation;
 
   if ((StmtCtx & ParsedStmtContext::AllowDeclarationsInC) ==
       ParsedStmtContext()) {
@@ -728,7 +729,11 @@ StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
   SourceLocation ContinuationBegin = Tok.getLocation();
   StmtVector ContinuationStmts;
   bool LastIsError = false;
-  ParseCompoundStatementSequence(ContinuationStmts, StmtCtx, LastIsError);
+  {
+    SaveAndRestore ParsingContinuation(ParsingPatternDeclarationContinuation,
+                                       true);
+    ParseCompoundStatementSequence(ContinuationStmts, StmtCtx, LastIsError);
+  }
   StmtResult Continuation = Actions.ActOnCompoundStmt(
       ContinuationBegin, Tok.getLocation(), ContinuationStmts,
       /*isStmtExpr=*/false);
@@ -756,9 +761,8 @@ StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
   if (Result.isInvalid())
     return Result;
 
-  if (auto *Deferred = MatchTestExpr::findCaseConditionRequiringInstantiation(
-          Condition.get().second);
-      Deferred && !Actions.CurContext->isDependentContext())
+  if (!Actions.CurContext->isDependentContext() &&
+      !IsNestedPatternDeclaration)
     return Actions.ExpandDeferredMatchConditionStmt(Result.get(), CaseLoc);
   return Result;
 }
