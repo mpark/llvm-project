@@ -3977,25 +3977,24 @@ enum FormatAttrKind {
 /// getFormatAttrKind - Map from format attribute names to supported format
 /// types.
 static FormatAttrKind getFormatAttrKind(StringRef Format) {
-  return llvm::StringSwitch<FormatAttrKind>(Format)
-      // Check for formats that get handled specially.
-      .Case("NSString", NSStringFormat)
-      .Case("CFString", CFStringFormat)
-      .Cases({"gnu_strftime", "strftime"}, StrftimeFormat)
+  return match (Format) {
+    // Check for formats that get handled specially.
+    case "NSString" => NSStringFormat;
+    case "CFString" => CFStringFormat;
+    case "gnu_strftime" or "strftime" => StrftimeFormat;
 
-      // Otherwise, check for supported formats.
-      .Cases({"gnu_scanf", "scanf", "gnu_printf", "printf", "printf0",
-              "gnu_strfmon", "strfmon"},
-             SupportedFormat)
-      .Cases({"cmn_err", "vcmn_err", "zcmn_err"}, SupportedFormat)
-      .Cases({"kprintf", "syslog"}, SupportedFormat) // OpenBSD.
-      .Case("freebsd_kprintf", SupportedFormat)      // FreeBSD.
-      .Case("os_trace", SupportedFormat)
-      .Case("os_log", SupportedFormat)
+    // Otherwise, check for supported formats.
+    case "gnu_scanf" or "scanf" or "gnu_printf" or "printf" or "printf0" or
+        "gnu_strfmon" or "strfmon" => SupportedFormat;
+    case "cmn_err" or "vcmn_err" or "zcmn_err" => SupportedFormat;
+    case "kprintf" or "syslog" => SupportedFormat; // OpenBSD.
+    case "freebsd_kprintf" => SupportedFormat;      // FreeBSD.
+    case "os_trace" or "os_log" => SupportedFormat;
 
-      .Cases({"gcc_diag", "gcc_cdiag", "gcc_cxxdiag", "gcc_tdiag"},
-             IgnoredFormat)
-      .Default(InvalidFormat);
+    case "gcc_diag" or "gcc_cdiag" or "gcc_cxxdiag" or "gcc_tdiag" =>
+      IgnoredFormat;
+    case _ => InvalidFormat;
+  };
 }
 
 /// Handle __attribute__((init_priority(priority))) attributes based on
