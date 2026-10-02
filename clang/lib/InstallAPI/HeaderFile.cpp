@@ -38,9 +38,10 @@ std::optional<std::string> createIncludeHeaderName(const StringRef FullPath) {
 }
 
 bool isHeaderFile(StringRef Path) {
-  return StringSwitch<bool>(sys::path::extension(Path))
-      .Cases({".h", ".H", ".hh", ".hpp", ".hxx"}, true)
-      .Default(false);
+  return match (sys::path::extension(Path)) {
+    case ".h" or ".H" or ".hh" or ".hpp" or ".hxx" => true;
+    case _ => false;
+  };
 }
 
 llvm::Expected<PathSeq> enumerateFiles(FileManager &FM, StringRef Directory) {

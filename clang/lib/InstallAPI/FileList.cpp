@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/InstallAPI/FileList.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/TextAPI/TextAPIError.h"
@@ -95,12 +94,13 @@ Implementation::parseLanguage(const Object *Obj) {
   if (!Language)
     return std::nullopt;
 
-  return StringSwitch<clang::Language>(*Language)
-      .Case("c", clang::Language::C)
-      .Case("c++", clang::Language::CXX)
-      .Case("objective-c", clang::Language::ObjC)
-      .Case("objective-c++", clang::Language::ObjCXX)
-      .Default(clang::Language::Unknown);
+  return match (*Language) {
+    case "c" => clang::Language::C;
+    case "c++" => clang::Language::CXX;
+    case "objective-c" => clang::Language::ObjC;
+    case "objective-c++" => clang::Language::ObjCXX;
+    case _ => clang::Language::Unknown;
+  };
 }
 
 Error Implementation::parseHeaders(Array &Headers) {
