@@ -377,12 +377,12 @@ const MemoryBuffer &InputFile::unknown() const {
 }
 
 StringRef InputFile::getFilePath() const {
-  if (isPdb())
-    return pdb().getFilePath();
-  if (isObj())
-    return obj().getFileName();
-  assert(isUnknown());
-  return unknown().getBufferIdentifier();
+  match (PdbOrObj) {
+    case { const PDBFile &Pdb } => return Pdb.getFilePath();
+    case { const object::COFFObjectFile &Obj } => return Obj.getFileName();
+    case { const MemoryBuffer &Buffer } => return Buffer.getBufferIdentifier();
+    case {} => llvm_unreachable("uninitialized input file");
+  }
 }
 
 bool InputFile::hasTypes() const {

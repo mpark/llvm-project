@@ -1621,21 +1621,28 @@ void DwarfUnit::constructSubrangeDIE(DIE &DW_Subrange, const DISubrangeType *SR,
 
   auto AddBoundTypeEntry = [&](dwarf::Attribute Attr,
                                DISubrangeType::BoundType Bound) -> void {
-    if (auto *BV = dyn_cast_if_present<DIVariable *>(Bound)) {
-      if (auto *VarDIE = getDIE(BV))
-        addDIEEntry(DW_Subrange, Attr, *VarDIE);
-    } else if (auto *DT = dyn_cast_if_present<DIDerivedType *>(Bound)) {
-      if (auto *DTDIE = getDIE(DT))
-        addDIEEntry(DW_Subrange, Attr, *DTDIE);
-    } else if (auto *BE = dyn_cast_if_present<DIExpression *>(Bound)) {
-      addBlock(DW_Subrange, Attr, BE);
-    } else if (auto *BI = dyn_cast_if_present<ConstantInt *>(Bound)) {
-      if (Attr == dwarf::DW_AT_GNU_bias) {
-        if (BI->getSExtValue() != 0)
-          addUInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata, BI->getSExtValue());
-      } else if (Attr != dwarf::DW_AT_lower_bound || DefaultLowerBound == -1 ||
-                 BI->getSExtValue() != DefaultLowerBound || !ForArray)
-        addSInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata, BI->getSExtValue());
+    match (Bound) {
+      case { DIVariable &BV } => {
+        if (auto *VarDIE = getDIE(&BV))
+          addDIEEntry(DW_Subrange, Attr, *VarDIE);
+      }
+      case { DIDerivedType &DT } => {
+        if (auto *DTDIE = getDIE(&DT))
+          addDIEEntry(DW_Subrange, Attr, *DTDIE);
+      }
+      case { DIExpression &BE } => addBlock(DW_Subrange, Attr, &BE);
+      case { ConstantInt &BI } => {
+        if (Attr == dwarf::DW_AT_GNU_bias) {
+          if (BI.getSExtValue() != 0)
+            addUInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata,
+                    BI.getSExtValue());
+        } else if (Attr != dwarf::DW_AT_lower_bound ||
+                   DefaultLowerBound == -1 ||
+                   BI.getSExtValue() != DefaultLowerBound || !ForArray)
+          addSInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata,
+                  BI.getSExtValue());
+      }
+      case {} => ;
     }
   };
 
@@ -1662,18 +1669,23 @@ void DwarfUnit::constructSubrangeDIE(DIE &Buffer, const DISubrange *SR) {
 
   auto AddBoundTypeEntry = [&](dwarf::Attribute Attr,
                                DISubrange::BoundType Bound) -> void {
-    if (auto *BV = dyn_cast_if_present<DIVariable *>(Bound)) {
-      if (auto *VarDIE = getDIE(BV))
-        addDIEEntry(DW_Subrange, Attr, *VarDIE);
-    } else if (auto *BE = dyn_cast_if_present<DIExpression *>(Bound)) {
-      addBlock(DW_Subrange, Attr, BE);
-    } else if (auto *BI = dyn_cast_if_present<ConstantInt *>(Bound)) {
-      if (Attr == dwarf::DW_AT_count) {
-        if (BI->getSExtValue() != -1)
-          addUInt(DW_Subrange, Attr, std::nullopt, BI->getSExtValue());
-      } else if (Attr != dwarf::DW_AT_lower_bound || DefaultLowerBound == -1 ||
-                 BI->getSExtValue() != DefaultLowerBound)
-        addSInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata, BI->getSExtValue());
+    match (Bound) {
+      case { DIVariable &BV } => {
+        if (auto *VarDIE = getDIE(&BV))
+          addDIEEntry(DW_Subrange, Attr, *VarDIE);
+      }
+      case { DIExpression &BE } => addBlock(DW_Subrange, Attr, &BE);
+      case { ConstantInt &BI } => {
+        if (Attr == dwarf::DW_AT_count) {
+          if (BI.getSExtValue() != -1)
+            addUInt(DW_Subrange, Attr, std::nullopt, BI.getSExtValue());
+        } else if (Attr != dwarf::DW_AT_lower_bound ||
+                   DefaultLowerBound == -1 ||
+                   BI.getSExtValue() != DefaultLowerBound)
+          addSInt(DW_Subrange, Attr, dwarf::DW_FORM_sdata,
+                  BI.getSExtValue());
+      }
+      case {} => ;
     }
   };
 
