@@ -8,6 +8,7 @@
 
 #include "llvm/ProfileData/ETMTraceDecoder.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Object/AlternativeTraits.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
@@ -117,14 +118,14 @@ class ETMDecoderImpl : public ETMDecoder {
       }
     };
 
-    if (auto *O = dyn_cast<object::ELF32LEObjectFile>(&SourceBin))
-      ProcessHeaders(O->getELFFile());
-    else if (auto *O = dyn_cast<object::ELF64LEObjectFile>(&SourceBin))
-      ProcessHeaders(O->getELFFile());
-    else if (auto *O = dyn_cast<object::ELF32BEObjectFile>(&SourceBin))
-      ProcessHeaders(O->getELFFile());
-    else if (auto *O = dyn_cast<object::ELF64BEObjectFile>(&SourceBin))
-      ProcessHeaders(O->getELFFile());
+    match (SourceBin) {
+      case { const object::ELF32LEObjectFile &O } or
+           { const object::ELF64LEObjectFile &O } or
+           { const object::ELF32BEObjectFile &O } or
+           { const object::ELF64BEObjectFile &O } =>
+        ProcessHeaders(O.getELFFile());
+      case _ => ;
+    }
 
     if (!Regions.empty()) {
       std::string Path = SourceBin.getFileName().str();
