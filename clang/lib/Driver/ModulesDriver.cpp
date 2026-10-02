@@ -29,7 +29,6 @@
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVectorExtras.h"
-#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Casting.h"
@@ -39,6 +38,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/VirtualFileSystem.h"
+#include <type_traits>
 #include <utility>
 
 namespace deps = clang::dependencies;
@@ -974,6 +974,42 @@ private:
 };
 } // anonymous namespace
 
+#ifdef __clang__
+#if __has_feature(pattern_matching)
+
+namespace std {
+
+template <> struct alternative_traits<CGNode> {
+  template <class T, bool IsLvalue> struct result {
+    T *value;
+
+    explicit operator bool() const noexcept { return value != nullptr; }
+
+    decltype(auto) operator*() && {
+      if constexpr (IsLvalue)
+        return static_cast<T &>(*value);
+      else
+        return static_cast<T &&>(*value);
+    }
+  };
+
+  template <class T, class Self> static auto try_cast(Self &&Value) {
+    using Target = remove_reference_t<T>;
+    auto *Cast = llvm::dyn_cast<Target>(&Value);
+    using Projected = remove_pointer_t<decltype(Cast)>;
+    return result<Projected, is_lvalue_reference_v<Self &&>>{Cast};
+  }
+
+  template <class T, class Self> static auto try_init(Self &&Value) {
+    return try_cast<T>(std::forward<Self>(Value));
+  }
+};
+
+} // namespace std
+
+#endif // __has_feature(pattern_matching)
+#endif // __clang__
+
 static StringRef getFirstInputFilename(const Command &Job) {
   return Job.getInputInfos().front().getFilename();
 }
@@ -1084,50 +1120,51 @@ struct DOTGraphTraits<const CompilationGraph *> : DefaultDOTGraphTraits {
   }
 
   static std::string getNodeIdentifier(NodeRef N, GraphRef) {
-    return llvm::TypeSwitch<NodeRef, std::string>(N)
-        .Case([](const ClangModuleJobNode *ClangModuleNode) {
-          const auto &ID = ClangModuleNode->MD.ID;
-          return llvm::formatv("{0}-{1}", ID.ModuleName, ID.ContextHash).str();
-        })
-        .Case([](const NamedModuleJobNode *NamedModuleNode) {
-          return llvm::formatv("{0}-{1}", NamedModuleNode->InputDeps.ModuleName,
-                               getTriple(*NamedModuleNode->Job))
-              .str();
-        })
-        .Case([](const NonModuleTUJobNode *NonModuleTUNode) {
-          const auto &Job = *NonModuleTUNode->Job;
-          return llvm::formatv("{0}-{1}", getFirstInputFilename(Job),
-                               getTriple(Job))
-              .str();
-        })
-        .DefaultUnreachable("Unexpected node kind! Is this node hidden?");
+    match (*N) {
+      case { const ClangModuleJobNode &ClangModuleNode } => {
+        const auto &ID = ClangModuleNode.MD.ID;
+        return llvm::formatv("{0}-{1}", ID.ModuleName, ID.ContextHash).str();
+      }
+      case { const NamedModuleJobNode &NamedModuleNode } =>
+        return llvm::formatv("{0}-{1}", NamedModuleNode.InputDeps.ModuleName,
+                             getTriple(*NamedModuleNode.Job))
+            .str();
+      case { const NonModuleTUJobNode &NonModuleTUNode } => {
+        const auto &Job = *NonModuleTUNode.Job;
+        return llvm::formatv("{0}-{1}", getFirstInputFilename(Job),
+                             getTriple(Job))
+            .str();
+      }
+      case _ => llvm_unreachable("Unexpected node kind! Is this node hidden?");
+    }
   }
 
   static std::string getNodeLabel(NodeRef N, GraphRef) {
-    return llvm::TypeSwitch<NodeRef, std::string>(N)
-        .Case([](const ClangModuleJobNode *ClangModuleNode) {
-          const auto &ID = ClangModuleNode->MD.ID;
-          return llvm::formatv("Module type: Clang module \\| Module name: {0} "
-                               "\\| Hash: {1}",
-                               ID.ModuleName, ID.ContextHash)
-              .str();
-        })
-        .Case([](const NamedModuleJobNode *NamedModuleNode) {
-          const auto &Job = *NamedModuleNode->Job;
-          return llvm::formatv(
-                     "Filename: {0} \\| Module type: Named module \\| "
-                     "Module name: {1} \\| Triple: {2}",
-                     getFirstInputFilename(Job),
-                     NamedModuleNode->InputDeps.ModuleName, getTriple(Job))
-              .str();
-        })
-        .Case([](const NonModuleTUJobNode *NonModuleTUNode) {
-          const auto &Job = *NonModuleTUNode->Job;
-          return llvm::formatv("Filename: {0} \\| Triple: {1}",
-                               getFirstInputFilename(Job), getTriple(Job))
-              .str();
-        })
-        .DefaultUnreachable("Unexpected node kind! Is this node hidden?");
+    match (*N) {
+      case { const ClangModuleJobNode &ClangModuleNode } => {
+        const auto &ID = ClangModuleNode.MD.ID;
+        return llvm::formatv("Module type: Clang module \\| Module name: {0} "
+                             "\\| Hash: {1}",
+                             ID.ModuleName, ID.ContextHash)
+            .str();
+      }
+      case { const NamedModuleJobNode &NamedModuleNode } => {
+        const auto &Job = *NamedModuleNode.Job;
+        return llvm::formatv(
+                   "Filename: {0} \\| Module type: Named module \\| "
+                   "Module name: {1} \\| Triple: {2}",
+                   getFirstInputFilename(Job),
+                   NamedModuleNode.InputDeps.ModuleName, getTriple(Job))
+            .str();
+      }
+      case { const NonModuleTUJobNode &NonModuleTUNode } => {
+        const auto &Job = *NonModuleTUNode.Job;
+        return llvm::formatv("Filename: {0} \\| Triple: {1}",
+                             getFirstInputFilename(Job), getTriple(Job))
+            .str();
+      }
+      case _ => llvm_unreachable("Unexpected node kind! Is this node hidden?");
+    }
   }
 
   static std::string getNodeAttributes(NodeRef N, GraphRef) {
@@ -1414,59 +1451,62 @@ static bool createModuleDependencyEdges(CompilationGraph &Graph,
   // Map each module to the job that produces it.
   bool HasDuplicateModuleError = false;
   for (auto *Node : Graph) {
-    llvm::TypeSwitch<CGNode *>(Node)
-        .Case([&](ClangModuleJobNode *ClangModuleNode) {
-          [[maybe_unused]] const bool Inserted =
-              ClangModuleNodeByID.try_emplace(ClangModuleNode->MD.ID, Node)
-                  .second;
-          assert(Inserted &&
-                 "Multiple Clang module nodes with the same module ID!");
-        })
-        .Case([&](NamedModuleJobNode *NamedModuleNode) {
-          StringRef ModuleName = NamedModuleNode->InputDeps.ModuleName;
-          ModuleNameAndTriple ID{ModuleName, getTriple(*NamedModuleNode->Job)};
-          const auto [It, Inserted] = NamedModuleNodeByID.try_emplace(ID, Node);
-          if (!Inserted) {
-            // For scan input jobs, their first input is always a filename and
-            // the scanned source.
-            // We don't use InputDeps.FileDeps here because diagnostics should
-            // refer to the filename as specified on the command line, not the
-            // canonical absolute path.
-            StringRef PrevFile =
-                getFirstInputFilename(*cast<JobNode>(It->second)->Job);
-            StringRef CurFile = getFirstInputFilename(*NamedModuleNode->Job);
-            Diags.Report(diag::err_modules_driver_named_module_redefinition)
-                << ModuleName << PrevFile << CurFile;
-            HasDuplicateModuleError = true;
-          }
-        });
+    match (*Node) {
+      case { ClangModuleJobNode &ClangModuleNode } => {
+        [[maybe_unused]] const bool Inserted =
+            ClangModuleNodeByID.try_emplace(ClangModuleNode.MD.ID, Node).second;
+        assert(Inserted &&
+               "Multiple Clang module nodes with the same module ID!");
+      }
+      case { NamedModuleJobNode &NamedModuleNode } => {
+        StringRef ModuleName = NamedModuleNode.InputDeps.ModuleName;
+        ModuleNameAndTriple ID{ModuleName, getTriple(*NamedModuleNode.Job)};
+        const auto [It, Inserted] = NamedModuleNodeByID.try_emplace(ID, Node);
+        if (!Inserted) {
+          // For scan input jobs, their first input is always a filename and
+          // the scanned source.
+          // We don't use InputDeps.FileDeps here because diagnostics should
+          // refer to the filename as specified on the command line, not the
+          // canonical absolute path.
+          StringRef PrevFile =
+              getFirstInputFilename(*cast<JobNode>(It->second)->Job);
+          StringRef CurFile = getFirstInputFilename(*NamedModuleNode.Job);
+          Diags.Report(diag::err_modules_driver_named_module_redefinition)
+              << ModuleName << PrevFile << CurFile;
+          HasDuplicateModuleError = true;
+        }
+      }
+      case _ => ;
+    }
   }
   if (HasDuplicateModuleError)
     return false;
 
   // Create edges from the module nodes to their importers.
   for (auto *Node : Graph) {
-    llvm::TypeSwitch<CGNode *>(Node)
-        .Case([&](ClangModuleJobNode *ClangModuleNode) {
-          connectEdgesViaLookup(Graph, *ClangModuleNode, ClangModuleNodeByID,
-                                ClangModuleNode->MD.ClangModuleDeps,
-                                CGEdge::EdgeKind::ModuleDependency);
-        })
-        .Case([&](ScannedJobNode *NodeWithInputDeps) {
-          connectEdgesViaLookup(Graph, *NodeWithInputDeps, ClangModuleNodeByID,
-                                NodeWithInputDeps->InputDeps.ClangModuleDeps,
-                                CGEdge::EdgeKind::ModuleDependency);
+    match (*Node) {
+      case { ClangModuleJobNode &ClangModuleNode } => {
+        connectEdgesViaLookup(Graph, ClangModuleNode, ClangModuleNodeByID,
+                              ClangModuleNode.MD.ClangModuleDeps,
+                              CGEdge::EdgeKind::ModuleDependency);
+      }
+      case { ScannedJobNode &NodeWithInputDeps } => {
+        connectEdgesViaLookup(Graph, NodeWithInputDeps, ClangModuleNodeByID,
+                              NodeWithInputDeps.InputDeps.ClangModuleDeps,
+                              CGEdge::EdgeKind::ModuleDependency);
 
-          StringRef Triple = getTriple(*NodeWithInputDeps->Job);
-          const auto NamedModuleDepIDs =
-              llvm::map_range(NodeWithInputDeps->InputDeps.NamedModuleDeps,
-                              [&](StringRef ModuleName) {
-                                return ModuleNameAndTriple{ModuleName, Triple};
-                              });
-          connectEdgesViaLookup(Graph, *NodeWithInputDeps, NamedModuleNodeByID,
-                                NamedModuleDepIDs,
-                                CGEdge::EdgeKind::ModuleDependency);
-        });
+        StringRef Triple = getTriple(*NodeWithInputDeps.Job);
+        const auto NamedModuleDepIDs =
+            llvm::map_range(NodeWithInputDeps.InputDeps.NamedModuleDeps,
+                            [&](StringRef ModuleName) {
+                              return ModuleNameAndTriple{ModuleName, Triple};
+                            });
+        connectEdgesViaLookup(Graph, NodeWithInputDeps, NamedModuleNodeByID,
+                              NamedModuleDepIDs,
+                              CGEdge::EdgeKind::ModuleDependency);
+      }
+      case _ => ;
+    }
   }
 
   return true;
