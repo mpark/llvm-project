@@ -33,6 +33,14 @@ namespace llvm {
 
 class raw_ostream;
 
+constexpr auto starts_with(StringLiteral Prefix) {
+  return [Prefix = StringRef(Prefix)](auto &&S)
+#if __has_attribute(always_inline)
+             __attribute__((always_inline))
+#endif
+  { return S.starts_with(Prefix); };
+}
+
 /// hexdigit - Return the hexadecimal character for the
 /// given number \p X (which should be less than 16).
 inline char hexdigit(unsigned X, bool LowerCase = false) {

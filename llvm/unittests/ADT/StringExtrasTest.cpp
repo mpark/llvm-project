@@ -13,6 +13,12 @@
 
 using namespace llvm;
 
+TEST(StringExtrasTest, StartsWithPredicate) {
+  auto LiteralPrefix = starts_with("pre");
+  EXPECT_TRUE(LiteralPrefix(StringRef("prefix")));
+  EXPECT_FALSE(LiteralPrefix(StringRef("suffix")));
+}
+
 TEST(StringExtrasTest, isPrint) {
   EXPECT_FALSE(isPrint('\0'));
   EXPECT_FALSE(isPrint('\t'));
