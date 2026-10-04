@@ -24,6 +24,7 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/Support/FileOutputBuffer.h"
@@ -1172,12 +1173,13 @@ void Writer::createOutputSegments() {
   llvm::stable_sort(segments,
                     [](const OutputSegment *a, const OutputSegment *b) {
                       auto order = [](StringRef name) {
-                        return StringSwitch<int>(name)
-                            .StartsWith(".rodata", 0)
-                            .StartsWith(".data", 1)
-                            .StartsWith(".tdata", 3)
-                            .StartsWith(".bss", 4)
-                            .Default(2);
+                        return match (name) {
+                          case starts_with(".rodata") => 0;
+                          case starts_with(".data") => 1;
+                          case starts_with(".tdata") => 3;
+                          case starts_with(".bss") => 4;
+                          case _ => 2;
+                        };
                       };
                       return order(a->name) < order(b->name);
                     });

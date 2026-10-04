@@ -12,6 +12,7 @@
 
 #include "llvm/TargetParser/ARMTargetParserCommon.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 
 using namespace llvm;
@@ -109,12 +110,13 @@ StringRef ARM::getCanonicalArchName(StringRef Arch) {
 }
 
 ARM::ISAKind ARM::parseArchISA(StringRef Arch) {
-  return StringSwitch<ISAKind>(Arch)
-      .StartsWith("aarch64", ISAKind::AARCH64)
-      .StartsWith("arm64", ISAKind::AARCH64)
-      .StartsWith("thumb", ISAKind::THUMB)
-      .StartsWith("arm", ISAKind::ARM)
-      .Default(ISAKind::INVALID);
+  return match (Arch) {
+    case starts_with("aarch64") => ISAKind::AARCH64;
+    case starts_with("arm64") => ISAKind::AARCH64;
+    case starts_with("thumb") => ISAKind::THUMB;
+    case starts_with("arm") => ISAKind::ARM;
+    case _ => ISAKind::INVALID;
+  };
 }
 
 ARM::EndianKind ARM::parseArchEndian(StringRef Arch) {
