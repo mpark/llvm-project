@@ -14,6 +14,7 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTMutationListener.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DynamicRecursiveASTVisitor.h"
 #include "clang/AST/Expr.h"
@@ -4334,16 +4335,12 @@ private:
   void searchFromContainer(const ObjCContainerDecl *container) {
     if (container->isInvalidDecl()) return;
 
-    switch (container->getDeclKind()) {
-#define OBJCCONTAINER(type, base) \
-    case Decl::type: \
-      searchFrom(cast<type##Decl>(container)); \
-      break;
-#define ABSTRACT_DECL(expansion)
-#define DECL(type, base) \
-    case Decl::type:
-#include "clang/AST/DeclNodes.inc"
-      llvm_unreachable("not an ObjC container!");
+    match (*container) {
+    case { const ObjCProtocolDecl &D } => searchFrom(&D);
+    case { const ObjCCategoryDecl &D } => searchFrom(&D);
+    case { const ObjCCategoryImplDecl &D } => searchFrom(&D);
+    case { const ObjCInterfaceDecl &D } => searchFrom(&D);
+    case { const ObjCImplementationDecl &D } => searchFrom(&D);
     }
   }
 

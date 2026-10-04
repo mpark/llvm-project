@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
@@ -1400,27 +1401,23 @@ void StmtPrinter::VisitDeclRefExpr(DeclRefExpr *Node) {
       else
         NameInfo.printName(OS, Policy);
     } else {
-      switch (VD->getKind()) {
-      case Decl::NonTypeTemplateParm: {
-        auto *TD = cast<NonTypeTemplateParmDecl>(VD);
-        OS << "value-parameter-" << TD->getDepth() << '-' << TD->getIndex()
+      match (*VD) {
+      case { const NonTypeTemplateParmDecl &TD } => {
+        OS << "value-parameter-" << TD.getDepth() << '-' << TD.getIndex()
            << "";
-        break;
       }
-      case Decl::ParmVar: {
-        auto *PD = cast<ParmVarDecl>(VD);
-        OS << "function-parameter-" << PD->getFunctionScopeDepth() << '-'
-           << PD->getFunctionScopeIndex();
-        break;
+      case { const ParmVarDecl &PD } => {
+        OS << "function-parameter-" << PD.getFunctionScopeDepth() << '-'
+           << PD.getFunctionScopeIndex();
       }
-      case Decl::Decomposition:
+      case { const DecompositionDecl &DD } => {
         OS << "decomposition";
-        for (const auto &I : cast<DecompositionDecl>(VD)->bindings())
+        for (const auto &I : DD.bindings())
           OS << '-' << I->getName();
-        break;
-      default:
+      }
+      case _ => {
         OS << "unhandled-anonymous-" << VD->getDeclKindName();
-        break;
+      }
       }
     }
   }
