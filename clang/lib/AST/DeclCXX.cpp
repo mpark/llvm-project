@@ -15,6 +15,7 @@
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/ASTUnresolvedSet.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclBase.h"
@@ -2162,16 +2163,12 @@ bool CXXRecordDecl::isInjectedClassName() const {
 }
 
 bool CXXRecordDecl::hasInjectedClassType() const {
-  switch (getDeclKind()) {
-  case Decl::ClassTemplatePartialSpecialization:
-    return true;
-  case Decl::ClassTemplateSpecialization:
-    return false;
-  case Decl::CXXRecord:
-    return getDescribedClassTemplate() != nullptr;
-  default:
-    llvm_unreachable("unexpected decl kind");
-  }
+  return match (*this) {
+  case { const ClassTemplatePartialSpecializationDecl & } => true;
+  case { const ClassTemplateSpecializationDecl & } => false;
+  case { const CXXRecordDecl &D } =>
+    D.getDescribedClassTemplate() != nullptr;
+  };
 }
 
 CanQualType CXXRecordDecl::getCanonicalTemplateSpecializationType(

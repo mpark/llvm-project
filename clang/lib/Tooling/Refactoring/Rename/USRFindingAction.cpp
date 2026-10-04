@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Tooling/Refactoring/Rename/USRFindingAction.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
@@ -61,36 +62,44 @@ public:
   std::vector<std::string> Find() {
     // Fill OverriddenMethods and PartialSpecs storages.
     TraverseAST(Context);
-    if (const auto *MethodDecl = dyn_cast<CXXMethodDecl>(FoundDecl)) {
-      addUSRsOfOverridenFunctions(MethodDecl);
+    match (*FoundDecl) {
+    case { const CXXMethodDecl &MethodDecl } => {
+      addUSRsOfOverridenFunctions(&MethodDecl);
       for (const auto &OverriddenMethod : OverriddenMethods) {
         if (checkIfOverriddenFunctionAscends(OverriddenMethod))
           USRSet.insert(getUSRForDecl(OverriddenMethod));
       }
-      addUSRsOfInstantiatedMethods(MethodDecl);
-    } else if (const auto *RecordDecl = dyn_cast<CXXRecordDecl>(FoundDecl)) {
-      handleCXXRecordDecl(RecordDecl);
-    } else if (const auto *TemplateDecl =
-                   dyn_cast<ClassTemplateDecl>(FoundDecl)) {
-      handleClassTemplateDecl(TemplateDecl);
-    } else if (const auto *FD = dyn_cast<FunctionDecl>(FoundDecl)) {
-      USRSet.insert(getUSRForDecl(FD));
-      if (const auto *FTD = FD->getPrimaryTemplate())
+      addUSRsOfInstantiatedMethods(&MethodDecl);
+    }
+    case { const CXXRecordDecl &RecordDecl } => {
+      handleCXXRecordDecl(&RecordDecl);
+    }
+    case { const ClassTemplateDecl &TemplateDecl } => {
+      handleClassTemplateDecl(&TemplateDecl);
+    }
+    case { const FunctionDecl &FD } => {
+      USRSet.insert(getUSRForDecl(&FD));
+      if (const auto *FTD = FD.getPrimaryTemplate())
         handleFunctionTemplateDecl(FTD);
-    } else if (const auto *FD = dyn_cast<FunctionTemplateDecl>(FoundDecl)) {
-      handleFunctionTemplateDecl(FD);
-    } else if (const auto *VTD = dyn_cast<VarTemplateDecl>(FoundDecl)) {
-      handleVarTemplateDecl(VTD);
-    } else if (const auto *VD =
-                   dyn_cast<VarTemplateSpecializationDecl>(FoundDecl)) {
+    }
+    case { const FunctionTemplateDecl &FD } => {
+      handleFunctionTemplateDecl(&FD);
+    }
+    case { const VarTemplateDecl &VTD } => {
+      handleVarTemplateDecl(&VTD);
+    }
+    case { const VarTemplateSpecializationDecl &VD } => {
       // FIXME: figure out why FoundDecl can be a VarTemplateSpecializationDecl.
-      handleVarTemplateDecl(VD->getSpecializedTemplate());
-    } else if (const auto *VD = dyn_cast<VarDecl>(FoundDecl)) {
-      USRSet.insert(getUSRForDecl(VD));
-      if (const auto *VTD = VD->getDescribedVarTemplate())
+      handleVarTemplateDecl(VD.getSpecializedTemplate());
+    }
+    case { const VarDecl &VD } => {
+      USRSet.insert(getUSRForDecl(&VD));
+      if (const auto *VTD = VD.getDescribedVarTemplate())
         handleVarTemplateDecl(VTD);
-    } else {
+    }
+    case _ => {
       USRSet.insert(getUSRForDecl(FoundDecl));
+    }
     }
     return std::vector<std::string>(USRSet.begin(), USRSet.end());
   }

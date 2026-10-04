@@ -14,6 +14,7 @@
 #include "CGDebugInfo.h"
 #include "CodeGenFunction.h"
 #include "CoverageMappingGen.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/DiagnosticFrontend.h"
@@ -196,19 +197,13 @@ struct MapRegionCounters : public RecursiveASTVisitor<MapRegionCounters> {
   bool TraverseCapturedStmt(CapturedStmt *CS) { return true; }
 
   bool VisitDecl(const Decl *D) {
-    switch (D->getKind()) {
-    default:
-      break;
-    case Decl::Function:
-    case Decl::CXXMethod:
-    case Decl::CXXConstructor:
-    case Decl::CXXDestructor:
-    case Decl::CXXConversion:
-    case Decl::ObjCMethod:
-    case Decl::Block:
-    case Decl::Captured:
+    match (*D) {
+    case { const FunctionDecl & } or
+         { const ObjCMethodDecl & } or
+         { const BlockDecl & } or
+         { const CapturedDecl & } =>
       CounterMap[D->getBody()] = NextCounter++;
-      break;
+    case _ => ;
     }
     return true;
   }
