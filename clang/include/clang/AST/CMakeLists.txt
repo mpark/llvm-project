@@ -26,6 +26,10 @@ clang_tablegen(DeclNodes.inc -gen-clang-decl-nodes
   SOURCE ../Basic/DeclNodes.td
   TARGET ClangDeclNodes)
 
+clang_tablegen(DeclAlternativeTraits.inc -gen-clang-decl-alternative-traits
+  SOURCE ../Basic/DeclNodes.td
+  TARGET ClangDeclAlternativeTraits)
+
 clang_tablegen(TypeNodes.inc -gen-clang-type-nodes
   SOURCE ../Basic/TypeNodes.td
   TARGET ClangTypeNodes)
