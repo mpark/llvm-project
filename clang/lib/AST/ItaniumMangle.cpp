@@ -15,6 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
@@ -5075,31 +5076,28 @@ void CXXNameMangler::mangleExpression(const Expr *E, unsigned Arity,
   };
 
   auto MangleDeclRefExpr = [&](const NamedDecl *D) {
-    switch (D->getKind()) {
-    default:
+    match (*D) {
+    case { const ParmVarDecl &PD } => {
+      NotPrimaryExpr();
+      mangleFunctionParam(&PD);
+    }
+
+    case { const EnumConstantDecl &ED } => {
+      // <expr-primary>
+      mangleIntegerLiteral(ED.getType(), ED.getInitVal());
+    }
+
+    case { const NonTypeTemplateParmDecl &PD } => {
+      NotPrimaryExpr();
+      mangleTemplateParameter(PD.getDepth(), PD.getIndex());
+    }
+
+    case _ => {
       //  <expr-primary> ::= L <mangled-name> E # external name
       Out << 'L';
       mangle(D);
       Out << 'E';
-      break;
-
-    case Decl::ParmVar:
-      NotPrimaryExpr();
-      mangleFunctionParam(cast<ParmVarDecl>(D));
-      break;
-
-    case Decl::EnumConstant: {
-      // <expr-primary>
-      const EnumConstantDecl *ED = cast<EnumConstantDecl>(D);
-      mangleIntegerLiteral(ED->getType(), ED->getInitVal());
-      break;
     }
-
-    case Decl::NonTypeTemplateParm:
-      NotPrimaryExpr();
-      const NonTypeTemplateParmDecl *PD = cast<NonTypeTemplateParmDecl>(D);
-      mangleTemplateParameter(PD->getDepth(), PD->getIndex());
-      break;
     }
   };
 
