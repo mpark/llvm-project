@@ -12,6 +12,7 @@
 
 #include "clang/AST/TextNodeDumper.h"
 #include "clang/AST/APValue.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/DeclFriend.h"
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
@@ -50,14 +51,13 @@ static void dumpPreviousDeclImpl(raw_ostream &OS, const Redeclarable<T> *D) {
 /// Dump the previous declaration in the redeclaration chain for a declaration,
 /// if any.
 static void dumpPreviousDecl(raw_ostream &OS, const Decl *D) {
-  switch (D->getKind()) {
+  match (*D) {
 #define DECL(DERIVED, BASE)                                                    \
-  case Decl::DERIVED:                                                          \
-    return dumpPreviousDeclImpl(OS, cast<DERIVED##Decl>(D));
+  case { DERIVED##Decl: const DERIVED##Decl &Typed } =>                        \
+    dumpPreviousDeclImpl(OS, &Typed);
 #define ABSTRACT_DECL(DECL)
 #include "clang/AST/DeclNodes.inc"
   }
-  llvm_unreachable("Decl that isn't part of DeclNodes.inc!");
 }
 
 TextNodeDumper::TextNodeDumper(raw_ostream &OS, const ASTContext &Context,

@@ -8,6 +8,7 @@
 
 #include "clang/UnifiedSymbolResolution/USRGeneration.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
@@ -464,17 +465,14 @@ void USRGenerator::VisitObjCMethodDecl(const ObjCMethodDecl *D) {
 
 void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
                                           const ObjCCategoryDecl *CatD) {
-  switch (D->getKind()) {
-  default:
-    llvm_unreachable("Invalid ObjC container.");
-  case Decl::ObjCInterface:
-  case Decl::ObjCImplementation:
+  match (*D) {
+  case { const ObjCInterfaceDecl & } or
+       { const ObjCImplementationDecl & } => {
     GenObjCClass(D->getName(), GetExternalSourceContainer(D),
                  GetExternalSourceContainer(CatD));
-    break;
-  case Decl::ObjCCategory: {
-    const ObjCCategoryDecl *CD = cast<ObjCCategoryDecl>(D);
-    const ObjCInterfaceDecl *ID = CD->getClassInterface();
+  }
+  case { const ObjCCategoryDecl &CD } => {
+    const ObjCInterfaceDecl *ID = CD.getClassInterface();
     if (!ID) {
       // Handle invalid code where the @interface might not
       // have been specified.
@@ -485,19 +483,16 @@ void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
     }
     // Specially handle class extensions, which are anonymous categories.
     // We want to mangle in the location to uniquely distinguish them.
-    if (CD->IsClassExtension()) {
+    if (CD.IsClassExtension()) {
       Out << "objc(ext)" << ID->getName() << '@';
-      GenLoc(CD, /*IncludeOffset=*/true);
+      GenLoc(&CD, /*IncludeOffset=*/true);
     } else
-      GenObjCCategory(ID->getName(), CD->getName(),
+      GenObjCCategory(ID->getName(), CD.getName(),
                       GetExternalSourceContainer(ID),
-                      GetExternalSourceContainer(CD));
-
-    break;
+                      GetExternalSourceContainer(&CD));
   }
-  case Decl::ObjCCategoryImpl: {
-    const ObjCCategoryImplDecl *CD = cast<ObjCCategoryImplDecl>(D);
-    const ObjCInterfaceDecl *ID = CD->getClassInterface();
+  case { const ObjCCategoryImplDecl &CD } => {
+    const ObjCInterfaceDecl *ID = CD.getClassInterface();
     if (!ID) {
       // Handle invalid code where the @interface might not
       // have been specified.
@@ -506,15 +501,12 @@ void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
       IgnoreResults = true;
       return;
     }
-    GenObjCCategory(ID->getName(), CD->getName(),
+    GenObjCCategory(ID->getName(), CD.getName(),
                     GetExternalSourceContainer(ID),
-                    GetExternalSourceContainer(CD));
-    break;
+                    GetExternalSourceContainer(&CD));
   }
-  case Decl::ObjCProtocol: {
-    const ObjCProtocolDecl *PD = cast<ObjCProtocolDecl>(D);
-    GenObjCProtocol(PD->getName(), GetExternalSourceContainer(PD));
-    break;
+  case { const ObjCProtocolDecl &PD } => {
+    GenObjCProtocol(PD.getName(), GetExternalSourceContainer(&PD));
   }
   }
 }

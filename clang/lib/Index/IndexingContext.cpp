@@ -8,6 +8,7 @@
 
 #include "IndexingContext.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -256,25 +257,21 @@ static const Decl *adjustTemplateImplicitInstantiation(const Decl *D) {
   return nullptr;
 }
 
-static bool isDeclADefinition(const Decl *D, const DeclContext *ContainerDC, ASTContext &Ctx) {
-  if (auto VD = dyn_cast<VarDecl>(D))
-    return VD->isThisDeclarationADefinition(Ctx);
-
-  if (auto FD = dyn_cast<FunctionDecl>(D))
-    return FD->isThisDeclarationADefinition();
-
-  if (auto TD = dyn_cast<TagDecl>(D))
-    return TD->isThisDeclarationADefinition();
-
-  if (auto MD = dyn_cast<ObjCMethodDecl>(D))
-    return MD->isThisDeclarationADefinition() || isa<ObjCImplDecl>(ContainerDC);
-
-  if (isa<TypedefNameDecl>(D) || isa<EnumConstantDecl>(D) ||
-      isa<FieldDecl>(D) || isa<MSPropertyDecl>(D) || isa<ObjCImplDecl>(D) ||
-      isa<ObjCPropertyImplDecl>(D) || isa<ConceptDecl>(D))
-    return true;
-
-  return false;
+static bool isDeclADefinition(const Decl *D, const DeclContext *ContainerDC,
+                              ASTContext &Ctx) {
+  return match (*D) {
+    case { const VarDecl &VD } =>
+      VD.isThisDeclarationADefinition(Ctx) != VarDecl::DeclarationOnly;
+    case { const FunctionDecl &FD } => FD.isThisDeclarationADefinition();
+    case { const TagDecl &TD } => TD.isThisDeclarationADefinition();
+    case { const ObjCMethodDecl &MD } =>
+      MD.isThisDeclarationADefinition() || isa<ObjCImplDecl>(ContainerDC);
+    case { const TypedefNameDecl & } or { const EnumConstantDecl & } or
+         { const FieldDecl & } or { const MSPropertyDecl & } or
+         { const ObjCImplDecl & } or { const ObjCPropertyImplDecl & } or
+         { const ConceptDecl & } => true;
+    case _ => false;
+  };
 }
 
 /// Whether the given NamedDecl should be skipped because it has no name.
