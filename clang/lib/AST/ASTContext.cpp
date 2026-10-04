@@ -19,6 +19,7 @@
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/ASTStructuralEquivalence.h"
 #include "clang/AST/ASTTypeTraits.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/AttrIterator.h"
 #include "clang/AST/CharUnits.h"
@@ -5479,26 +5480,18 @@ TagType *ASTContext::getTagTypeInternal(ElaboratedTypeKeyword Keyword,
                                         bool IsInjected,
                                         const Type *CanonicalType,
                                         bool WithFoldingSetNode) const {
-  auto [TC, Size] = [&] {
-    switch (TD->getDeclKind()) {
-    case Decl::Enum:
-      static_assert(alignof(EnumType) == alignof(TagType));
-      return std::make_tuple(Type::Enum, sizeof(EnumType));
-    case Decl::ClassTemplatePartialSpecialization:
-    case Decl::ClassTemplateSpecialization:
-    case Decl::CXXRecord:
-      static_assert(alignof(RecordType) == alignof(TagType));
-      static_assert(alignof(InjectedClassNameType) == alignof(TagType));
-      if (cast<CXXRecordDecl>(TD)->hasInjectedClassType())
-        return std::make_tuple(Type::InjectedClassName,
-                               sizeof(InjectedClassNameType));
-      [[fallthrough]];
-    case Decl::Record:
-      return std::make_tuple(Type::Record, sizeof(RecordType));
-    default:
-      llvm_unreachable("unexpected decl kind");
-    }
-  }();
+  static_assert(alignof(EnumType) == alignof(TagType));
+  static_assert(alignof(RecordType) == alignof(TagType));
+  static_assert(alignof(InjectedClassNameType) == alignof(TagType));
+
+  auto [TC, Size] = match (*TD) {
+  case { const EnumDecl & } => std::make_tuple(Type::Enum, sizeof(EnumType));
+  case { const CXXRecordDecl &D } if (D.hasInjectedClassType()) =>
+    std::make_tuple(Type::InjectedClassName,
+                    sizeof(InjectedClassNameType));
+  case { const RecordDecl & } =>
+    std::make_tuple(Type::Record, sizeof(RecordType));
+  };
 
   if (Qualifier) {
     static_assert(alignof(NestedNameSpecifier) <= alignof(TagType));
