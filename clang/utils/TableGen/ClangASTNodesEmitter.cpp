@@ -19,6 +19,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 using namespace llvm;
 using namespace clang;
 using namespace clang::tblgen;
@@ -61,6 +62,8 @@ class ClangASTNodesEmitter {
   }
 
   void deriveChildTree();
+  std::vector<ASTNode> getSortedChildren(ASTNode Base) const;
+  void collectConcreteNodes(ASTNode Base, std::vector<ASTNode> &Nodes) const;
 
   std::pair<ASTNode, ASTNode> EmitNode(raw_ostream& OS, ASTNode Base);
 public:
@@ -76,6 +79,7 @@ public:
 
   // run - Output the .inc file contents
   void run(raw_ostream &OS);
+  void runAlternativeTraits(raw_ostream &OS);
 };
 } // end anonymous namespace
 
@@ -96,19 +100,7 @@ std::pair<ASTNode, ASTNode> ClangASTNodesEmitter::EmitNode(raw_ostream &OS,
   if (!Base.isAbstract())
     First = Last = Base;
 
-  auto Comp = [this](const ASTNode &LHS, const ASTNode &RHS) {
-    bool LHSPrioritized = PrioritizedClasses.count(LHS) > 0;
-    bool RHSPrioritized = PrioritizedClasses.count(RHS) > 0;
-    return std::tuple(LHSPrioritized, LHS.getName()) >
-           std::tuple(RHSPrioritized, RHS.getName());
-  };
-  auto SortedChildren = std::set<ASTNode, decltype(Comp)>(Comp);
-
-  for (; II != E; ++II) {
-    SortedChildren.insert(II->second);
-  }
-
-  for (const auto &Child : SortedChildren) {
+  for (const auto &Child : getSortedChildren(Base)) {
     bool Abstract = Child.isAbstract();
     std::string NodeName = macroName(Child.getName());
 
@@ -150,6 +142,30 @@ std::pair<ASTNode, ASTNode> ClangASTNodesEmitter::EmitNode(raw_ostream &OS,
   }
 
   return std::make_pair(First, Last);
+}
+
+std::vector<ASTNode>
+ClangASTNodesEmitter::getSortedChildren(ASTNode Base) const {
+  std::vector<ASTNode> Children;
+  auto [II, E] = Tree.equal_range(Base);
+  for (; II != E; ++II)
+    Children.push_back(II->second);
+
+  llvm::sort(Children, [this](const ASTNode &LHS, const ASTNode &RHS) {
+    bool LHSPrioritized = PrioritizedClasses.count(LHS) > 0;
+    bool RHSPrioritized = PrioritizedClasses.count(RHS) > 0;
+    return std::tuple(LHSPrioritized, LHS.getName()) >
+           std::tuple(RHSPrioritized, RHS.getName());
+  });
+  return Children;
+}
+
+void ClangASTNodesEmitter::collectConcreteNodes(
+    ASTNode Base, std::vector<ASTNode> &Nodes) const {
+  if (!Base.isAbstract())
+    Nodes.push_back(Base);
+  for (ASTNode Child : getSortedChildren(Base))
+    collectConcreteNodes(Child, Nodes);
 }
 
 void ClangASTNodesEmitter::deriveChildTree() {
@@ -201,10 +217,51 @@ void ClangASTNodesEmitter::run(raw_ostream &OS) {
   OS << "#undef ABSTRACT_" << macroHierarchyName() << "\n";
 }
 
+void ClangASTNodesEmitter::runAlternativeTraits(raw_ostream &OS) {
+  deriveChildTree();
+
+  emitSourceFileHeader("Pattern matching support for Clang Decl nodes", OS,
+                       Records);
+
+  std::set<ASTNode> Bases = {Root};
+  for (const auto &Entry : Tree)
+    Bases.insert(Entry.first);
+
+  for (ASTNode Base : Bases) {
+    std::vector<ASTNode> Alternatives;
+    collectConcreteNodes(Base, Alternatives);
+    assert(!Alternatives.empty());
+
+    std::string Subject = baseName(Base);
+    ASTNode First = Alternatives.front();
+    ASTNode Last = Alternatives.back();
+
+    OS << "template <> struct alternative_traits<clang::" << Subject << ">\n"
+       << "    : clang::detail::DeclAlternativeTraitsBase<clang::" << Subject
+       << ", clang::Decl::" << First.getName() << "> {\n"
+       << "  static constexpr alternative_info alternatives[] = {\n";
+    for (ASTNode Alternative : Alternatives)
+      OS << "      ^^clang::" << baseName(Alternative) << ",\n";
+    OS << "  };\n"
+       << "  static_assert(sizeof(alternatives) / sizeof(alternatives[0]) ==\n"
+       << "                clang::Decl::" << Last.getName()
+       << " - clang::Decl::" << First.getName() << " + 1);\n"
+       << "  static constexpr bool has_residual_states = false;\n"
+       << "};\n\n";
+  }
+}
+
 void clang::EmitClangASTNodes(const RecordKeeper &RK, raw_ostream &OS,
                               const std::string &N, const std::string &S,
                               std::string_view PriorizeIfSubclassOf) {
   ClangASTNodesEmitter(RK, N, S, PriorizeIfSubclassOf).run(OS);
+}
+
+void clang::EmitClangDeclAlternativeTraits(const RecordKeeper &RK,
+                                           raw_ostream &OS) {
+  ClangASTNodesEmitter(RK, DeclNodeClassName, "Decl",
+                       DeclContextNodeClassName)
+      .runAlternativeTraits(OS);
 }
 
 static void
