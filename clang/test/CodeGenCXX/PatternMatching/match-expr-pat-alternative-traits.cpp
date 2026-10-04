@@ -108,6 +108,66 @@ struct std::alternative_traits<Choice> {
   static typename ChoiceAlternative<I>::type& get(Choice&);
 };
 
+struct ChoiceBase {};
+struct ChoiceLeft : ChoiceBase {};
+struct ChoiceRight : ChoiceBase {};
+
+struct HierarchyChoice {};
+
+template<__SIZE_TYPE__ I>
+struct HierarchyAlternative;
+
+template<>
+struct HierarchyAlternative<0> {
+  using type = ChoiceLeft;
+};
+
+template<>
+struct HierarchyAlternative<1> {
+  using type = ChoiceRight;
+};
+
+template<>
+struct std::alternative_traits<HierarchyChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^ChoiceLeft, ^^ChoiceRight
+  };
+  static constexpr bool has_residual_states = false;
+
+  static IndexedState index(const HierarchyChoice&) noexcept;
+
+  template<__SIZE_TYPE__ I>
+  static typename HierarchyAlternative<I>::type& get(HierarchyChoice&);
+};
+
+void consume_base(const ChoiceBase&);
+void consume_any_base();
+
+// All projections that initialize the same reference declaration converge on
+// one initialization and one copy of the source handler.
+// CHECK-LABEL: define{{.*}} void @_Z17match_shared_baseR15HierarchyChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE3getILm0E
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE3getILm1E
+// CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK: ret void
+void match_shared_base(HierarchyChoice& value) {
+  match (value) {
+    case { const ChoiceBase& base } => consume_base(base);
+  }
+}
+
+// Declaration-free patterns also converge on one copy of the source handler.
+// CHECK-LABEL: define{{.*}} void @_Z22match_shared_base_typeR15HierarchyChoice
+// CHECK: call{{.*}} @_Z16consume_any_basev
+// CHECK-NOT: call{{.*}} @_Z16consume_any_basev
+// CHECK: ret void
+void match_shared_base_type(HierarchyChoice& value) {
+  match (value) {
+    case { const ChoiceBase& } => consume_any_base();
+  }
+}
+
 // CHECK-LABEL: define{{.*}} i32 @_Z19match_selected_typeR6Choice
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE3getILm0E
