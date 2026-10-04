@@ -90,9 +90,36 @@ public:
   /// if (S == nullptr)
   StringRef(std::nullptr_t) = delete;
 
+#if defined(__clang__) && __has_attribute(enable_if)
+  /// Construct a string ref from a null-terminated character array.
+  template <size_t N>
+  /*implicit*/ constexpr StringRef(const char (&Str)[N])
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgcc-compat"
+      __attribute((enable_if(__builtin_strlen(Str) == N - 1,
+                             "invalid string literal")))
+#pragma clang diagnostic pop
+      : StringRef(Str, N - 1) {}
+#endif
+
   /// Construct a string ref from a cstring.
-  /*implicit*/ constexpr StringRef(const char *Str LLVM_LIFETIME_BOUND)
+  template <typename T,
+            std::enable_if_t<std::is_pointer_v<T> &&
+                                 std::is_convertible_v<T, const char *>,
+                             int> = 0>
+  /*implicit*/ constexpr StringRef(T Str LLVM_LIFETIME_BOUND)
       : StringRef(Str ? std::string_view(Str) : std::string_view()) {}
+
+  // Preserve direct construction from non-pointer types convertible to a
+  // cstring without making those types implicitly convertible to StringRef.
+  template <typename T,
+            std::enable_if_t<
+                !std::is_pointer_v<std::remove_reference_t<T>> &&
+                    !std::is_array_v<std::remove_reference_t<T>> &&
+                    std::is_convertible_v<T, const char *>,
+                int> = 0>
+  explicit constexpr StringRef(T &&Str LLVM_LIFETIME_BOUND)
+      : StringRef(static_cast<const char *>(std::forward<T>(Str))) {}
 
   /// Construct a string ref from a pointer and length.
   /*implicit*/ constexpr StringRef(const char *data LLVM_LIFETIME_BOUND,
