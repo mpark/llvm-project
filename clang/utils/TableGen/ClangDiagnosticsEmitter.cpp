@@ -1415,27 +1415,17 @@ static bool isExemptAtStart(StringRef Text) {
     return Text.size() > 1 || Text[0] == 'C';
 
   // Otherwise, there are a few other exemptions.
-  return StringSwitch<bool>(Text)
-      .Case("AddressSanitizer", true)
-      .Case("CFString", true)
-      .Case("Clang", true)
-      .Case("Fuchsia", true)
-      .Case("GNUstep", true)
-      .Case("IBOutletCollection", true)
-      .Case("Itanium", true)
-      .Case("Microsoft", true)
-      .Case("Neon", true)
-      .StartsWith("NSInvocation", true) // NSInvocation, NSInvocation's
-      .Case("Objective", true) // Objective-C (hyphen is a word boundary)
-      .Case("OpenACC", true)
-      .Case("OpenCL", true)
-      .Case("OpenMP", true)
-      .Case("Pascal", true)
-      .Case("Swift", true)
-      .Case("Unicode", true)
-      .Case("Vulkan", true)
-      .Case("WebAssembly", true)
-      .Default(false);
+  return match (Text) {
+    case "AddressSanitizer" or "CFString" or "Clang" or "Fuchsia" or
+        "GNUstep" or "IBOutletCollection" or "Itanium" or "Microsoft" or
+        "Neon" => true;
+    // NSInvocation, NSInvocation's
+    case starts_with("NSInvocation") => true;
+    // Objective-C (hyphen is a word boundary)
+    case "Objective" or "OpenACC" or "OpenCL" or "OpenMP" or "Pascal" or
+        "Swift" or "Unicode" or "Vulkan" or "WebAssembly" => true;
+    case _ => false;
+  };
 }
 
 // Does not presume the text has been split at all.
