@@ -22,6 +22,10 @@ clang_tablegen(StmtNodes.inc -gen-clang-stmt-nodes
   SOURCE ../Basic/StmtNodes.td
   TARGET ClangStmtNodes)
 
+clang_tablegen(StmtAlternativeTraits.inc -gen-clang-stmt-alternative-traits
+  SOURCE ../Basic/StmtNodes.td
+  TARGET ClangStmtAlternativeTraits)
+
 clang_tablegen(DeclNodes.inc -gen-clang-decl-nodes
   SOURCE ../Basic/DeclNodes.td
   TARGET ClangDeclNodes)

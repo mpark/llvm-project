@@ -61,6 +61,7 @@ enum ActionType {
   GenClangCommentNodes,
   GenClangDeclAlternativeTraits,
   GenClangDeclNodes,
+  GenClangStmtAlternativeTraits,
   GenClangStmtNodes,
   GenClangTypeNodes,
   GenClangTypeReader,
@@ -226,6 +227,9 @@ cl::opt<ActionType> Action(
                    "Generate Clang Decl alternative_traits specializations"),
         clEnumValN(GenClangDeclNodes, "gen-clang-decl-nodes",
                    "Generate Clang AST declaration nodes"),
+        clEnumValN(GenClangStmtAlternativeTraits,
+                   "gen-clang-stmt-alternative-traits",
+                   "Generate Clang Stmt alternative_traits specializations"),
         clEnumValN(GenClangStmtNodes, "gen-clang-stmt-nodes",
                    "Generate Clang AST statement nodes"),
         clEnumValN(GenClangTypeNodes, "gen-clang-type-nodes",
@@ -501,6 +505,9 @@ bool ClangTableGenMain(raw_ostream &OS, const RecordKeeper &Records) {
     EmitClangASTNodes(Records, OS, DeclNodeClassName, "Decl",
                       DeclContextNodeClassName);
     EmitClangDeclContext(Records, OS);
+    break;
+  case GenClangStmtAlternativeTraits:
+    EmitClangStmtAlternativeTraits(Records, OS);
     break;
   case GenClangStmtNodes:
     EmitClangASTNodes(Records, OS, StmtNodeClassName, "");
