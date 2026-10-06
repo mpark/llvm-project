@@ -344,12 +344,11 @@ void CustomDfaEmitter::printActionValue(action_type A, raw_ostream &OS) {
   ListSeparator LS;
   for (const auto &SingleAction : AT) {
     OS << LS;
-    if (const auto *R = std::get_if<const Record *>(&SingleAction))
-      OS << (*R)->getName();
-    else if (const auto *S = std::get_if<std::string>(&SingleAction))
-      OS << '"' << *S << '"';
-    else
-      OS << std::get<unsigned>(SingleAction);
+    match (SingleAction) {
+      case { const Record *R } => OS << R->getName();
+      case { const std::string &S } => OS << '"' << S << '"';
+      case { unsigned Value } => OS << Value;
+    }
   }
   if (AT.size() > 1)
     OS << "}";
