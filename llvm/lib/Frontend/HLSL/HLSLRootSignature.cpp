@@ -183,27 +183,15 @@ raw_ostream &operator<<(raw_ostream &OS, const StaticSampler &Sampler) {
   return OS;
 }
 
-namespace {
-
-// We use the OverloadVisit with std::visit to ensure the compiler catches if a
-// new RootElement variant type is added but it's operator<< isn't handled.
-template <class... Ts> struct OverloadedVisit : Ts... {
-  using Ts::operator()...;
-};
-template <class... Ts> OverloadedVisit(Ts...) -> OverloadedVisit<Ts...>;
-
-} // namespace
-
 raw_ostream &operator<<(raw_ostream &OS, const RootElement &Element) {
-  const auto Visitor = OverloadedVisit{
-      [&OS](const dxbc::RootFlags &Flags) { OS << Flags; },
-      [&OS](const RootConstants &Constants) { OS << Constants; },
-      [&OS](const RootDescriptor &Descriptor) { OS << Descriptor; },
-      [&OS](const DescriptorTableClause &Clause) { OS << Clause; },
-      [&OS](const DescriptorTable &Table) { OS << Table; },
-      [&OS](const StaticSampler &Sampler) { OS << Sampler; },
-  };
-  std::visit(Visitor, Element);
+  match (Element) {
+    case { const dxbc::RootFlags &Flags } => OS << Flags;
+    case { const RootConstants &Constants } => OS << Constants;
+    case { const RootDescriptor &Descriptor } => OS << Descriptor;
+    case { const DescriptorTableClause &Clause } => OS << Clause;
+    case { const DescriptorTable &Table } => OS << Table;
+    case { const StaticSampler &Sampler } => OS << Sampler;
+  }
   return OS;
 }
 
