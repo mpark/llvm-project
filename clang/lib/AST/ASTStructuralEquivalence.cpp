@@ -59,6 +59,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTStructuralEquivalence.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/Attr.h"
@@ -575,17 +576,13 @@ bool ASTStructuralEquivalence::isEquivalent(
   // the compared structure is otherwise equivalent. For this reason we must
   // treat a similar unary/binary operator node and CXXOperatorCall node as
   // equivalent.
-  if (const auto *E2CXXOperatorCall = dyn_cast<CXXOperatorCallExpr>(S2)) {
-    if (const auto *E1Unary = dyn_cast<UnaryOperator>(S1))
-      return IsStructurallyEquivalent(Context, E1Unary, E2CXXOperatorCall);
-    if (const auto *E1Binary = dyn_cast<BinaryOperator>(S1))
-      return IsStructurallyEquivalent(Context, E1Binary, E2CXXOperatorCall);
-  }
-  if (const auto *E1CXXOperatorCall = dyn_cast<CXXOperatorCallExpr>(S1)) {
-    if (const auto *E2Unary = dyn_cast<UnaryOperator>(S2))
-      return IsStructurallyEquivalent(Context, E1CXXOperatorCall, E2Unary);
-    if (const auto *E2Binary = dyn_cast<BinaryOperator>(S2))
-      return IsStructurallyEquivalent(Context, E1CXXOperatorCall, E2Binary);
+  match (*S1, *S2) {
+    case [{ const UnaryOperator  &E1 }, { const CXXOperatorCallExpr &E2 }]
+      or [{ const BinaryOperator &E1 }, { const CXXOperatorCallExpr &E2 }]
+      or [{ const CXXOperatorCallExpr &E1 }, { const UnaryOperator  &E2 }]
+      or [{ const CXXOperatorCallExpr &E1 }, { const BinaryOperator &E2 }] =>
+      return IsStructurallyEquivalent(Context, &E1, &E2);
+    case _ => ;
   }
 
   // Compare the statements itself.
