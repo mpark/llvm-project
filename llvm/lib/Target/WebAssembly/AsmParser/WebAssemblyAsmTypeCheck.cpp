@@ -68,22 +68,17 @@ bool WebAssemblyAsmTypeCheck::typeError(SMLoc ErrorLoc, const Twine &Msg) {
 }
 
 bool WebAssemblyAsmTypeCheck::match(StackType TypeA, StackType TypeB) {
-  // These should have been filtered out in checkTypes()
+  // These should have been filtered out in checkTypes().
   assert(!std::get_if<Polymorphic>(&TypeA) &&
          !std::get_if<Polymorphic>(&TypeB));
 
-  if (TypeA == TypeB)
-    return false;
-  if (std::get_if<Any>(&TypeA) || std::get_if<Any>(&TypeB))
-    return false;
-
-  if (std::get_if<Ref>(&TypeB))
-    std::swap(TypeA, TypeB);
-  assert(std::get_if<wasm::ValType>(&TypeB));
-  if (std::get_if<Ref>(&TypeA) &&
-      WebAssembly::isRefType(std::get<wasm::ValType>(TypeB)))
-    return false;
-  return true;
+  return match (TypeA, TypeB) {
+    case [auto& A, auto& B] if (A == B) => false;
+    case [{ Any }, _] or [_, { Any }] => false;
+    case [{ Ref }, { wasm::ValType Type }] or
+         [{ wasm::ValType Type }, { Ref }] => !WebAssembly::isRefType(Type);
+    case _ => true;
+  };
 }
 
 std::string WebAssemblyAsmTypeCheck::getTypesString(ArrayRef<StackType> Types,
