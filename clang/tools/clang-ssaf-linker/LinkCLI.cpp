@@ -206,29 +206,23 @@ llvm::Triple LinkCLI::resolveTargetTriple(const ArtifactEncoding &First,
     return *ExplicitTriple;
   }
 
-  auto Inferred = [&]() -> llvm::Triple {
-    if (const auto *TU = std::get_if<TUSummaryEncoding>(&First)) {
-      return TU->getTargetTriple();
-    }
-
-    if (const auto *SL = std::get_if<StaticLibrary>(&First)) {
-      return SL->TargetTriple;
-    }
-
-    if (const auto *MASL = std::get_if<MultiArchStaticLibrary>(&First)) {
+  auto Inferred = match (First) -> llvm::Triple {
+    case { const TUSummaryEncoding &TU } => TU.getTargetTriple();
+    case { const StaticLibrary &SL } => SL.TargetTriple;
+    case { const MultiArchStaticLibrary &MASL } => do {
       // A single member names the target unambiguously; anything else needs the
       // architecture to be chosen on the command line.
-      if (MASL->Members.empty()) {
+      if (MASL.Members.empty())
         fail(NoMembersToInferFrom, SourceFile);
-      }
-      if (MASL->Members.size() > 1) {
-        fail(AmbiguousMembersToInferFrom, SourceFile, MASL->Members.size());
-      }
-      return (*MASL->Members.begin())->TargetTriple;
-    }
-
-    fail(UnsupportedSharedInput, SourceFile, unsupportedInputKindName(First));
-  }();
+      if (MASL.Members.size() > 1)
+        fail(AmbiguousMembersToInferFrom, SourceFile, MASL.Members.size());
+      do_return (*MASL.Members.begin())->TargetTriple;
+    };
+    case { const LUSummaryEncoding & } or
+         { const MultiArchSharedLibrary & } =>
+        not return fail(UnsupportedSharedInput, SourceFile,
+                        unsupportedInputKindName(First));
+  };
 
   info(Verbose, Level, "Target triple: '{0}' (inferred from '{1}').", Inferred,
        SourceFile);
@@ -247,37 +241,34 @@ void LinkCLI::linkInput(EntityLinker &EL, ArtifactEncoding Encoding,
     }
   };
 
-  if (auto *TU = std::get_if<TUSummaryEncoding>(&Encoding)) {
-    info(Verbose, Level, "[{0}/{1}] Linking '{2}'.", Index + 1,
-         InputFiles.size(), SourceFile);
-    llvm::TimeRegion _(Time ? &TLink : nullptr);
-
-    failOnError(EL.link(std::make_unique<TUSummaryEncoding>(std::move(*TU))));
-    return;
+  match (std::move(Encoding)) {
+    case { TUSummaryEncoding &&TU } => {
+      info(Verbose, Level, "[{0}/{1}] Linking '{2}'.", Index + 1,
+           InputFiles.size(), SourceFile);
+      llvm::TimeRegion _(Time ? &TLink : nullptr);
+      failOnError(EL.link(std::make_unique<TUSummaryEncoding>(std::move(TU))));
+    }
+    case { StaticLibrary &&SL } => {
+      info(Verbose, Level,
+           "[{0}/{1}] Linking '{2}' (static library, {3} member(s)).",
+           Index + 1, InputFiles.size(), SourceFile, SL.Members.size());
+      llvm::TimeRegion _(Time ? &TLink : nullptr);
+      failOnError(EL.link(std::make_unique<StaticLibrary>(std::move(SL))));
+    }
+    case { MultiArchStaticLibrary &&MASL } => {
+      info(Verbose, Level,
+           "[{0}/{1}] Linking '{2}' (multi-arch static library, {3} member(s)).",
+           Index + 1, InputFiles.size(), SourceFile, MASL.Members.size());
+      llvm::TimeRegion _(Time ? &TLink : nullptr);
+      failOnError(EL.link(
+          std::make_unique<MultiArchStaticLibrary>(std::move(MASL))));
+    }
+    case { const LUSummaryEncoding & } or
+         { const MultiArchSharedLibrary & } => {
+      fail(UnsupportedSharedInput, SourceFile,
+           unsupportedInputKindName(Encoding));
+    }
   }
-
-  if (auto *SL = std::get_if<StaticLibrary>(&Encoding)) {
-    info(Verbose, Level,
-         "[{0}/{1}] Linking '{2}' (static library, {3} member(s)).", Index + 1,
-         InputFiles.size(), SourceFile, SL->Members.size());
-    llvm::TimeRegion _(Time ? &TLink : nullptr);
-
-    failOnError(EL.link(std::make_unique<StaticLibrary>(std::move(*SL))));
-    return;
-  }
-
-  if (auto *MASL = std::get_if<MultiArchStaticLibrary>(&Encoding)) {
-    info(Verbose, Level,
-         "[{0}/{1}] Linking '{2}' (multi-arch static library, {3} member(s)).",
-         Index + 1, InputFiles.size(), SourceFile, MASL->Members.size());
-    llvm::TimeRegion _(Time ? &TLink : nullptr);
-
-    failOnError(
-        EL.link(std::make_unique<MultiArchStaticLibrary>(std::move(*MASL))));
-    return;
-  }
-
-  fail(UnsupportedSharedInput, SourceFile, unsupportedInputKindName(Encoding));
 }
 
 void LinkCLI::write(const LUSummaryEncoding &Output, unsigned Level,

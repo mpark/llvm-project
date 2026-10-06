@@ -81,20 +81,11 @@ llvm::Expected<Artifact> JSONFormat::readArtifact(llvm::StringRef Path) {
 }
 
 llvm::Error JSONFormat::writeArtifact(const Artifact &A, llvm::StringRef Path) {
-  return std::visit(
-      [&](const auto &S) -> llvm::Error {
-        using T = std::decay_t<decltype(S)>;
-        if constexpr (std::is_same_v<T, TUSummary>) {
-          return writeTUSummary(S, Path);
-        } else if constexpr (std::is_same_v<T, LUSummary>) {
-          return writeLUSummary(S, Path);
-        } else {
-          static_assert(std::is_same_v<T, WPASuite>,
-                        "Artifact visitor must cover all variant alternatives");
-          return writeWPASuite(S, Path);
-        }
-      },
-      A);
+  return match (A) {
+    case { const TUSummary &S } => writeTUSummary(S, Path);
+    case { const LUSummary &S } => writeLUSummary(S, Path);
+    case { const WPASuite &S } => writeWPASuite(S, Path);
+  };
 }
 
 llvm::Expected<ArtifactEncoding>
@@ -187,25 +178,13 @@ JSONFormat::readArtifactEncoding(llvm::StringRef Path) {
 
 llvm::Error JSONFormat::writeArtifactEncoding(const ArtifactEncoding &E,
                                               llvm::StringRef Path) {
-  return std::visit(
-      [&](const auto &Enc) -> llvm::Error {
-        using T = std::decay_t<decltype(Enc)>;
-        if constexpr (std::is_same_v<T, TUSummaryEncoding>) {
-          return writeTUSummaryEncoding(Enc, Path);
-        } else if constexpr (std::is_same_v<T, LUSummaryEncoding>) {
-          return writeLUSummaryEncoding(Enc, Path);
-        } else if constexpr (std::is_same_v<T, StaticLibrary>) {
-          return writeStaticLibrary(Enc, Path);
-        } else if constexpr (std::is_same_v<T, MultiArchStaticLibrary>) {
-          return writeMultiArchStaticLibrary(Enc, Path);
-        } else {
-          static_assert(
-              std::is_same_v<T, MultiArchSharedLibrary>,
-              "ArtifactEncoding visitor must cover all variant alternatives");
-          return writeMultiArchSharedLibrary(Enc, Path);
-        }
-      },
-      E);
+  return match (E) {
+    case { const TUSummaryEncoding &Enc } => writeTUSummaryEncoding(Enc, Path);
+    case { const LUSummaryEncoding &Enc } => writeLUSummaryEncoding(Enc, Path);
+    case { const StaticLibrary &Enc } => writeStaticLibrary(Enc, Path);
+    case { const MultiArchStaticLibrary &Enc } => writeMultiArchStaticLibrary(Enc, Path);
+    case { const MultiArchSharedLibrary &Enc } => writeMultiArchSharedLibrary(Enc, Path);
+  };
 }
 
 } // namespace clang::ssaf
