@@ -22,34 +22,21 @@ static constexpr std::size_t number(BlockVerifier::State S) {
 }
 
 static StringRef recordToString(BlockVerifier::State R) {
-  switch (R) {
-  case BlockVerifier::State::BufferExtents:
-    return "BufferExtents";
-  case BlockVerifier::State::NewBuffer:
-    return "NewBuffer";
-  case BlockVerifier::State::WallClockTime:
-    return "WallClockTime";
-  case BlockVerifier::State::PIDEntry:
-    return "PIDEntry";
-  case BlockVerifier::State::NewCPUId:
-    return "NewCPUId";
-  case BlockVerifier::State::TSCWrap:
-    return "TSCWrap";
-  case BlockVerifier::State::CustomEvent:
-    return "CustomEvent";
-  case BlockVerifier::State::Function:
-    return "Function";
-  case BlockVerifier::State::CallArg:
-    return "CallArg";
-  case BlockVerifier::State::EndOfBuffer:
-    return "EndOfBuffer";
-  case BlockVerifier::State::TypedEvent:
-    return "TypedEvent";
-  case BlockVerifier::State::StateMax:
-  case BlockVerifier::State::Unknown:
-    return "Unknown";
-  }
-  llvm_unreachable("Unkown state!");
+  using enum BlockVerifier::State;
+  return match (R) {
+    case BufferExtents => "BufferExtents";
+    case NewBuffer => "NewBuffer";
+    case WallClockTime => "WallClockTime";
+    case PIDEntry => "PIDEntry";
+    case NewCPUId => "NewCPUId";
+    case TSCWrap => "TSCWrap";
+    case CustomEvent => "CustomEvent";
+    case Function => "Function";
+    case CallArg => "CallArg";
+    case EndOfBuffer => "EndOfBuffer";
+    case TypedEvent => "TypedEvent";
+    case StateMax or Unknown => "Unknown";
+  };
 }
 
 namespace {

@@ -438,33 +438,32 @@ Expected<Trace> llvm::xray::loadTrace(const DataExtractor &DE, bool Sort) {
   enum BinaryFormatType { NAIVE_FORMAT = 0, FLIGHT_DATA_RECORDER_FORMAT = 1 };
 
   Trace T;
-  switch (Type) {
-  case NAIVE_FORMAT:
-    if (Version == 1 || Version == 2 || Version == 3) {
+  match (Type) {
+    case NAIVE_FORMAT if (match(Version, case 1 or 2 or 3)) => {
       if (auto E = loadNaiveFormatLog(DE.getData(), DE.isLittleEndian(),
                                       T.FileHeader, T.Records))
         return std::move(E);
-    } else {
+    }
+    case NAIVE_FORMAT => {
       return make_error<StringError>(
           Twine("Unsupported version for Basic/Naive Mode logging: ") +
               Twine(Version),
           std::make_error_code(std::errc::executable_format_error));
     }
-    break;
-  case FLIGHT_DATA_RECORDER_FORMAT:
-    if (Version >= 1 && Version <= 5) {
+    case FLIGHT_DATA_RECORDER_FORMAT if (Version >= 1 && Version <= 5) => {
       if (auto E = loadFDRLog(DE.getData(), DE.isLittleEndian(), T.FileHeader,
                               T.Records))
         return std::move(E);
-    } else {
+    }
+    case FLIGHT_DATA_RECORDER_FORMAT => {
       return make_error<StringError>(
           Twine("Unsupported version for FDR Mode logging: ") + Twine(Version),
           std::make_error_code(std::errc::executable_format_error));
     }
-    break;
-  default:
-    if (auto E = loadYAMLLog(DE.getData(), T.FileHeader, T.Records))
-      return std::move(E);
+    case _ => {
+      if (auto E = loadYAMLLog(DE.getData(), T.FileHeader, T.Records))
+        return std::move(E);
+    }
   }
 
   if (Sort)
