@@ -256,6 +256,48 @@ void ClangASTNodesEmitter::runAlternativeTraits(raw_ostream &OS,
        << "  static constexpr bool has_residual_states = false;\n"
        << "};\n\n";
   }
+
+  if (Hierarchy != "Decl")
+    return;
+
+  std::vector<ASTNode> AllDecls;
+  collectConcreteNodes(Root, AllDecls);
+
+  std::vector<ASTNode> DeclContexts;
+  for (ASTNode Node : AllDecls) {
+    for (ASTNode Base = Node; Base; Base = Base.getBase()) {
+      if (!Base.isSubClassOf(DeclContextNodeClassName))
+        continue;
+      DeclContexts.push_back(Node);
+      break;
+    }
+  }
+  assert(!DeclContexts.empty());
+
+  OS << "template <> struct alternative_traits<clang::DeclContext> {\n"
+     << "  static constexpr alternative_info alternatives[] = {\n";
+  for (ASTNode Alternative : DeclContexts)
+    OS << "      ^^clang::" << baseName(Alternative) << ",\n";
+  OS << "  };\n"
+     << "  static constexpr bool has_residual_states = false;\n\n"
+     << "  LLVM_ATTRIBUTE_ALWAYS_INLINE static std::size_t "
+        "index(const clang::DeclContext &Value) noexcept {\n"
+     << "    switch (Value.getDeclKind()) {\n";
+  for (auto [State, Alternative] : llvm::enumerate(DeclContexts))
+    OS << "    case clang::Decl::" << Alternative.getName() << ":\n"
+       << "      return " << State << ";\n";
+  OS << "    default:\n"
+     << "      llvm_unreachable(\"invalid DeclContext kind\");\n"
+     << "    }\n"
+     << "  }\n\n"
+     << "  template <std::size_t State, class Self>\n"
+     << "  static decltype(auto) get(Self &&Value) {\n"
+     << "    using Type = typename[:alternatives[State].info:];\n"
+     << "    using Result =\n"
+     << "        decltype(std::forward_like<Self>(std::declval<Type &>()));\n"
+     << "    return static_cast<Result>(Value);\n"
+     << "  }\n"
+     << "};\n\n";
 }
 
 void clang::EmitClangASTNodes(const RecordKeeper &RK, raw_ostream &OS,
