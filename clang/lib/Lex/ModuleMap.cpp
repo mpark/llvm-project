@@ -1521,38 +1521,31 @@ bool ModuleMap::parseModuleMapFile(FileEntryRef File, bool IsSystem,
   std::function<void(const modulemap::ModuleDecl &)> CollectExternDecls =
       [&](const modulemap::ModuleDecl &MD) {
         for (const auto &Decl : MD.Decls) {
-          std::visit(llvm::makeVisitor(
-                         [&](const modulemap::ModuleDecl &SubMD) {
-                           // Skip inferred submodules (module *)
-                           if (SubMD.Id.front().first == "*")
-                             return;
-                           CollectExternDecls(SubMD);
-                         },
-                         [&](const modulemap::ExternModuleDecl &EMD) {
-                           PendingExternalModuleMaps.push_back(&EMD);
-                         },
-                         [&](const auto &) {
-                           // Ignore other decls
-                         }),
-                     Decl);
+          match (Decl) {
+            case { const modulemap::ModuleDecl &SubMD } => {
+              // Skip inferred submodules (module *)
+              if (SubMD.Id.front().first != "*")
+                CollectExternDecls(SubMD);
+            }
+            case { const modulemap::ExternModuleDecl &EMD } =>
+              PendingExternalModuleMaps.push_back(&EMD);
+            case _ => ;
+          }
         }
       };
 
   for (const auto &Decl : MMF.Decls) {
-    std::visit(llvm::makeVisitor(
-                   [&](const modulemap::ModuleDecl &MD) {
-                     // Only use the first part of the name even for submodules.
-                     // This will correctly load the submodule declarations when
-                     // the module is loaded.
-                     auto &ModuleDecls =
-                         ParsedModules[StringRef(MD.Id.front().first)];
-                     ModuleDecls.push_back(std::pair(&MMF, &MD));
-                     CollectExternDecls(MD);
-                   },
-                   [&](const modulemap::ExternModuleDecl &EMD) {
-                     PendingExternalModuleMaps.push_back(&EMD);
-                   }),
-               Decl);
+    match (Decl) {
+      case { const modulemap::ModuleDecl &MD } => {
+        // Only use the first part of the name even for submodules. This will
+        // correctly load the submodule declarations when the module is loaded.
+        auto &ModuleDecls = ParsedModules[StringRef(MD.Id.front().first)];
+        ModuleDecls.push_back(std::pair(&MMF, &MD));
+        CollectExternDecls(MD);
+      }
+      case { const modulemap::ExternModuleDecl &EMD } =>
+        PendingExternalModuleMaps.push_back(&EMD);
+    }
   }
 
   for (const modulemap::ExternModuleDecl *EMD : PendingExternalModuleMaps) {
@@ -2006,31 +1999,24 @@ void ModuleMapLoader::handleModuleDecl(const modulemap::ModuleDecl &MD) {
     diagnosePrivateModules(MD.Location);
 
   for (const modulemap::Decl &Decl : MD.Decls) {
-    std::visit(
-        llvm::makeVisitor(
-            [&](const modulemap::RequiresDecl &RD) { handleRequiresDecl(RD); },
-            [&](const modulemap::HeaderDecl &HD) { handleHeaderDecl(HD); },
-            [&](const modulemap::UmbrellaDirDecl &UDD) {
-              handleUmbrellaDirDecl(UDD);
-            },
-            [&](const modulemap::ModuleDecl &MD) { handleModuleDecl(MD); },
-            [&](const modulemap::ExportDecl &ED) { handleExportDecl(ED); },
-            [&](const modulemap::ExportAsDecl &EAD) {
-              handleExportAsDecl(EAD);
-            },
-            [&](const modulemap::ExternModuleDecl &EMD) {
-              handleExternModuleDecl(EMD);
-            },
-            [&](const modulemap::UseDecl &UD) { handleUseDecl(UD); },
-            [&](const modulemap::LinkDecl &LD) { handleLinkDecl(LD); },
-            [&](const modulemap::ConfigMacrosDecl &CMD) {
-              handleConfigMacros(CMD);
-            },
-            [&](const modulemap::ConflictDecl &CD) { handleConflict(CD); },
-            [&](const modulemap::ExcludeDecl &ED) {
-              Diags.Report(ED.Location, diag::err_mmap_expected_member);
-            }),
-        Decl);
+    match (Decl) {
+      case { const modulemap::RequiresDecl &RD } => handleRequiresDecl(RD);
+      case { const modulemap::HeaderDecl &HD } => handleHeaderDecl(HD);
+      case { const modulemap::UmbrellaDirDecl &UDD } =>
+        handleUmbrellaDirDecl(UDD);
+      case { const modulemap::ModuleDecl &MD } => handleModuleDecl(MD);
+      case { const modulemap::ExportDecl &ED } => handleExportDecl(ED);
+      case { const modulemap::ExportAsDecl &EAD } => handleExportAsDecl(EAD);
+      case { const modulemap::ExternModuleDecl &EMD } =>
+        handleExternModuleDecl(EMD);
+      case { const modulemap::UseDecl &UD } => handleUseDecl(UD);
+      case { const modulemap::LinkDecl &LD } => handleLinkDecl(LD);
+      case { const modulemap::ConfigMacrosDecl &CMD } =>
+        handleConfigMacros(CMD);
+      case { const modulemap::ConflictDecl &CD } => handleConflict(CD);
+      case { const modulemap::ExcludeDecl &ED } =>
+        Diags.Report(ED.Location, diag::err_mmap_expected_member);
+    }
   }
 
   // If the active module is a top-level framework, and there are no link
@@ -2377,42 +2363,37 @@ void ModuleMapLoader::handleInferredModuleDecl(
   }
 
   for (const modulemap::Decl &Decl : MD.Decls) {
-    std::visit(
-        llvm::makeVisitor(
-            [&](const auto &Other) {
-              Diags.Report(Other.Location,
-                           diag::err_mmap_expected_inferred_member)
-                  << (ActiveModule != nullptr);
-            },
-            [&](const modulemap::ExcludeDecl &ED) {
-              // Only inferred frameworks can have exclude decls
-              if (ActiveModule) {
-                Diags.Report(ED.Location,
-                             diag::err_mmap_expected_inferred_member)
-                    << (ActiveModule != nullptr);
-                HadError = true;
-                return;
-              }
-              Map.InferredDirectories[Directory].ExcludedModules.emplace_back(
-                  ED.Module);
-            },
-            [&](const modulemap::ExportDecl &ED) {
-              // Only inferred submodules can have export decls
-              if (!ActiveModule) {
-                Diags.Report(ED.Location,
-                             diag::err_mmap_expected_inferred_member)
-                    << (ActiveModule != nullptr);
-                HadError = true;
-                return;
-              }
+    match (Decl) {
+      case { const modulemap::ExcludeDecl &ED } => {
+        // Only inferred frameworks can have exclude decls
+        if (ActiveModule) {
+          Diags.Report(ED.Location, diag::err_mmap_expected_inferred_member)
+              << (ActiveModule != nullptr);
+          HadError = true;
+          continue;
+        }
+        Map.InferredDirectories[Directory].ExcludedModules.emplace_back(
+            ED.Module);
+      }
+      case { const modulemap::ExportDecl &ED } => {
+        // Only inferred submodules can have export decls
+        if (!ActiveModule) {
+          Diags.Report(ED.Location, diag::err_mmap_expected_inferred_member)
+              << (ActiveModule != nullptr);
+          HadError = true;
+          continue;
+        }
 
-              if (ED.Wildcard && ED.Id.size() == 0)
-                ActiveModule->InferExportWildcard = true;
-              else
-                Diags.Report(ED.Id.front().second,
-                             diag::err_mmap_expected_export_wildcard);
-            }),
-        Decl);
+        if (ED.Wildcard && ED.Id.size() == 0)
+          ActiveModule->InferExportWildcard = true;
+        else
+          Diags.Report(ED.Id.front().second,
+                       diag::err_mmap_expected_export_wildcard);
+      }
+      case { const auto &Other } =>
+        Diags.Report(Other.Location, diag::err_mmap_expected_inferred_member)
+            << (ActiveModule != nullptr);
+    }
   }
 }
 
@@ -2430,13 +2411,11 @@ bool ModuleMapLoader::loadExternModuleDecl(
 bool ModuleMapLoader::parseAndLoadModuleMapFile(
     const modulemap::ModuleMapFile &MMF) {
   for (const auto &Decl : MMF.Decls) {
-    std::visit(
-        llvm::makeVisitor(
-            [&](const modulemap::ModuleDecl &MD) { handleModuleDecl(MD); },
-            [&](const modulemap::ExternModuleDecl &EMD) {
-              handleExternModuleDecl(EMD);
-            }),
-        Decl);
+    match (Decl) {
+      case { const modulemap::ModuleDecl &MD } => handleModuleDecl(MD);
+      case { const modulemap::ExternModuleDecl &EMD } =>
+        handleExternModuleDecl(EMD);
+    }
   }
   return HadError;
 }
