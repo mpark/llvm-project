@@ -680,19 +680,15 @@ VendorSignatures getVendorSignature(unsigned *MaxLeaf) {
   if (getX86CpuIDAndInfo(0, MaxLeaf, &EBX, &ECX, &EDX) || *MaxLeaf < 1)
     return VendorSignatures::UNKNOWN;
 
-  // "Genu ineI ntel"
-  if (EBX == 0x756e6547 && EDX == 0x49656e69 && ECX == 0x6c65746e)
-    return VendorSignatures::GENUINE_INTEL;
-
-  // "Auth enti cAMD"
-  if (EBX == 0x68747541 && EDX == 0x69746e65 && ECX == 0x444d4163)
-    return VendorSignatures::AUTHENTIC_AMD;
-
-  // "Hygo nGen uine"
-  if (EBX == 0x6f677948 && EDX == 0x6e65476e && ECX == 0x656e6975)
-    return VendorSignatures::HYGON_GENUINE;
-
-  return VendorSignatures::UNKNOWN;
+  return match (EBX, EDX, ECX) {
+    // "Genu ineI ntel"
+    case [0x756e6547, 0x49656e69, 0x6c65746e] => VendorSignatures::GENUINE_INTEL;
+    // "Auth enti cAMD"
+    case [0x68747541, 0x69746e65, 0x444d4163] => VendorSignatures::AUTHENTIC_AMD;
+    // "Hygo nGen uine"
+    case [0x6f677948, 0x6e65476e, 0x656e6975] => VendorSignatures::HYGON_GENUINE;
+    case _                                    => VendorSignatures::UNKNOWN;
+  };
 }
 
 } // namespace x86
