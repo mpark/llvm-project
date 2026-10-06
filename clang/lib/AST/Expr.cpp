@@ -12,6 +12,7 @@
 
 #include "clang/AST/Expr.h"
 #include "clang/AST/APValue.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/Attr.h"
@@ -4413,38 +4414,29 @@ bool Expr::isSameComparisonOperand(const Expr* E1, const Expr* E2) {
         }
       }
 
-      const auto *DRE1 = dyn_cast<DeclRefExpr>(E1);
-      const auto *DRE2 = dyn_cast<DeclRefExpr>(E2);
-      if (DRE1 && DRE2)
-        return declaresSameEntity(DRE1->getDecl(), DRE2->getDecl());
-
-      const auto *Ivar1 = dyn_cast<ObjCIvarRefExpr>(E1);
-      const auto *Ivar2 = dyn_cast<ObjCIvarRefExpr>(E2);
-      if (Ivar1 && Ivar2) {
-        return Ivar1->isFreeIvar() && Ivar2->isFreeIvar() &&
-               declaresSameEntity(Ivar1->getDecl(), Ivar2->getDecl());
-      }
-
-      const auto *Array1 = dyn_cast<ArraySubscriptExpr>(E1);
-      const auto *Array2 = dyn_cast<ArraySubscriptExpr>(E2);
-      if (Array1 && Array2) {
-        if (!isSameComparisonOperand(Array1->getBase(), Array2->getBase()))
+      match (*E1, *E2) {
+      case [{ const DeclRefExpr &DRE1 }, { const DeclRefExpr &DRE2 }] =>
+        return declaresSameEntity(DRE1.getDecl(), DRE2.getDecl());
+      case [{ const ObjCIvarRefExpr &Ivar1 },
+            { const ObjCIvarRefExpr &Ivar2 }] =>
+        return Ivar1.isFreeIvar() && Ivar2.isFreeIvar() &&
+               declaresSameEntity(Ivar1.getDecl(), Ivar2.getDecl());
+      case [{ const ArraySubscriptExpr &Array1 },
+            { const ArraySubscriptExpr &Array2 }] => {
+        if (!isSameComparisonOperand(Array1.getBase(), Array2.getBase()))
           return false;
 
-        auto Idx1 = Array1->getIdx();
-        auto Idx2 = Array2->getIdx();
-        const auto Integer1 = dyn_cast<IntegerLiteral>(Idx1);
-        const auto Integer2 = dyn_cast<IntegerLiteral>(Idx2);
-        if (Integer1 && Integer2) {
-          if (!llvm::APInt::isSameValue(Integer1->getValue(),
-                                        Integer2->getValue()))
-            return false;
-        } else {
-          if (!isSameComparisonOperand(Idx1, Idx2))
-            return false;
-        }
-
-        return true;
+        const Expr *Idx1 = Array1.getIdx();
+        const Expr *Idx2 = Array2.getIdx();
+        return match (*Idx1, *Idx2) {
+          case [{ const IntegerLiteral &Integer1 },
+                { const IntegerLiteral &Integer2 }] =>
+            llvm::APInt::isSameValue(Integer1.getValue(),
+                                     Integer2.getValue());
+          case _ => isSameComparisonOperand(Idx1, Idx2);
+        };
+      }
+      case _ => ;
       }
 
       // Walk the MemberExpr chain.
