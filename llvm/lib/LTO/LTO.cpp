@@ -1047,51 +1047,52 @@ LTO::addRegularLTO(InputFile &Input, ArrayRef<SymbolResolution> InputRes,
     ModuleSymbolTable::Symbol Msym = *MsymI++;
     Skip();
 
-    if (GlobalValue *GV = dyn_cast_if_present<GlobalValue *>(Msym)) {
-      if (R.Prevailing) {
-        if (Sym.isUndefined())
-          continue;
-        Mod.Keep.push_back(GV);
-        // For symbols re-defined with linker -wrap and -defsym options,
-        // set the linkage to weak to inhibit IPO. The linkage will be
-        // restored by the linker.
-        if (R.LinkerRedefined)
-          GV->setLinkage(GlobalValue::WeakAnyLinkage);
+    match (Msym) {
+      case { GlobalValue &GV } => {
+        if (R.Prevailing) {
+          if (Sym.isUndefined())
+            continue;
+          Mod.Keep.push_back(&GV);
+          // For symbols re-defined with linker -wrap and -defsym options,
+          // set the linkage to weak to inhibit IPO. The linkage will be
+          // restored by the linker.
+          if (R.LinkerRedefined)
+            GV.setLinkage(GlobalValue::WeakAnyLinkage);
 
-        GlobalValue::LinkageTypes OriginalLinkage = GV->getLinkage();
-        if (GlobalValue::isLinkOnceLinkage(OriginalLinkage))
-          GV->setLinkage(GlobalValue::getWeakLinkage(
-              GlobalValue::isLinkOnceODRLinkage(OriginalLinkage)));
-      } else if (isa<GlobalObject>(GV) &&
-                 (GV->hasLinkOnceODRLinkage() || GV->hasWeakODRLinkage() ||
-                  GV->hasAvailableExternallyLinkage()) &&
-                 !AliasedGlobals.count(cast<GlobalObject>(GV))) {
-        // Any of the above three types of linkage indicates that the
-        // chosen prevailing symbol will have the same semantics as this copy of
-        // the symbol, so we may be able to link it with available_externally
-        // linkage. We will decide later whether to do that when we link this
-        // module (in linkRegularLTO), based on whether it is undefined.
-        Mod.Keep.push_back(GV);
-        GV->setLinkage(GlobalValue::AvailableExternallyLinkage);
-        if (GV->hasComdat())
-          NonPrevailingComdats.insert(GV->getComdat());
-        cast<GlobalObject>(GV)->setComdat(nullptr);
-      }
+          GlobalValue::LinkageTypes OriginalLinkage = GV.getLinkage();
+          if (GlobalValue::isLinkOnceLinkage(OriginalLinkage))
+            GV.setLinkage(GlobalValue::getWeakLinkage(
+                GlobalValue::isLinkOnceODRLinkage(OriginalLinkage)));
+        } else if (isa<GlobalObject>(GV) &&
+                   (GV.hasLinkOnceODRLinkage() || GV.hasWeakODRLinkage() ||
+                    GV.hasAvailableExternallyLinkage()) &&
+                   !AliasedGlobals.count(cast<GlobalObject>(&GV))) {
+          // Any of the above three types of linkage indicates that the chosen
+          // prevailing symbol will have the same semantics as this copy of the
+          // symbol, so we may be able to link it with available_externally
+          // linkage. We will decide later whether to do that when we link this
+          // module (in linkRegularLTO), based on whether it is undefined.
+          Mod.Keep.push_back(&GV);
+          GV.setLinkage(GlobalValue::AvailableExternallyLinkage);
+          if (GV.hasComdat())
+            NonPrevailingComdats.insert(GV.getComdat());
+          cast<GlobalObject>(GV).setComdat(nullptr);
+        }
 
-      // Set the 'local' flag based on the linker resolution for this symbol.
-      if (R.FinalDefinitionInLinkageUnit) {
-        GV->setDSOLocal(true);
-        if (GV->hasDLLImportStorageClass())
-          GV->setDLLStorageClass(GlobalValue::DLLStorageClassTypes::
-                                 DefaultStorageClass);
+        // Set the 'local' flag based on the linker resolution for this symbol.
+        if (R.FinalDefinitionInLinkageUnit) {
+          GV.setDSOLocal(true);
+          if (GV.hasDLLImportStorageClass())
+            GV.setDLLStorageClass(
+                GlobalValue::DLLStorageClassTypes::DefaultStorageClass);
+        }
       }
-    } else if (auto *AS =
-                   dyn_cast_if_present<ModuleSymbolTable::AsmSymbol *>(Msym)) {
-      // Collect non-prevailing symbols.
-      if (!R.Prevailing)
-        NonPrevailingAsmSymbols.insert(AS->first);
-    } else {
-      llvm_unreachable("unknown symbol type");
+      case { ModuleSymbolTable::AsmSymbol &AS } => {
+        // Collect non-prevailing symbols.
+        if (!R.Prevailing)
+          NonPrevailingAsmSymbols.insert(AS.first);
+      }
+      case {} => llvm_unreachable("unknown symbol type");
     }
 
     // Common resolution: collect the maximum size/alignment over all commons.
