@@ -18,6 +18,7 @@
 #include "llvm/DebugInfo/PDB/Native/NativeSession.h"
 #include "llvm/DebugInfo/PDB/PDB.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/Object/AlternativeTraits.h"
 #include "llvm/Object/COFF.h"
 
 using namespace llvm;
@@ -45,30 +46,33 @@ Error LVReaderHandler::createReader(StringRef Filename, LVReaders &Readers,
                                     StringRef FileFormatName,
                                     StringRef ExePath) {
   auto CreateOneReader = [&]() -> std::unique_ptr<LVReader> {
-    if (auto ObjPtrPtr = std::get_if<ObjectFile *>(&Input)) {
-      ObjectFile &Obj = **ObjPtrPtr;
-      if (Obj.isCOFF()) {
-        COFFObjectFile *COFF = cast<COFFObjectFile>(&Obj);
-        return std::make_unique<LVCodeViewReader>(Filename, FileFormatName,
-                                                  *COFF, W, ExePath);
-      }
-      if (Obj.isELF() || Obj.isMachO() || Obj.isWasm())
-        return std::make_unique<LVDWARFReader>(Filename, FileFormatName, Obj,
-                                               W);
-    }
-    if (auto PdbPtrPtr = std::get_if<PDBFile *>(&Input)) {
-      PDBFile &Pdb = **PdbPtrPtr;
-      return std::make_unique<LVCodeViewReader>(Filename, FileFormatName, Pdb,
-                                                W, ExePath);
-    }
-    if (auto Ir = std::get_if<IRObjectFile *>(&Input))
-      return std::make_unique<LVIRReader>(Filename, FileFormatName, *Ir, W);
-    if (auto MemBuf = std::get_if<MemoryBufferRef *>(&Input)) {
-      // If the filename extension is '.ll' create an IR reader.
-      constexpr StringRef IRFileExt = ".ll";
-      if (llvm::sys::path::extension(Filename) == IRFileExt)
-        return std::make_unique<LVIRReader>(Filename, IRFileFormatName, *MemBuf,
+    match (Input) {
+      case { ObjectFile *Obj } => {
+        return match (*Obj) -> std::unique_ptr<LVReader> {
+          case { COFFObjectFile &COFF } =>
+            std::make_unique<LVCodeViewReader>(Filename, FileFormatName, COFF,
+                                               W, ExePath);
+          case ObjectFile &Object
+              if (Object.isELF() || Object.isMachO() || Object.isWasm()) =>
+            std::make_unique<LVDWARFReader>(Filename, FileFormatName, Object,
                                             W);
+          case _ => nullptr;
+        };
+      }
+      case { PDBFile *Pdb } => {
+        return std::make_unique<LVCodeViewReader>(Filename, FileFormatName,
+                                                  *Pdb, W, ExePath);
+      }
+      case { IRObjectFile *IR } => {
+        return std::make_unique<LVIRReader>(Filename, FileFormatName, IR, W);
+      }
+      case { MemoryBufferRef *Buffer } => {
+        if (llvm::sys::path::extension(Filename) == ".ll") {
+          return std::make_unique<LVIRReader>(Filename, IRFileFormatName,
+                                              Buffer, W);
+        }
+      }
+      case { StringRef * } => ;
     }
     return nullptr;
   };
