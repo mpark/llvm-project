@@ -918,33 +918,25 @@ Error DirectX::PSVRuntimeInfo::parse(uint16_t ShaderKind) {
 }
 
 uint8_t DirectX::PSVRuntimeInfo::getSigInputCount() const {
-  if (const auto *P = std::get_if<dxbc::PSV::v3::RuntimeInfo>(&BasicInfo))
-    return P->SigInputElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
-    return P->SigInputElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
-    return P->SigInputElements;
-  return 0;
+  return match (BasicInfo) -> uint8_t {
+    case { const dxbc::PSV::v1::RuntimeInfo &Info } => Info.SigInputElements;
+    case _ => 0;
+  };
 }
 
 uint8_t DirectX::PSVRuntimeInfo::getSigOutputCount() const {
-  if (const auto *P = std::get_if<dxbc::PSV::v3::RuntimeInfo>(&BasicInfo))
-    return P->SigOutputElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
-    return P->SigOutputElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
-    return P->SigOutputElements;
-  return 0;
+  return match (BasicInfo) -> uint8_t {
+    case { const dxbc::PSV::v1::RuntimeInfo &Info } => Info.SigOutputElements;
+    case _ => 0;
+  };
 }
 
 uint8_t DirectX::PSVRuntimeInfo::getSigPatchOrPrimCount() const {
-  if (const auto *P = std::get_if<dxbc::PSV::v3::RuntimeInfo>(&BasicInfo))
-    return P->SigPatchOrPrimElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
-    return P->SigPatchOrPrimElements;
-  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
-    return P->SigPatchOrPrimElements;
-  return 0;
+  return match (BasicInfo) -> uint8_t {
+    case { const dxbc::PSV::v1::RuntimeInfo &Info } =>
+        Info.SigPatchOrPrimElements;
+    case _ => 0;
+  };
 }
 
 class DXNotSupportedError : public ErrorInfo<DXNotSupportedError> {
