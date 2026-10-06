@@ -19,6 +19,7 @@
 #include "CodeGenFunction.h"
 #include "TargetInfo.h"
 #include "clang/AST/APValue.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/OpenMPClause.h"
@@ -7294,130 +7295,44 @@ public:
       if (LHS->getStmtClass() != RHS->getStmtClass())
         return false;
 
-      // Handle DeclRefExpr (variable references)
-      if (const auto *LD = dyn_cast<DeclRefExpr>(LHS)) {
-        const auto *RD = dyn_cast<DeclRefExpr>(RHS);
-        if (!RD)
-          return false;
-        return LD->getDecl()->getCanonicalDecl() ==
-               RD->getDecl()->getCanonicalDecl();
-      }
-
-      // Handle ArraySubscriptExpr (array indexing like a[i])
-      if (const auto *LA = dyn_cast<ArraySubscriptExpr>(LHS)) {
-        const auto *RA = dyn_cast<ArraySubscriptExpr>(RHS);
-        if (!RA)
-          return false;
-        return areSemanticallyEqual(LA->getBase(), RA->getBase()) &&
-               areSemanticallyEqual(LA->getIdx(), RA->getIdx());
-      }
-
-      // Handle MemberExpr (member access like s.m or p->m)
-      if (const auto *LM = dyn_cast<MemberExpr>(LHS)) {
-        const auto *RM = dyn_cast<MemberExpr>(RHS);
-        if (!RM)
-          return false;
-        if (LM->getMemberDecl()->getCanonicalDecl() !=
-            RM->getMemberDecl()->getCanonicalDecl())
-          return false;
-        return areSemanticallyEqual(LM->getBase(), RM->getBase());
-      }
-
-      // Handle UnaryOperator (unary operations like *p, &x, etc.)
-      if (const auto *LU = dyn_cast<UnaryOperator>(LHS)) {
-        const auto *RU = dyn_cast<UnaryOperator>(RHS);
-        if (!RU)
-          return false;
-        if (LU->getOpcode() != RU->getOpcode())
-          return false;
-        return areSemanticallyEqual(LU->getSubExpr(), RU->getSubExpr());
-      }
-
-      // Handle BinaryOperator (binary operations like p + offset)
-      if (const auto *LB = dyn_cast<BinaryOperator>(LHS)) {
-        const auto *RB = dyn_cast<BinaryOperator>(RHS);
-        if (!RB)
-          return false;
-        if (LB->getOpcode() != RB->getOpcode())
-          return false;
-        return areSemanticallyEqual(LB->getLHS(), RB->getLHS()) &&
-               areSemanticallyEqual(LB->getRHS(), RB->getRHS());
-      }
-
-      // Handle ArraySectionExpr (array sections like a[0:1])
-      // Attach pointers should not contain array-sections, but currently we
-      // don't emit an error.
-      if (const auto *LAS = dyn_cast<ArraySectionExpr>(LHS)) {
-        const auto *RAS = dyn_cast<ArraySectionExpr>(RHS);
-        if (!RAS)
-          return false;
-        return areSemanticallyEqual(LAS->getBase(), RAS->getBase()) &&
-               areSemanticallyEqual(LAS->getLowerBound(),
-                                    RAS->getLowerBound()) &&
-               areSemanticallyEqual(LAS->getLength(), RAS->getLength());
-      }
-
-      // Handle CastExpr (explicit casts)
-      if (const auto *LC = dyn_cast<CastExpr>(LHS)) {
-        const auto *RC = dyn_cast<CastExpr>(RHS);
-        if (!RC)
-          return false;
-        if (LC->getCastKind() != RC->getCastKind())
-          return false;
-        return areSemanticallyEqual(LC->getSubExpr(), RC->getSubExpr());
-      }
-
-      // Handle CXXThisExpr (this pointer)
-      if (isa<CXXThisExpr>(LHS) && isa<CXXThisExpr>(RHS))
-        return true;
-
-      // Handle IntegerLiteral (integer constants)
-      if (const auto *LI = dyn_cast<IntegerLiteral>(LHS)) {
-        const auto *RI = dyn_cast<IntegerLiteral>(RHS);
-        if (!RI)
-          return false;
-        return LI->getValue() == RI->getValue();
-      }
-
-      // Handle CharacterLiteral (character constants)
-      if (const auto *LC = dyn_cast<CharacterLiteral>(LHS)) {
-        const auto *RC = dyn_cast<CharacterLiteral>(RHS);
-        if (!RC)
-          return false;
-        return LC->getValue() == RC->getValue();
-      }
-
-      // Handle FloatingLiteral (floating point constants)
-      if (const auto *LF = dyn_cast<FloatingLiteral>(LHS)) {
-        const auto *RF = dyn_cast<FloatingLiteral>(RHS);
-        if (!RF)
-          return false;
-        // Use bitwise comparison for floating point literals
-        return LF->getValue().bitwiseIsEqual(RF->getValue());
-      }
-
-      // Handle StringLiteral (string constants)
-      if (const auto *LS = dyn_cast<StringLiteral>(LHS)) {
-        const auto *RS = dyn_cast<StringLiteral>(RHS);
-        if (!RS)
-          return false;
-        return LS->getString() == RS->getString();
-      }
-
-      // Handle CXXNullPtrLiteralExpr (nullptr)
-      if (isa<CXXNullPtrLiteralExpr>(LHS) && isa<CXXNullPtrLiteralExpr>(RHS))
-        return true;
-
-      // Handle CXXBoolLiteralExpr (true/false)
-      if (const auto *LB = dyn_cast<CXXBoolLiteralExpr>(LHS)) {
-        const auto *RB = dyn_cast<CXXBoolLiteralExpr>(RHS);
-        if (!RB)
-          return false;
-        return LB->getValue() == RB->getValue();
-      }
-
-      // Fallback for other forms - use the existing comparison method
-      return Expr::isSameComparisonOperand(LHS, RHS);
+      return match (*LHS, *RHS) {
+        case [{ const DeclRefExpr &LD }, { const DeclRefExpr &RD }] =>
+          LD.getDecl()->getCanonicalDecl() == RD.getDecl()->getCanonicalDecl();
+        case [{ const ArraySubscriptExpr &LA }, { const ArraySubscriptExpr &RA }] =>
+          areSemanticallyEqual(LA.getBase(), RA.getBase()) &&
+          areSemanticallyEqual(LA.getIdx(), RA.getIdx());
+        case [{ const MemberExpr &LM }, { const MemberExpr &RM }] =>
+          LM.getMemberDecl()->getCanonicalDecl() ==
+              RM.getMemberDecl()->getCanonicalDecl() &&
+          areSemanticallyEqual(LM.getBase(), RM.getBase());
+        case [{ const UnaryOperator &LU }, { const UnaryOperator &RU }] =>
+          LU.getOpcode() == RU.getOpcode() &&
+          areSemanticallyEqual(LU.getSubExpr(), RU.getSubExpr());
+        case [{ const BinaryOperator &LB }, { const BinaryOperator &RB }] =>
+          LB.getOpcode() == RB.getOpcode() &&
+          areSemanticallyEqual(LB.getLHS(), RB.getLHS()) &&
+          areSemanticallyEqual(LB.getRHS(), RB.getRHS());
+        case [{ const ArraySectionExpr &LAS }, { const ArraySectionExpr &RAS }] =>
+          areSemanticallyEqual(LAS.getBase(), RAS.getBase()) &&
+          areSemanticallyEqual(LAS.getLowerBound(), RAS.getLowerBound()) &&
+          areSemanticallyEqual(LAS.getLength(), RAS.getLength());
+        case [{ const CastExpr &LC }, { const CastExpr &RC }] =>
+          LC.getCastKind() == RC.getCastKind() &&
+          areSemanticallyEqual(LC.getSubExpr(), RC.getSubExpr());
+        case [{ const CXXThisExpr & }, { const CXXThisExpr & }] => true;
+        case [{ const IntegerLiteral &LI }, { const IntegerLiteral &RI }] =>
+          LI.getValue() == RI.getValue();
+        case [{ const CharacterLiteral &LC }, { const CharacterLiteral &RC }] =>
+          LC.getValue() == RC.getValue();
+        case [{ const FloatingLiteral &LF }, { const FloatingLiteral &RF }] =>
+          LF.getValue().bitwiseIsEqual(RF.getValue());
+        case [{ const StringLiteral &LS }, { const StringLiteral &RS }] =>
+          LS.getString() == RS.getString();
+        case [{ const CXXNullPtrLiteralExpr & }, { const CXXNullPtrLiteralExpr & }] => true;
+        case [{ const CXXBoolLiteralExpr &LB }, { const CXXBoolLiteralExpr &RB }] =>
+          LB.getValue() == RB.getValue();
+        case _ => Expr::isSameComparisonOperand(LHS, RHS);
+      };
     }
   };
 
