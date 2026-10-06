@@ -1900,18 +1900,24 @@ TypeTraitExpr::TypeTraitExpr(
   assert(static_cast<unsigned>(Kind) == TypeTraitExprBits.Kind &&
          "TypeTraitExprBits.Kind overflow!");
 
-  TypeTraitExprBits.IsBooleanTypeTrait = std::holds_alternative<bool>(Value);
-  TypeTraitExprBits.IsComparisonResult =
-      std::holds_alternative<ComparisonCategoryResult>(Value);
-  if (TypeTraitExprBits.IsBooleanTypeTrait)
-    TypeTraitExprBits.Value = std::get<bool>(Value);
-  else {
-    if (auto *CCR = std::get_if<ComparisonCategoryResult>(&Value)) {
-      llvm::APSInt EncodedValue = llvm::APSInt::get(llvm::to_underlying(*CCR));
+  match (std::move(Value)) {
+    case { bool Result } => {
+      TypeTraitExprBits.IsBooleanTypeTrait = true;
+      TypeTraitExprBits.IsComparisonResult = false;
+      TypeTraitExprBits.Value = Result;
+    }
+    case { APValue &&Result } => {
+      TypeTraitExprBits.IsBooleanTypeTrait = false;
+      TypeTraitExprBits.IsComparisonResult = false;
+      ::new (getTrailingObjects<APValue>()) APValue(std::move(Result));
+    }
+    case { ComparisonCategoryResult Result } => {
+      TypeTraitExprBits.IsBooleanTypeTrait = false;
+      TypeTraitExprBits.IsComparisonResult = true;
+      llvm::APSInt EncodedValue =
+          llvm::APSInt::get(llvm::to_underlying(Result));
       ::new (getTrailingObjects<APValue>()) APValue(std::move(EncodedValue));
-    } else
-      ::new (getTrailingObjects<APValue>())
-          APValue(std::get<APValue>(std::move(Value)));
+    }
   }
 
   TypeTraitExprBits.NumArgs = Args.size();
