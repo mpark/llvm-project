@@ -27,6 +27,8 @@ namespace clang {
 void EmitCIRLowering(const llvm::RecordKeeper &RK, llvm::raw_ostream &OS);
 void EmitClangDeclAlternativeTraits(const llvm::RecordKeeper &RK,
                                     llvm::raw_ostream &OS);
+void EmitClangStmtAlternativeTraits(const llvm::RecordKeeper &RK,
+                                    llvm::raw_ostream &OS);
 void EmitClangDeclContext(const llvm::RecordKeeper &RK, llvm::raw_ostream &OS);
 /**
   @param PriorizeIfSubclassOf These classes should be prioritized in the output.

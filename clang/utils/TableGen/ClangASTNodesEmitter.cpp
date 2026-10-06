@@ -79,7 +79,8 @@ public:
 
   // run - Output the .inc file contents
   void run(raw_ostream &OS);
-  void runAlternativeTraits(raw_ostream &OS);
+  void runAlternativeTraits(raw_ostream &OS, StringRef Hierarchy,
+                            StringRef EnumSuffix);
 };
 } // end anonymous namespace
 
@@ -217,11 +218,15 @@ void ClangASTNodesEmitter::run(raw_ostream &OS) {
   OS << "#undef ABSTRACT_" << macroHierarchyName() << "\n";
 }
 
-void ClangASTNodesEmitter::runAlternativeTraits(raw_ostream &OS) {
+void ClangASTNodesEmitter::runAlternativeTraits(raw_ostream &OS,
+                                                StringRef Hierarchy,
+                                                StringRef EnumSuffix) {
   deriveChildTree();
 
-  emitSourceFileHeader("Pattern matching support for Clang Decl nodes", OS,
-                       Records);
+  std::string Description = "Pattern matching support for Clang ";
+  Description += Hierarchy;
+  Description += " nodes";
+  emitSourceFileHeader(Description, OS, Records);
 
   std::set<ASTNode> Bases = {Root};
   for (const auto &Entry : Tree)
@@ -237,15 +242,17 @@ void ClangASTNodesEmitter::runAlternativeTraits(raw_ostream &OS) {
     ASTNode Last = Alternatives.back();
 
     OS << "template <> struct alternative_traits<clang::" << Subject << ">\n"
-       << "    : clang::detail::DeclAlternativeTraitsBase<clang::" << Subject
-       << ", clang::Decl::" << First.getName() << "> {\n"
+       << "    : clang::detail::" << Hierarchy
+       << "AlternativeTraitsBase<clang::" << Subject << ", clang::"
+       << Hierarchy << "::" << First.getName() << EnumSuffix << "> {\n"
        << "  static constexpr alternative_info alternatives[] = {\n";
     for (ASTNode Alternative : Alternatives)
       OS << "      ^^clang::" << baseName(Alternative) << ",\n";
     OS << "  };\n"
        << "  static_assert(sizeof(alternatives) / sizeof(alternatives[0]) ==\n"
-       << "                clang::Decl::" << Last.getName()
-       << " - clang::Decl::" << First.getName() << " + 1);\n"
+       << "                clang::" << Hierarchy << "::" << Last.getName()
+       << EnumSuffix << " - clang::" << Hierarchy << "::" << First.getName()
+       << EnumSuffix << " + 1);\n"
        << "  static constexpr bool has_residual_states = false;\n"
        << "};\n\n";
   }
@@ -261,7 +268,13 @@ void clang::EmitClangDeclAlternativeTraits(const RecordKeeper &RK,
                                            raw_ostream &OS) {
   ClangASTNodesEmitter(RK, DeclNodeClassName, "Decl",
                        DeclContextNodeClassName)
-      .runAlternativeTraits(OS);
+      .runAlternativeTraits(OS, "Decl", "");
+}
+
+void clang::EmitClangStmtAlternativeTraits(const RecordKeeper &RK,
+                                           raw_ostream &OS) {
+  ClangASTNodesEmitter(RK, StmtNodeClassName, "", "")
+      .runAlternativeTraits(OS, "Stmt", "Class");
 }
 
 static void
