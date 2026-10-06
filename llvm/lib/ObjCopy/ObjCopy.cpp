@@ -20,6 +20,7 @@
 #include "llvm/ObjCopy/XCOFF/XCOFFObjcopy.h"
 #include "llvm/ObjCopy/wasm/WasmConfig.h"
 #include "llvm/ObjCopy/wasm/WasmObjcopy.h"
+#include "llvm/Object/AlternativeTraits.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -50,60 +51,60 @@ void objcopy::printCopyMessage(StringRef InPath, StringRef InFormatName,
 /// of the input binary (ELF, MachO or COFF).
 Error objcopy::executeObjcopyOnBinary(const MultiFormatConfig &Config,
                                       object::Binary &In, raw_ostream &Out) {
-  if (auto *ELFBinary = dyn_cast<object::ELFObjectFileBase>(&In)) {
-    Expected<const ELFConfig &> ELFConfig = Config.getELFConfig();
-    if (!ELFConfig)
-      return ELFConfig.takeError();
+  match (In) {
+    case { object::ELFObjectFileBase &ELFBinary } => {
+      auto ELFCfg = Config.getELFConfig();
+      if (!ELFCfg)
+        return ELFCfg.takeError();
 
-    return elf::executeObjcopyOnBinary(Config.getCommonConfig(), *ELFConfig,
-                                       *ELFBinary, Out);
-  }
-  if (auto *COFFBinary = dyn_cast<object::COFFObjectFile>(&In)) {
-    Expected<const COFFConfig &> COFFConfig = Config.getCOFFConfig();
-    if (!COFFConfig)
-      return COFFConfig.takeError();
+      return elf::executeObjcopyOnBinary(Config.getCommonConfig(), *ELFCfg,
+                                         ELFBinary, Out);
+    }
+    case { object::COFFObjectFile &COFFBinary } => {
+      auto COFFCfg = Config.getCOFFConfig();
+      if (!COFFCfg)
+        return COFFCfg.takeError();
 
-    return coff::executeObjcopyOnBinary(Config.getCommonConfig(), *COFFConfig,
-                                        *COFFBinary, Out);
-  }
-  if (auto *MachOBinary = dyn_cast<object::MachOObjectFile>(&In)) {
-    Expected<const MachOConfig &> MachOConfig = Config.getMachOConfig();
-    if (!MachOConfig)
-      return MachOConfig.takeError();
+      return coff::executeObjcopyOnBinary(Config.getCommonConfig(), *COFFCfg,
+                                          COFFBinary, Out);
+    }
+    case { object::MachOObjectFile &MachOBinary } => {
+      auto MachOCfg = Config.getMachOConfig();
+      if (!MachOCfg)
+        return MachOCfg.takeError();
 
-    return macho::executeObjcopyOnBinary(Config.getCommonConfig(), *MachOConfig,
-                                         *MachOBinary, Out);
-  }
-  if (auto *MachOUniversalBinary =
-          dyn_cast<object::MachOUniversalBinary>(&In)) {
-    return macho::executeObjcopyOnMachOUniversalBinary(
-        Config, *MachOUniversalBinary, Out);
-  }
-  if (auto *WasmBinary = dyn_cast<object::WasmObjectFile>(&In)) {
-    Expected<const WasmConfig &> WasmConfig = Config.getWasmConfig();
-    if (!WasmConfig)
-      return WasmConfig.takeError();
+      return macho::executeObjcopyOnBinary(
+          Config.getCommonConfig(), *MachOCfg, MachOBinary, Out);
+    }
+    case { object::MachOUniversalBinary &MachOUniversalBinary } =>
+      return macho::executeObjcopyOnMachOUniversalBinary(
+          Config, MachOUniversalBinary, Out);
+    case { object::WasmObjectFile &WasmBinary } => {
+      auto WasmCfg = Config.getWasmConfig();
+      if (!WasmCfg)
+        return WasmCfg.takeError();
 
-    return objcopy::wasm::executeObjcopyOnBinary(Config.getCommonConfig(),
-                                                 *WasmConfig, *WasmBinary, Out);
-  }
-  if (auto *XCOFFBinary = dyn_cast<object::XCOFFObjectFile>(&In)) {
-    Expected<const XCOFFConfig &> XCOFFConfig = Config.getXCOFFConfig();
-    if (!XCOFFConfig)
-      return XCOFFConfig.takeError();
+      return objcopy::wasm::executeObjcopyOnBinary(
+          Config.getCommonConfig(), *WasmCfg, WasmBinary, Out);
+    }
+    case { object::XCOFFObjectFile &XCOFFBinary } => {
+      auto XCOFFCfg = Config.getXCOFFConfig();
+      if (!XCOFFCfg)
+        return XCOFFCfg.takeError();
 
-    return xcoff::executeObjcopyOnBinary(Config.getCommonConfig(), *XCOFFConfig,
-                                         *XCOFFBinary, Out);
-  }
-  if (auto *DXContainerBinary = dyn_cast<object::DXContainerObjectFile>(&In)) {
-    Expected<const DXContainerConfig &> DXContainerConfig =
-        Config.getDXContainerConfig();
-    if (!DXContainerConfig)
-      return DXContainerConfig.takeError();
+      return xcoff::executeObjcopyOnBinary(
+          Config.getCommonConfig(), *XCOFFCfg, XCOFFBinary, Out);
+    }
+    case { object::DXContainerObjectFile &DXContainerBinary } => {
+      auto DXContainerCfg = Config.getDXContainerConfig();
+      if (!DXContainerCfg)
+        return DXContainerCfg.takeError();
 
-    return dxbc::executeObjcopyOnBinary(
-        Config.getCommonConfig(), *DXContainerConfig, *DXContainerBinary, Out);
+      return dxbc::executeObjcopyOnBinary(
+          Config.getCommonConfig(), *DXContainerCfg, DXContainerBinary, Out);
+    }
+    case _ =>
+      return createStringError(object_error::invalid_file_type,
+                               "unsupported object file format");
   }
-  return createStringError(object_error::invalid_file_type,
-                           "unsupported object file format");
 }
