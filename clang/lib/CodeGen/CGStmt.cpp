@@ -3330,9 +3330,8 @@ void AsmConstraintsInfo::EmitAsmStores(
     llvm::Value *Tmp = RegResults[i];
     llvm::Type *TruncTy = ResultTruncRegTypes[i];
 
-    if (i < ResultBounds.size() && ResultBounds[i].has_value()) {
-      const auto [LowerBound, UpperBound] = ResultBounds[i].value();
-
+    if (i < ResultBounds.size() &&
+        case { auto [LowerBound, UpperBound] } = ResultBounds[i]) {
       // FIXME: Support for nonzero lower bounds not yet implemented.
       assert(LowerBound == 0 && "Output operand lower bound is not zero.");
 
