@@ -68,17 +68,13 @@ constexpr const char *SharedFamilyName = "shared-library";
 //===----------------------------------------------------------------------===//
 
 bool isStaticFamily(const ArtifactEncoding &E) {
-  return std::holds_alternative<StaticLibrary>(E) ||
-         std::holds_alternative<MultiArchStaticLibrary>(E);
+  return match(E, case { const StaticLibrary & or
+                         const MultiArchStaticLibrary & });
 }
 
 bool isSharedFamily(const ArtifactEncoding &E) {
-  return std::holds_alternative<LUSummaryEncoding>(E) ||
-         std::holds_alternative<MultiArchSharedLibrary>(E);
-}
-
-bool isTUSummaryEncoding(const ArtifactEncoding &E) {
-  return std::holds_alternative<TUSummaryEncoding>(E);
+  return match(E, case { const LUSummaryEncoding & or
+                         const MultiArchSharedLibrary & });
 }
 
 } // namespace
@@ -250,34 +246,27 @@ void MultiArchCreateCLI::addStaticInput(MultiArchStaticLibrary &Bundle,
        InputFiles.size(), SourceFile);
   llvm::TimeRegion _(Time ? &TBundle : nullptr);
 
-  if (auto *SL = std::get_if<StaticLibrary>(&Encoding)) {
-    BuildNamespace Expected =
-        Bundle.Namespace.withKind(BuildNamespaceKind::StaticLibrary);
-    if (SL->Namespace != Expected) {
-      fail(NamespaceMismatch, SL->Namespace, SourceFile, Expected);
+  match (std::move(Encoding)) {
+    case { StaticLibrary &&SL } => {
+      BuildNamespace Expected =
+          Bundle.Namespace.withKind(BuildNamespaceKind::StaticLibrary);
+      if (SL.Namespace != Expected)
+        fail(NamespaceMismatch, SL.Namespace, SourceFile, Expected);
+      addStaticMember(Bundle, std::make_unique<StaticLibrary>(std::move(SL)),
+                      SourceFile);
     }
-    addStaticMember(Bundle, std::make_unique<StaticLibrary>(std::move(*SL)),
-                    SourceFile);
-    return;
-  }
+    case { MultiArchStaticLibrary &&MASL } => {
+      if (MASL.Namespace != Bundle.Namespace)
+        fail(NamespaceMismatch, MASL.Namespace, SourceFile, Bundle.Namespace);
 
-  if (auto *MASL = std::get_if<MultiArchStaticLibrary>(&Encoding)) {
-    if (MASL->Namespace != Bundle.Namespace) {
-      fail(NamespaceMismatch, MASL->Namespace, SourceFile, Bundle.Namespace);
+      while (!MASL.Members.empty()) {
+        auto Node = MASL.Members.extract(MASL.Members.begin());
+        addStaticMember(Bundle, std::move(Node.value()), SourceFile);
+      }
     }
-
-    while (!MASL->Members.empty()) {
-      auto Node = MASL->Members.extract(MASL->Members.begin());
-      addStaticMember(Bundle, std::move(Node.value()), SourceFile);
-    }
-    return;
+    case { const TUSummaryEncoding & } => fail(InvalidInputKind, SourceFile);
+    case _ => fail(MixedFamily, SourceFile, SharedFamilyName, StaticFamilyName);
   }
-
-  if (isTUSummaryEncoding(Encoding)) {
-    fail(InvalidInputKind, SourceFile);
-  }
-
-  fail(MixedFamily, SourceFile, SharedFamilyName, StaticFamilyName);
 }
 
 void MultiArchCreateCLI::addSharedInput(MultiArchSharedLibrary &Bundle,
@@ -288,32 +277,26 @@ void MultiArchCreateCLI::addSharedInput(MultiArchSharedLibrary &Bundle,
        InputFiles.size(), SourceFile);
   llvm::TimeRegion _(Time ? &TBundle : nullptr);
 
-  if (auto *LU = std::get_if<LUSummaryEncoding>(&Encoding)) {
-    if (LU->LUNamespace != Bundle.Namespace) {
-      fail(NamespaceMismatch, LU->LUNamespace, SourceFile, Bundle.Namespace);
+  match (std::move(Encoding)) {
+    case { LUSummaryEncoding &&LU } => {
+      if (LU.LUNamespace != Bundle.Namespace)
+        fail(NamespaceMismatch, LU.LUNamespace, SourceFile, Bundle.Namespace);
+      addSharedMember(Bundle,
+                      std::make_unique<LUSummaryEncoding>(std::move(LU)),
+                      SourceFile);
     }
-    addSharedMember(Bundle, std::make_unique<LUSummaryEncoding>(std::move(*LU)),
-                    SourceFile);
-    return;
-  }
-
-  if (auto *MASharedL = std::get_if<MultiArchSharedLibrary>(&Encoding)) {
-    if (MASharedL->Namespace != Bundle.Namespace) {
-      fail(NamespaceMismatch, MASharedL->Namespace, SourceFile,
-           Bundle.Namespace);
+    case { MultiArchSharedLibrary &&MASharedL } => {
+      if (MASharedL.Namespace != Bundle.Namespace)
+        fail(NamespaceMismatch, MASharedL.Namespace, SourceFile,
+             Bundle.Namespace);
+      while (!MASharedL.Members.empty()) {
+        auto Node = MASharedL.Members.extract(MASharedL.Members.begin());
+        addSharedMember(Bundle, std::move(Node.value()), SourceFile);
+      }
     }
-    while (!MASharedL->Members.empty()) {
-      auto Node = MASharedL->Members.extract(MASharedL->Members.begin());
-      addSharedMember(Bundle, std::move(Node.value()), SourceFile);
-    }
-    return;
+    case { const TUSummaryEncoding & } => fail(InvalidInputKind, SourceFile);
+    case _ => fail(MixedFamily, SourceFile, StaticFamilyName, SharedFamilyName);
   }
-
-  if (isTUSummaryEncoding(Encoding)) {
-    fail(InvalidInputKind, SourceFile);
-  }
-
-  fail(MixedFamily, SourceFile, StaticFamilyName, SharedFamilyName);
 }
 
 void MultiArchCreateCLI::addStaticMember(MultiArchStaticLibrary &Bundle,
