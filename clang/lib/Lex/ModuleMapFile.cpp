@@ -1160,67 +1160,65 @@ static void dumpExternModule(const ExternModuleDecl &EMD,
 
 static void dumpDecls(ArrayRef<Decl> Decls, llvm::raw_ostream &out, int depth) {
   for (const auto &Decl : Decls) {
-    std::visit(llvm::makeVisitor(
-                   [&](const RequiresDecl &RD) {
-                     out.indent(depth * 2);
-                     out << "requires\n";
-                   },
-                   [&](const HeaderDecl &HD) {
-                     out.indent(depth * 2);
-                     if (HD.Private)
-                       out << "private ";
-                     if (HD.Textual)
-                       out << "textual ";
-                     if (HD.Excluded)
-                       out << "excluded ";
-                     if (HD.Umbrella)
-                       out << "umbrella ";
-                     out << "header \"" << HD.Path << "\"\n";
-                   },
-                   [&](const UmbrellaDirDecl &UDD) {
-                     out.indent(depth * 2);
-                     out << "umbrella\n";
-                   },
-                   [&](const ModuleDecl &MD) { dumpModule(MD, out, depth); },
-                   [&](const ExcludeDecl &ED) {
-                     out.indent(depth * 2);
-                     out << "exclude " << ED.Module << "\n";
-                   },
-                   [&](const ExportDecl &ED) {
-                     out.indent(depth * 2);
-                     out << "export "
-                         << (ED.Wildcard ? "*" : formatModuleId(ED.Id)) << "\n";
-                   },
-                   [&](const ExportAsDecl &EAD) {
-                     out.indent(depth * 2);
-                     out << "export as\n";
-                   },
-                   [&](const ExternModuleDecl &EMD) {
-                     dumpExternModule(EMD, out, depth);
-                   },
-                   [&](const UseDecl &UD) {
-                     out.indent(depth * 2);
-                     out << "use\n";
-                   },
-                   [&](const LinkDecl &LD) {
-                     out.indent(depth * 2);
-                     out << "link\n";
-                   },
-                   [&](const ConfigMacrosDecl &CMD) {
-                     out.indent(depth * 2);
-                     out << "config_macros ";
-                     if (CMD.Exhaustive)
-                       out << "[exhaustive] ";
-                     for (auto Macro : CMD.Macros) {
-                       out << Macro << " ";
-                     }
-                     out << "\n";
-                   },
-                   [&](const ConflictDecl &CD) {
-                     out.indent(depth * 2);
-                     out << "conflicts\n";
-                   }),
-               Decl);
+    match (Decl) {
+      case { const RequiresDecl & } => {
+        out.indent(depth * 2);
+        out << "requires\n";
+      }
+      case { const HeaderDecl &HD } => {
+        out.indent(depth * 2);
+        if (HD.Private)
+          out << "private ";
+        if (HD.Textual)
+          out << "textual ";
+        if (HD.Excluded)
+          out << "excluded ";
+        if (HD.Umbrella)
+          out << "umbrella ";
+        out << "header \"" << HD.Path << "\"\n";
+      }
+      case { const UmbrellaDirDecl & } => {
+        out.indent(depth * 2);
+        out << "umbrella\n";
+      }
+      case { const ModuleDecl &MD } => dumpModule(MD, out, depth);
+      case { const ExcludeDecl &ED } => {
+        out.indent(depth * 2);
+        out << "exclude " << ED.Module << "\n";
+      }
+      case { const ExportDecl &ED } => {
+        out.indent(depth * 2);
+        out << "export " << (ED.Wildcard ? "*" : formatModuleId(ED.Id))
+            << "\n";
+      }
+      case { const ExportAsDecl & } => {
+        out.indent(depth * 2);
+        out << "export as\n";
+      }
+      case { const ExternModuleDecl &EMD } =>
+        dumpExternModule(EMD, out, depth);
+      case { const UseDecl & } => {
+        out.indent(depth * 2);
+        out << "use\n";
+      }
+      case { const LinkDecl & } => {
+        out.indent(depth * 2);
+        out << "link\n";
+      }
+      case { const ConfigMacrosDecl &CMD } => {
+        out.indent(depth * 2);
+        out << "config_macros ";
+        if (CMD.Exhaustive)
+          out << "[exhaustive] ";
+        for (auto Macro : CMD.Macros)
+          out << Macro << " ";
+        out << "\n";
+      }
+      case { const ConflictDecl & } => {
+        out.indent(depth * 2);
+        out << "conflicts\n";
+      }
+    }
   }
 }
 
@@ -1233,11 +1231,9 @@ static void dumpModule(const ModuleDecl &MD, llvm::raw_ostream &out,
 
 void ModuleMapFile::dump(llvm::raw_ostream &out) const {
   for (const auto &Decl : Decls) {
-    std::visit(
-        llvm::makeVisitor([&](const ModuleDecl &MD) { dumpModule(MD, out, 0); },
-                          [&](const ExternModuleDecl &EMD) {
-                            dumpExternModule(EMD, out, 0);
-                          }),
-        Decl);
+    match (Decl) {
+      case { const ModuleDecl &MD }        => dumpModule(MD, out, 0);
+      case { const ExternModuleDecl &EMD } => dumpExternModule(EMD, out, 0);
+    }
   }
 }
