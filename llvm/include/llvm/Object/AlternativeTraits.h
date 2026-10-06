@@ -17,6 +17,10 @@
 #ifdef __clang__
 #if __has_feature(pattern_matching)
 
+namespace llvm::object {
+class ObjectFile;
+}
+
 namespace std {
 
 template <> struct alternative_traits<llvm::object::Binary> {
@@ -44,6 +48,10 @@ template <> struct alternative_traits<llvm::object::Binary> {
     return try_cast<T>(std::forward<Self>(Value));
   }
 };
+
+template <>
+struct alternative_traits<llvm::object::ObjectFile>
+    : alternative_traits<llvm::object::Binary> {};
 
 } // namespace std
 
