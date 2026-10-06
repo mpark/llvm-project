@@ -14,6 +14,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/ASTMutationListener.h"
+#include "clang/AST/AlternativeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/AttrIterator.h"
 #include "clang/AST/Decl.h"
@@ -1488,72 +1489,52 @@ DeclContext *DeclContext::getNonTransparentContext() {
 }
 
 DeclContext *DeclContext::getPrimaryContext() {
-  switch (getDeclKind()) {
-  case Decl::ExternCContext:
-  case Decl::LinkageSpec:
-  case Decl::Export:
-  case Decl::TopLevelStmt:
-  case Decl::Block:
-  case Decl::Captured:
-  case Decl::OutlinedFunction:
-  case Decl::OMPDeclareReduction:
-  case Decl::OMPDeclareMapper:
-  case Decl::RequiresExprBody:
-  case Decl::CXXExpansionStmt:
-    // There is only one DeclContext for these entities.
-    return this;
+  auto DefinitionOrSelf = [](auto &D) -> DeclContext * {
+    if (auto *Def = D.getDefinition())
+      return Def;
+    return &D;
+  };
 
-  case Decl::HLSLBuffer:
+  return match (*this) -> DeclContext * {
+  case { ExternCContextDecl & } or
+       { LinkageSpecDecl & } or
+       { ExportDecl & } or
+       { TopLevelStmtDecl & } or
+       { BlockDecl & } or
+       { CapturedDecl & } or
+       { OutlinedFunctionDecl & } or
+       { OMPDeclareReductionDecl & } or
+       { OMPDeclareMapperDecl & } or
+       { RequiresExprBodyDecl & } or
+       { CXXExpansionStmtDecl & } =>
+    // There is only one DeclContext for these entities.
+    this;
+
+  case { HLSLBufferDecl & } =>
     // Each buffer, even with the same name, is a distinct construct.
     // Multiple buffers with the same name are allowed for backward
-    // compatibility.
-    // As long as buffers have unique resource bindings the names don't matter.
-    // The names get exposed via the CPU-side reflection API which
-    // supports querying bindings, so we cannot remove them.
-    return this;
+    // compatibility. As long as buffers have unique resource bindings the
+    // names don't matter. The names get exposed via the CPU-side reflection
+    // API which supports querying bindings, so we cannot remove them.
+    this;
 
-  case Decl::TranslationUnit:
-    return static_cast<TranslationUnitDecl *>(this)->getFirstDecl();
-  case Decl::Namespace:
-    return static_cast<NamespaceDecl *>(this)->getFirstDecl();
+  case { FunctionDecl & } or { ObjCMethodDecl & } => this;
 
-  case Decl::ObjCMethod:
-    return this;
+  case { TranslationUnitDecl &D } => D.getFirstDecl();
+  case { NamespaceDecl &D } => D.getFirstDecl();
 
-  case Decl::ObjCInterface:
-    if (auto *OID = dyn_cast<ObjCInterfaceDecl>(this))
-      if (auto *Def = OID->getDefinition())
-        return Def;
-    return this;
-
-  case Decl::ObjCProtocol:
-    if (auto *OPD = dyn_cast<ObjCProtocolDecl>(this))
-      if (auto *Def = OPD->getDefinition())
-        return Def;
-    return this;
-
-  case Decl::ObjCCategory:
-    return this;
-
-  case Decl::ObjCImplementation:
-  case Decl::ObjCCategoryImpl:
-    return this;
+  case { ObjCInterfaceDecl &D } => DefinitionOrSelf(D);
+  case { ObjCProtocolDecl &D } => DefinitionOrSelf(D);
+  case { ObjCCategoryDecl & } or
+       { ObjCImplementationDecl & } or
+       { ObjCCategoryImplDecl & } =>
+    this;
 
   // If this is a tag type that has a definition or is currently
   // being defined, that definition is our primary context.
-  case Decl::ClassTemplatePartialSpecialization:
-  case Decl::ClassTemplateSpecialization:
-  case Decl::CXXRecord:
-    return cast<CXXRecordDecl>(this)->getDefinitionOrSelf();
-  case Decl::Record:
-  case Decl::Enum:
-    return cast<TagDecl>(this)->getDefinitionOrSelf();
-
-  default:
-    assert(getDeclKind() >= Decl::firstFunction &&
-           getDeclKind() <= Decl::lastFunction && "Unknown DeclContext kind");
-    return this;
-  }
+  case { CXXRecordDecl &D } => D.getDefinitionOrSelf();
+  case { TagDecl &D } => D.getDefinitionOrSelf();
+  };
 }
 
 template <typename T>
