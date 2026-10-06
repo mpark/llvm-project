@@ -4032,13 +4032,13 @@ Instruction *InstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
   if (match(CondVal, m_LogicalOr(m_Value(A), m_Value(B))) &&
       match(FalseVal, m_Zero())) {
     std::optional<bool> Res = isImpliedCondition(TrueVal, B, DL);
-    if (Res && *Res == false)
+    if (match(Res, case { false }))
       return replaceOperand(SI, 0, A);
   }
   if (match(TrueVal, m_LogicalOr(m_Value(A), m_Value(B))) &&
       match(FalseVal, m_Zero())) {
     std::optional<bool> Res = isImpliedCondition(CondVal, B, DL);
-    if (Res && *Res == false)
+    if (match(Res, case { false }))
       return replaceOperand(SI, 1, A);
   }
   // select c, true, (a && b)  -> select c, true, a
@@ -4047,13 +4047,13 @@ Instruction *InstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
   if (match(TrueVal, m_One()) &&
       match(FalseVal, m_LogicalAnd(m_Value(A), m_Value(B)))) {
     std::optional<bool> Res = isImpliedCondition(CondVal, B, DL, false);
-    if (Res && *Res == true)
+    if (match(Res, case { true }))
       return replaceOperand(SI, 2, A);
   }
   if (match(CondVal, m_LogicalAnd(m_Value(A), m_Value(B))) &&
       match(TrueVal, m_One())) {
     std::optional<bool> Res = isImpliedCondition(FalseVal, B, DL, false);
-    if (Res && *Res == true)
+    if (match(Res, case { true }))
       return replaceOperand(SI, 0, A);
   }
 

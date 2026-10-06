@@ -11662,7 +11662,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
 
   // MT_Local variables use direct access with no host-device mapping.
   // No offload entry needed — the device global keeps its own initializer.
-  if (Res && *Res == OMPDeclareTargetDeclAttr::MT_Local)
+  if (match(Res, case { OMPDeclareTargetDeclAttr::MT_Local }))
     return;
 
   if (!Res) {
