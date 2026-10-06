@@ -200,16 +200,11 @@ bool nonloc::PointerToMember::isNullMemberPointer() const {
 
 const NamedDecl *nonloc::PointerToMember::getDecl() const {
   const auto PTMD = this->getPTMData();
-  if (PTMD.isNull())
-    return nullptr;
-
-  const NamedDecl *ND = nullptr;
-  if (const auto *NDP = dyn_cast<const NamedDecl *>(PTMD))
-    ND = NDP;
-  else
-    ND = cast<const PointerToMemberData *>(PTMD)->getDeclaratorDecl();
-
-  return ND;
+  return match (PTMD) -> const NamedDecl * {
+    case {} => nullptr;
+    case { const NamedDecl &D } => &D;
+    case { const PointerToMemberData &D } => D.getDeclaratorDecl();
+  };
 }
 
 //===----------------------------------------------------------------------===//
