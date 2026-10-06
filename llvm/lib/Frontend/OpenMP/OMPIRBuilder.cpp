@@ -1165,6 +1165,12 @@ void OpenMPIRBuilder::applyDeclareTargetGlobalReplacements() {
   DeclareTargetGlobalReplacements.clear();
 }
 
+OpenMPIRBuilder::OpenMPIRBuilder(Module &M)
+    : M(M), Builder(M), OffloadInfoManager(this), T(M.getTargetTriple()),
+      IsFinalized(false) {
+  Builder.disableGEPCanonicalization();
+}
+
 OpenMPIRBuilder::~OpenMPIRBuilder() {
   assert(OutlineInfos.empty() && "There must be no outstanding outlinings");
 }

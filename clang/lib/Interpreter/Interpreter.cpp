@@ -435,6 +435,11 @@ IncrementalCompilerBuilder::CreateHost(OffloadType Type) {
 
 Interpreter::Interpreter(std::unique_ptr<CompilerInstance> Instance,
                          llvm::Error &ErrOut,
+                         std::unique_ptr<IncrementalExecutorBuilder> IEB)
+    : Interpreter(std::move(Instance), ErrOut, std::move(IEB), nullptr) {}
+
+Interpreter::Interpreter(std::unique_ptr<CompilerInstance> Instance,
+                         llvm::Error &ErrOut,
                          std::unique_ptr<IncrementalExecutorBuilder> IEB,
                          std::unique_ptr<clang::ASTConsumer> Consumer)
     : IncrExecutorBuilder(std::move(IEB)) {
@@ -598,7 +603,8 @@ Interpreter::createWithDevice(std::unique_ptr<CompilerInstance> CI,
   llvm::Error Err = llvm::Error::success();
 
   auto DeviceAct = Interp->TSCtx->withContextDo([&](llvm::LLVMContext *Ctx) {
-    return std::make_unique<IncrementalAction>(*DCI, *Ctx, Err, *Interp);
+    return std::make_unique<IncrementalAction>(*DCI, *Ctx, Err, *Interp,
+                                               nullptr);
   });
 
   if (Err)

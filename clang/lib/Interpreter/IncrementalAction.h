@@ -45,7 +45,7 @@ private:
 public:
   IncrementalAction(CompilerInstance &Instance, llvm::LLVMContext &LLVMCtx,
                     llvm::Error &Err, Interpreter &I,
-                    std::unique_ptr<ASTConsumer> Consumer = nullptr);
+                    std::unique_ptr<ASTConsumer> Consumer);
 
   FrontendAction *getWrapped() const { return WrappedAction.get(); }
 
