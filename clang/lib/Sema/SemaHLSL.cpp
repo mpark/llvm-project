@@ -1539,47 +1539,50 @@ bool SemaHLSL::handleRootSignatureElements(
   for (const hlsl::RootSignatureElement &RootSigElem : Elements) {
     SourceLocation Loc = RootSigElem.getLocation();
     const llvm::hlsl::rootsig::RootElement &Elem = RootSigElem.getElement();
-    if (const auto *Descriptor =
-            std::get_if<llvm::hlsl::rootsig::RootDescriptor>(&Elem)) {
-      VerifyRegister(Loc, Descriptor->Reg.Number);
-      VerifySpace(Loc, Descriptor->Space);
+    match (Elem) {
+      case { const llvm::hlsl::rootsig::RootDescriptor &Descriptor } => {
+        VerifyRegister(Loc, Descriptor.Reg.Number);
+        VerifySpace(Loc, Descriptor.Space);
 
-      if (!llvm::hlsl::rootsig::verifyRootDescriptorFlag(Version,
-                                                         Descriptor->Flags))
-        ReportFlagError(Loc);
-    } else if (const auto *Constants =
-                   std::get_if<llvm::hlsl::rootsig::RootConstants>(&Elem)) {
-      VerifyRegister(Loc, Constants->Reg.Number);
-      VerifySpace(Loc, Constants->Space);
-    } else if (const auto *Sampler =
-                   std::get_if<llvm::hlsl::rootsig::StaticSampler>(&Elem)) {
-      VerifyRegister(Loc, Sampler->Reg.Number);
-      VerifySpace(Loc, Sampler->Space);
-
-      assert(!std::isnan(Sampler->MaxLOD) && !std::isnan(Sampler->MinLOD) &&
-             "By construction, parseFloatParam can't produce a NaN from a "
-             "float_literal token");
-
-      if (!llvm::hlsl::rootsig::verifyMaxAnisotropy(Sampler->MaxAnisotropy))
-        ReportError(Loc, 0, 16);
-      if (!llvm::hlsl::rootsig::verifyMipLODBias(Sampler->MipLODBias))
-        ReportFloatError(Loc, -16.f, 15.99f);
-    } else if (const auto *Clause =
-                   std::get_if<llvm::hlsl::rootsig::DescriptorTableClause>(
-                       &Elem)) {
-      VerifyRegister(Loc, Clause->Reg.Number);
-      VerifySpace(Loc, Clause->Space);
-
-      if (!llvm::hlsl::rootsig::verifyNumDescriptors(Clause->NumDescriptors)) {
-        // NumDescriptor could techincally be ~0u but that is reserved for
-        // unbounded, so the diagnostic will not report that as a valid int
-        // value
-        ReportError(Loc, 1, 0xfffffffe);
+        if (!llvm::hlsl::rootsig::verifyRootDescriptorFlag(Version,
+                                                           Descriptor.Flags))
+          ReportFlagError(Loc);
       }
+      case { const llvm::hlsl::rootsig::RootConstants &Constants } => {
+        VerifyRegister(Loc, Constants.Reg.Number);
+        VerifySpace(Loc, Constants.Space);
+      }
+      case { const llvm::hlsl::rootsig::StaticSampler &Sampler } => {
+        VerifyRegister(Loc, Sampler.Reg.Number);
+        VerifySpace(Loc, Sampler.Space);
 
-      if (!llvm::hlsl::rootsig::verifyDescriptorRangeFlag(Version, Clause->Type,
-                                                          Clause->Flags))
-        ReportFlagError(Loc);
+        assert(!std::isnan(Sampler.MaxLOD) && !std::isnan(Sampler.MinLOD) &&
+               "By construction, parseFloatParam can't produce a NaN from a "
+               "float_literal token");
+
+        if (!llvm::hlsl::rootsig::verifyMaxAnisotropy(Sampler.MaxAnisotropy))
+          ReportError(Loc, 0, 16);
+        if (!llvm::hlsl::rootsig::verifyMipLODBias(Sampler.MipLODBias))
+          ReportFloatError(Loc, -16.f, 15.99f);
+      }
+      case { const llvm::hlsl::rootsig::DescriptorTableClause &Clause } => {
+        VerifyRegister(Loc, Clause.Reg.Number);
+        VerifySpace(Loc, Clause.Space);
+
+        if (!llvm::hlsl::rootsig::verifyNumDescriptors(
+                Clause.NumDescriptors)) {
+          // NumDescriptor could techincally be ~0u but that is reserved for
+          // unbounded, so the diagnostic will not report that as a valid int
+          // value
+          ReportError(Loc, 1, 0xfffffffe);
+        }
+
+        if (!llvm::hlsl::rootsig::verifyDescriptorRangeFlag(
+                Version, Clause.Type, Clause.Flags))
+          ReportFlagError(Loc);
+      }
+      case { const llvm::dxbc::RootFlags & } or
+           { const llvm::hlsl::rootsig::DescriptorTable & } => ;
     }
   }
 
@@ -1590,89 +1593,90 @@ bool SemaHLSL::handleRootSignatureElements(
 
   for (const hlsl::RootSignatureElement &RootSigElem : Elements) {
     const llvm::hlsl::rootsig::RootElement &Elem = RootSigElem.getElement();
-    if (const auto *Descriptor =
-            std::get_if<llvm::hlsl::rootsig::RootDescriptor>(&Elem)) {
-      uint32_t LowerBound(Descriptor->Reg.Number);
-      uint32_t UpperBound(LowerBound); // inclusive range
-
-      BindingChecker.trackBinding(
-          Descriptor->Visibility,
-          static_cast<llvm::dxil::ResourceClass>(Descriptor->Type),
-          Descriptor->Space, LowerBound, UpperBound, &RootSigElem);
-    } else if (const auto *Constants =
-                   std::get_if<llvm::hlsl::rootsig::RootConstants>(&Elem)) {
-      uint32_t LowerBound(Constants->Reg.Number);
-      uint32_t UpperBound(LowerBound); // inclusive range
-
-      BindingChecker.trackBinding(
-          Constants->Visibility, llvm::dxil::ResourceClass::CBuffer,
-          Constants->Space, LowerBound, UpperBound, &RootSigElem);
-    } else if (const auto *Sampler =
-                   std::get_if<llvm::hlsl::rootsig::StaticSampler>(&Elem)) {
-      uint32_t LowerBound(Sampler->Reg.Number);
-      uint32_t UpperBound(LowerBound); // inclusive range
-
-      BindingChecker.trackBinding(
-          Sampler->Visibility, llvm::dxil::ResourceClass::Sampler,
-          Sampler->Space, LowerBound, UpperBound, &RootSigElem);
-    } else if (const auto *Clause =
-                   std::get_if<llvm::hlsl::rootsig::DescriptorTableClause>(
-                       &Elem)) {
-      // We'll process these once we see the table element.
-      UnboundClauses.emplace_back(Clause, &RootSigElem);
-    } else if (const auto *Table =
-                   std::get_if<llvm::hlsl::rootsig::DescriptorTable>(&Elem)) {
-      assert(UnboundClauses.size() == Table->NumClauses &&
-             "Number of unbound elements must match the number of clauses");
-      bool HasAnySampler = false;
-      bool HasAnyNonSampler = false;
-      uint64_t Offset = 0;
-      bool IsPrevUnbound = false;
-      for (const auto &[Clause, ClauseElem] : UnboundClauses) {
-        SourceLocation Loc = ClauseElem->getLocation();
-        if (Clause->Type == llvm::dxil::ResourceClass::Sampler)
-          HasAnySampler = true;
-        else
-          HasAnyNonSampler = true;
-
-        if (HasAnySampler && HasAnyNonSampler)
-          Diag(Loc, diag::err_hlsl_invalid_mixed_resources);
-
-        // Relevant error will have already been reported above and needs to be
-        // fixed before we can conduct further analysis, so shortcut error
-        // return
-        if (Clause->NumDescriptors == 0)
-          return true;
-
-        bool IsAppending =
-            Clause->Offset == llvm::hlsl::rootsig::DescriptorTableOffsetAppend;
-        if (!IsAppending)
-          Offset = Clause->Offset;
-
-        uint64_t RangeBound = llvm::hlsl::rootsig::computeRangeBound(
-            Offset, Clause->NumDescriptors);
-
-        if (IsPrevUnbound && IsAppending)
-          Diag(Loc, diag::err_hlsl_appending_onto_unbound);
-        else if (!llvm::hlsl::rootsig::verifyNoOverflowedOffset(RangeBound))
-          Diag(Loc, diag::err_hlsl_offset_overflow) << Offset << RangeBound;
-
-        // Update offset to be 1 past this range's bound
-        Offset = RangeBound + 1;
-        IsPrevUnbound = Clause->NumDescriptors ==
-                        llvm::hlsl::rootsig::NumDescriptorsUnbounded;
-
-        // Compute the register bounds and track resource binding
-        uint32_t LowerBound(Clause->Reg.Number);
-        uint32_t UpperBound = llvm::hlsl::rootsig::computeRangeBound(
-            LowerBound, Clause->NumDescriptors);
+    match (Elem) {
+      case { const llvm::hlsl::rootsig::RootDescriptor &Descriptor } => {
+        uint32_t LowerBound(Descriptor.Reg.Number);
+        uint32_t UpperBound(LowerBound); // inclusive range
 
         BindingChecker.trackBinding(
-            Table->Visibility,
-            static_cast<llvm::dxil::ResourceClass>(Clause->Type), Clause->Space,
-            LowerBound, UpperBound, ClauseElem);
+            Descriptor.Visibility,
+            static_cast<llvm::dxil::ResourceClass>(Descriptor.Type),
+            Descriptor.Space, LowerBound, UpperBound, &RootSigElem);
       }
-      UnboundClauses.clear();
+      case { const llvm::hlsl::rootsig::RootConstants &Constants } => {
+        uint32_t LowerBound(Constants.Reg.Number);
+        uint32_t UpperBound(LowerBound); // inclusive range
+
+        BindingChecker.trackBinding(
+            Constants.Visibility, llvm::dxil::ResourceClass::CBuffer,
+            Constants.Space, LowerBound, UpperBound, &RootSigElem);
+      }
+      case { const llvm::hlsl::rootsig::StaticSampler &Sampler } => {
+        uint32_t LowerBound(Sampler.Reg.Number);
+        uint32_t UpperBound(LowerBound); // inclusive range
+
+        BindingChecker.trackBinding(
+            Sampler.Visibility, llvm::dxil::ResourceClass::Sampler,
+            Sampler.Space, LowerBound, UpperBound, &RootSigElem);
+      }
+      case { const llvm::hlsl::rootsig::DescriptorTableClause &Clause } => {
+        // We'll process these once we see the table element.
+        UnboundClauses.emplace_back(&Clause, &RootSigElem);
+      }
+      case { const llvm::hlsl::rootsig::DescriptorTable &Table } => {
+        assert(UnboundClauses.size() == Table.NumClauses &&
+               "Number of unbound elements must match the number of clauses");
+        bool HasAnySampler = false;
+        bool HasAnyNonSampler = false;
+        uint64_t Offset = 0;
+        bool IsPrevUnbound = false;
+        for (const auto &[Clause, ClauseElem] : UnboundClauses) {
+          SourceLocation Loc = ClauseElem->getLocation();
+          if (Clause->Type == llvm::dxil::ResourceClass::Sampler)
+            HasAnySampler = true;
+          else
+            HasAnyNonSampler = true;
+
+          if (HasAnySampler && HasAnyNonSampler)
+            Diag(Loc, diag::err_hlsl_invalid_mixed_resources);
+
+          // Relevant error will have already been reported above and needs to
+          // be fixed before we can conduct further analysis, so shortcut error
+          // return
+          if (Clause->NumDescriptors == 0)
+            return true;
+
+          bool IsAppending = Clause->Offset ==
+                             llvm::hlsl::rootsig::DescriptorTableOffsetAppend;
+          if (!IsAppending)
+            Offset = Clause->Offset;
+
+          uint64_t RangeBound = llvm::hlsl::rootsig::computeRangeBound(
+              Offset, Clause->NumDescriptors);
+
+          if (IsPrevUnbound && IsAppending)
+            Diag(Loc, diag::err_hlsl_appending_onto_unbound);
+          else if (!llvm::hlsl::rootsig::verifyNoOverflowedOffset(RangeBound))
+            Diag(Loc, diag::err_hlsl_offset_overflow) << Offset << RangeBound;
+
+          // Update offset to be 1 past this range's bound
+          Offset = RangeBound + 1;
+          IsPrevUnbound = Clause->NumDescriptors ==
+                          llvm::hlsl::rootsig::NumDescriptorsUnbounded;
+
+          // Compute the register bounds and track resource binding
+          uint32_t LowerBound(Clause->Reg.Number);
+          uint32_t UpperBound = llvm::hlsl::rootsig::computeRangeBound(
+              LowerBound, Clause->NumDescriptors);
+
+          BindingChecker.trackBinding(
+              Table.Visibility,
+              static_cast<llvm::dxil::ResourceClass>(Clause->Type),
+              Clause->Space, LowerBound, UpperBound, ClauseElem);
+        }
+        UnboundClauses.clear();
+      }
+      case { const llvm::dxbc::RootFlags & } => ;
     }
   }
 
