@@ -26,6 +26,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
+#include <utility>
 
 namespace llvm {
 
@@ -201,6 +203,11 @@ class PointerUnion
   friend class pointer_union_detail::PointerUnionMembers;
   template <typename To, typename From, typename Enable> friend struct CastInfo;
   template <typename> friend struct PointerLikeTypeTraits;
+#ifdef __clang__
+#if __has_feature(pattern_matching)
+  friend struct std::alternative_traits<PointerUnion<PTs...>>;
+#endif
+#endif
 
   // These are constexpr functions rather than static constexpr data members
   // so that alignof() on potentially incomplete types is not evaluated at
@@ -267,6 +274,66 @@ class PointerUnion
     assert((PtrInt & (Table[Idx].Mask << Shift)) == 0 &&
            "Pointer low bits collide with tag");
     return PtrInt | (Table[Idx].Value << Shift);
+  }
+
+  template <typename T> T getUnchecked() const {
+    constexpr TagTable Table = getTagTable();
+    constexpr int Shift = tagShift();
+    constexpr size_t Idx = FirstIndexOfType<T, PTs...>::value;
+    constexpr uintptr_t PtrMask = ~(uintptr_t(Table[Idx].Mask) << Shift);
+    void *Ptr = reinterpret_cast<void *>(
+        reinterpret_cast<uintptr_t>(getOpaqueValue()) & PtrMask);
+    return PointerLikeTypeTraits<T>::getFromVoidPointer(Ptr);
+  }
+
+  template <size_t TierBegin> static consteval size_t getTierEnd() {
+    constexpr int LowBits[] = {
+        PointerLikeTypeTraits<PTs>::NumLowBitsAvailable...};
+    size_t TierEnd = TierBegin + 1;
+    while (TierEnd < sizeof...(PTs) &&
+           LowBits[TierEnd] == LowBits[TierBegin])
+      ++TierEnd;
+    return TierEnd;
+  }
+
+  template <size_t TierBegin, int PreviousBits>
+  static size_t decodeExtended(uintptr_t Encoded) {
+    constexpr int LowBits[] = {
+        PointerLikeTypeTraits<PTs>::NumLowBitsAvailable...};
+    constexpr int TierBits = LowBits[TierBegin];
+    constexpr size_t TierEnd = getTierEnd<TierBegin>();
+    constexpr size_t TypesInTier = TierEnd - TierBegin;
+    constexpr int NewBits = TierBits - PreviousBits;
+    constexpr uintptr_t CodeMask =
+        (uintptr_t(1) << NewBits) - uintptr_t(1);
+    uintptr_t Code = (Encoded >> PreviousBits) & CodeMask;
+
+    if constexpr (TierEnd < sizeof...(PTs)) {
+      if (Code >= TypesInTier) {
+        assert(Code == CodeMask && "invalid PointerUnion tag");
+        return decodeExtended<TierEnd, TierBits>(Encoded);
+      }
+    } else {
+      assert(Code < TypesInTier && "invalid PointerUnion tag");
+    }
+
+    if ((Encoded >> TierBits) == 0)
+      return 0;
+    return 1 + TierBegin + Code;
+  }
+
+  size_t decode() const {
+    uintptr_t Encoded = static_cast<uintptr_t>(this->Val.asInt());
+    if constexpr (useFixedWidthTags()) {
+      if ((Encoded >> minLowBitsAvailable()) == 0)
+        return 0;
+
+      constexpr uintptr_t Mask =
+          (uintptr_t(1) << tagBits()) - uintptr_t(1);
+      return 1 + ((Encoded >> tagShift()) & Mask);
+    } else {
+      return decodeExtended<0, 0>(Encoded);
+    }
   }
 
 public:
@@ -365,14 +432,7 @@ struct CastInfo<To, PointerUnion<PTs...>>
 
   static To doCast(From &F) {
     assert(isPossible(F) && "cast to an incompatible type!");
-    constexpr std::array<pointer_union_detail::TagEntry, sizeof...(PTs)> Table =
-        From::getTagTable();
-    constexpr int Shift = From::tagShift();
-    constexpr size_t Idx = FirstIndexOfType<To, PTs...>::value;
-    constexpr uintptr_t PtrMask = ~(uintptr_t(Table[Idx].Mask) << Shift);
-    void *Ptr = reinterpret_cast<void *>(
-        reinterpret_cast<uintptr_t>(F.getOpaqueValue()) & PtrMask);
-    return PointerLikeTypeTraits<To>::getFromVoidPointer(Ptr);
+    return F.template getUnchecked<To>();
   }
 
   static inline To castFailed() { return To(); }
@@ -420,5 +480,37 @@ template <typename... PTs> struct DenseMapInfo<PointerUnion<PTs...>> {
 };
 
 } // end namespace llvm
+
+#ifdef __clang__
+#if __has_feature(pattern_matching)
+
+namespace std {
+
+template <class... PTs>
+  requires(is_pointer_v<PTs> && ...)
+struct alternative_traits<llvm::PointerUnion<PTs...>> {
+  using Union = llvm::PointerUnion<PTs...>;
+
+  static constexpr alternative_info alternatives[] = {
+      {meta::reflect_constant(nullptr), /*empty=*/true},
+      ^^remove_pointer_t<PTs>...};
+  static constexpr bool has_residual_states = false;
+
+  static size_t index(const Union &Value) noexcept {
+    return Value.decode();
+  }
+
+  template <size_t State, class Self>
+    requires(State > 0 && State <= sizeof...(PTs))
+  static decltype(auto) get(Self &&Value) {
+    using Pointer = PTs...[State - 1];
+    return *Value.template getUnchecked<Pointer>();
+  }
+};
+
+} // namespace std
+
+#endif // __has_feature(pattern_matching)
+#endif // __clang__
 
 #endif // LLVM_ADT_POINTERUNION_H
