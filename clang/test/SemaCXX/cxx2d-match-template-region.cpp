@@ -1,11 +1,16 @@
 // RUN: %clang_cc1 -std=c++2d -fpattern-matching -fsyntax-only -verify %s
+// RUN: %clang_cc1 -std=c++2d -fpattern-matching -fsyntax-only -verify \
+// RUN:   -ast-dump -ast-dump-filter=singleton_projection_ %s \
+// RUN:   | FileCheck %s --check-prefix=SINGLETON
+
+#include "Inputs/std-coroutine.h"
 
 namespace std {
 template <class T> struct alternative_traits;
 
 struct alternative_info {
-  decltype(^^int) info = {};
-  bool empty = false;
+  decltype(^^int) info;
+  bool empty;
 
   consteval alternative_info(decltype(^^int) info = {}, bool empty = false)
       : info(info), empty(empty) {}
@@ -34,6 +39,198 @@ template <> struct std::alternative_traits<Choice> {
       return (static_cast<Self &&>(value).real);
   }
 };
+
+struct RepeatedChoice {
+  unsigned active;
+  int first;
+  int second;
+};
+
+template <> struct std::alternative_traits<RepeatedChoice> {
+  static constexpr alternative_info alternatives[] = {^^int, ^^int};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const RepeatedChoice &value) noexcept {
+    return value.active;
+  }
+
+  template <unsigned I, class Self>
+  static constexpr decltype(auto) get(Self &&value) {
+    if constexpr (I == 0)
+      return (static_cast<Self &&>(value).first);
+    else
+      return (static_cast<Self &&>(value).second);
+  }
+};
+
+struct MaybeInt {
+  bool engaged;
+  int value;
+};
+
+template <> struct std::alternative_traits<MaybeInt> {
+  static constexpr alternative_info alternatives[] = {{ {}, true }, ^^int};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const MaybeInt &value) noexcept {
+    return value.engaged;
+  }
+
+  template <unsigned I, class Self>
+  static constexpr decltype(auto) get(Self &&value) {
+    static_assert(I == 1);
+    return (static_cast<Self &&>(value).value);
+  }
+};
+
+template <class T> struct Maybe {
+  bool engaged;
+  T value;
+};
+
+template <class T> struct std::alternative_traits<Maybe<T>> {
+  static constexpr alternative_info alternatives[] = {{ {}, true }, ^^T};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const Maybe<T> &value) noexcept {
+    return value.engaged;
+  }
+
+  template <unsigned I, class Self>
+  static constexpr decltype(auto) get(Self &&value) {
+    static_assert(I == 1);
+    return (static_cast<Self &&>(value).value);
+  }
+};
+
+struct EmptyChoice {};
+
+template <> struct std::alternative_traits<EmptyChoice> {
+  static constexpr alternative_info alternatives[] = {{ {}, true }};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const EmptyChoice &) noexcept { return 0; }
+};
+
+// Dependence counts advertised projectable entries, not distinct types or
+// candidates remaining after viability and usefulness checks.
+void multiple_projectable_states(Choice value) {
+  match (value) {
+    case { auto payload } => {
+      if constexpr (sizeof(payload) > 0)
+        (void)payload;
+      else
+        static_assert(false, "discarded in each case instantiation");
+    }
+  }
+  static_assert(false, "outside the match region"); // expected-error {{static assertion failed: outside the match region}}
+}
+
+void repeated_projectable_states(RepeatedChoice value) {
+  match (value) {
+    case { auto payload } => {
+      if constexpr (sizeof(payload) > 0)
+        (void)payload;
+      else
+        static_assert(false, "repeated entries still introduce a region");
+    }
+  }
+}
+
+void singleton_projectable_state(MaybeInt value) {
+  match (value) {
+    case { auto payload } => {
+      if constexpr (sizeof(payload) > 0)
+        (void)payload;
+      else
+        static_assert(false, "a singleton projection is not dependent"); // expected-error {{static assertion failed: a singleton projection is not dependent}}
+    }
+    case {} => ;
+  }
+}
+
+constexpr bool singleton_projection_value(MaybeInt value) {
+  return match (value, case { 42 });
+}
+// SINGLETON-LABEL: Dumping singleton_projection_value:
+// SINGLETON: MatchTestExpr {{.*}} 'bool'{{$}}
+
+constexpr bool singleton_projection_declaration(MaybeInt value) {
+  return match (value, case { int payload } if (payload == 42));
+}
+// SINGLETON-LABEL: Dumping singleton_projection_declaration:
+// SINGLETON: MatchTestExpr {{.*}} 'bool'{{$}}
+
+constexpr bool singleton_projection_wildcard(MaybeInt value) {
+  return match (value, case { _ });
+}
+// SINGLETON-LABEL: Dumping singleton_projection_wildcard:
+// SINGLETON: MatchTestExpr {{.*}} 'bool'{{$}}
+
+constexpr bool singleton_projection_nested(Maybe<MaybeInt> value) {
+  return match (value, case { { 42 } });
+}
+// SINGLETON-LABEL: Dumping singleton_projection_nested:
+// SINGLETON: MatchTestExpr {{.*}} 'bool'{{$}}
+
+constexpr bool singleton_projection_nested_choice(Maybe<Choice> value) {
+  return match (value, case { { int payload } } if (payload == 42));
+}
+// SINGLETON-LABEL: Dumping singleton_projection_nested_choice:
+// SINGLETON: MatchTestExpr {{.*}} 'bool' instantiated{{$}}
+
+static_assert(singleton_projection_value({true, 42}));
+static_assert(!singleton_projection_value({true, 43}));
+static_assert(!singleton_projection_value({false, 42}));
+static_assert(singleton_projection_declaration({true, 42}));
+static_assert(!singleton_projection_declaration({true, 43}));
+static_assert(!singleton_projection_declaration({false, 42}));
+static_assert(singleton_projection_wildcard({true, 42}));
+static_assert(!singleton_projection_wildcard({false, 42}));
+static_assert(singleton_projection_nested({true, {true, 42}}));
+static_assert(!singleton_projection_nested({true, {true, 43}}));
+static_assert(!singleton_projection_nested({true, {false, 42}}));
+static_assert(!singleton_projection_nested({false, {true, 42}}));
+static_assert(singleton_projection_nested_choice({true, {0, 42, 0.0}}));
+static_assert(!singleton_projection_nested_choice({true, {1, 0, 42.0}}));
+static_assert(!singleton_projection_nested_choice({false, {0, 42, 0.0}}));
+
+constexpr bool nested_singleton_test(Maybe<MaybeInt> value) {
+  return match (value, case { { auto payload } } if (payload == 42));
+}
+
+static_assert(nested_singleton_test({true, {true, 42}}));
+static_assert(!nested_singleton_test({true, {true, 43}}));
+static_assert(!nested_singleton_test({true, {false, 42}}));
+static_assert(!nested_singleton_test({false, {true, 42}}));
+
+void nested_singleton_region(Maybe<MaybeInt> value) {
+  match (value) {
+    case { { auto payload } } => {
+      if constexpr (sizeof(payload) > 0)
+        (void)payload;
+      else
+        static_assert(false, "nested singleton projections are not dependent"); // expected-error {{static assertion failed: nested singleton projections are not dependent}}
+    }
+    case _ => ;
+  }
+}
+
+constexpr int nested_multiple_projectable_states(Maybe<Choice> value) {
+  match (value) {
+    case { { auto payload } } => {
+      if constexpr (sizeof(payload) > 0)
+        return static_cast<int>(payload);
+      else
+        static_assert(false, "the nested choice introduces a region");
+    }
+    case _ => return -1;
+  }
+}
+
+static_assert(nested_multiple_projectable_states({true, {0, 17, 0.0}}) == 17);
+static_assert(nested_multiple_projectable_states({true, {1, 0, 29.0}}) == 29);
+static_assert(nested_multiple_projectable_states({false, {0, 17, 0.0}}) == -1);
 
 int deferred_assertion(Choice value) {
   return match (value) {

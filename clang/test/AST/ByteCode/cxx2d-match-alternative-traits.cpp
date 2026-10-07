@@ -111,7 +111,7 @@ struct IndexOnlyChoice {
   unsigned state;
 };
 
-struct AnonymousProjection {
+struct TypedProjection {
   int value;
 };
 
@@ -197,11 +197,11 @@ struct std::alternative_traits<IndexOnlyChoice> {
 };
 
 template<>
-struct std::alternative_traits<AnonymousProjection> {
-  static constexpr alternative_info alternatives[] = {{}};
+struct std::alternative_traits<TypedProjection> {
+  static constexpr alternative_info alternatives[] = {^^int};
   static constexpr bool has_residual_states = false;
 
-  static constexpr IndexedState index(AnonymousProjection) noexcept {
+  static constexpr IndexedState index(TypedProjection) noexcept {
     return {0};
   }
 
@@ -273,7 +273,7 @@ struct std::alternative_traits<GenericSelectorChoice> {
 
 template<>
 struct std::alternative_traits<DirectNamedChoice> {
-  static constexpr alternative_info alternatives[] = {{}, {}};
+  static constexpr alternative_info alternatives[] = {^^int, ^^long};
   static constexpr bool has_residual_states = false;
 
   enum class names : bool { first = false, second = true };
@@ -581,20 +581,20 @@ constexpr bool index_only_state(IndexOnlyChoice choice) {
 static_assert(index_only_state<0>({0}));
 static_assert(!index_only_state<0>({1}));
 static_assert(index_only_state<1>({1}));
-constexpr int match_anonymous_by_index(AnonymousProjection choice) {
+constexpr int match_typed_by_index(TypedProjection choice) {
   return match (choice) {
     case { .index<0>: int value } => value;
   };
 }
 
-constexpr int match_anonymous_generically(AnonymousProjection choice) {
+constexpr int match_typed_generically(TypedProjection choice) {
   return match (choice) {
     case { int value } => value;
   };
 }
 
-static_assert(match_anonymous_by_index({42}) == 42);
-static_assert(match_anonymous_generically({42}) == 42);
+static_assert(match_typed_by_index({42}) == 42);
+static_assert(match_typed_generically({42}) == 42);
 static_assert(match (VoidProjection{}) {
   case { void: _ } => true;
 });
