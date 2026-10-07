@@ -7,7 +7,6 @@
 // CHECK-NEXT:    [[XS_ADDR:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[MATCH_SELECT_RESULT:%.*]] = alloca i32, align 4
-// CHECK-NEXT:    [[MATCH_DECOMP_RESULT:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[TMP1:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[MATCH_CASE_SELECTED:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[X:%.*]] = alloca ptr, align 8
@@ -16,33 +15,29 @@
 // CHECK-NEXT:    store ptr [[TMP2]], ptr [[TMP0]], align 8
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    store ptr [[TMP3]], ptr [[TMP1]], align 8
-// CHECK-NEXT:    br i1 true, label %[[MATCH_DECOMP_NEXT_PATTERN:.*]], label %[[MATCH_DECOMP_FAIL:.*]]
+// CHECK-NEXT:    br label %[[MATCH_DECOMP_NEXT_PATTERN:.*]]
 // CHECK:       [[MATCH_DECOMP_NEXT_PATTERN]]:
 // CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds [2 x i32], ptr [[TMP4]], i64 0, i64 1
 // CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[ARRAYIDX]], align 4
 // CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[TMP5]], 0
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECOMP_NEXT_PATTERN1:.*]], label %[[MATCH_DECOMP_FAIL]]
-// CHECK:       [[MATCH_DECOMP_NEXT_PATTERN1]]:
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_PASS:.*]]
-// CHECK:       [[MATCH_DECOMP_FAIL]]:
-// CHECK-NEXT:    store i1 false, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_END:.*]]
-// CHECK:       [[MATCH_DECOMP_PASS]]:
-// CHECK-NEXT:    store i1 true, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_END]]
-// CHECK:       [[MATCH_DECOMP_END]]:
-// CHECK-NEXT:    [[TMP6:%.*]] = load i1, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br i1 [[TMP6]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_PATTERN_SUCCESS:.*]], label %[[MATCH_PATTERN_FAILURE:.*]]
+// CHECK:       [[MATCH_PATTERN_SUCCESS]]:
+// CHECK-NEXT:    br label %[[MATCH_PATTERN_END:.*]]
+// CHECK:       [[MATCH_PATTERN_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_PATTERN_END]]
+// CHECK:       [[MATCH_PATTERN_END]]:
+// CHECK-NEXT:    [[MATCH_PATTERN_RESULT:%.*]] = phi i1 [ true, %[[MATCH_PATTERN_SUCCESS]] ], [ false, %[[MATCH_PATTERN_FAILURE]] ]
+// CHECK-NEXT:    br i1 [[MATCH_PATTERN_RESULT]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_CASE:.*]]
 // CHECK:       [[MATCH_SELECT_INIT]]:
-// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[ARRAYIDX2:%.*]] = getelementptr inbounds [2 x i32], ptr [[TMP7]], i64 0, i64 0
-// CHECK-NEXT:    store ptr [[ARRAYIDX2]], ptr [[X]], align 8
+// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds [2 x i32], ptr [[TMP6]], i64 0, i64 0
+// CHECK-NEXT:    store ptr [[ARRAYIDX1]], ptr [[X]], align 8
 // CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
-// CHECK-NEXT:    [[TMP8:%.*]] = load ptr, ptr [[X]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[TMP8]], align 4
-// CHECK-NEXT:    [[MUL:%.*]] = mul nsw i32 [[TMP9]], 2
+// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[X]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[TMP7]], align 4
+// CHECK-NEXT:    [[MUL:%.*]] = mul nsw i32 [[TMP8]], 2
 // CHECK-NEXT:    store i32 [[MUL]], ptr [[MATCH_SELECT_RESULT]], align 4
 // CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
@@ -50,11 +45,11 @@
 // CHECK-NEXT:    store i1 false, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
 // CHECK:       [[MATCH_SELECT_CLEANUP]]:
-// CHECK-NEXT:    [[TMP10:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP10]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_PATTERN]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION3:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION3]]:
+// CHECK-NEXT:    [[TMP9:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br i1 [[TMP9]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_CASE]]
+// CHECK:       [[MATCH_SELECT_NEXT_CASE]]:
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION2:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION2]]:
 // CHECK-NEXT:    [[EXCEPTION:%.*]] = call ptr @__cxa_allocate_exception(i64 4) #[[ATTR1:[0-9]+]]
 // CHECK-NEXT:    store i32 0, ptr [[EXCEPTION]], align 16
 // CHECK-NEXT:    call void @__cxa_throw(ptr [[EXCEPTION]], ptr @_ZTIi, ptr null) #[[ATTR2:[0-9]+]]
@@ -65,8 +60,8 @@
 // CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR2]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
-// CHECK-NEXT:    ret i32 [[TMP11]]
+// CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    ret i32 [[TMP10]]
 //
 auto decomposition_pattern(const int (&xs)[2]) {
   return match (xs) {
@@ -124,48 +119,43 @@ namespace std {
 // CHECK-NEXT:    [[TUP_ADDR:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[MATCH_SELECT_RESULT:%.*]] = alloca i32, align 4
-// CHECK-NEXT:    [[MATCH_DECOMP_RESULT:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[TMP1:%.*]] = alloca ptr, align 8
-// CHECK-NEXT:    [[TMP2:%.*]] = alloca ptr, align 8
-// CHECK-NEXT:    [[TMP3:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[__NESTED_STRUCTURED_BINDING_10476:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[__NESTED_STRUCTURED_BINDING_10479:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[MATCH_CASE_SELECTED:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[Y:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    store ptr [[TUP]], ptr [[TUP_ADDR]], align 8
-// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TUP_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    store ptr [[TMP4]], ptr [[TMP0]], align 8
-// CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    store ptr [[TMP5]], ptr [[TMP1]], align 8
-// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[CALL:%.*]] = call noundef nonnull align 4 dereferenceable(4) ptr @_ZNH4Pair3getILi0ERKS_EEODaOT0_(ptr noundef nonnull align 4 dereferenceable(8) [[TMP6]])
-// CHECK-NEXT:    store ptr [[CALL]], ptr [[TMP2]], align 8
-// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[CALL1:%.*]] = call noundef nonnull align 4 dereferenceable(4) ptr @_ZNH4Pair3getILi1ERKS_EEODaOT0_(ptr noundef nonnull align 4 dereferenceable(8) [[TMP7]])
-// CHECK-NEXT:    store ptr [[CALL1]], ptr [[TMP3]], align 8
-// CHECK-NEXT:    [[TMP8:%.*]] = load ptr, ptr [[TMP2]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[TMP8]], align 4
-// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[TMP9]], 0
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECOMP_NEXT_PATTERN:.*]], label %[[MATCH_DECOMP_FAIL:.*]]
+// CHECK-NEXT:    [[TMP2:%.*]] = load ptr, ptr [[TUP_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    store ptr [[TMP2]], ptr [[TMP0]], align 8
+// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    store ptr [[TMP3]], ptr [[TMP1]], align 8
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[CALL:%.*]] = call noundef nonnull align 4 dereferenceable(4) ptr @_ZNH4Pair3getILi0ERKS_EEODaOT0_(ptr noundef nonnull align 4 dereferenceable(8) [[TMP4]])
+// CHECK-NEXT:    store ptr [[CALL]], ptr [[__NESTED_STRUCTURED_BINDING_10476]], align 8
+// CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[CALL1:%.*]] = call noundef nonnull align 4 dereferenceable(4) ptr @_ZNH4Pair3getILi1ERKS_EEODaOT0_(ptr noundef nonnull align 4 dereferenceable(8) [[TMP5]])
+// CHECK-NEXT:    store ptr [[CALL1]], ptr [[__NESTED_STRUCTURED_BINDING_10479]], align 8
+// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[__NESTED_STRUCTURED_BINDING_10476]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[TMP6]], align 4
+// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[TMP7]], 0
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECOMP_NEXT_PATTERN:.*]], label %[[MATCH_PATTERN_FAILURE:.*]]
 // CHECK:       [[MATCH_DECOMP_NEXT_PATTERN]]:
-// CHECK-NEXT:    br i1 true, label %[[MATCH_DECOMP_NEXT_PATTERN2:.*]], label %[[MATCH_DECOMP_FAIL]]
-// CHECK:       [[MATCH_DECOMP_NEXT_PATTERN2]]:
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_PASS:.*]]
-// CHECK:       [[MATCH_DECOMP_FAIL]]:
-// CHECK-NEXT:    store i1 false, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_END:.*]]
-// CHECK:       [[MATCH_DECOMP_PASS]]:
-// CHECK-NEXT:    store i1 true, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_END]]
-// CHECK:       [[MATCH_DECOMP_END]]:
-// CHECK-NEXT:    [[TMP10:%.*]] = load i1, ptr [[MATCH_DECOMP_RESULT]], align 8
-// CHECK-NEXT:    br i1 [[TMP10]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br label %[[MATCH_PATTERN_SUCCESS:.*]]
+// CHECK:       [[MATCH_PATTERN_SUCCESS]]:
+// CHECK-NEXT:    br label %[[MATCH_PATTERN_END:.*]]
+// CHECK:       [[MATCH_PATTERN_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_PATTERN_END]]
+// CHECK:       [[MATCH_PATTERN_END]]:
+// CHECK-NEXT:    [[MATCH_PATTERN_RESULT:%.*]] = phi i1 [ true, %[[MATCH_PATTERN_SUCCESS]] ], [ false, %[[MATCH_PATTERN_FAILURE]] ]
+// CHECK-NEXT:    br i1 [[MATCH_PATTERN_RESULT]], label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NEXT_CASE:.*]]
 // CHECK:       [[MATCH_SELECT_INIT]]:
-// CHECK-NEXT:    [[TMP11:%.*]] = load ptr, ptr [[TMP3]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    store ptr [[TMP11]], ptr [[Y]], align 8
+// CHECK-NEXT:    [[TMP8:%.*]] = load ptr, ptr [[__NESTED_STRUCTURED_BINDING_10479]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    store ptr [[TMP8]], ptr [[Y]], align 8
 // CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
-// CHECK-NEXT:    [[TMP12:%.*]] = load ptr, ptr [[Y]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    [[TMP13:%.*]] = load i32, ptr [[TMP12]], align 4
-// CHECK-NEXT:    [[MUL:%.*]] = mul nsw i32 [[TMP13]], 2
+// CHECK-NEXT:    [[TMP9:%.*]] = load ptr, ptr [[Y]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[TMP9]], align 4
+// CHECK-NEXT:    [[MUL:%.*]] = mul nsw i32 [[TMP10]], 2
 // CHECK-NEXT:    store i32 [[MUL]], ptr [[MATCH_SELECT_RESULT]], align 4
 // CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
@@ -173,11 +163,11 @@ namespace std {
 // CHECK-NEXT:    store i1 false, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
 // CHECK:       [[MATCH_SELECT_CLEANUP]]:
-// CHECK-NEXT:    [[TMP14:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP14]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_PATTERN]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION3:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION3]]:
+// CHECK-NEXT:    [[TMP11:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br i1 [[TMP11]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_SELECT_NEXT_CASE]]
+// CHECK:       [[MATCH_SELECT_NEXT_CASE]]:
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION2:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION2]]:
 // CHECK-NEXT:    [[EXCEPTION:%.*]] = call ptr @__cxa_allocate_exception(i64 4) #[[ATTR1]]
 // CHECK-NEXT:    store i32 0, ptr [[EXCEPTION]], align 16
 // CHECK-NEXT:    call void @__cxa_throw(ptr [[EXCEPTION]], ptr @_ZTIi, ptr null) #[[ATTR2]]
@@ -188,8 +178,8 @@ namespace std {
 // CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR2]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP15:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
-// CHECK-NEXT:    ret i32 [[TMP15]]
+// CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    ret i32 [[TMP12]]
 //
 int tuple_like_decomposition_pattern(const Pair &tup) {
   return match (tup) {
