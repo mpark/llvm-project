@@ -31,7 +31,9 @@ bool operator==(int value, SecondPattern) { return second(value); }
 // CHECK: br i1 %[[FIRST]], label %[[DONE:.*]], label %[[SECOND_BLOCK:.*]]
 // CHECK: [[SECOND_BLOCK]]:
 // CHECK: %[[SECOND:.*]] = tail call{{.*}} i1 @_Z6secondi(i32 {{.*}} %[[VALUE]])
-// CHECK: br i1 %[[SECOND]], label %[[DONE]], label
+// CHECK-NEXT: br label %[[DONE]]
+// CHECK: [[DONE]]:
+// CHECK: phi i1 [ true, %{{.*}} ], [ %[[SECOND]], %[[SECOND_BLOCK]] ]
 bool short_circuit(int value) {
   return match(value, case first_pattern or second_pattern);
 }
