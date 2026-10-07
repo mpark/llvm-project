@@ -25,9 +25,10 @@ int short_circuit(int value) {
 
 // CHECK-LABEL: define{{.*}} i32 @_Z13short_circuiti(
 // CHECK: call{{.*}} @_ZNK15first_predicateclEi
-// CHECK: br i1 {{.*}}, label %[[NEXT:match.and.next.*]], label %[[FAIL:match.and.fail.*]]
+// CHECK: br i1 {{.*}}, label %[[NEXT:match.and.next.*]], label %[[FAIL:match.pattern.failure.*]]
 // CHECK: [[NEXT]]:
 // CHECK: call{{.*}} @_ZNK16second_predicateclEi
+// CHECK: br i1 {{.*}}, label %{{.*}}, label %[[FAIL]]
 // CHECK: [[FAIL]]:
 
 struct Copy {

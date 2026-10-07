@@ -5396,13 +5396,11 @@ public:
                    const MatchPatternInstantiation *Instantiation,
                    const Expr *Subject,
                    StagedPatternDeclarations *StagedDeclarations = nullptr);
-  RValue
-  EmitDecompositionPattern(const DecompositionPattern *Pattern,
-                           const MatchPatternInstantiation *Instantiation,
-                           StagedPatternDeclarations *StagedDeclarations);
-  RValue EmitAlternativePattern(const AlternativePattern *Pattern,
-                                const MatchPatternInstantiation *Instantiation,
-                                StagedPatternDeclarations *StagedDeclarations);
+  void EmitMatchPatternBranch(
+      const MatchPattern *Pattern,
+      const MatchPatternInstantiation *Instantiation, const Expr *Subject,
+      llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
+      StagedPatternDeclarations *StagedDeclarations = nullptr);
   void
   EmitAlternativeDiscriminator(const AlternativePattern *Pattern,
                                const MatchPatternInstantiation *Instantiation);
