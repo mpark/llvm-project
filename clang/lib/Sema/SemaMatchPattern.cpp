@@ -792,21 +792,6 @@ buildAlternativeTraitsGetCall(Sema &S, SourceLocation Loc,
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
 }
 
-static QualType findAlternativeTraitsGet(Sema &S, SourceLocation Loc,
-                                         const AlternativeTraitsInfo &Info,
-                                         Expr *Subject, unsigned Index) {
-  auto *Probe = new (S.Context)
-      OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
-                      Subject->getObjectKind(), Subject);
-  EnterExpressionEvaluationContext Unevaluated(
-      S, Sema::ExpressionEvaluationContext::Unevaluated);
-  Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
-  ExprResult Call = buildAlternativeTraitsGetCall(S, Loc, Info, Probe, Index);
-  if (Call.isUsable() && !Trap.hasErrorOccurred())
-    return Call.get()->getType();
-  return QualType();
-}
-
 static QualType getAlternativeProjectionBindingType(Sema &S, SourceLocation Loc,
                                                     QualType AdvertisedType,
                                                     Expr *Projection) {
@@ -869,40 +854,20 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
   Info.Projectable.clear();
   Info.Projectable.reserve(Info.Size);
   for (unsigned I = 0; I < Info.Size; ++I) {
-    QualType ProjectionType =
-        findAlternativeTraitsGet(S, Loc, Info, Subject, I);
-    bool IsProjectable = !ProjectionType.isNull();
-    if (!IsProjectable)
-      ProjectionType = S.Context.VoidTy;
-    Info.ProjectionTypes.push_back(ProjectionType);
-    Info.Projectable.push_back(IsProjectable);
-
-    unsigned ConflictKind = UINT_MAX;
-    if (Info.Empty[I] && Info.HasAlternativeType[I])
-      ConflictKind = 0;
-    else if (Info.Empty[I] && IsProjectable)
-      ConflictKind = 1;
-    else if (Info.Values[I] && IsProjectable)
-      ConflictKind = 2;
-    if (ConflictKind != UINT_MAX) {
-      S.Diag(Loc, diag::err_alternative_info_conflicting_kind)
-          << Subject->getType().getNonReferenceType().getUnqualifiedType() << I
-          << ConflictKind;
+    if (Info.Empty[I] && Info.HasAlternativeType[I]) {
+      S.Diag(Loc, diag::err_alternative_info_empty_and_typed)
+          << Subject->getType().getNonReferenceType().getUnqualifiedType() << I;
       return true;
     }
-  }
-  return false;
-}
 
-static bool
-validateAdvertisedAlternativeProjections(Sema &S, SourceLocation Loc,
-                                         Expr *Subject,
-                                         const AlternativeTraitsInfo &Info) {
-  for (unsigned I = 0; I < Info.Size; ++I) {
-    if (!Info.HasAlternativeType[I])
+    if (!Info.HasAlternativeType[I]) {
+      Info.ProjectionTypes.push_back(S.Context.VoidTy);
+      Info.Projectable.push_back(false);
       continue;
+    }
 
     bool IsCompatible = false;
+    QualType ProjectionType = S.Context.VoidTy;
     {
       auto *Probe = new (S.Context)
           OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
@@ -913,10 +878,11 @@ validateAdvertisedAlternativeProjections(Sema &S, SourceLocation Loc,
       ExprResult GetCall =
           buildAlternativeTraitsGetCall(S, Loc, Info, Probe, I);
       if (GetCall.isUsable() && !Trap.hasErrorOccurred()) {
+        ProjectionType = GetCall.get()->getType();
         QualType AdvertisedType = Info.AdvertisedTypes[I];
         if (AdvertisedType->isVoidType()) {
-          IsCompatible = GetCall.get()->getType()->isVoidType();
-        } else if (!GetCall.get()->getType()->isVoidType()) {
+          IsCompatible = ProjectionType->isVoidType();
+        } else if (!ProjectionType->isVoidType()) {
           QualType BindingType = getAlternativeProjectionBindingType(
               S, Loc, AdvertisedType, GetCall.get());
           VarDecl *Binding = BuildVarDecl(S, Loc, BindingType, GetCall.get());
@@ -932,6 +898,9 @@ validateAdvertisedAlternativeProjections(Sema &S, SourceLocation Loc,
           << Info.AdvertisedTypes[I];
       return true;
     }
+
+    Info.ProjectionTypes.push_back(ProjectionType);
+    Info.Projectable.push_back(true);
   }
   return false;
 }
@@ -2874,9 +2843,6 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   bool UsesAdvertisedTypes =
       Pattern->isTypeSelected() || Pattern->isTypeConstraintSelected();
-  if (UsesAdvertisedTypes &&
-      validateAdvertisedAlternativeProjections(S, Loc, Subject, Traits))
-    return true;
 
   if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)

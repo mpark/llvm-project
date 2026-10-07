@@ -338,9 +338,9 @@ struct std::alternative_traits<EmptyProjectedChoice> {
   }
 };
 
-int empty_state_cannot_be_projected(EmptyProjectedChoice value) {
+int empty_state_ignores_get(EmptyProjectedChoice value) {
   return match (value) {
-    case { .index<0> } => 0; // expected-error {{state 0 of type 'EmptyProjectedChoice' is both empty and projectable}}
+    case {} => 0;
   };
 }
 
@@ -381,9 +381,9 @@ struct std::alternative_traits<SingletonProjectedChoice> {
   }
 };
 
-int singleton_state_cannot_be_projected(SingletonProjectedChoice value) {
+int value_state_ignores_get(SingletonProjectedChoice value) {
   return match (value) {
-    case { .index<0> } => 0; // expected-error {{state 0 of type 'SingletonProjectedChoice' is both represented by a value and projectable}}
+    case ProjectedSingleton => 0;
   };
 }
 
@@ -637,15 +637,17 @@ struct std::alternative_traits<AnonymousProjection> {
   }
 };
 
-int anonymous_projection_by_index(AnonymousProjection choice) {
+int anonymous_state_cannot_be_projected_by_index(AnonymousProjection choice) {
   return match (choice) {
-    case { .index<0>: int value } => value;
+    case { .index<0>: int value } => value; // expected-error {{alternative state 0 of type 'AnonymousProjection' has no projected value; omit the ': pattern'}}
+    case _ => 0;
   };
 }
 
-int anonymous_projection_is_generic(AnonymousProjection choice) {
+int anonymous_state_is_not_generic(AnonymousProjection choice) {
   return match (choice) {
-    case { int value } => value;
+    case { int value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'AnonymousProjection'}}
+    case _ => 0;
   };
 }
 
@@ -698,7 +700,7 @@ int advertised_type_requires_compatible_projection(IncompatibleProjection choice
 
 double index_selector_ignores_advertised_type(IncompatibleProjection choice) {
   return match (choice) {
-    case { .index<0>: double value } => value;
+    case { .index<0>: double value } => value; // expected-error {{invalid alternative protocol; state 0 of type 'IncompatibleProjection' advertises type 'int', but 'get<0>' does not provide a compatible projection}}
   };
 }
 
