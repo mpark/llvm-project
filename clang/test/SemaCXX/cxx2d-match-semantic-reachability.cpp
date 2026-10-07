@@ -107,7 +107,9 @@ struct std::alternative_traits<One> {
 int one_state(One one) {
   return match (one) {
     case { int i } => i;
-    case { auto&& other } => other.no_such_member(); // expected-error {{match case is redundant}}
+    // expected-error@+2 {{member reference base type 'int' is not a structure or union}}
+    // expected-error@+1 {{match case is redundant}}
+    case { auto&& other } => other.no_such_member();
   };
 }
 

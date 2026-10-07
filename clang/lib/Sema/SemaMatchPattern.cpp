@@ -86,6 +86,13 @@ bool Sema::MatchAlternativeSelectionPlan::advance(
   return false;
 }
 
+static bool containsUndeducedDeclarationPattern(const MatchPattern *Pattern) {
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
+    if (Declaration->getDeclaration()->getType()->getContainedAutoType())
+      return true;
+  return llvm::any_of(Pattern->children(), containsUndeducedDeclarationPattern);
+}
+
 static void
 collectPatternBindings(MatchPattern *Pattern,
                        llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
@@ -2902,8 +2909,16 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (!ProjectionCache)
       return true;
 
+    // A singleton projection has no alternative-dependent declaration
+    // environment. Complete its placeholders against the actual projection
+    // before parsing the guard and handler.
+    bool CompleteSingletonDeclarations =
+        Selected.size() == 1 && Pattern->getSubPattern() &&
+        containsUndeducedDeclarationPattern(Pattern->getSubPattern());
+
     unsigned Chosen = Selected.front();
-    if (ProjectionCache->DeferAlternativeChoices) {
+    if (ProjectionCache->DeferAlternativeChoices &&
+        !CompleteSingletonDeclarations) {
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
       ProjectionCache->HasDeferredAlternativeChoices = true;
       return checkClosedAlternativeSubPattern(S, nullptr, Pattern,
