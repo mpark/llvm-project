@@ -14725,10 +14725,8 @@ def err_alternative_traits_alternatives_invalid : Error<
 def err_alternative_info_invalid : Error<
   "invalid alternative protocol; state %1 of type %0 has an invalid %2 "
   "in its 'alternative_info' descriptor">;
-def err_alternative_info_conflicting_kind : Error<
-  "invalid alternative protocol; state %1 of type %0 is both "
-  "%select{empty and typed|empty and projectable|represented by a value and "
-  "projectable}2">;
+def err_alternative_info_empty_and_typed : Error<
+  "invalid alternative protocol; state %1 of type %0 is both empty and typed">;
 def err_alternative_type_without_projection : Error<
   "invalid alternative protocol; state %1 of type %0 advertises type %2, "
   "but 'get<%1>' does not provide a compatible projection">;
