@@ -3996,19 +3996,6 @@ ExprResult Parser::ParseBuiltinBitCast() {
                                          T.getCloseLocation());
 }
 
-static bool needsAlternativeCandidateSpecialization(MatchPattern *Pattern) {
-  if (Pattern->getMatchPatternClass() ==
-      MatchPattern::AlternativePatternClass) {
-    auto *Alternative = static_cast<AlternativePattern *>(Pattern);
-    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-        Alternative->isTypeSelected() ||
-        Alternative->isTypeConstraintSelected())
-      return true;
-  }
-  return llvm::any_of(Pattern->children(),
-                      needsAlternativeCandidateSpecialization);
-}
-
 Sema::ConditionResult
 Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
                            Sema::ConditionKind CK, bool MissingOK,
@@ -4086,8 +4073,6 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   if (Subject.isInvalid())
     return Sema::ConditionError();
 
-  bool PatternNeedsAlternativeSpecialization =
-      needsAlternativeCandidateSpecialization(Pattern);
   Sema::MatchProjectionCache ProjectionCache;
   Sema::MatchPatternState PatternState;
   ProjectionCache.DeferAlternativeChoices = true;
@@ -4108,8 +4093,8 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
 
   bool NeedsCaseInstantiation =
       ProjectionCache.hasDeferredPatterns() ||
-      (PatternNeedsAlternativeSpecialization &&
-       Subject.get()->isTypeDependent());
+      (Subject.get()->isTypeDependent() &&
+       Sema::MatchAlternativeSelectionPlan::isRequired(Pattern));
   Sema::MatchPatternSemanticAnalysis Semantic =
       Actions.AnalyzeMatchPatternSemantics(Pattern, PatternState);
   bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
@@ -4274,8 +4259,6 @@ Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI,
   if (Subject.isInvalid())
     return ExprError();
 
-  bool PatternNeedsAlternativeSpecialization =
-      needsAlternativeCandidateSpecialization(FRI.Pattern);
   Sema::MatchProjectionCache ProjectionCache;
   Sema::MatchPatternState PatternState;
   ProjectionCache.DeferAlternativeChoices = true;
@@ -4285,9 +4268,10 @@ Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI,
   Region.enter(FRI.PatternCaseLoc, FRI.Pattern,
                ProjectionCache.RequiresTemplateRegion);
 
-  bool NeedsCaseInstantiation = ProjectionCache.hasDeferredPatterns() ||
-                                (PatternNeedsAlternativeSpecialization &&
-                                 Subject.get()->isTypeDependent());
+  bool NeedsCaseInstantiation =
+      ProjectionCache.hasDeferredPatterns() ||
+      (Subject.get()->isTypeDependent() &&
+       Sema::MatchAlternativeSelectionPlan::isRequired(FRI.Pattern));
   Sema::MatchPatternSemanticAnalysis Semantic =
       Actions.AnalyzeMatchPatternSemantics(FRI.Pattern, PatternState);
   ExprResult Result = Actions.ActOnCaseConditionExpr(
@@ -4768,9 +4752,6 @@ ExprResult Parser::ParseMatchTestExpression() {
     Parens.consumeClose();
     return ExprError();
   }
-  bool PatternNeedsAlternativeSpecialization =
-      Pattern.isUsable() &&
-      needsAlternativeCandidateSpecialization(Pattern.get());
   Sema::MatchProjectionCache ProjectionCache;
   Sema::MatchPatternState PatternState;
   ProjectionCache.DeferAlternativeChoices = true;
@@ -4793,7 +4774,8 @@ ExprResult Parser::ParseMatchTestExpression() {
 
   bool NeedsCaseInstantiation =
       ProjectionCache.hasDeferredPatterns() ||
-      (PatternNeedsAlternativeSpecialization && Subject.get()->isTypeDependent());
+      (Subject.get()->isTypeDependent() &&
+       Sema::MatchAlternativeSelectionPlan::isRequired(Pattern.get()));
   Sema::MatchPatternSemanticAnalysis Semantic =
       Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
   bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
@@ -4827,8 +4809,8 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
   if (T.expectAndConsume())
     return true;
   Sema::MatchProjectionCache ProjectionCache;
-  // Parse each source arm once. Sema specializes every generic projection arm
-  // after its guard and handler are parsed.
+  // Parse each source arm once. Defer alternative-dependent specialization
+  // until its guard and handler have been parsed.
   ProjectionCache.DeferAlternativeChoices = true;
   if (Subject->isTypeDependent() &&
       OrigResultType.getType()->getContainedAutoType())
@@ -4864,7 +4846,6 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
       continue;
     }
     ProjectionCache.AlternativeChoices.clear();
-    ProjectionCache.HasDeferredAlternativeChoices = false;
     ProjectionCache.RequiresTemplateRegion = false;
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
@@ -4932,7 +4913,7 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get(),
                                                PatternState, &ProjectionCache))
     return true;
-  if (ProjectionCache.hasDeferredPatterns() &&
+  if (ProjectionCache.hasDeferredAlternativeChoices() &&
       OrigResultType.getType()->getContainedAutoType())
     RetTy = Actions.Context.DependentTy;
   Sema::MatchTemplateRegionRAII Region(Actions);

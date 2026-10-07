@@ -11534,17 +11534,23 @@ public:
     };
 
     SmallVector<Entry, 8> Entries;
+    // Source checking records only deferred choices. Candidate checking records
+    // the complete selection path, including singleton choices.
     SmallVector<AlternativeChoice, 4> AlternativeChoices;
     ArrayRef<unsigned> PlannedAlternativeSelections;
     unsigned NextPlannedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
-    bool HasDeferredAlternativeChoices = false;
     bool RequiresTemplateRegion = false;
-    bool hasDeferredPatterns() const {
-      return HasDeferredAlternativeChoices || RequiresTemplateRegion;
-    }
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
+
+    bool hasDeferredAlternativeChoices() const {
+      return DeferAlternativeChoices && !AlternativeChoices.empty();
+    }
+
+    bool hasDeferredPatterns() const {
+      return hasDeferredAlternativeChoices() || RequiresTemplateRegion;
+    }
   };
   /// Enumerates the semantic candidates produced by generic alternative and
   /// declaration-bearing or-pattern choices. Each completed check records the

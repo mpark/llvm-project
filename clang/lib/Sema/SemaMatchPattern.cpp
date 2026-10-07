@@ -2900,6 +2900,12 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   if (determineAlternativeProjections(S, Loc, Subject, Traits))
     return true;
 
+  unsigned NumProjectableStates = llvm::count(Traits.Projectable, true);
+  if (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+      Pattern->getAlternativeKind() == AlternativePattern::Generic &&
+      NumProjectableStates > 1)
+    ProjectionCache->RequiresTemplateRegion = true;
+
   llvm::SmallVector<unsigned, 4> Selected;
   if (Pattern->isNamed()) {
     std::optional<unsigned> Named =
@@ -2951,27 +2957,30 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     }
 
     assert(ProjectionCache &&
-           "generic alternative patterns require candidate specialization");
+           "generic alternative patterns require a projection cache");
     if (!ProjectionCache)
       return true;
 
+    // A single projectable state can be checked against its actual projection
+    // before parsing the guard and handler.
     unsigned Chosen = Selected.front();
-    if (ProjectionCache->DeferAlternativeChoices) {
-      ProjectionCache->RequiresTemplateRegion = true;
+    if (ProjectionCache->DeferAlternativeChoices &&
+        NumProjectableStates > 1) {
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
-      ProjectionCache->HasDeferredAlternativeChoices = true;
       return checkClosedAlternativeSubPattern(S, nullptr, Pattern,
                                               Traits.AdvertisedTypes[Chosen],
                                               State, ProjectionCache);
     }
-    if (ProjectionCache->NextPlannedAlternativeSelection <
-        ProjectionCache->PlannedAlternativeSelections.size()) {
-      Chosen = ProjectionCache->PlannedAlternativeSelections
-                   [ProjectionCache->NextPlannedAlternativeSelection++];
-      if (!llvm::is_contained(Selected, Chosen))
-        return true;
+    if (!ProjectionCache->DeferAlternativeChoices) {
+      if (ProjectionCache->NextPlannedAlternativeSelection <
+          ProjectionCache->PlannedAlternativeSelections.size()) {
+        Chosen = ProjectionCache->PlannedAlternativeSelections
+                     [ProjectionCache->NextPlannedAlternativeSelection++];
+        if (!llvm::is_contained(Selected, Chosen))
+          return true;
+      }
+      ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
     }
-    ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
     Selected.assign(1, Chosen);
   }
 
@@ -3390,7 +3399,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         ProjectionCache->AlternativeChoices.push_back(
             {Alternatives, Alternatives.front()});
         ProjectionCache->RequiresTemplateRegion |= Alternatives.size() > 1;
-        ProjectionCache->HasDeferredAlternativeChoices = true;
       } else {
         unsigned Chosen = Alternatives.front();
         if (ProjectionCache->NextPlannedAlternativeSelection <
@@ -3423,8 +3431,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         unsigned SavedPlannedSelection =
             ProjectionCache ? ProjectionCache->NextPlannedAlternativeSelection
                             : 0;
-        bool SavedDeferredChoices =
-            ProjectionCache && ProjectionCache->HasDeferredAlternativeChoices;
         bool Invalid;
         bool SubstitutionFailure;
         {
@@ -3446,7 +3452,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
           ProjectionCache->AlternativeChoices.resize(SavedChoiceCount);
           ProjectionCache->NextPlannedAlternativeSelection =
               SavedPlannedSelection;
-          ProjectionCache->HasDeferredAlternativeChoices = SavedDeferredChoices;
         }
       }
     }
