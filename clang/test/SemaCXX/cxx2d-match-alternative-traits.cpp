@@ -153,6 +153,30 @@ struct std::alternative_traits<SingleChoice> {
   }
 };
 
+struct RepeatedChoice {
+  bool second;
+  int first_value;
+  int second_value;
+};
+
+template<>
+struct std::alternative_traits<RepeatedChoice> {
+  static constexpr alternative_info alternatives[] = {^^int, ^^int};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr bool index(const RepeatedChoice& choice) noexcept {
+    return choice.second;
+  }
+
+  template<bool I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (I)
+      return (static_cast<Self&&>(choice).second_value);
+    else
+      return (static_cast<Self&&>(choice).first_value);
+  }
+};
+
 struct MaybeInt {
   bool engaged;
   int value;
@@ -853,6 +877,29 @@ int direct_single_alternative(SingleChoice choice) {
   if (case { auto&& value } = choice)
     return value;
   return 0;
+}
+
+void optional_like_payload_is_nondependent(MaybeInt choice) {
+  match (choice) {
+    case { auto value } => {
+      if constexpr (__is_same(decltype(value), int))
+        (void)value;
+      else
+        value.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
+    }
+    case {} => ;
+  }
+}
+
+void repeated_alternative_payload_remains_dependent(RepeatedChoice choice) {
+  match (choice) {
+    case { auto value } => {
+      if constexpr (__is_same(decltype(value), int))
+        (void)value;
+      else
+        value.no_such_member();
+    }
+  }
 }
 
 template<class T>
