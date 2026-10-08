@@ -3058,6 +3058,42 @@ static bool collectSharedCaseReferenceDeclarations(
   });
 }
 
+using SharedCaseDeclarations =
+    SmallVector<SmallVector<const VarDecl *, 2>, 4>;
+
+static std::optional<SharedCaseDeclarations>
+collectSharedCaseDeclarations(ArrayRef<MatchCaseInstantiation> Cases,
+                              ASTContext &Context) {
+  if (Cases.size() < 2)
+    return std::nullopt;
+
+  SharedCaseDeclarations SharedDeclarations;
+  SharedDeclarations.reserve(Cases.size());
+  for (const MatchCaseInstantiation &Case : Cases) {
+    SmallVector<const VarDecl *, 2> Declarations;
+    if (Case.Guard.hasGuard() ||
+        hasStagedAndPatternDeclarations(Case.Pattern,
+                                        Case.PatternInstantiation) ||
+        !collectSharedCaseReferenceDeclarations(
+            Case.Pattern, Case.PatternInstantiation, Declarations))
+      return std::nullopt;
+
+    if (!SharedDeclarations.empty()) {
+      ArrayRef<const VarDecl *> Canonical = SharedDeclarations.front();
+      if (Declarations.size() != Canonical.size() ||
+          !llvm::all_of(
+              llvm::zip_equal(Declarations, Canonical), [&](auto Pair) {
+                const auto &[D, CanonicalD] = Pair;
+                return D->getLocation() == CanonicalD->getLocation() &&
+                       Context.hasSameType(D->getType(), CanonicalD->getType());
+              }))
+        return std::nullopt;
+    }
+    SharedDeclarations.push_back(std::move(Declarations));
+  }
+  return SharedDeclarations;
+}
+
 void CodeGenFunction::EmitMatchGuardBranch(const MatchGuard &MG,
                                            llvm::BasicBlock *Success,
                                            llvm::BasicBlock *Failure,
@@ -3470,6 +3506,68 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
   llvm::BasicBlock *NoMatchBB =
       IgnoreResult ? SelectEndBB : createBasicBlock("match.select.no_match");
 
+  using IncomingReference = std::pair<llvm::Value *, llvm::BasicBlock *>;
+  using SharedCaseIncomingReferences =
+      SmallVector<SmallVector<IncomingReference, 4>, 2>;
+  struct SharedCaseHandler {
+    unsigned CaseBegin;
+    SharedCaseDeclarations Declarations;
+    SharedCaseIncomingReferences IncomingReferences;
+    llvm::BasicBlock *ActionBB = nullptr;
+  };
+
+  std::optional<MatchDecisionTree> Decision = MatchDecisionTree::build(Cases);
+  SmallVector<SharedCaseHandler, 4> SharedCaseHandlers;
+  SmallVector<unsigned, 8> SharedHandlerForSourceCase(S.getNumCases(),
+                                                      Cases.size());
+  for (unsigned CaseBegin = 0; CaseBegin != Cases.size();) {
+    unsigned CaseEnd = CaseBegin + 1;
+    while (CaseEnd != Cases.size() &&
+           Cases[CaseEnd].CaseIndex == Cases[CaseBegin].CaseIndex)
+      ++CaseEnd;
+
+    if (auto Declarations = collectSharedCaseDeclarations(
+            Cases.slice(CaseBegin, CaseEnd - CaseBegin), getContext())) {
+      unsigned HandlerIndex = SharedCaseHandlers.size();
+      SharedHandlerForSourceCase[Cases[CaseBegin].CaseIndex] = HandlerIndex;
+      SharedCaseHandler &Handler = SharedCaseHandlers.emplace_back();
+      Handler.CaseBegin = CaseBegin;
+      Handler.IncomingReferences.resize(Declarations->front().size());
+      Handler.Declarations = std::move(*Declarations);
+    }
+    CaseBegin = CaseEnd;
+  }
+
+  auto GetSharedCaseHandler =
+      [&](const MatchCaseInstantiation &Case) -> SharedCaseHandler * {
+    unsigned HandlerIndex = SharedHandlerForSourceCase[Case.CaseIndex];
+    return HandlerIndex == Cases.size() ? nullptr
+                                        : &SharedCaseHandlers[HandlerIndex];
+  };
+
+  auto EmitSharedCaseHandler = [&](SharedCaseHandler &Shared) {
+    EmitBlock(Shared.ActionBB, /*IsFinished=*/true);
+    RunCleanupsScope CaseScope(*this);
+    for (auto [D, Incoming] : llvm::zip_equal(Shared.Declarations.front(),
+                                              Shared.IncomingReferences)) {
+      llvm::PHINode *Reference =
+          Builder.CreatePHI(Incoming.front().first->getType(), Incoming.size(),
+                            D->getName() + ".match");
+      for (auto [Value, Block] : Incoming)
+        Reference->addIncoming(Value, Block);
+
+      AutoVarEmission Emission = EmitAutoVarAlloca(*D);
+      LValue Storage =
+          MakeAddrLValue(Emission.getObjectAddress(*this), D->getType());
+      Storage.setNonGC(true);
+      EmitStoreThroughLValue(RValue::get(Reference), Storage,
+                             /*isInit=*/true);
+      EmitAutoVarCleanups(Emission);
+    }
+    EmitCaseHandler(Cases[Shared.CaseBegin]);
+    EmitBranch(SelectEndBB);
+  };
+
   auto EmitCandidate = [&](const MatchCaseInstantiation &Case,
                            ArrayRef<const MatchPattern *>
                                KnownDiscriminatorPatterns,
@@ -3494,6 +3592,34 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       Builder.CreateCondBr(Condition, Success, Failure);
     };
 
+    if (SharedCaseHandler *Shared = GetSharedCaseHandler(Case)) {
+      if (!Shared->ActionBB)
+        Shared->ActionBB = createBasicBlock("match.select.shared_action");
+      size_t InstantiationIndex = &Case - Cases.data() - Shared->CaseBegin;
+      assert(InstantiationIndex < Shared->Declarations.size() &&
+             "case is outside its shared-handler group");
+      ArrayRef<const VarDecl *> Declarations =
+          Shared->Declarations[InstantiationIndex];
+      if (Declarations.empty()) {
+        EmitPatternBranch(Shared->ActionBB, PatternFailure);
+        return;
+      }
+
+      llvm::BasicBlock *InitializePatternBB =
+          createBasicBlock("match.select.init");
+      EmitPatternBranch(InitializePatternBB, PatternFailure);
+      EmitBlock(InitializePatternBB);
+      EmitSharedDeclarationProjections(Case.Pattern, Case.PatternInstantiation);
+      for (auto [D, Incoming] :
+           llvm::zip_equal(Declarations, Shared->IncomingReferences)) {
+        llvm::Value *Reference =
+            EmitReferenceBindingToExpr(D->getInit()).getScalarVal();
+        Incoming.push_back({Reference, Builder.GetInsertBlock()});
+      }
+      EmitBranch(Shared->ActionBB);
+      return;
+    }
+
     if (!hasPatternDeclarations(Case.Pattern, Case.PatternInstantiation) &&
         !Case.Guard.hasGuard()) {
       llvm::BasicBlock *ExecuteActionBB =
@@ -3515,9 +3641,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         Stmt::getLikelihood(Case.Attributes), MatchCandidateKind::Selection);
   };
 
-  unsigned LinearCaseBegin = 0;
-  if (std::optional<MatchDecisionTree> Decision =
-          MatchDecisionTree::build(Cases)) {
+  if (Decision) {
     auto EmitDecision = [&](auto &Self,
                             const MatchDecisionTree::Node &Node) -> void {
       // Bindings materialized in one subtree do not dominate its siblings.
@@ -3533,13 +3657,24 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         EmitBranch(NoMatchBB);
         return;
       case MatchDecisionTree::Node::NK_Candidate: {
-        llvm::BasicBlock *Next = createBasicBlock("match.decision.next_case");
+        llvm::BasicBlock *PatternFailure =
+            createBasicBlock("match.decision.next_pattern");
+        llvm::BasicBlock *GuardFailure =
+            Node.GuardFailure
+                ? createBasicBlock("match.decision.next_case")
+                : PatternFailure;
         EmitCandidate(*Node.MatchCandidate.Case,
-                      Node.MatchCandidate.KnownDiscriminatorPatterns, Next,
-                      Next);
-        EmitBlock(Next, /*IsFinished=*/true);
+                      Node.MatchCandidate.KnownDiscriminatorPatterns,
+                      PatternFailure,
+                      GuardFailure);
+        EmitBlock(PatternFailure, /*IsFinished=*/true);
         if (HaveInsertPoint())
           Self(Self, *Node.Failure);
+        if (Node.GuardFailure) {
+          EmitBlock(GuardFailure, /*IsFinished=*/true);
+          if (HaveInsertPoint())
+            Self(Self, *Node.GuardFailure);
+        }
         return;
       }
       case MatchDecisionTree::Node::NK_Test:
@@ -3615,132 +3750,39 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     };
 
     EmitDecision(EmitDecision, Decision->getRoot());
-    LinearCaseBegin = Cases.size();
-    EmitBlock(NoMatchBB);
-  }
-
-  for (unsigned CaseBegin = LinearCaseBegin; CaseBegin != Cases.size();) {
-    unsigned CaseEnd = CaseBegin + 1;
-    while (CaseEnd != Cases.size() &&
-           Cases[CaseEnd].CaseIndex == Cases[CaseBegin].CaseIndex)
-      ++CaseEnd;
-    llvm::BasicBlock *NextSourceCaseBB =
-        CaseEnd == Cases.size() ? NoMatchBB
-                                : createBasicBlock("match.select.next_case");
-
-    SmallVector<SmallVector<const VarDecl *, 2>, 4> SharedDeclarations;
-    bool CanShareHandler = CaseEnd - CaseBegin > 1;
-    if (CanShareHandler) {
-      SharedDeclarations.reserve(CaseEnd - CaseBegin);
-      for (unsigned I = CaseBegin; I != CaseEnd; ++I) {
-        const MatchCaseInstantiation &Case = Cases[I];
-        SmallVector<const VarDecl *, 2> Declarations;
-        if (Case.Guard.hasGuard() ||
-            hasStagedAndPatternDeclarations(Case.Pattern,
-                                            Case.PatternInstantiation) ||
-            !collectSharedCaseReferenceDeclarations(
-                Case.Pattern, Case.PatternInstantiation, Declarations)) {
-          CanShareHandler = false;
-          break;
-        }
-        if (!SharedDeclarations.empty()) {
-          ArrayRef<const VarDecl *> Canonical = SharedDeclarations.front();
-          if (Declarations.size() != Canonical.size() ||
-              !llvm::all_of(
-                  llvm::zip_equal(Declarations, Canonical), [&](auto Pair) {
-                    const auto &[D, CanonicalD] = Pair;
-                    return D->getLocation() == CanonicalD->getLocation() &&
-                           getContext().hasSameType(D->getType(),
-                                                    CanonicalD->getType());
-                  })) {
-            CanShareHandler = false;
-            break;
-          }
-        }
-        SharedDeclarations.push_back(std::move(Declarations));
-      }
+    for (SharedCaseHandler &Shared : SharedCaseHandlers) {
+      if (!Shared.ActionBB)
+        continue;
+      llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
+      EmitSharedCaseHandler(Shared);
     }
-
-    if (CanShareHandler) {
-      const MatchCaseInstantiation &SharedCase = Cases[CaseBegin];
-      ArrayRef<const VarDecl *> CanonicalDeclarations =
-          SharedDeclarations.front();
-      SmallVector<SmallVector<std::pair<llvm::Value *, llvm::BasicBlock *>, 4>,
-                  2>
-          IncomingReferences(CanonicalDeclarations.size());
-      llvm::BasicBlock *ExecuteActionBB =
-          createBasicBlock("match.select.action");
+    EmitBlock(NoMatchBB);
+  } else {
+    for (unsigned CaseBegin = 0; CaseBegin != Cases.size();) {
+      unsigned CaseEnd = CaseBegin + 1;
+      while (CaseEnd != Cases.size() &&
+             Cases[CaseEnd].CaseIndex == Cases[CaseBegin].CaseIndex)
+        ++CaseEnd;
+      llvm::BasicBlock *NextSourceCaseBB =
+          CaseEnd == Cases.size() ? NoMatchBB
+                                  : createBasicBlock("match.select.next_case");
 
       for (unsigned I = CaseBegin; I != CaseEnd; ++I) {
-        const MatchCaseInstantiation &Case = Cases[I];
         llvm::BasicBlock *NextPatternBB =
             I + 1 == CaseEnd ? NextSourceCaseBB
                              : createBasicBlock("match.select.next_pattern");
-        llvm::BasicBlock *InitializePatternBB =
-            CanonicalDeclarations.empty()
-                ? ExecuteActionBB
-                : createBasicBlock("match.select.init");
-
-        RValue MatchResult = EmitMatchPattern(
-            Case.Pattern, Case.PatternInstantiation, S.getSubject());
-        llvm::Value *Condition =
-            ApplyCaseLikelihood(MatchResult.getScalarVal(), Case);
-        Builder.CreateCondBr(Condition, InitializePatternBB, NextPatternBB);
-
-        if (!CanonicalDeclarations.empty()) {
-          EmitBlock(InitializePatternBB);
-          EmitSharedDeclarationProjections(Case.Pattern,
-                                           Case.PatternInstantiation);
-          for (auto [DeclarationIndex, D] :
-               llvm::enumerate(SharedDeclarations[I - CaseBegin])) {
-            llvm::Value *Reference =
-                EmitReferenceBindingToExpr(D->getInit()).getScalarVal();
-            IncomingReferences[DeclarationIndex].push_back(
-                {Reference, Builder.GetInsertBlock()});
-          }
-          EmitBranch(ExecuteActionBB);
-        }
-
+        EmitCandidate(Cases[I], {}, NextPatternBB, NextSourceCaseBB);
         if (I + 1 != CaseEnd)
           EmitBlock(NextPatternBB);
       }
 
-      EmitBlock(ExecuteActionBB, /*IsFinished=*/true);
-      {
-        RunCleanupsScope CaseScope(*this);
-        for (auto [DeclarationIndex, D] :
-             llvm::enumerate(CanonicalDeclarations)) {
-          auto &Incoming = IncomingReferences[DeclarationIndex];
-          llvm::PHINode *Reference =
-              Builder.CreatePHI(Incoming.front().first->getType(),
-                                Incoming.size(), D->getName() + ".match");
-          for (auto [Value, Block] : Incoming)
-            Reference->addIncoming(Value, Block);
-
-          AutoVarEmission Emission = EmitAutoVarAlloca(*D);
-          LValue Storage =
-              MakeAddrLValue(Emission.getObjectAddress(*this), D->getType());
-          Storage.setNonGC(true);
-          EmitStoreThroughLValue(RValue::get(Reference), Storage,
-                                 /*isInit=*/true);
-          EmitAutoVarCleanups(Emission);
-        }
-        EmitCaseHandler(SharedCase);
+      if (SharedCaseHandler *Shared = GetSharedCaseHandler(Cases[CaseBegin])) {
+        assert(Shared->ActionBB && "shared handler has no predecessor");
+        EmitSharedCaseHandler(*Shared);
       }
-      EmitBranch(SelectEndBB);
       EmitBlock(NextSourceCaseBB);
       CaseBegin = CaseEnd;
-      continue;
     }
-
-    for (unsigned I = CaseBegin; I != CaseEnd; ++I) {
-      llvm::BasicBlock *NextPatternBB =
-          I + 1 == CaseEnd ? NextSourceCaseBB
-                           : createBasicBlock("match.select.next_pattern");
-      EmitCandidate(Cases[I], {}, NextPatternBB, NextSourceCaseBB);
-      EmitBlock(NextPatternBB);
-    }
-    CaseBegin = CaseEnd;
   }
 
   assert(!Cases.empty() && "expected at least one pattern");
