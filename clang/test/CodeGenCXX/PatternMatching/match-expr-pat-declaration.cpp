@@ -131,9 +131,9 @@ struct CopyCounter {
 // CHECK-LABEL: define{{.*}} i32 @_Z12guarded_copy11CopyCounter
 // CHECK: match.select.init:
 // CHECK: call void @_ZN11CopyCounterC1ERKS_
-// CHECK: match.guard.check:
 // CHECK-NOT: call void @_ZN11CopyCounterC1ERKS_
 // CHECK-NOT: call void @_ZN11CopyCounterD1Ev
+// CHECK-NOT: match.guard.
 // CHECK: br i1
 // CHECK: match.select.action:
 // CHECK-NOT: call void @_ZN11CopyCounterC1ERKS_
