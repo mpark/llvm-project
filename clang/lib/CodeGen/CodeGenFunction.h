@@ -5411,10 +5411,15 @@ public:
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation, const Expr *Subject,
       llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
-      StagedPatternDeclarations *StagedDeclarations = nullptr);
+      StagedPatternDeclarations *StagedDeclarations = nullptr,
+      ArrayRef<const MatchPattern *> KnownDiscriminatorPatterns = {});
+  void EmitMatchDiscriminator(const MatchPattern *Pattern,
+                              const MatchPatternInstantiation *Instantiation);
+  void EmitMatchProjectionValue(const MatchProjection &Projection);
   void
-  EmitAlternativeDiscriminator(const AlternativePattern *Pattern,
-                               const MatchPatternInstantiation *Instantiation);
+  EmitMatchDiscriminatorPath(const MatchPattern *Pattern,
+                             const MatchPattern *Discriminator,
+                             const MatchPatternInstantiation *Instantiation);
   void EmitSharedDeclarationProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
