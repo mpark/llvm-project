@@ -121,6 +121,16 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
     Result->MatchCandidate = {Rows.front().Case,
                               Rows.front().KnownDiscriminators};
     Result->Failure = buildDecisionTree(Rows.drop_front());
+    if (Rows.size() > 1 &&
+        Rows[1].Case->CaseIndex == Rows.front().Case->CaseIndex &&
+        Rows.front().Case->Guard.hasGuard()) {
+      ArrayRef<MatchRow> FollowingCase = Rows.drop_front();
+      while (!FollowingCase.empty() &&
+             FollowingCase.front().Case->CaseIndex ==
+                 Rows.front().Case->CaseIndex)
+        FollowingCase = FollowingCase.drop_front();
+      Result->GuardFailure = buildDecisionTree(FollowingCase);
+    }
     return Result;
   }
 
@@ -180,11 +190,7 @@ MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases) {
 
   SmallVector<MatchRow, 8> Rows;
   Rows.reserve(Cases.size());
-  for (auto [Offset, Case] : llvm::enumerate(Cases)) {
-    // Multiple adjacent instantiations belong to one source case and may need
-    // a shared handler with PHI-selected bindings.
-    if (Offset != 0 && Case.CaseIndex == Cases[Offset - 1].CaseIndex)
-      return std::nullopt;
+  for (const MatchCaseInstantiation &Case : Cases) {
     MatchRow &Row = Rows.emplace_back();
     Row.Case = &Case;
     collectDirectDiscriminators(Case.Pattern, Case.PatternInstantiation,

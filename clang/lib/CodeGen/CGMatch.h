@@ -53,6 +53,7 @@ public:
     Test MatchTest = {};
     std::unique_ptr<Node> Success;
     std::unique_ptr<Node> Failure;
+    std::unique_ptr<Node> GuardFailure;
 
     explicit Node(NodeKind Kind) : Kind(Kind) {}
   };
