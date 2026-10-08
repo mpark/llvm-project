@@ -237,6 +237,59 @@ struct std::alternative_traits<Choice> {
   static typename ChoiceAlternative<I>::type& get(Choice&);
 };
 
+struct SwitchChoice {
+  unsigned state;
+  int first;
+  double second;
+};
+
+template<>
+struct std::alternative_traits<SwitchChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^int, ^^double
+  };
+  static constexpr bool has_residual_states = false;
+
+  static __SIZE_TYPE__ index(const SwitchChoice&) noexcept;
+
+  template<__SIZE_TYPE__ I>
+  static typename ChoiceAlternative<I>::type& get(SwitchChoice&);
+};
+
+// Alternative-dependent instantiations of one source case participate in the
+// same decision tree.
+// CHECK-LABEL: define{{.*}} i32 @_Z23match_instantiated_caseR12SwitchChoice
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI12SwitchChoiceE5indexERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI12SwitchChoiceE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK: i64 0, label %match.decision.success
+// CHECK: i64 1, label %match.decision.success
+// CHECK: ret i32
+int match_instantiated_case(SwitchChoice& value) {
+  return match (value) {
+    case { auto&& alternative } => static_cast<int>(alternative);
+  };
+}
+
+bool accept_instantiated();
+
+// A failed guard skips the other instantiations of its source case.
+// CHECK-LABEL: define{{.*}} i32 @_Z24match_instantiated_guardR12SwitchChoice
+// CHECK: switch i64 %match.index
+// CHECK: call{{.*}} @_Z19accept_instantiatedv
+// CHECK: br i1 {{.*}}, label %match.select.action, label %match.select.guard_failed
+// CHECK: match.select.guard_failed:
+// CHECK: match.decision.next_pattern:
+// CHECK-NOT: alternative_traitsI12SwitchChoiceE3getILm1E
+// CHECK: store i32 -1
+int match_instantiated_guard(SwitchChoice& value) {
+  return match (value) {
+    case { auto&& alternative } if (accept_instantiated()) =>
+        static_cast<int>(alternative);
+    case _ => -1;
+  };
+}
+
 bool accept_choice();
 
 // Record-valued discriminators may occur in disjoint branches of the decision
@@ -278,7 +331,7 @@ struct std::alternative_traits<HierarchyChoice> {
   };
   static constexpr bool has_residual_states = false;
 
-  static IndexedState index(const HierarchyChoice&) noexcept;
+  static __SIZE_TYPE__ index(const HierarchyChoice&) noexcept;
 
   template<__SIZE_TYPE__ I>
   static typename HierarchyAlternative<I>::type& get(HierarchyChoice&);
@@ -286,12 +339,17 @@ struct std::alternative_traits<HierarchyChoice> {
 
 void consume_base(const ChoiceBase&);
 void consume_any_base();
+bool prefer_whole(const HierarchyChoice&);
+void consume_whole(const HierarchyChoice&);
 
 // All projections that initialize the same reference declaration converge on
 // one initialization and one copy of the source handler.
 // CHECK-LABEL: define{{.*}} void @_Z17match_shared_baseR15HierarchyChoice
+// CHECK: switch i64 %match.index
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE3getILm0E
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE3getILm1E
+// CHECK: match.select.shared_action:
+// CHECK: phi ptr
 // CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
 // CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
 // CHECK: ret void
@@ -303,12 +361,32 @@ void match_shared_base(HierarchyChoice& value) {
 
 // Declaration-free patterns also converge on one copy of the source handler.
 // CHECK-LABEL: define{{.*}} void @_Z22match_shared_base_typeR15HierarchyChoice
+// CHECK: switch i64 %match.index
+// CHECK: match.select.shared_action:
 // CHECK: call{{.*}} @_Z16consume_any_basev
 // CHECK-NOT: call{{.*}} @_Z16consume_any_basev
 // CHECK: ret void
 void match_shared_base_type(HierarchyChoice& value) {
   match (value) {
     case { const ChoiceBase& } => consume_any_base();
+  }
+}
+
+// A leading case without a closed-alternative discriminator keeps this match
+// on the linear path. Its projected alternatives still share one handler.
+// CHECK-LABEL: define{{.*}} void @{{.*}}match_linear_shared_base
+// CHECK-NOT: switch
+// CHECK: call{{.*}} @{{.*}}prefer_whole
+// CHECK: match.select.shared_action:
+// CHECK: phi ptr
+// CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK: ret void
+void match_linear_shared_base(HierarchyChoice& value) {
+  match (value) {
+    case HierarchyChoice& whole if (prefer_whole(whole)) =>
+      consume_whole(whole);
+    case { const ChoiceBase& base } => consume_base(base);
   }
 }
 
