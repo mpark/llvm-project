@@ -52,6 +52,8 @@ struct std::alternative_traits<MaybeInt> {
 // CHECK-LABEL: define{{.*}} i32 @_Z17match_alternativeR8MaybeInt
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK-NOT: icmp eq i64
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0E
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE3getILm0E
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
@@ -61,6 +63,133 @@ int match_alternative(MaybeInt& value) {
     case { int& number } if (number == 0) => 0;
     case { int& number } => number;
     case {} => -1;
+  };
+}
+
+// A residual source case becomes the default edge of the discriminator tree.
+// CHECK-LABEL: define{{.*}} i32 @_Z22match_value_or_defaultR8MaybeInt
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK: i64 0, label %match.decision.success
+// CHECK: match.decision.failure:
+int match_value_or_default(MaybeInt& value) {
+  return match (value) {
+    case { int& number } => number;
+    case _ => -1;
+  };
+}
+
+// A built-in pointer has a bool discriminator. Load it using the C++ scalar
+// representation rather than its address representation.
+// CHECK-LABEL: define{{.*}} i32 @_Z13match_pointerPi
+// CHECK: switch i1 %match.index
+// CHECK: i1 true, label %match.decision.success
+// CHECK: i1 false, label %match.decision.success
+int match_pointer(int* pointer) {
+  return match (pointer) {
+    case { int& number } => number;
+    case {} => -1;
+  };
+}
+
+// Of the two tests in the first row, the second pointer is tested by more
+// rows. It therefore supplies the root discriminator.
+// CHECK-LABEL: define{{.*}} i32 @_Z18match_pointer_pairPiS_(
+// CHECK: switch i1 %match.index
+// CHECK: i1 true, label %match.decision.success
+// CHECK: i1 false, label %match.decision.success
+// CHECK: match.decision.success:
+// CHECK: switch i1 %match.index{{[0-9]+}}
+int match_pointer_pair(int* first, int* second) {
+  return match (first, second) {
+    case [{ int& left }, { int& right }] => left + right;
+    case [_, {}] => -1;
+    case _ => -2;
+  };
+}
+
+struct MaybeMaybeInt {
+  bool engaged;
+  MaybeInt value;
+};
+
+template<>
+struct std::alternative_traits<MaybeMaybeInt> {
+  static constexpr alternative_info alternatives[] = {
+    ^^MaybeInt, {^^empty_state, true}
+  };
+  static constexpr bool has_residual_states = false;
+
+  static __SIZE_TYPE__ index(const MaybeMaybeInt&) noexcept;
+
+  template<__SIZE_TYPE__ I>
+    requires(I == 0)
+  static MaybeInt& get(MaybeMaybeInt&);
+};
+
+// A successful outer constructor exposes its payload as a new decision
+// column. Each discriminator is evaluated once, and the inner discriminator
+// remains conditional on the outer value state.
+// CHECK-LABEL: define{{.*}} i32 @_Z24match_nested_alternativeR13MaybeMaybeInt
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI13MaybeMaybeIntE5indexERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI13MaybeMaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK: ret i32
+int match_nested_alternative(MaybeMaybeInt& value) {
+  return match (value) {
+    case {{ int& number }} => number;
+    case {{}} => -2;
+    case {} => -1;
+  };
+}
+
+struct MaybeIntPair {
+  MaybeInt first;
+  MaybeInt second;
+};
+
+// Projection paths may pass through a decomposition before exposing more
+// closed-alternative columns.
+// CHECK-LABEL: define{{.*}} i32 @_Z26match_nested_decompositionP12MaybeIntPair
+// CHECK: switch i1 %match.index
+// CHECK-COUNT-2: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK-COUNT-2: switch i64 %match.index
+// CHECK: ret i32
+int match_nested_decomposition(MaybeIntPair* value) {
+  return match (value) {
+    case { [{ int& first }, { int& second }] } => first + second;
+    case _ => -1;
+  };
+}
+
+// A nested discriminator can be materialized independently in disjoint
+// subtrees.
+// CHECK-LABEL: define{{.*}} i32 @_Z29match_duplicated_nested_pathsR13MaybeMaybeIntS0_
+// CHECK-COUNT-4: switch i64 %match.index
+// CHECK: ret i32
+int match_duplicated_nested_paths(MaybeMaybeInt& first,
+                                  MaybeMaybeInt& second) {
+  return match (first, second) {
+    case [_, {{ int& value }}] => value;
+    case [{{ int& value }}, _] => value;
+    case _ => -1;
+  };
+}
+
+// A discriminator may disappear from a row and reappear later. The recursive
+// tree returns to the first pointer after testing the second one.
+// CHECK-LABEL: define{{.*}} i32 @_Z29match_nonconsecutive_pointersPiS_(
+// CHECK: switch i1 %match.index
+// CHECK: switch i1 %match.index{{[0-9]+}}
+// CHECK: switch i1 %match.index{{[0-9]+}}
+int match_nonconsecutive_pointers(int* first, int* second) {
+  return match (first, second) {
+    case [{ int& }, _] => 1;
+    case [_, { int& }] => 2;
+    case [{}, _] => 3;
   };
 }
 
@@ -107,6 +236,21 @@ struct std::alternative_traits<Choice> {
   template<__SIZE_TYPE__ I>
   static typename ChoiceAlternative<I>::type& get(Choice&);
 };
+
+bool accept_choice();
+
+// Record-valued discriminators may occur in disjoint branches of the decision
+// tree. Their condition storage must dominate every use.
+// CHECK-LABEL: define{{.*}} i32 @_Z28match_nonconsecutive_choicesR6ChoiceS0_(
+// CHECK-COUNT-5: icmp eq i64
+int match_nonconsecutive_choices(Choice& first, Choice& second) {
+  return match (first, second) {
+    case [{ int& }, _] if (accept_choice()) => 1;
+    case [_, { int& }] if (accept_choice()) => 2;
+    case [{ double& }, _] => 3;
+    case _ => 4;
+  };
+}
 
 struct ChoiceBase {};
 struct ChoiceLeft : ChoiceBase {};
@@ -368,8 +512,8 @@ struct std::alternative_traits<LabeledChoice> {
 // CHECK-LABEL: define{{.*}} i32 @_Z19match_labeled_value13LabeledChoice
 // CHECK: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
-// CHECK: icmp eq
-// CHECK: icmp eq
+// CHECK: switch i32 %match.index
+// CHECK-NOT: icmp eq
 // CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI13LabeledChoiceE5indexE
 // CHECK: ret i32
 int match_labeled_value(LabeledChoice value) {
