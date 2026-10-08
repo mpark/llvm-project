@@ -5391,6 +5391,17 @@ public:
     void markInitialized(CodeGenFunction &CGF);
     void emitCleanups(CodeGenFunction &CGF);
   };
+  enum class MatchCandidateKind { Test, Selection };
+  void EmitMatchCandidate(
+      const MatchPattern *Pattern,
+      const MatchPatternInstantiation *Instantiation, const MatchGuard &Guard,
+      llvm::BasicBlock *PatternFailure, llvm::BasicBlock *GuardFailure,
+      llvm::BasicBlock *Success,
+      llvm::function_ref<void(llvm::BasicBlock *, llvm::BasicBlock *,
+                              StagedPatternDeclarations *)>
+          EmitPattern,
+      llvm::function_ref<void()> EmitAction,
+      Stmt::Likelihood GuardLikelihood, MatchCandidateKind Kind);
   RValue
   EmitMatchPattern(const MatchPattern *Pattern,
                    const MatchPatternInstantiation *Instantiation,
@@ -5413,6 +5424,9 @@ public:
   void EmitSelectedMatchPatternProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
+  void EmitMatchGuardBranch(const MatchGuard &MG, llvm::BasicBlock *Success,
+                            llvm::BasicBlock *Failure,
+                            Stmt::Likelihood LH = Stmt::LH_None);
   RValue EmitMatchGuard(const MatchGuard &MG, llvm::Value *PatBoolRes);
 
   //===--------------------------------------------------------------------===//
