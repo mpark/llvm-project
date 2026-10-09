@@ -22,18 +22,19 @@ bool hasMatchPatternDeclarations(
     const MatchPattern *Pattern,
     const MatchPatternInstantiation *Instantiation);
 
-/// A decision tree over the closed-alternative columns of a match.
+/// A decision tree over the refutable columns of a match.
 ///
-/// Test nodes specialize the source-ordered rows on one alternative state.
-/// A successful test can expose additional columns from the projected payload.
-/// Candidate nodes hand the remaining pattern tests and action back to the
-/// ordinary match emitter once the first row has no more decision columns.
+/// Test nodes specialize source-ordered rows on closed-alternative states or
+/// residual expression conditions. A successful test can expose additional
+/// columns from a decomposition or projected payload. Candidate nodes hand any
+/// remaining pattern tests and the action back to the ordinary match emitter.
 class MatchDecisionTree {
 public:
   struct Candidate {
     const MatchCaseInstantiation *Case = nullptr;
     SmallVector<const MatchPattern *, 2> KnownDiscriminatorPatterns;
     SmallVector<const MatchPattern *, 2> CompletedPatterns;
+    bool ShareAction = false;
   };
 
   struct Test {
