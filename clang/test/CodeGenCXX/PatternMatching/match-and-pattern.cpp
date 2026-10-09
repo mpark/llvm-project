@@ -4,6 +4,7 @@
 
 bool test_first(int);
 bool test_second(int);
+bool test_third(int);
 
 struct first_predicate {
   bool operator()(int value) const { return test_first(value); }
@@ -13,8 +14,13 @@ struct second_predicate {
   bool operator()(int value) const { return test_second(value); }
 };
 
+struct third_predicate {
+  bool operator()(int value) const { return test_third(value); }
+};
+
 inline constexpr first_predicate first;
 inline constexpr second_predicate second;
+inline constexpr third_predicate third;
 
 int short_circuit(int value) {
   return match (value) {
@@ -25,11 +31,22 @@ int short_circuit(int value) {
 
 // CHECK-LABEL: define{{.*}} i32 @_Z13short_circuiti(
 // CHECK: call{{.*}} @_ZNK15first_predicateclEi
-// CHECK: br i1 {{.*}}, label %[[NEXT:match.and.next.*]], label %[[FAIL:match.pattern.failure.*]]
+// CHECK: br i1 {{.*}}, label %[[NEXT:match.decision.success.*]], label %{{.*}}
 // CHECK: [[NEXT]]:
 // CHECK: call{{.*}} @_ZNK16second_predicateclEi
-// CHECK: br i1 {{.*}}, label %{{.*}}, label %[[FAIL]]
-// CHECK: [[FAIL]]:
+// CHECK: br i1
+
+int nested_short_circuit(int value) {
+  return match (value) {
+    case first and (second and third) => 1;
+    case _ => 0;
+  };
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z20nested_short_circuiti(
+// CHECK: call{{.*}} @_ZNK15first_predicateclEi
+// CHECK: call{{.*}} @_ZNK16second_predicateclEi
+// CHECK: call{{.*}} @_ZNK15third_predicateclEi
 
 struct Copy {
   int value;

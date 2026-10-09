@@ -18,6 +18,10 @@
 
 namespace clang::CodeGen {
 
+bool hasMatchPatternDeclarations(
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation);
+
 /// A decision tree over the closed-alternative columns of a match.
 ///
 /// Test nodes specialize the source-ordered rows on one alternative state.
@@ -29,6 +33,7 @@ public:
   struct Candidate {
     const MatchCaseInstantiation *Case = nullptr;
     SmallVector<const MatchPattern *, 2> KnownDiscriminatorPatterns;
+    SmallVector<const MatchPattern *, 2> CompletedPatterns;
   };
 
   struct Test {
@@ -39,11 +44,19 @@ public:
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
 
+  struct PatternTest {
+    const MatchCaseInstantiation *Case = nullptr;
+    const MatchPattern *Pattern = nullptr;
+    /// Ancestor projections needed to reach the pattern subject.
+    SmallVector<const MatchProjection *, 2> ProjectionPath;
+  };
+
   struct Node {
-    enum NodeKind { NK_Failure, NK_Candidate, NK_Test } Kind;
+    enum NodeKind { NK_Failure, NK_Candidate, NK_Test, NK_PatternTest } Kind;
 
     Candidate MatchCandidate = {};
     Test MatchTest = {};
+    PatternTest ResidualTest = {};
     std::unique_ptr<Node> Success;
     std::unique_ptr<Node> Failure;
     std::unique_ptr<Node> GuardFailure;

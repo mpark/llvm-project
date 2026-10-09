@@ -29,6 +29,11 @@ struct MatchRow {
   const MatchCaseInstantiation *Case = nullptr;
   SmallVector<MatchColumn, 4> Columns;
   SmallVector<const MatchPattern *, 2> KnownDiscriminators;
+  SmallVector<const MatchPattern *, 2> CompletedPatterns;
+  const MatchPattern *SequencePattern = nullptr;
+  const MatchPattern *ActiveConjunct = nullptr;
+  SmallVector<const MatchPattern *, 2> RemainingConjuncts;
+  bool AllowResidualTests = true;
 
   const MatchColumn *find(const VarDecl *IndexVar) const {
     auto It = llvm::find_if(Columns, [&](const MatchColumn &Column) {
@@ -37,6 +42,40 @@ struct MatchRow {
     return It == Columns.end() ? nullptr : &*It;
   }
 };
+
+static bool
+hasPatternDeclarationsImpl(const MatchPattern *Pattern,
+                           const MatchPatternInstantiation *Instantiation) {
+  if (isa<DeclarationPattern>(Pattern))
+    return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::any_of(
+        llvm::enumerate(Or->alternatives()), [&](auto Alternative) {
+          return Instantiation->isViableOrAlternative(Or,
+                                                      Alternative.index()) &&
+                 hasPatternDeclarationsImpl(Alternative.value(), Instantiation);
+        });
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
+                        [&](const MatchPattern *Child) {
+                          return hasPatternDeclarationsImpl(Child,
+                                                            Instantiation);
+                        });
+  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
+    return hasPatternDeclarationsImpl(Child, Instantiation);
+  });
+}
+
+static void
+collectAndConjuncts(const MatchPattern *Pattern,
+                    SmallVectorImpl<const MatchPattern *> &Conjuncts) {
+  if (const auto *And = dyn_cast<AndPattern>(Pattern->IgnoreParens())) {
+    for (const MatchPattern *Conjunct : And->conjuncts())
+      collectAndConjuncts(Conjunct, Conjuncts);
+    return;
+  }
+  Conjuncts.push_back(Pattern);
+}
 
 static SmallVector<MatchRow, 4>
 expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
@@ -70,6 +109,7 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
 
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     SmallVector<MatchRow, 4> Result;
+    Row.AllowResidualTests = false;
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives())) {
       if (!Instantiation->isViableOrAlternative(Or, I))
         continue;
@@ -141,16 +181,61 @@ static SmallVector<MatchRow, 4> specializeColumn(const MatchRow &Source,
                            Source.Case->PatternInstantiation, PayloadPath);
 }
 
+static bool canEmitResidualTest(const MatchColumn &Column,
+                                const MatchRow &Row) {
+  if (!Row.AllowResidualTests || !isa<ExpressionPattern>(Column.Pattern))
+    return false;
+  const MatchPatternInfo *Info =
+      Row.Case->PatternInstantiation->find(Column.Pattern);
+  return !Info || !Info->Projection ||
+         Info->Projection->getKind() != MatchProjection::AlternativeProjection;
+}
+
+static MatchRow specializeResidualTest(const MatchRow &Source,
+                                       const MatchColumn *Column) {
+  unsigned Index = Column - Source.Columns.begin();
+  MatchRow Row = Source;
+  Row.CompletedPatterns.push_back(Column->Pattern);
+  Row.Columns.erase(Row.Columns.begin() + Index);
+  return Row;
+}
+
 static std::unique_ptr<MatchDecisionTree::Node>
 buildDecisionTree(ArrayRef<MatchRow> Rows) {
   using Node = MatchDecisionTree::Node;
   if (Rows.empty())
     return std::make_unique<Node>(Node::NK_Failure);
 
+  const MatchRow &InitialFirst = Rows.front();
+  if (InitialFirst.Columns.empty() && InitialFirst.ActiveConjunct) {
+    MatchRow Advanced = InitialFirst;
+    Advanced.CompletedPatterns.push_back(Advanced.ActiveConjunct);
+    Advanced.ActiveConjunct = nullptr;
+    SmallVector<MatchRow, 8> AdvancedRows;
+    if (!Advanced.RemainingConjuncts.empty()) {
+      const MatchPattern *Next = Advanced.RemainingConjuncts.front();
+      Advanced.RemainingConjuncts.erase(Advanced.RemainingConjuncts.begin());
+      Advanced.ActiveConjunct = Next;
+      Advanced.AllowResidualTests = true;
+      SmallVector<MatchRow, 4> Expanded =
+          expandPatternRows(std::move(Advanced), Next,
+                            InitialFirst.Case->PatternInstantiation, {});
+      AdvancedRows.append(std::make_move_iterator(Expanded.begin()),
+                          std::make_move_iterator(Expanded.end()));
+    } else {
+      Advanced.CompletedPatterns.push_back(Advanced.SequencePattern);
+      Advanced.SequencePattern = nullptr;
+      AdvancedRows.push_back(std::move(Advanced));
+    }
+    AdvancedRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
+    return buildDecisionTree(AdvancedRows);
+  }
+
   auto BuildCandidate = [&] {
     auto Result = std::make_unique<Node>(Node::NK_Candidate);
     Result->MatchCandidate = {Rows.front().Case,
-                              Rows.front().KnownDiscriminators};
+                              Rows.front().KnownDiscriminators,
+                              Rows.front().CompletedPatterns};
     ArrayRef<MatchRow> FollowingPattern = Rows.drop_front();
     while (!FollowingPattern.empty() &&
            FollowingPattern.front().Case == Rows.front().Case)
@@ -186,8 +271,32 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
     }
   }
 
-  if (!Selected)
+  if (!Selected) {
+    if (First.ActiveConjunct && !First.Columns.empty() &&
+        isa<WildcardPattern>(First.Columns.front().Pattern)) {
+      SmallVector<MatchRow, 8> SuccessRows;
+      SuccessRows.push_back(
+          specializeResidualTest(First, &First.Columns.front()));
+      SuccessRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
+      return buildDecisionTree(SuccessRows);
+    }
+    if (!First.Columns.empty() &&
+        canEmitResidualTest(First.Columns.front(), First)) {
+      const MatchColumn *Column = &First.Columns.front();
+      SmallVector<MatchRow, 8> SuccessRows;
+      SuccessRows.push_back(specializeResidualTest(First, Column));
+      SuccessRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
+
+      auto Result = std::make_unique<Node>(Node::NK_PatternTest);
+      Result->ResidualTest.Case = First.Case;
+      Result->ResidualTest.Pattern = Column->Pattern;
+      Result->ResidualTest.ProjectionPath = Column->ProjectionPath;
+      Result->Success = buildDecisionTree(SuccessRows);
+      Result->Failure = buildDecisionTree(Rows.drop_front());
+      return Result;
+    }
     return BuildCandidate();
+  }
 
   const VarDecl *IndexVar = Selected->getIndexVar();
   SmallVector<MatchRow, 8> SuccessRows;
@@ -221,6 +330,12 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
 
 } // namespace
 
+bool CodeGen::hasMatchPatternDeclarations(
+    const MatchPattern *Pattern,
+    const MatchPatternInstantiation *Instantiation) {
+  return hasPatternDeclarationsImpl(Pattern, Instantiation);
+}
+
 MatchDecisionTree
 MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases) {
   SmallVector<MatchRow, 8> Rows;
@@ -228,8 +343,24 @@ MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases) {
   for (const MatchCaseInstantiation &Case : Cases) {
     MatchRow Row;
     Row.Case = &Case;
+    const MatchPattern *Pattern = Case.Pattern;
+    SmallVector<const MatchPattern *, 4> Conjuncts;
+    collectAndConjuncts(Pattern, Conjuncts);
+    ArrayRef<const MatchPattern *> ConjunctList = Conjuncts;
+    if (ConjunctList.size() > 1 &&
+        llvm::none_of(ConjunctList.drop_back(),
+                      [&](const MatchPattern *Conjunct) {
+                        return hasMatchPatternDeclarations(
+                            Conjunct, Case.PatternInstantiation);
+                      })) {
+      Row.SequencePattern = Case.Pattern;
+      Row.ActiveConjunct = ConjunctList.front();
+      Row.RemainingConjuncts.append(ConjunctList.drop_front().begin(),
+                                    ConjunctList.drop_front().end());
+      Pattern = Row.ActiveConjunct;
+    }
     SmallVector<MatchRow, 4> Expanded = expandPatternRows(
-        std::move(Row), Case.Pattern, Case.PatternInstantiation, {});
+        std::move(Row), Pattern, Case.PatternInstantiation, {});
     Rows.append(std::make_move_iterator(Expanded.begin()),
                 std::make_move_iterator(Expanded.end()));
   }
