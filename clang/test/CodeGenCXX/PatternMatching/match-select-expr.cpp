@@ -21,13 +21,11 @@
 // CHECK-NEXT:    store i8 1, ptr [[MATCH_SELECT_RESULT]], align 1
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
 // CHECK:       [[MATCH_DECISION_FAILURE]]:
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br label %[[MATCH_SELECT_ACTION:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
 // CHECK-NEXT:    store i8 0, ptr [[MATCH_SELECT_RESULT]], align 1
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
-// CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
-// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_NO_MATCH]]:
+// CHECK:       [[MATCH_SELECT_NO_MATCH:.*:]]
 // CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3:[0-9]+]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
