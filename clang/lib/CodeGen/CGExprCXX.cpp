@@ -3626,7 +3626,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     EmitMatchDiscriminator(*Node.MatchTest.Discriminator);
     const VarDecl *IndexVar =
         Node.MatchTest.Discriminator->getIntermediateVar();
-    if (IndexVar->getType()->isIntegralType(getContext())) {
+    if (IndexVar->getType()->isIntegralOrEnumerationType()) {
       auto *IndexType =
           cast<llvm::IntegerType>(ConvertType(IndexVar->getType()));
       // Coalesce a chain of distinct tests on the same discriminator into
