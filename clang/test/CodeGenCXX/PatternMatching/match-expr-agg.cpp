@@ -82,7 +82,7 @@ struct Result {
 // CHECK:       [[THROW_CONT:.*:]]
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR4]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP14:%.*]] = load i64, ptr [[RETVAL]], align 4
@@ -140,7 +140,7 @@ struct MoveOnly {
 // CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[TMP6]])
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR4]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    ret void
@@ -191,7 +191,7 @@ MoveOnly select_move_only(bool first, MoveOnly&& x, MoveOnly&& y) {
 // CHECK:       [[DOEXPR_END]]:
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR4]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    call void @_ZN8MoveOnlyC1EOS_(ptr noundef nonnull align 4 dereferenceable(4) [[AGG_RESULT]], ptr noundef nonnull align 4 dereferenceable(4) [[RESULT]])

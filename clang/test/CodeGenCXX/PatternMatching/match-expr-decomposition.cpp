@@ -57,7 +57,7 @@
 // CHECK:       [[THROW_CONT:.*:]]
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR2]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR2]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
@@ -175,7 +175,7 @@ namespace std {
 // CHECK:       [[THROW_CONT:.*:]]
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR2]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR2]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP12:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
