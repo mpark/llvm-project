@@ -167,6 +167,24 @@ int downcast_declaration(Shape &shape) {
   };
 }
 
+bool prefer_type_only();
+
+// A name-free type test and a declaration pattern can share one cast. The
+// successful projection is still materialized for the later declaration.
+// CHECK-LABEL: define{{.*}} i32 @_Z30downcast_after_type_only_guardR5Shape
+// CHECK: call ptr @__dynamic_cast
+// CHECK-NOT: call ptr @__dynamic_cast
+// CHECK: call{{.*}} @_Z16prefer_type_onlyv
+// CHECK: load i32
+// CHECK: ret i32
+int downcast_after_type_only_guard(Shape &shape) {
+  return match (shape) {
+    case Circle & if (prefer_type_only()) => 0;
+    case Circle &circle => circle.radius;
+    case _ => -1;
+  };
+}
+
 namespace std {
 template<class T> struct tuple_size;
 template<__SIZE_TYPE__ I, class T> struct tuple_element;

@@ -43,6 +43,7 @@ public:
     const MatchCaseInstantiation *Case = nullptr;
     std::optional<unsigned> AlternativeIndex;
     const MatchProjection *Projection = nullptr;
+    bool MaterializeProjection = false;
     /// Ancestor projections needed to reach the test projection.
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
