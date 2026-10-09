@@ -14,7 +14,6 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 namespace clang::CodeGen {
@@ -27,13 +26,6 @@ namespace clang::CodeGen {
 /// ordinary match emitter once the first row has no more decision columns.
 class MatchDecisionTree {
 public:
-  struct Discriminator {
-    const MatchCaseInstantiation *Case = nullptr;
-    const MatchPattern *Pattern = nullptr;
-
-    const VarDecl *getIndexVar() const;
-  };
-
   struct Candidate {
     const MatchCaseInstantiation *Case = nullptr;
     SmallVector<const MatchPattern *, 2> KnownDiscriminatorPatterns;
@@ -42,13 +34,14 @@ public:
   struct Test {
     const MatchCaseInstantiation *Case = nullptr;
     unsigned AlternativeIndex = 0;
-    const MatchProjection *ConditionProjection = nullptr;
+    const MatchProjection *Discriminator = nullptr;
+    /// Ancestor projections needed to reach the discriminator.
+    SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
 
   struct Node {
     enum NodeKind { NK_Failure, NK_Candidate, NK_Test } Kind;
 
-    SmallVector<Discriminator, 2> EntryDiscriminators;
     Candidate MatchCandidate = {};
     Test MatchTest = {};
     std::unique_ptr<Node> Success;
@@ -65,8 +58,7 @@ private:
       : Root(std::move(Root)) {}
 
 public:
-  static std::optional<MatchDecisionTree>
-  build(ArrayRef<MatchCaseInstantiation> Cases);
+  static MatchDecisionTree build(ArrayRef<MatchCaseInstantiation> Cases);
 
   const Node &getRoot() const { return *Root; }
 };

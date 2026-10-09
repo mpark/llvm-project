@@ -155,8 +155,10 @@ struct MaybeIntPair {
 // closed-alternative columns.
 // CHECK-LABEL: define{{.*}} i32 @_Z26match_nested_decompositionP12MaybeIntPair
 // CHECK: switch i1 %match.index
-// CHECK-COUNT-2: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
-// CHECK-COUNT-2: switch i64 %match.index
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI8MaybeIntE5indexERKS0_
+// CHECK: switch i64 %match.index
 // CHECK: ret i32
 int match_nested_decomposition(MaybeIntPair* value) {
   return match (value) {
@@ -372,21 +374,38 @@ void match_shared_base_type(HierarchyChoice& value) {
   }
 }
 
-// A leading case without a closed-alternative discriminator keeps this match
-// on the linear path. Its projected alternatives still share one handler.
-// CHECK-LABEL: define{{.*}} void @{{.*}}match_linear_shared_base
-// CHECK-NOT: switch
+// A leading ordinary candidate is emitted before the closed-alternative
+// failure subtree. Its successful guard never evaluates the discriminator.
+// CHECK-LABEL: define{{.*}} void @{{.*}}match_guarded_then_shared_base
+// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE5index
 // CHECK: call{{.*}} @{{.*}}prefer_whole
+// CHECK: call{{.*}} @_ZNSt18alternative_traitsI15HierarchyChoiceE5index
+// CHECK: switch i64 %match.index
 // CHECK: match.select.shared_action:
 // CHECK: phi ptr
 // CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
 // CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
 // CHECK: ret void
-void match_linear_shared_base(HierarchyChoice& value) {
+void match_guarded_then_shared_base(HierarchyChoice& value) {
   match (value) {
     case HierarchyChoice& whole if (prefer_whole(whole)) =>
       consume_whole(whole);
     case { const ChoiceBase& base } => consume_base(base);
+  }
+}
+
+// A closed alternative nested under a residual and-pattern is emitted as a
+// source-ordered candidate while sharing the expanded source handler.
+// CHECK-LABEL: define{{.*}} void @{{.*}}match_residual_shared_base
+// CHECK-NOT: switch
+// CHECK: match.select.shared_action:
+// CHECK: phi ptr
+// CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK: ret void
+void match_residual_shared_base(HierarchyChoice& value) {
+  match (value) {
+    case _ and { const ChoiceBase& base } => consume_base(base);
   }
 }
 
@@ -549,14 +568,11 @@ int combine(int&, double&);
 int combine(double&, int&);
 int combine(double&, double&);
 
-// Both sibling discriminators are initialized before the first selected-index
-// comparison, and neither is recomputed in another Cartesian branch.
+// Sibling discriminators are initialized only when their branch first needs
+// them. Each runtime path evaluates both once; the second initialization
+// appears separately in the two outer branches.
 // CHECK-LABEL: define{{.*}} i32 @_Z20match_choice_productR13ChoiceProduct
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
-// CHECK: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
-// CHECK: icmp eq
-// CHECK-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// CHECK-COUNT-3: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
 // CHECK: ret i32
 int match_choice_product(ChoiceProduct& value) {
   return match (value) {

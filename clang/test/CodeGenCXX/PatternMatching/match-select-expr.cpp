@@ -60,7 +60,7 @@ bool scalar_bool_result(bool value) {
 // CHECK-NEXT:    [[TMP8:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br i1 [[TMP8]], label %[[MATCH_SELECT_END]], label %[[MATCH_SELECT_NO_MATCH]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR1:[0-9]+]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR1:[0-9]+]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
@@ -88,9 +88,11 @@ auto char_pattern(char c) {
 // CHECK-SAME: ) #[[ATTR0]] {
 // CHECK-NEXT:  [[ENTRY:.*:]]
 // CHECK-NEXT:    [[REF_TMP:%.*]] = alloca [[CLASS_ANON:%.*]], align 1
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_END:.*]]
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
 // CHECK-NEXT:    call void @"_ZZ25test_void_returning_matchvENK3$_0clEv"(ptr noundef nonnull align 1 dereferenceable(1) [[REF_TMP]])
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
+// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    ret void
@@ -188,7 +190,7 @@ void test_match_if_without_bindings(bool value, int &result) {
 // CHECK-NEXT:    store ptr [[TMP6]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
@@ -237,7 +239,7 @@ int &select_lvalue_reference(bool first, int &x, int &y) {
 // CHECK-NEXT:    store ptr [[TMP6]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
@@ -316,7 +318,7 @@ template int &select_reference_template(bool, int &, int &);
 // CHECK-NEXT:    store double [[Y_IMAG]], ptr [[MATCH_SELECT_RESULT_IMAGP6]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    [[MATCH_SELECT_RESULT_REALP7:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
