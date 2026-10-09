@@ -3443,7 +3443,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     llvm::BasicBlock *ActionBB = nullptr;
   };
 
-  MatchDecisionTree Decision = MatchDecisionTree::build(Cases);
+  MatchDecisionTree Decision = MatchDecisionTree::build(Cases, getContext());
   SmallVector<SharedCaseHandler, 4> SharedCaseHandlers;
   SmallVector<llvm::BasicBlock *, 8> CompletedCaseActions(S.getNumCases());
   SmallVector<const MatchCaseInstantiation *, 8> CompletedActionCases(
@@ -3503,24 +3503,24 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                            ArrayRef<const MatchPattern *> CompletedPatterns,
                            bool ShareAction, llvm::BasicBlock *PatternFailure,
                            llvm::BasicBlock *GuardFailure) {
-    auto EmitPatternBranch = [&](llvm::BasicBlock *Success,
-                                 llvm::BasicBlock *Failure,
-                                 StagedPatternDeclarations *StagedDeclarations =
-                                     nullptr) {
-      if (!KnownTestPatterns.empty() || !CompletedPatterns.empty()) {
-        EmitMatchPatternBranch(
-            Case.Pattern, Case.PatternInstantiation, S.getSubject(), Success,
-            Failure, StagedDeclarations, KnownTestPatterns, CompletedPatterns);
-        return;
-      }
+    auto EmitPatternBranch =
+        [&](llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
+            StagedPatternDeclarations *StagedDeclarations = nullptr) {
+          if (!KnownTestPatterns.empty() || !CompletedPatterns.empty()) {
+            EmitMatchPatternBranch(Case.Pattern, Case.PatternInstantiation,
+                                   S.getSubject(), Success, Failure,
+                                   StagedDeclarations, KnownTestPatterns,
+                                   CompletedPatterns);
+            return;
+          }
 
-      RValue MatchResult =
-          EmitMatchPattern(Case.Pattern, Case.PatternInstantiation,
-                           S.getSubject(), StagedDeclarations);
-      llvm::Value *Condition =
-          ApplyCaseLikelihood(MatchResult.getScalarVal(), Case);
-      Builder.CreateCondBr(Condition, Success, Failure);
-    };
+          RValue MatchResult =
+              EmitMatchPattern(Case.Pattern, Case.PatternInstantiation,
+                               S.getSubject(), StagedDeclarations);
+          llvm::Value *Condition =
+              ApplyCaseLikelihood(MatchResult.getScalarVal(), Case);
+          Builder.CreateCondBr(Condition, Success, Failure);
+        };
 
     if (SharedCaseHandler *Shared = GetSharedCaseHandler(Case)) {
       if (!Shared->ActionBB)
@@ -3611,46 +3611,6 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     }
   };
 
-  struct IntegralPatternTest {
-    const BinaryOperator *Comparison;
-    const ValueDecl *Subject;
-  };
-  auto GetIntegralPatternTest = [&](const MatchDecisionTree::PatternTest &Test)
-      -> std::optional<IntegralPatternTest> {
-    if (Stmt::getLikelihood(Test.Case->Attributes) != Stmt::LH_None)
-      return std::nullopt;
-
-    const MatchPatternInfo *Info =
-        Test.Case->PatternInstantiation->find(Test.Pattern);
-    if (!Info || !Info->Condition)
-      return std::nullopt;
-    const auto *Comparison =
-        dyn_cast<BinaryOperator>(Info->Condition->IgnoreParenImpCasts());
-    if (!Comparison || Comparison->getOpcode() != BO_EQ ||
-        !Comparison->getLHS()->getType()->isIntegralOrEnumerationType())
-      return std::nullopt;
-
-    const auto *Subject =
-        dyn_cast<DeclRefExpr>(Comparison->getLHS()->IgnoreParenImpCasts());
-    if (!Subject || Subject->getType().isVolatileQualified())
-      return std::nullopt;
-
-    const Expr *ValueExpr = Comparison->getRHS();
-    while (true) {
-      if (const auto *Parens = dyn_cast<ParenExpr>(ValueExpr))
-        ValueExpr = Parens->getSubExpr();
-      else if (const auto *Cast = dyn_cast<ImplicitCastExpr>(ValueExpr))
-        ValueExpr = Cast->getSubExpr();
-      else
-        break;
-    }
-    const auto *Value = dyn_cast<ConstantExpr>(ValueExpr);
-    if (!Value || !Value->hasAPValueResult() ||
-        !Value->getAPValueResult().isInt())
-      return std::nullopt;
-    return IntegralPatternTest{Comparison, Subject->getDecl()};
-  };
-
   auto EmitDecision = [&](auto &Self,
                           const MatchDecisionTree::Node &Node) -> void {
     // Bindings materialized in one subtree do not dominate its siblings.
@@ -3703,21 +3663,24 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       return;
     }
     case MatchDecisionTree::Node::NK_PatternTest: {
-      if (auto First = GetIntegralPatternTest(Node.ResidualTest)) {
+      if (Node.ResidualTest.IntegralComparison) {
+        const auto *First = &Node.ResidualTest;
         SmallVector<const MatchDecisionTree::Node *, 4> Tests;
         SmallVector<llvm::ConstantInt *, 4> Values;
         const MatchDecisionTree::Node *Default = &Node;
         do {
-          auto Test = GetIntegralPatternTest(Default->ResidualTest);
-          if (!Test || Test->Subject != First->Subject ||
+          const auto *Test = &Default->ResidualTest;
+          if (!Test->IntegralComparison ||
+              Test->IntegralComparison->getLHS()->IgnoreParenImpCasts() !=
+                  First->IntegralComparison->getLHS()->IgnoreParenImpCasts() ||
               !getContext().hasSameType(
-                  Test->Comparison->getLHS()->getType(),
-                  First->Comparison->getLHS()->getType()) ||
+                  Test->IntegralComparison->getLHS()->getType(),
+                  First->IntegralComparison->getLHS()->getType()) ||
               Default->ResidualTest.ProjectionPath !=
                   Node.ResidualTest.ProjectionPath)
             break;
           auto *Value = dyn_cast<llvm::ConstantInt>(
-              EmitScalarExpr(Test->Comparison->getRHS()));
+              EmitScalarExpr(Test->IntegralComparison->getRHS()));
           assert(Value && "expected integral constant pattern value");
           if (llvm::is_contained(Values, Value))
             break;
@@ -3729,7 +3692,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         if (Tests.size() > 1) {
           EmitProjectionPath(Node.ResidualTest.ProjectionPath);
           llvm::Value *Discriminator =
-              EmitScalarExpr(First->Comparison->getLHS());
+              EmitScalarExpr(First->IntegralComparison->getLHS());
           Discriminator->setName("match.value");
           EmitSwitchDecision(Discriminator, Tests, Values, Default);
           return;
