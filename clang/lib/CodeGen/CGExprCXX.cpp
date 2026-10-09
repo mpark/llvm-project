@@ -2516,7 +2516,7 @@ void CodeGenFunction::EmitMatchPatternBranch(
   }
 
   if (llvm::is_contained(KnownTestPatterns, Pattern) &&
-      isa<ExpressionPattern>(Pattern)) {
+      isa<ExpressionPattern, TypePattern, DeclarationPattern>(Pattern)) {
     EmitBranch(Success);
     return;
   }
@@ -3795,6 +3795,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     Builder.CreateCondBr(Condition, Success, Failure);
 
     EmitBlock(Success);
+    if (Node.MatchTest.MaterializeProjection)
+      EmitMatchProjectionValue(*Projection);
     Self(Self, *Node.Success);
     EmitBlock(Failure);
     Self(Self, *Node.Failure);
