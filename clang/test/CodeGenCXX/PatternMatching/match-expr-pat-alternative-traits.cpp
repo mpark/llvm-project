@@ -397,7 +397,7 @@ void match_guarded_then_shared_base(HierarchyChoice& value) {
 // An irrefutable first conjunct exposes the closed alternative in the second
 // conjunct to the decision tree while sharing the expanded source handler.
 // CHECK-LABEL: define{{.*}} void @{{.*}}match_residual_shared_base
-// CHECK: switch
+// CHECK-COUNT-1: switch
 // CHECK: match.select.shared_action:
 // CHECK: phi ptr
 // CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase

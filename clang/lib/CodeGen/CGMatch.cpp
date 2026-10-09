@@ -200,35 +200,67 @@ static MatchRow specializeResidualTest(const MatchRow &Source,
   return Row;
 }
 
+static bool canNormalizeRow(const MatchRow &Row) {
+  return Row.ActiveConjunct &&
+         (Row.Columns.empty() ||
+          llvm::all_of(Row.Columns, [](const MatchColumn &Column) {
+            return isa<WildcardPattern>(Column.Pattern);
+          }));
+}
+
+static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row) {
+  if (!canNormalizeRow(Row)) {
+    SmallVector<MatchRow, 4> Result;
+    Result.push_back(std::move(Row));
+    return Result;
+  }
+
+  for (const MatchColumn &Column : Row.Columns)
+    Row.CompletedPatterns.push_back(Column.Pattern);
+  Row.Columns.clear();
+  if (!llvm::is_contained(Row.CompletedPatterns, Row.ActiveConjunct))
+    Row.CompletedPatterns.push_back(Row.ActiveConjunct);
+  Row.ActiveConjunct = nullptr;
+
+  if (Row.RemainingConjuncts.empty()) {
+    Row.CompletedPatterns.push_back(Row.SequencePattern);
+    Row.SequencePattern = nullptr;
+    SmallVector<MatchRow, 4> Result;
+    Result.push_back(std::move(Row));
+    return Result;
+  }
+
+  const MatchPattern *Next = Row.RemainingConjuncts.front();
+  Row.RemainingConjuncts.erase(Row.RemainingConjuncts.begin());
+  Row.ActiveConjunct = Next;
+  Row.AllowResidualTests = true;
+  const MatchPatternInstantiation *Instantiation =
+      Row.Case->PatternInstantiation;
+  SmallVector<MatchRow, 4> Expanded =
+      expandPatternRows(std::move(Row), Next, Instantiation, {});
+  SmallVector<MatchRow, 4> Result;
+  for (MatchRow &ExpandedRow : Expanded) {
+    SmallVector<MatchRow, 4> Normalized = normalizeRow(std::move(ExpandedRow));
+    Result.append(std::make_move_iterator(Normalized.begin()),
+                  std::make_move_iterator(Normalized.end()));
+  }
+  return Result;
+}
+
 static std::unique_ptr<MatchDecisionTree::Node>
 buildDecisionTree(ArrayRef<MatchRow> Rows) {
   using Node = MatchDecisionTree::Node;
   if (Rows.empty())
     return std::make_unique<Node>(Node::NK_Failure);
 
-  const MatchRow &InitialFirst = Rows.front();
-  if (InitialFirst.Columns.empty() && InitialFirst.ActiveConjunct) {
-    MatchRow Advanced = InitialFirst;
-    Advanced.CompletedPatterns.push_back(Advanced.ActiveConjunct);
-    Advanced.ActiveConjunct = nullptr;
-    SmallVector<MatchRow, 8> AdvancedRows;
-    if (!Advanced.RemainingConjuncts.empty()) {
-      const MatchPattern *Next = Advanced.RemainingConjuncts.front();
-      Advanced.RemainingConjuncts.erase(Advanced.RemainingConjuncts.begin());
-      Advanced.ActiveConjunct = Next;
-      Advanced.AllowResidualTests = true;
-      SmallVector<MatchRow, 4> Expanded =
-          expandPatternRows(std::move(Advanced), Next,
-                            InitialFirst.Case->PatternInstantiation, {});
-      AdvancedRows.append(std::make_move_iterator(Expanded.begin()),
-                          std::make_move_iterator(Expanded.end()));
-    } else {
-      Advanced.CompletedPatterns.push_back(Advanced.SequencePattern);
-      Advanced.SequencePattern = nullptr;
-      AdvancedRows.push_back(std::move(Advanced));
+  if (llvm::any_of(Rows, canNormalizeRow)) {
+    SmallVector<MatchRow, 8> NormalizedRows;
+    for (const MatchRow &Row : Rows) {
+      SmallVector<MatchRow, 4> Normalized = normalizeRow(Row);
+      NormalizedRows.append(std::make_move_iterator(Normalized.begin()),
+                            std::make_move_iterator(Normalized.end()));
     }
-    AdvancedRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
-    return buildDecisionTree(AdvancedRows);
+    return buildDecisionTree(NormalizedRows);
   }
 
   auto BuildCandidate = [&] {
@@ -272,14 +304,6 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   }
 
   if (!Selected) {
-    if (First.ActiveConjunct && !First.Columns.empty() &&
-        isa<WildcardPattern>(First.Columns.front().Pattern)) {
-      SmallVector<MatchRow, 8> SuccessRows;
-      SuccessRows.push_back(
-          specializeResidualTest(First, &First.Columns.front()));
-      SuccessRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
-      return buildDecisionTree(SuccessRows);
-    }
     if (!First.Columns.empty() &&
         canEmitResidualTest(First.Columns.front(), First)) {
       const MatchColumn *Column = &First.Columns.front();
