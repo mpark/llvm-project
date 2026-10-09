@@ -5419,8 +5419,8 @@ public:
       llvm::function_ref<void(llvm::BasicBlock *, llvm::BasicBlock *,
                               StagedPatternDeclarations *)>
           EmitPattern,
-      llvm::function_ref<void()> EmitAction,
-      Stmt::Likelihood GuardLikelihood, MatchCandidateKind Kind);
+      llvm::function_ref<void()> EmitAction, Stmt::Likelihood GuardLikelihood,
+      MatchCandidateKind Kind);
   RValue
   EmitMatchPattern(const MatchPattern *Pattern,
                    const MatchPatternInstantiation *Instantiation,
@@ -5432,13 +5432,8 @@ public:
       llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
       StagedPatternDeclarations *StagedDeclarations = nullptr,
       ArrayRef<const MatchPattern *> KnownDiscriminatorPatterns = {});
-  void EmitMatchDiscriminator(const MatchPattern *Pattern,
-                              const MatchPatternInstantiation *Instantiation);
+  void EmitMatchDiscriminator(const MatchProjection &Projection);
   void EmitMatchProjectionValue(const MatchProjection &Projection);
-  void
-  EmitMatchDiscriminatorPath(const MatchPattern *Pattern,
-                             const MatchPattern *Discriminator,
-                             const MatchPatternInstantiation *Instantiation);
   void EmitSharedDeclarationProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);
