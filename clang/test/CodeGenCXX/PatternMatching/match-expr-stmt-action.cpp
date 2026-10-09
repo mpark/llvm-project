@@ -17,26 +17,24 @@ int match_stmt_action(int limit) {
 
 // CHECK-LABEL: _Z17match_stmt_actioni
 
-// CHECK:  %[[FIVE_CMP:.*]] = icmp eq i32 {{.*}}, 5
-// CHECK:  br i1 %[[FIVE_CMP]], label %[[CONTINUE:.*]], label %[[NEXT_SIX:.*]]
+// CHECK: [[MATCH_VALUE:%match.value]] = load i32
+// CHECK-NEXT: switch i32 [[MATCH_VALUE]], label %[[DEFAULT:.*]] [
+// CHECK-NEXT:   i32 5, label %[[CONTINUE:.*]]
+// CHECK-NEXT:   i32 6, label %[[BREAK:.*]]
+// CHECK-NEXT:   i32 7, label %[[RETURN:.*]]
+// CHECK-NEXT: ]
 
 // CHECK: [[CONTINUE]]:
 // CHECK:   br label %for.inc
 
-// CHECK: [[NEXT_SIX]]:
-// CHECK:   %[[SIX_CMP:.*]] = icmp eq i32 {{.*}}, 6
-// CHECK:   br i1 %[[SIX_CMP]], label %[[BREAK:.*]], label %[[NEXT_SEVEN:.*]]
-
 // CHECK: [[BREAK]]:
 // CHECK:   br label %for.end
-
-// CHECK: [[NEXT_SEVEN]]:
-// CHECK:   %[[SEVEN_CMP:.*]] = icmp eq i32 {{.*}}, 7
-// CHECK:   br i1 %[[SEVEN_CMP]], label %[[RETURN:.*]], label
 
 // CHECK: [[RETURN]]:
 // CHECK:   store i32 99, ptr %retval, align 4
 // CHECK:   br label %return
+
+// CHECK: [[DEFAULT]]:
 
 auto match_only_return_actions(int value) {
   match (value) {

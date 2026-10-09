@@ -2,10 +2,44 @@
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -O0 -emit-llvm %s -o - | FileCheck %s
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown -fpattern-matching -O1 -emit-llvm %s -o - | FileCheck %s --check-prefix=OPT
 
-// OPT-LABEL: define{{.*}} i1 @_Z18scalar_bool_resultb(
-// OPT-NOT: alloca
-// OPT-NOT: store
-// OPT: ret i1
+// CHECK-LABEL: define dso_local noundef zeroext i1 @_Z18scalar_bool_resultb(
+// CHECK-SAME: i1 noundef zeroext [[VALUE:%.*]]) #[[ATTR0:[0-9]+]] {
+// CHECK-NEXT:  [[ENTRY:.*:]]
+// CHECK-NEXT:    [[VALUE_ADDR:%.*]] = alloca i8, align 1
+// CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT:%.*]] = alloca i8, align 1
+// CHECK-NEXT:    [[STOREDV:%.*]] = zext i1 [[VALUE]] to i8
+// CHECK-NEXT:    store i8 [[STOREDV]], ptr [[VALUE_ADDR]], align 1
+// CHECK-NEXT:    store ptr [[VALUE_ADDR]], ptr [[TMP0]], align 8
+// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1:![0-9]+]]
+// CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
+// CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP2]], 0
+// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECISION_SUCCESS:.*]], label %[[MATCH_DECISION_FAILURE:.*]]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
+// CHECK-NEXT:    store i8 1, ptr [[MATCH_SELECT_RESULT]], align 1
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    store i8 0, ptr [[MATCH_SELECT_RESULT]], align 1
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_NO_MATCH]]:
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3:[0-9]+]]
+// CHECK-NEXT:    unreachable
+// CHECK:       [[MATCH_SELECT_END]]:
+// CHECK-NEXT:    [[TMP3:%.*]] = load i8, ptr [[MATCH_SELECT_RESULT]], align 1
+// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP3]], 0
+// CHECK-NEXT:    ret i1 [[LOADEDV1]]
+//
+// OPT-LABEL: define dso_local noundef zeroext i1 @_Z18scalar_bool_resultb(
+// OPT-SAME: i1 noundef returned zeroext [[VALUE:%.*]]) local_unnamed_addr #[[ATTR0:[0-9]+]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    ret i1 [[VALUE]]
+//
 bool scalar_bool_result(bool value) {
   return match (value) {
     case true => true;
@@ -14,7 +48,7 @@ bool scalar_bool_result(bool value) {
 }
 
 // CHECK-LABEL: define dso_local noundef i32 @_Z12char_patternc(
-// CHECK-SAME: i8 noundef signext [[C:%.*]]) #[[ATTR0:[0-9]+]] {
+// CHECK-SAME: i8 noundef signext [[C:%.*]]) #[[ATTR0]] {
 // CHECK-NEXT:  [[ENTRY:.*:]]
 // CHECK-NEXT:    [[C_ADDR:%.*]] = alloca i8, align 1
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
@@ -23,48 +57,62 @@ bool scalar_bool_result(bool value) {
 // CHECK-NEXT:    [[X:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    store i8 [[C]], ptr [[C_ADDR]], align 1
 // CHECK-NEXT:    store ptr [[C_ADDR]], ptr [[TMP0]], align 8
-// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1:![0-9]+]]
+// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
 // CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
-// CHECK-NEXT:    [[CONV:%.*]] = sext i8 [[TMP2]] to i32
-// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 97
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[MATCH_VALUE:%.*]] = sext i8 [[TMP2]] to i32
+// CHECK-NEXT:    switch i32 [[MATCH_VALUE]], label %[[MATCH_DECISION_FAILURE:.*]] [
+// CHECK-NEXT:      i32 97, label %[[MATCH_DECISION_SUCCESS:.*]]
+// CHECK-NEXT:      i32 98, label %[[MATCH_DECISION_SUCCESS1:.*]]
+// CHECK-NEXT:    ]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
 // CHECK-NEXT:    store i32 1, ptr [[MATCH_SELECT_RESULT]], align 4
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    [[TMP4:%.*]] = load i8, ptr [[TMP3]], align 1
-// CHECK-NEXT:    [[CONV1:%.*]] = sext i8 [[TMP4]] to i32
-// CHECK-NEXT:    [[CMP2:%.*]] = icmp eq i32 [[CONV1]], 98
-// CHECK-NEXT:    br i1 [[CMP2]], label %[[MATCH_SELECT_ACTION3:.*]], label %[[MATCH_SELECT_NEXT_PATTERN4:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION3]]:
+// CHECK:       [[MATCH_DECISION_SUCCESS1]]:
 // CHECK-NEXT:    store i32 2, ptr [[MATCH_SELECT_RESULT]], align 4
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN4]]:
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
 // CHECK:       [[MATCH_SELECT_INIT]]:
-// CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    store ptr [[TMP5]], ptr [[X]], align 8
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION5:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION5]]:
-// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[X]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    [[TMP7:%.*]] = load i8, ptr [[TMP6]], align 1
-// CHECK-NEXT:    [[CONV6:%.*]] = sext i8 [[TMP7]] to i32
-// CHECK-NEXT:    store i32 [[CONV6]], ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    store ptr [[TMP3]], ptr [[X]], align 8
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[X]], align 8, !nonnull [[META1]]
+// CHECK-NEXT:    [[TMP5:%.*]] = load i8, ptr [[TMP4]], align 1
+// CHECK-NEXT:    [[CONV:%.*]] = sext i8 [[TMP5]] to i32
+// CHECK-NEXT:    store i32 [[CONV]], ptr [[MATCH_SELECT_RESULT]], align 4
 // CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
 // CHECK:       [[MATCH_SELECT_GUARD_FAILED]]:
 // CHECK-NEXT:    store i1 false, ptr [[MATCH_CASE_SELECTED]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
 // CHECK:       [[MATCH_SELECT_CLEANUP]]:
-// CHECK-NEXT:    [[TMP8:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP8]], label %[[MATCH_SELECT_END]], label %[[MATCH_SELECT_NO_MATCH]]
+// CHECK-NEXT:    [[TMP6:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br i1 [[TMP6]], label %[[MATCH_SELECT_END]], label %[[MATCH_DECISION_NEXT_PATTERN]]
+// CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK:         call void @_ZSt9terminatev() #[[ATTR1:[0-9]+]]
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
-// CHECK-NEXT:    ret i32 [[TMP9]]
+// CHECK-NEXT:    [[TMP7:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    ret i32 [[TMP7]]
+//
+// OPT-LABEL: define dso_local noundef range(i32 -128, 128) i32 @_Z12char_patternc(
+// OPT-SAME: i8 noundef signext [[C:%.*]]) local_unnamed_addr #[[ATTR0]] {
+// OPT-NEXT:  [[ENTRY:.*]]:
+// OPT-NEXT:    switch i8 [[C]], label %[[MATCH_SELECT_INIT:.*]] [
+// OPT-NEXT:      i8 97, label %[[MATCH_SELECT_END:.*]]
+// OPT-NEXT:      i8 98, label %[[MATCH_DECISION_SUCCESS1:.*]]
+// OPT-NEXT:    ]
+// OPT:       [[MATCH_DECISION_SUCCESS1]]:
+// OPT-NEXT:    br label %[[MATCH_SELECT_END]]
+// OPT:       [[MATCH_SELECT_INIT]]:
+// OPT-NEXT:    [[MATCH_VALUE:%.*]] = sext i8 [[C]] to i32
+// OPT-NEXT:    br label %[[MATCH_SELECT_END]]
+// OPT:       [[MATCH_SELECT_END]]:
+// OPT-NEXT:    [[MATCH_SELECT_RESULT_0:%.*]] = phi i32 [ [[MATCH_VALUE]], %[[MATCH_SELECT_INIT]] ], [ 2, %[[MATCH_DECISION_SUCCESS1]] ], [ 1, %[[ENTRY]] ]
+// OPT-NEXT:    ret i32 [[MATCH_SELECT_RESULT_0]]
 //
 auto char_pattern(char c) {
   return match (c) {
@@ -88,14 +136,19 @@ auto char_pattern(char c) {
 // CHECK-SAME: ) #[[ATTR0]] {
 // CHECK-NEXT:  [[ENTRY:.*:]]
 // CHECK-NEXT:    [[REF_TMP:%.*]] = alloca [[CLASS_ANON:%.*]], align 1
-// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
 // CHECK:       [[MATCH_SELECT_ACTION]]:
 // CHECK-NEXT:    call void @"_ZZ25test_void_returning_matchvENK3$_0clEv"(ptr noundef nonnull align 1 dereferenceable(1) [[REF_TMP]])
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
+// CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
 // CHECK:       [[MATCH_SELECT_END]]:
 // CHECK-NEXT:    ret void
+//
+// OPT-LABEL: define dso_local void @_Z25test_void_returning_matchv(
+// OPT-SAME: ) local_unnamed_addr #[[ATTR0]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    ret void
 //
 void test_void_returning_match() {
   match (0) { case _ => []() {}(); }
@@ -107,13 +160,63 @@ struct GuardInit {
   bool accept() const;
 };
 
-// CHECK-LABEL: define{{.*}} i32 @_Z20guard_init_statementi
-// CHECK: match.select.init:
-// CHECK: call void @_ZN9GuardInitC1Ev
-// CHECK: call noundef zeroext i1 @_ZNK9GuardInit6acceptEv
-// CHECK: match.select.action:
-// CHECK: call void @_ZN9GuardInitD1Ev
-// CHECK: ret i32
+// CHECK-LABEL: define dso_local noundef i32 @_Z20guard_init_statementi(
+// CHECK-SAME: i32 noundef [[VALUE:%.*]]) #[[ATTR0]] {
+// CHECK-NEXT:  [[ENTRY:.*:]]
+// CHECK-NEXT:    [[VALUE_ADDR:%.*]] = alloca i32, align 4
+// CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT:%.*]] = alloca i32, align 4
+// CHECK-NEXT:    [[MATCH_CASE_SELECTED:%.*]] = alloca i1, align 8
+// CHECK-NEXT:    [[COPY:%.*]] = alloca i32, align 4
+// CHECK-NEXT:    [[INIT:%.*]] = alloca [[STRUCT_GUARDINIT:%.*]], align 1
+// CHECK-NEXT:    store i32 [[VALUE]], ptr [[VALUE_ADDR]], align 4
+// CHECK-NEXT:    store ptr [[VALUE_ADDR]], ptr [[TMP0]], align 8
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_INIT:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
+// CHECK:       [[MATCH_SELECT_INIT]]:
+// CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]], !align [[META2:![0-9]+]]
+// CHECK-NEXT:    [[TMP2:%.*]] = load i32, ptr [[TMP1]], align 4
+// CHECK-NEXT:    store i32 [[TMP2]], ptr [[COPY]], align 4
+// CHECK-NEXT:    call void @_ZN9GuardInitC1Ev(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]])
+// CHECK-NEXT:    [[CALL:%.*]] = call noundef zeroext i1 @_ZNK9GuardInit6acceptEv(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]])
+// CHECK-NEXT:    br i1 [[CALL]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_GUARD_FAILED:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[TMP3:%.*]] = load i32, ptr [[COPY]], align 4
+// CHECK-NEXT:    store i32 [[TMP3]], ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
+// CHECK:       [[MATCH_SELECT_GUARD_FAILED]]:
+// CHECK-NEXT:    store i1 false, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
+// CHECK:       [[MATCH_SELECT_CLEANUP]]:
+// CHECK-NEXT:    call void @_ZN9GuardInitD1Ev(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]]) #[[ATTR4:[0-9]+]]
+// CHECK-NEXT:    [[TMP4:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
+// CHECK-NEXT:    br i1 [[TMP4]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_DECISION_NEXT_PATTERN]]
+// CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
+// CHECK-NEXT:    br i1 true, label %[[MATCH_SELECT_ACTION1:.*]], label %[[MATCH_DECISION_NEXT_PATTERN2:.*]]
+// CHECK:       [[MATCH_SELECT_ACTION1]]:
+// CHECK-NEXT:    store i32 0, ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_DECISION_NEXT_PATTERN2]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
+// CHECK:       [[MATCH_SELECT_NO_MATCH]]:
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
+// CHECK-NEXT:    unreachable
+// CHECK:       [[MATCH_SELECT_END]]:
+// CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[MATCH_SELECT_RESULT]], align 4
+// CHECK-NEXT:    ret i32 [[TMP5]]
+//
+// OPT-LABEL: define dso_local noundef i32 @_Z20guard_init_statementi(
+// OPT-SAME: i32 noundef [[VALUE:%.*]]) local_unnamed_addr #[[ATTR2:[0-9]+]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    [[INIT:%.*]] = alloca [[STRUCT_GUARDINIT:%.*]], align 1
+// OPT-NEXT:    call void @llvm.lifetime.start.p0(ptr nonnull [[INIT]]) #[[ATTR6:[0-9]+]]
+// OPT-NEXT:    call void @_ZN9GuardInitC1Ev(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]]) #[[ATTR6]]
+// OPT-NEXT:    [[CALL:%.*]] = call noundef zeroext i1 @_ZNK9GuardInit6acceptEv(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]]) #[[ATTR6]]
+// OPT-NEXT:    call void @_ZN9GuardInitD1Ev(ptr noundef nonnull align 1 dereferenceable(1) [[INIT]]) #[[ATTR6]]
+// OPT-NEXT:    call void @llvm.lifetime.end.p0(ptr nonnull [[INIT]]) #[[ATTR6]]
+// OPT-NEXT:    [[MATCH_SELECT_RESULT_1:%.*]] = select i1 [[CALL]], i32 [[VALUE]], i32 0
+// OPT-NEXT:    ret i32 [[MATCH_SELECT_RESULT_1]]
+//
 int guard_init_statement(int value) {
   return match (value) {
     case int copy if (GuardInit init; init.accept()) => copy;
@@ -138,7 +241,7 @@ int guard_init_statement(int value) {
 // CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
 // CHECK-NEXT:    br i1 [[CMP]], label %[[IF_THEN:.*]], label %[[IF_ELSE:.*]]
 // CHECK:       [[IF_THEN]]:
-// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[RESULT_ADDR]], align 8, !nonnull [[META1]], !align [[META2:![0-9]+]]
+// CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[RESULT_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    store i32 1, ptr [[TMP3]], align 4
 // CHECK-NEXT:    br label %[[IF_END:.*]]
 // CHECK:       [[IF_ELSE]]:
@@ -147,6 +250,13 @@ int guard_init_statement(int value) {
 // CHECK-NEXT:    br label %[[IF_END]]
 // CHECK:       [[IF_END]]:
 // CHECK-NEXT:    ret void
+//
+// OPT-LABEL: define dso_local void @_Z30test_match_if_without_bindingsbRi(
+// OPT-SAME: i1 noundef zeroext [[VALUE:%.*]], ptr nofree noundef nonnull writeonly align 4 captures(none) dereferenceable(4) initializes((0, 4)) [[RESULT:%.*]]) local_unnamed_addr #[[ATTR5:[0-9]+]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    [[DOT:%.*]] = select i1 [[VALUE]], i32 1, i32 2
+// OPT-NEXT:    store i32 [[DOT]], ptr [[RESULT]], align 4, !tbaa [[INT_TBAA6:![0-9]+]]
+// OPT-NEXT:    ret void
 //
 void test_match_if_without_bindings(bool value, int &result) {
   if (match(value, case true))
@@ -171,30 +281,33 @@ void test_match_if_without_bindings(bool value, int &result) {
 // CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
 // CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
 // CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP2]], 0
-// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
-// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[MATCH_VALUE:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    switch i32 [[MATCH_VALUE]], label %[[MATCH_DECISION_FAILURE:.*]] [
+// CHECK-NEXT:      i32 1, label %[[MATCH_DECISION_SUCCESS:.*]]
+// CHECK-NEXT:      i32 0, label %[[MATCH_DECISION_SUCCESS1:.*]]
+// CHECK-NEXT:    ]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[X_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    store ptr [[TMP3]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    [[TMP5:%.*]] = load i8, ptr [[TMP4]], align 1
-// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP5]], 0
-// CHECK-NEXT:    [[CONV2:%.*]] = zext i1 [[LOADEDV1]] to i32
-// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[CONV2]], 0
-// CHECK-NEXT:    br i1 [[CMP3]], label %[[MATCH_SELECT_ACTION4:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION4]]:
-// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    store ptr [[TMP6]], ptr [[MATCH_SELECT_REFRESULT]], align 8
+// CHECK:       [[MATCH_DECISION_SUCCESS1]]:
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    store ptr [[TMP4]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
-// CHECK-NEXT:    ret ptr [[TMP7]]
+// CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
+// CHECK-NEXT:    ret ptr [[TMP5]]
+//
+// OPT-LABEL: define dso_local noundef nonnull align 4 dereferenceable(4) ptr @_Z23select_lvalue_referencebRiS_(
+// OPT-SAME: i1 noundef zeroext [[FIRST:%.*]], ptr nofree noundef nonnull readnone align 4 captures(ret: address, provenance) dereferenceable(4) [[X:%.*]], ptr nofree noundef nonnull readnone align 4 captures(ret: address, provenance) dereferenceable(4) [[Y:%.*]]) local_unnamed_addr #[[ATTR0]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    [[X_Y:%.*]] = select i1 [[FIRST]], ptr [[X]], ptr [[Y]]
+// OPT-NEXT:    ret ptr [[X_Y]]
 //
 int &select_lvalue_reference(bool first, int &x, int &y) {
   return match (first) -> int & {
@@ -220,30 +333,33 @@ int &select_lvalue_reference(bool first, int &x, int &y) {
 // CHECK-NEXT:    [[TMP1:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
 // CHECK-NEXT:    [[TMP2:%.*]] = load i8, ptr [[TMP1]], align 1
 // CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP2]], 0
-// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
-// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[MATCH_VALUE:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    switch i32 [[MATCH_VALUE]], label %[[MATCH_DECISION_FAILURE:.*]] [
+// CHECK-NEXT:      i32 1, label %[[MATCH_DECISION_SUCCESS:.*]]
+// CHECK-NEXT:      i32 0, label %[[MATCH_DECISION_SUCCESS1:.*]]
+// CHECK-NEXT:    ]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[X_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    store ptr [[TMP3]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    [[TMP5:%.*]] = load i8, ptr [[TMP4]], align 1
-// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP5]], 0
-// CHECK-NEXT:    [[CONV2:%.*]] = zext i1 [[LOADEDV1]] to i32
-// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[CONV2]], 0
-// CHECK-NEXT:    br i1 [[CMP3]], label %[[MATCH_SELECT_ACTION4:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION4]]:
-// CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
-// CHECK-NEXT:    store ptr [[TMP6]], ptr [[MATCH_SELECT_REFRESULT]], align 8
+// CHECK:       [[MATCH_DECISION_SUCCESS1]]:
+// CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[Y_ADDR]], align 8, !nonnull [[META1]], !align [[META2]]
+// CHECK-NEXT:    store ptr [[TMP4]], ptr [[MATCH_SELECT_REFRESULT]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
-// CHECK-NEXT:    ret ptr [[TMP7]]
+// CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[MATCH_SELECT_REFRESULT]], align 8
+// CHECK-NEXT:    ret ptr [[TMP5]]
+//
+// OPT-LABEL: define dso_local noundef nonnull align 4 dereferenceable(4) ptr @_Z23select_rvalue_referencebOiS_(
+// OPT-SAME: i1 noundef zeroext [[FIRST:%.*]], ptr nofree noundef nonnull readnone align 4 captures(ret: address, provenance) dereferenceable(4) [[X:%.*]], ptr nofree noundef nonnull readnone align 4 captures(ret: address, provenance) dereferenceable(4) [[Y:%.*]]) local_unnamed_addr #[[ATTR0]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    [[X_Y:%.*]] = select i1 [[FIRST]], ptr [[X]], ptr [[Y]]
+// OPT-NEXT:    ret ptr [[X_Y]]
 //
 int &&select_rvalue_reference(bool first, int &&x, int &&y) {
   return match (first) -> int && {
@@ -287,10 +403,12 @@ template int &select_reference_template(bool, int &, int &);
 // CHECK-NEXT:    [[TMP5:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
 // CHECK-NEXT:    [[TMP6:%.*]] = load i8, ptr [[TMP5]], align 1
 // CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP6]], 0
-// CHECK-NEXT:    [[CONV:%.*]] = zext i1 [[LOADEDV]] to i32
-// CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[CONV]], 1
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_SELECT_ACTION:.*]], label %[[MATCH_SELECT_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION]]:
+// CHECK-NEXT:    [[MATCH_VALUE:%.*]] = zext i1 [[LOADEDV]] to i32
+// CHECK-NEXT:    switch i32 [[MATCH_VALUE]], label %[[MATCH_DECISION_FAILURE:.*]] [
+// CHECK-NEXT:      i32 1, label %[[MATCH_DECISION_SUCCESS:.*]]
+// CHECK-NEXT:      i32 0, label %[[MATCH_DECISION_SUCCESS1:.*]]
+// CHECK-NEXT:    ]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
 // CHECK-NEXT:    [[X_REALP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[X]], i32 0, i32 0
 // CHECK-NEXT:    [[X_REAL:%.*]] = load double, ptr [[X_REALP]], align 8
 // CHECK-NEXT:    [[X_IMAGP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[X]], i32 0, i32 1
@@ -300,37 +418,41 @@ template int &select_reference_template(bool, int &, int &);
 // CHECK-NEXT:    store double [[X_REAL]], ptr [[MATCH_SELECT_RESULT_REALP]], align 8
 // CHECK-NEXT:    store double [[X_IMAG]], ptr [[MATCH_SELECT_RESULT_IMAGP]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
-// CHECK:       [[MATCH_SELECT_NEXT_PATTERN]]:
-// CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]]
-// CHECK-NEXT:    [[TMP8:%.*]] = load i8, ptr [[TMP7]], align 1
-// CHECK-NEXT:    [[LOADEDV1:%.*]] = icmp ne i8 [[TMP8]], 0
-// CHECK-NEXT:    [[CONV2:%.*]] = zext i1 [[LOADEDV1]] to i32
-// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[CONV2]], 0
-// CHECK-NEXT:    br i1 [[CMP3]], label %[[MATCH_SELECT_ACTION4:.*]], label %[[MATCH_SELECT_NO_MATCH:.*]]
-// CHECK:       [[MATCH_SELECT_ACTION4]]:
+// CHECK:       [[MATCH_DECISION_SUCCESS1]]:
 // CHECK-NEXT:    [[Y_REALP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[Y]], i32 0, i32 0
 // CHECK-NEXT:    [[Y_REAL:%.*]] = load double, ptr [[Y_REALP]], align 8
 // CHECK-NEXT:    [[Y_IMAGP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[Y]], i32 0, i32 1
 // CHECK-NEXT:    [[Y_IMAG:%.*]] = load double, ptr [[Y_IMAGP]], align 8
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REALP5:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAGP6:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 1
-// CHECK-NEXT:    store double [[Y_REAL]], ptr [[MATCH_SELECT_RESULT_REALP5]], align 8
-// CHECK-NEXT:    store double [[Y_IMAG]], ptr [[MATCH_SELECT_RESULT_IMAGP6]], align 8
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REALP2:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAGP3:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 1
+// CHECK-NEXT:    store double [[Y_REAL]], ptr [[MATCH_SELECT_RESULT_REALP2]], align 8
+// CHECK-NEXT:    store double [[Y_IMAG]], ptr [[MATCH_SELECT_RESULT_IMAGP3]], align 8
 // CHECK-NEXT:    br label %[[MATCH_SELECT_END]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_SELECT_NO_MATCH:.*]]
 // CHECK:       [[MATCH_SELECT_NO_MATCH]]:
-// CHECK:         call void @_ZSt9terminatev() #[[ATTR1]]
+// CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR3]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REALP7:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REAL:%.*]] = load double, ptr [[MATCH_SELECT_RESULT_REALP7]], align 8
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAGP8:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 1
-// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAG:%.*]] = load double, ptr [[MATCH_SELECT_RESULT_IMAGP8]], align 8
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REALP4:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 0
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_REAL:%.*]] = load double, ptr [[MATCH_SELECT_RESULT_REALP4]], align 8
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAGP5:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[MATCH_SELECT_RESULT]], i32 0, i32 1
+// CHECK-NEXT:    [[MATCH_SELECT_RESULT_IMAG:%.*]] = load double, ptr [[MATCH_SELECT_RESULT_IMAGP5]], align 8
 // CHECK-NEXT:    [[RETVAL_REALP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[RETVAL]], i32 0, i32 0
 // CHECK-NEXT:    [[RETVAL_IMAGP:%.*]] = getelementptr inbounds nuw { double, double }, ptr [[RETVAL]], i32 0, i32 1
 // CHECK-NEXT:    store double [[MATCH_SELECT_RESULT_REAL]], ptr [[RETVAL_REALP]], align 8
 // CHECK-NEXT:    store double [[MATCH_SELECT_RESULT_IMAG]], ptr [[RETVAL_IMAGP]], align 8
-// CHECK-NEXT:    [[TMP9:%.*]] = load { double, double }, ptr [[RETVAL]], align 8
-// CHECK-NEXT:    ret { double, double } [[TMP9]]
+// CHECK-NEXT:    [[TMP7:%.*]] = load { double, double }, ptr [[RETVAL]], align 8
+// CHECK-NEXT:    ret { double, double } [[TMP7]]
+//
+// OPT-LABEL: define dso_local noundef { double, double } @_Z14select_complexbCdS_(
+// OPT-SAME: i1 noundef zeroext [[FIRST:%.*]], double noundef [[X_COERCE0:%.*]], double noundef [[X_COERCE1:%.*]], double noundef [[Y_COERCE0:%.*]], double noundef [[Y_COERCE1:%.*]]) local_unnamed_addr #[[ATTR0]] {
+// OPT-NEXT:  [[ENTRY:.*:]]
+// OPT-NEXT:    [[X_COERCE1_Y_COERCE1:%.*]] = select i1 [[FIRST]], double [[X_COERCE1]], double [[Y_COERCE1]]
+// OPT-NEXT:    [[X_COERCE0_Y_COERCE0:%.*]] = select i1 [[FIRST]], double [[X_COERCE0]], double [[Y_COERCE0]]
+// OPT-NEXT:    [[DOTFCA_0_INSERT:%.*]] = insertvalue { double, double } poison, double [[X_COERCE0_Y_COERCE0]], 0
+// OPT-NEXT:    [[DOTFCA_1_INSERT:%.*]] = insertvalue { double, double } [[DOTFCA_0_INSERT]], double [[X_COERCE1_Y_COERCE1]], 1
+// OPT-NEXT:    ret { double, double } [[DOTFCA_1_INSERT]]
 //
 _Complex double select_complex(bool first, _Complex double x,
                                _Complex double y) {
@@ -343,4 +465,9 @@ _Complex double select_complex(bool first, _Complex double x,
 //.
 // CHECK: [[META1]] = !{}
 // CHECK: [[META2]] = !{i64 4}
+//.
+// OPT: [[META3:![0-9]+]] = !{!"int", [[META4:![0-9]+]], i64 0}
+// OPT: [[META4]] = !{!"omnipotent char", [[META5:![0-9]+]], i64 0}
+// OPT: [[META5]] = !{!"Simple C++ TBAA"}
+// OPT: [[INT_TBAA6]] = !{[[META3]], [[META3]], i64 0}
 //.

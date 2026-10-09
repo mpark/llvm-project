@@ -3601,10 +3601,72 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     }
   };
 
+  struct IntegralPatternTest {
+    const BinaryOperator *Comparison;
+    const ValueDecl *Subject;
+  };
+  auto GetIntegralPatternTest = [&](const MatchDecisionTree::PatternTest &Test)
+      -> std::optional<IntegralPatternTest> {
+    if (Stmt::getLikelihood(Test.Case->Attributes) != Stmt::LH_None)
+      return std::nullopt;
+
+    const MatchPatternInfo *Info =
+        Test.Case->PatternInstantiation->find(Test.Pattern);
+    if (!Info || !Info->Condition)
+      return std::nullopt;
+    const auto *Comparison =
+        dyn_cast<BinaryOperator>(Info->Condition->IgnoreParenImpCasts());
+    if (!Comparison || Comparison->getOpcode() != BO_EQ ||
+        !Comparison->getLHS()->getType()->isIntegralOrEnumerationType())
+      return std::nullopt;
+
+    const auto *Subject =
+        dyn_cast<DeclRefExpr>(Comparison->getLHS()->IgnoreParenImpCasts());
+    if (!Subject || Subject->getType().isVolatileQualified())
+      return std::nullopt;
+
+    const Expr *ValueExpr = Comparison->getRHS();
+    while (true) {
+      if (const auto *Parens = dyn_cast<ParenExpr>(ValueExpr))
+        ValueExpr = Parens->getSubExpr();
+      else if (const auto *Cast = dyn_cast<ImplicitCastExpr>(ValueExpr))
+        ValueExpr = Cast->getSubExpr();
+      else
+        break;
+    }
+    const auto *Value = dyn_cast<ConstantExpr>(ValueExpr);
+    if (!Value || !Value->hasAPValueResult() ||
+        !Value->getAPValueResult().isInt())
+      return std::nullopt;
+    return IntegralPatternTest{Comparison, Subject->getDecl()};
+  };
+
   auto EmitDecision = [&](auto &Self,
                           const MatchDecisionTree::Node &Node) -> void {
     // Bindings materialized in one subtree do not dominate its siblings.
     llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
+    auto EmitSwitchDecision =
+        [&](llvm::Value *Discriminator,
+            ArrayRef<const MatchDecisionTree::Node *> Tests,
+            ArrayRef<llvm::ConstantInt *> Values,
+            const MatchDecisionTree::Node *Default) {
+          SmallVector<llvm::BasicBlock *, 4> SuccessBlocks;
+          for ([[maybe_unused]] const MatchDecisionTree::Node *Test : Tests)
+            SuccessBlocks.push_back(createBasicBlock("match.decision.success"));
+          llvm::BasicBlock *DefaultBlock =
+              createBasicBlock("match.decision.failure");
+          auto *Switch = Builder.CreateSwitch(Discriminator, DefaultBlock,
+                                              SuccessBlocks.size());
+          for (auto [Value, Success] : llvm::zip_equal(Values, SuccessBlocks))
+            Switch->addCase(Value, Success);
+
+          for (auto [Test, Success] : llvm::zip_equal(Tests, SuccessBlocks)) {
+            EmitBlock(Success);
+            Self(Self, *Test->Success);
+          }
+          EmitBlock(DefaultBlock);
+          Self(Self, *Default);
+        };
 
     switch (Node.Kind) {
     case MatchDecisionTree::Node::NK_Failure:
@@ -3631,6 +3693,39 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       return;
     }
     case MatchDecisionTree::Node::NK_PatternTest: {
+      if (auto First = GetIntegralPatternTest(Node.ResidualTest)) {
+        SmallVector<const MatchDecisionTree::Node *, 4> Tests;
+        SmallVector<llvm::ConstantInt *, 4> Values;
+        const MatchDecisionTree::Node *Default = &Node;
+        do {
+          auto Test = GetIntegralPatternTest(Default->ResidualTest);
+          if (!Test || Test->Subject != First->Subject ||
+              !getContext().hasSameType(
+                  Test->Comparison->getLHS()->getType(),
+                  First->Comparison->getLHS()->getType()) ||
+              Default->ResidualTest.ProjectionPath !=
+                  Node.ResidualTest.ProjectionPath)
+            break;
+          auto *Value = dyn_cast<llvm::ConstantInt>(
+              EmitScalarExpr(Test->Comparison->getRHS()));
+          assert(Value && "expected integral constant pattern value");
+          if (llvm::is_contained(Values, Value))
+            break;
+          Tests.push_back(Default);
+          Values.push_back(Value);
+          Default = Default->Failure.get();
+        } while (Default->Kind == MatchDecisionTree::Node::NK_PatternTest);
+
+        if (Tests.size() > 1) {
+          EmitProjectionPath(Node.ResidualTest.ProjectionPath);
+          llvm::Value *Discriminator =
+              EmitScalarExpr(First->Comparison->getLHS());
+          Discriminator->setName("match.value");
+          EmitSwitchDecision(Discriminator, Tests, Values, Default);
+          return;
+        }
+      }
+
       EmitProjectionPath(Node.ResidualTest.ProjectionPath);
       llvm::BasicBlock *Success = createBasicBlock("match.decision.success");
       llvm::BasicBlock *Failure = createBasicBlock("match.decision.failure");
@@ -3681,26 +3776,11 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                Default->MatchTest.Discriminator->getIntermediateVar() ==
                    IndexVar);
 
-      SmallVector<llvm::BasicBlock *, 4> SuccessBlocks;
-      for ([[maybe_unused]] const MatchDecisionTree::Node *Test : Tests)
-        SuccessBlocks.push_back(createBasicBlock("match.decision.success"));
-      llvm::BasicBlock *DefaultBlock =
-          createBasicBlock("match.decision.failure");
       llvm::Value *Discriminator = EmitLoadOfScalar(
           MakeAddrLValue(GetAddrOfLocalVar(IndexVar), IndexVar->getType()),
           IndexVar->getLocation());
       Discriminator->setName("match.index");
-      auto *Switch = Builder.CreateSwitch(Discriminator, DefaultBlock,
-                                          SuccessBlocks.size());
-      for (auto [Value, Success] : llvm::zip_equal(Values, SuccessBlocks))
-        Switch->addCase(Value, Success);
-
-      for (auto [Test, Success] : llvm::zip_equal(Tests, SuccessBlocks)) {
-        EmitBlock(Success);
-        Self(Self, *Test->Success);
-      }
-      EmitBlock(DefaultBlock);
-      Self(Self, *Default);
+      EmitSwitchDecision(Discriminator, Tests, Values, Default);
       return;
     }
 
