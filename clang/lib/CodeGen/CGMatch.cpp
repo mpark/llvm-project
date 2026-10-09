@@ -18,6 +18,7 @@ struct MatchColumn {
   const MatchPattern *Pattern = nullptr;
   const MatchProjection *Projection = nullptr;
   std::optional<unsigned> AlternativeIndex;
+  bool MaterializeProjection = false;
   SmallVector<const MatchProjection *, 2> ProjectionPath;
 
   const VarDecl *getTestVar() const {
@@ -46,16 +47,18 @@ struct MatchRow {
 };
 
 static const MatchProjection *
-getAlternativeTest(const MatchPattern *Pattern,
-                   const MatchPatternInstantiation *Instantiation) {
+getDecisionProjection(const MatchPattern *Pattern,
+                      const MatchPatternInstantiation *Instantiation) {
   const MatchPatternInfo *Info = Instantiation->find(Pattern);
   const MatchProjection *Projection = Info ? Info->Projection : nullptr;
-  if (!Info || !Projection ||
-      Projection->getKind() != MatchProjection::AlternativeProjection ||
-      !Projection->getIntermediateVar() ||
-      (!Info->IsOpenAlternative && Info->SelectedAlternatives.size() != 1))
+  if (!Info || !Projection || !Projection->getIntermediateVar())
     return nullptr;
-  return Projection;
+  if (Projection->getKind() == MatchProjection::CastProjection)
+    return isa<TypePattern, DeclarationPattern>(Pattern) ? Projection : nullptr;
+  if (Projection->getKind() == MatchProjection::AlternativeProjection &&
+      (Info->IsOpenAlternative || Info->SelectedAlternatives.size() == 1))
+    return Projection;
+  return nullptr;
 }
 
 static bool
@@ -113,7 +116,7 @@ isDecisionTreePattern(const MatchPattern *Pattern,
                           return isDecisionTreePattern(Child, Instantiation);
                         });
   if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
-    if (!getAlternativeTest(Alternative, Instantiation))
+    if (!getDecisionProjection(Alternative, Instantiation))
       return false;
     if (const TypePattern *Selector = Alternative->getTypeSelector()) {
       const MatchPatternInfo *SelectorInfo = Instantiation->find(Selector);
@@ -126,7 +129,7 @@ isDecisionTreePattern(const MatchPattern *Pattern,
            isDecisionTreePattern(Alternative->getSubPattern(), Instantiation);
   }
   if (isa<ExpressionPattern, TypePattern>(Pattern)) {
-    if (getAlternativeTest(Pattern, Instantiation))
+    if (getDecisionProjection(Pattern, Instantiation))
       return true;
     const MatchPatternInfo *Info = Instantiation->find(Pattern);
     if (!Info || !Info->Projection)
@@ -206,11 +209,13 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
     Column.Pattern = Pattern;
     Column.ProjectionPath.append(ProjectionPath.begin(), ProjectionPath.end());
     if (const MatchProjection *Projection =
-            getAlternativeTest(Pattern, Instantiation)) {
+            getDecisionProjection(Pattern, Instantiation)) {
       const MatchPatternInfo *Info = Instantiation->find(Pattern);
       Column.Projection = Projection;
+      Column.MaterializeProjection = isa<DeclarationPattern>(Pattern);
       if (!Info->IsOpenAlternative)
-        Column.AlternativeIndex = Info->SelectedAlternatives.front();
+        if (Projection->getKind() == MatchProjection::AlternativeProjection)
+          Column.AlternativeIndex = Info->SelectedAlternatives.front();
     }
     SmallVector<MatchRow, 4> Result;
     Result.push_back(std::move(Row));
@@ -414,6 +419,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   const VarDecl *TestVar = Selected->getTestVar();
   SmallVector<MatchRow, 8> SuccessRows;
   SmallVector<MatchRow, 8> FailureRows;
+  bool MaterializeProjection = false;
   for (const MatchRow &Row : Rows) {
     const MatchColumn *Column = Row.find(TestVar);
     // Rows without this column apply on both edges. A successful projection
@@ -427,6 +433,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
     } else if (Column->AlternativeIndex == Selected->AlternativeIndex &&
                (Column->AlternativeIndex ||
                 Column->Projection == Selected->Projection)) {
+      MaterializeProjection |= Column->MaterializeProjection;
       SmallVector<MatchRow, 4> Specialized = specializeColumn(Row, Column);
       SuccessRows.append(std::make_move_iterator(Specialized.begin()),
                          std::make_move_iterator(Specialized.end()));
@@ -439,6 +446,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   Result->MatchTest.Case = First.Case;
   Result->MatchTest.AlternativeIndex = Selected->AlternativeIndex;
   Result->MatchTest.Projection = Selected->Projection;
+  Result->MatchTest.MaterializeProjection = MaterializeProjection;
   Result->MatchTest.ProjectionPath = Selected->ProjectionPath;
   Result->Success = buildDecisionTree(SuccessRows);
   Result->Failure = buildDecisionTree(FailureRows);
