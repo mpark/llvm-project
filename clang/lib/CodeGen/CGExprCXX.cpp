@@ -3429,6 +3429,9 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
 
   MatchDecisionTree Decision = MatchDecisionTree::build(Cases);
   SmallVector<SharedCaseHandler, 4> SharedCaseHandlers;
+  SmallVector<llvm::BasicBlock *, 8> CompletedCaseActions(S.getNumCases());
+  SmallVector<const MatchCaseInstantiation *, 8> CompletedActionCases(
+      S.getNumCases());
   SmallVector<unsigned, 8> SharedHandlerForSourceCase(S.getNumCases(),
                                                       Cases.size());
   for (unsigned CaseBegin = 0; CaseBegin != Cases.size();) {
@@ -3483,7 +3486,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                            ArrayRef<const MatchPattern *>
                                KnownDiscriminatorPatterns,
                            ArrayRef<const MatchPattern *> CompletedPatterns,
-                           llvm::BasicBlock *PatternFailure,
+                           bool ShareAction, llvm::BasicBlock *PatternFailure,
                            llvm::BasicBlock *GuardFailure) {
     auto EmitPatternBranch = [&](llvm::BasicBlock *Success,
                                  llvm::BasicBlock *Failure,
@@ -3536,11 +3539,20 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     if (llvm::is_contained(CompletedPatterns, Case.Pattern) &&
         !hasMatchPatternDeclarations(Case.Pattern, Case.PatternInstantiation) &&
         !Case.Guard.hasGuard()) {
-      {
-        RunCleanupsScope CaseScope(*this);
-        EmitCaseHandler(Case);
+      if (ShareAction) {
+        llvm::BasicBlock *&Action = CompletedCaseActions[Case.CaseIndex];
+        if (!Action) {
+          Action = createBasicBlock("match.select.action");
+          CompletedActionCases[Case.CaseIndex] = &Case;
+        }
+        EmitBranch(Action);
+      } else {
+        {
+          RunCleanupsScope CaseScope(*this);
+          EmitCaseHandler(Case);
+        }
+        EmitBranch(SelectEndBB);
       }
-      EmitBranch(SelectEndBB);
       return;
     }
 
@@ -3664,7 +3676,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                             : PatternFailure;
       EmitCandidate(*Node.MatchCandidate.Case,
                     Node.MatchCandidate.KnownDiscriminatorPatterns,
-                    Node.MatchCandidate.CompletedPatterns, PatternFailure,
+                    Node.MatchCandidate.CompletedPatterns,
+                    Node.MatchCandidate.ShareAction, PatternFailure,
                     GuardFailure);
       EmitBlock(PatternFailure, /*IsFinished=*/true);
       if (HaveInsertPoint())
@@ -3791,6 +3804,18 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
   };
 
   EmitDecision(EmitDecision, Decision.getRoot());
+  for (auto [Action, Case] :
+       llvm::zip_equal(CompletedCaseActions, CompletedActionCases)) {
+    if (!Action)
+      continue;
+    llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
+    EmitBlock(Action, /*IsFinished=*/true);
+    {
+      RunCleanupsScope CaseScope(*this);
+      EmitCaseHandler(*Case);
+    }
+    EmitBranch(SelectEndBB);
+  }
   for (SharedCaseHandler &Shared : SharedCaseHandlers) {
     if (!Shared.ActionBB)
       continue;
