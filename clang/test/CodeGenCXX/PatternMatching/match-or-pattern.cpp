@@ -68,6 +68,7 @@ struct Base {
   virtual ~Base();
 };
 struct Derived : Base {};
+struct Sibling : Base {};
 struct Tag {};
 
 inline constexpr Tag first_tag;
@@ -81,6 +82,17 @@ bool operator==(const Base&, Tag);
 int planned_or_before_cast(Base& value) {
   return match (value) {
     case (first_tag or second_tag) and Derived& => 1;
+    case _ => 0;
+  };
+}
+
+// OR-TREE-LABEL: define{{.*}} i32 @_Z15planned_type_orR4Base
+// OR-TREE-COUNT-2: call ptr @__dynamic_cast
+// OR-TREE: match.select.shared_action:
+// OR-TREE-COUNT-1: store i32 1
+int planned_type_or(Base& value) {
+  return match (value) {
+    case Derived& or Sibling& => 1;
     case _ => 0;
   };
 }

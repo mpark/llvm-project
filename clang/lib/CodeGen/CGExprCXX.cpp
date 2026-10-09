@@ -2508,14 +2508,14 @@ void CodeGenFunction::EmitMatchPatternBranch(
     const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     const Expr *Subject, llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
     StagedPatternDeclarations *StagedDeclarations,
-    ArrayRef<const MatchPattern *> KnownDiscriminatorPatterns,
+    ArrayRef<const MatchPattern *> KnownTestPatterns,
     ArrayRef<const MatchPattern *> CompletedPatterns) {
   if (llvm::is_contained(CompletedPatterns, Pattern)) {
     EmitBranch(Success);
     return;
   }
 
-  if (llvm::is_contained(KnownDiscriminatorPatterns, Pattern) &&
+  if (llvm::is_contained(KnownTestPatterns, Pattern) &&
       isa<ExpressionPattern>(Pattern)) {
     EmitBranch(Success);
     return;
@@ -2526,7 +2526,7 @@ void CodeGenFunction::EmitMatchPatternBranch(
     return EmitMatchPatternBranch(
         static_cast<const ParenPattern *>(Pattern)->getSubPattern(),
         Instantiation, Subject, Success, Failure, StagedDeclarations,
-        KnownDiscriminatorPatterns, CompletedPatterns);
+        KnownTestPatterns, CompletedPatterns);
   case MatchPattern::MatchPatternClass::AndPatternClass: {
     const auto *And = static_cast<const AndPattern *>(Pattern);
     assert(!And->conjuncts().empty() && "and-pattern has no conjuncts");
@@ -2535,7 +2535,7 @@ void CodeGenFunction::EmitMatchPatternBranch(
                                      ? Success
                                      : createBasicBlock("match.and.next");
       EmitMatchPatternBranch(Conjunct, Instantiation, Subject, NextBB, Failure,
-                             StagedDeclarations, KnownDiscriminatorPatterns,
+                             StagedDeclarations, KnownTestPatterns,
                              CompletedPatterns);
       if (I + 1 == And->conjuncts().size())
         break;
@@ -2563,8 +2563,8 @@ void CodeGenFunction::EmitMatchPatternBranch(
       llvm::BasicBlock *NextBB =
           I + 1 == Viable.size() ? Failure : createBasicBlock("match.or.next");
       EmitMatchPatternBranch(Alternative, Instantiation, Subject, Success,
-                             NextBB, StagedDeclarations,
-                             KnownDiscriminatorPatterns, CompletedPatterns);
+                             NextBB, StagedDeclarations, KnownTestPatterns,
+                             CompletedPatterns);
       if (I + 1 == Viable.size())
         break;
       EmitBlock(NextBB);
@@ -2577,7 +2577,7 @@ void CodeGenFunction::EmitMatchPatternBranch(
     const MatchProjection *Projection = Info ? Info->Projection : nullptr;
     assert(Projection && "expected alternative projection");
 
-    if (!llvm::is_contained(KnownDiscriminatorPatterns, Alternative)) {
+    if (!llvm::is_contained(KnownTestPatterns, Alternative)) {
       EmitMatchDiscriminator(*Projection);
       if (const VarDecl *Condition = Projection->getConditionVar();
           Condition && !LocalDeclMap.count(Condition))
@@ -2601,8 +2601,8 @@ void CodeGenFunction::EmitMatchPatternBranch(
         llvm::BasicBlock *SelectorPassed =
             createBasicBlock("match.alt.selector_passed");
         EmitMatchPatternBranch(Selector, Instantiation, nullptr, SelectorPassed,
-                               Failure, StagedDeclarations,
-                               KnownDiscriminatorPatterns, CompletedPatterns);
+                               Failure, StagedDeclarations, KnownTestPatterns,
+                               CompletedPatterns);
         EmitBlock(SelectorPassed);
         EmitSelectedMatchPatternProjections(Selector, Instantiation);
       }
@@ -2610,8 +2610,8 @@ void CodeGenFunction::EmitMatchPatternBranch(
 
     if (const MatchPattern *SubPattern = Alternative->getSubPattern())
       EmitMatchPatternBranch(SubPattern, Instantiation, nullptr, Success,
-                             Failure, StagedDeclarations,
-                             KnownDiscriminatorPatterns, CompletedPatterns);
+                             Failure, StagedDeclarations, KnownTestPatterns,
+                             CompletedPatterns);
     else
       EmitBranch(Success);
     return;
@@ -2649,8 +2649,8 @@ void CodeGenFunction::EmitMatchPatternBranch(
               ? Success
               : createBasicBlock("match.decomp.next_pattern");
       EmitMatchPatternBranch(SubPattern, Instantiation, nullptr, NextBB,
-                             Failure, StagedDeclarations,
-                             KnownDiscriminatorPatterns, CompletedPatterns);
+                             Failure, StagedDeclarations, KnownTestPatterns,
+                             CompletedPatterns);
       if (I + 1 == Patterns.size())
         break;
       EmitBlock(NextBB);
@@ -3483,8 +3483,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
   };
 
   auto EmitCandidate = [&](const MatchCaseInstantiation &Case,
-                           ArrayRef<const MatchPattern *>
-                               KnownDiscriminatorPatterns,
+                           ArrayRef<const MatchPattern *> KnownTestPatterns,
                            ArrayRef<const MatchPattern *> CompletedPatterns,
                            bool ShareAction, llvm::BasicBlock *PatternFailure,
                            llvm::BasicBlock *GuardFailure) {
@@ -3492,11 +3491,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                                  llvm::BasicBlock *Failure,
                                  StagedPatternDeclarations *StagedDeclarations =
                                      nullptr) {
-      if (!KnownDiscriminatorPatterns.empty() || !CompletedPatterns.empty()) {
-        EmitMatchPatternBranch(Case.Pattern, Case.PatternInstantiation,
-                               S.getSubject(), Success, Failure,
-                               StagedDeclarations, KnownDiscriminatorPatterns,
-                               CompletedPatterns);
+      if (!KnownTestPatterns.empty() || !CompletedPatterns.empty()) {
+        EmitMatchPatternBranch(
+            Case.Pattern, Case.PatternInstantiation, S.getSubject(), Success,
+            Failure, StagedDeclarations, KnownTestPatterns, CompletedPatterns);
         return;
       }
 
@@ -3674,11 +3672,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       llvm::BasicBlock *GuardFailure =
           Node.GuardFailure ? createBasicBlock("match.decision.next_case")
                             : PatternFailure;
-      EmitCandidate(*Node.MatchCandidate.Case,
-                    Node.MatchCandidate.KnownDiscriminatorPatterns,
-                    Node.MatchCandidate.CompletedPatterns,
-                    Node.MatchCandidate.ShareAction, PatternFailure,
-                    GuardFailure);
+      EmitCandidate(
+          *Node.MatchCandidate.Case, Node.MatchCandidate.KnownTestPatterns,
+          Node.MatchCandidate.CompletedPatterns,
+          Node.MatchCandidate.ShareAction, PatternFailure, GuardFailure);
       EmitBlock(PatternFailure, /*IsFinished=*/true);
       if (HaveInsertPoint())
         Self(Self, *Node.Failure);
@@ -3749,10 +3746,10 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     }
 
     EmitProjectionPath(Node.MatchTest.ProjectionPath);
-    EmitMatchDiscriminator(*Node.MatchTest.Discriminator);
-    const VarDecl *IndexVar =
-        Node.MatchTest.Discriminator->getIntermediateVar();
-    if (IndexVar->getType()->isIntegralOrEnumerationType()) {
+    EmitMatchDiscriminator(*Node.MatchTest.Projection);
+    const VarDecl *IndexVar = Node.MatchTest.Projection->getIntermediateVar();
+    if (Node.MatchTest.AlternativeIndex &&
+        IndexVar->getType()->isIntegralOrEnumerationType()) {
       auto *IndexType =
           cast<llvm::IntegerType>(ConvertType(IndexVar->getType()));
       // Coalesce a chain of distinct tests on the same discriminator into
@@ -3763,15 +3760,15 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       const MatchDecisionTree::Node *Default = &Node;
       do {
         auto *Value = llvm::ConstantInt::get(
-            IndexType, Default->MatchTest.AlternativeIndex);
+            IndexType, *Default->MatchTest.AlternativeIndex);
         if (llvm::is_contained(Values, Value))
           break;
         Tests.push_back(Default);
         Values.push_back(Value);
         Default = Default->Failure.get();
       } while (Default->Kind == MatchDecisionTree::Node::NK_Test &&
-               Default->MatchTest.Discriminator->getIntermediateVar() ==
-                   IndexVar);
+               Default->MatchTest.AlternativeIndex &&
+               Default->MatchTest.Projection->getIntermediateVar() == IndexVar);
 
       llvm::Value *Discriminator = EmitLoadOfScalar(
           MakeAddrLValue(GetAddrOfLocalVar(IndexVar), IndexVar->getType()),
@@ -3781,7 +3778,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       return;
     }
 
-    const MatchProjection *Projection = Node.MatchTest.Discriminator;
+    const MatchProjection *Projection = Node.MatchTest.Projection;
     RunCleanupsScope ConditionScope(*this);
     if (const VarDecl *Condition = Projection->getConditionVar()) {
       // The same row can occur in disjoint subtrees. Give each emitted test
