@@ -1,5 +1,8 @@
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown \
 // RUN:   -fpattern-matching -O1 -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-unknown-unknown \
+// RUN:   -fpattern-matching -O0 -emit-llvm %s -o - | \
+// RUN:   FileCheck %s --check-prefix=OR-TREE
 
 // CHECK-LABEL: define{{.*}} i32 @_Z8classifyi(
 // CHECK-SAME: i32 {{.*}} %[[VALUE:.*]])
@@ -36,6 +39,18 @@ bool operator==(int value, SecondPattern) { return second(value); }
 // CHECK: phi i1 [ true, %{{.*}} ], [ %[[SECOND]], %[[SECOND_BLOCK]] ]
 bool short_circuit(int value) {
   return match(value, case first_pattern or second_pattern);
+}
+
+// Expanding an or-pattern into rows must not cause the complete source pattern
+// to be evaluated again when its first row fails.
+// CHECK-LABEL: define{{.*}} i32 @_Z23selection_short_circuiti(
+// CHECK-COUNT-1: call{{.*}} i1 @_Z5firsti
+// CHECK-COUNT-1: call{{.*}} i1 @_Z6secondi
+int selection_short_circuit(int value) {
+  return match (value) {
+    case first_pattern or second_pattern => 1;
+    case _ => 0;
+  };
 }
 
 struct Pair {
@@ -93,6 +108,8 @@ struct D {};
 struct E {};
 struct F {};
 
+enum class ChoiceState : unsigned { a, b, c, d, e, f };
+
 struct Choice {
   unsigned active;
   A a;
@@ -109,21 +126,21 @@ struct std::alternative_traits<Choice> {
       ^^A, ^^B, ^^C, ^^D, ^^E, ^^F};
   static constexpr bool has_residual_states = false;
 
-  static constexpr unsigned index(const Choice& choice) noexcept {
-    return choice.active;
+  static constexpr ChoiceState index(const Choice& choice) noexcept {
+    return static_cast<ChoiceState>(choice.active);
   }
 
-  template <__SIZE_TYPE__ I, class Self>
+  template <ChoiceState I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
-    if constexpr (I == 0)
+    if constexpr (I == ChoiceState::a)
       return (static_cast<Self&&>(choice).a);
-    else if constexpr (I == 1)
+    else if constexpr (I == ChoiceState::b)
       return (static_cast<Self&&>(choice).b);
-    else if constexpr (I == 2)
+    else if constexpr (I == ChoiceState::c)
       return (static_cast<Self&&>(choice).c);
-    else if constexpr (I == 3)
+    else if constexpr (I == ChoiceState::d)
       return (static_cast<Self&&>(choice).d);
-    else if constexpr (I == 4)
+    else if constexpr (I == ChoiceState::e)
       return (static_cast<Self&&>(choice).e);
     else
       return (static_cast<Self&&>(choice).f);
@@ -140,4 +157,57 @@ void ignored_alternatives(const Choice& choice) {
     case { const A & } or
          { const D & } => ;
   }
+}
+
+// Or-pattern operands participate in the same discriminator switch as other
+// source cases.
+// OR-TREE-LABEL: define{{.*}} i32 @_Z20grouped_alternativesRK6Choice
+// OR-TREE: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// OR-TREE-NOT: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// OR-TREE: switch i32 %{{.*}}, label %{{.*}} [
+// OR-TREE-DAG: i32 0, label %{{.*}}
+// OR-TREE-DAG: i32 1, label %{{.*}}
+// OR-TREE-DAG: i32 2, label %{{.*}}
+// OR-TREE-DAG: i32 3, label %{{.*}}
+// OR-TREE-DAG: i32 4, label %{{.*}}
+// OR-TREE-DAG: i32 5, label %{{.*}}
+int grouped_alternatives(const Choice& choice) {
+  return match (choice) {
+    case { .a: _ } or { .d: _ } => 5;
+    case { const B & } => 1;
+    case { const C & } => 2;
+    case { const E & } => 3;
+    case { const F & } => 4;
+  };
+}
+
+// Declaration-free left conjuncts can be normalized before a final binding.
+// OR-TREE-LABEL: define{{.*}} i32 @_Z19grouped_and_bindingRK6Choice
+// OR-TREE-COUNT-1: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// OR-TREE: switch i32 %{{.*}}, label %{{.*}} [
+// OR-TREE-DAG: i32 0, label %{{.*}}
+// OR-TREE-DAG: i32 3, label %{{.*}}
+int grouped_and_binding(const Choice& choice) {
+  return match (choice) {
+    case ({ .a: _ } or { .d: _ }) and const Choice& whole =>
+      static_cast<int>(whole.active);
+    case _ => -1;
+  };
+}
+
+struct ChoicePair {
+  Choice first;
+  Choice second;
+};
+
+// Or-patterns nested under decomposition are expanded before the branching
+// column is selected.
+// OR-TREE-LABEL: define{{.*}} i32 @_Z19nested_alternativesRK10ChoicePair
+// OR-TREE-COUNT-2: call{{.*}} @_ZNSt18alternative_traitsI6ChoiceE5indexERKS0_
+// OR-TREE-COUNT-2: switch i32
+int nested_alternatives(const ChoicePair& choices) {
+  return match (choices) {
+    case [{ .a: _ } or { .d: _ }, { .b: _ }] => 1;
+    case _ => 0;
+  };
 }
