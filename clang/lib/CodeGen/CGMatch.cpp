@@ -12,12 +12,15 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <optional>
+
 using namespace clang;
 using namespace CodeGen;
 
 namespace {
 struct MatchPathComponent {
   enum ComponentKind { Decomposition, ClosedAlternative, OpenAlternative } Kind;
+  const MatchProjection *Projection = nullptr;
   unsigned Index = 0;
   QualType Type;
 };
@@ -37,7 +40,6 @@ struct MatchColumn {
   unsigned AlternativeIndex = 0;
   QualType ProjectionType;
   bool MaterializeProjection = false;
-  SmallVector<const MatchProjection *, 2> ProjectionPath;
   SmallVector<MatchPathComponent, 2> SubjectPath;
 };
 
@@ -53,6 +55,12 @@ struct MatchRow {
   bool AllowResidualTests = true;
   bool NeedsSharedAction = false;
 };
+
+static SmallVector<MatchRow, 4> singleRow(MatchRow Row) {
+  SmallVector<MatchRow, 4> Result;
+  Result.push_back(std::move(Row));
+  return Result;
+}
 
 static bool hasSameTestSubject(const MatchColumn &LHS, const MatchColumn &RHS,
                                const ASTContext &Context) {
@@ -110,6 +118,16 @@ static bool hasSameConstructor(const MatchColumn &LHS, const MatchColumn &RHS) {
                                      RHS.IntegralConstructor);
   }
   llvm_unreachable("unknown match column kind");
+}
+
+static SmallVector<const MatchProjection *, 2>
+getProjectionPath(ArrayRef<MatchPathComponent> SubjectPath) {
+  SmallVector<const MatchProjection *, 2> Result;
+  for (const MatchPathComponent &Component : SubjectPath) {
+    assert(Component.Projection && "subject path component has no projection");
+    Result.push_back(Component.Projection);
+  }
+  return Result;
 }
 
 struct IntegralPatternTest {
@@ -206,8 +224,8 @@ collectAndConjuncts(const MatchPattern *Pattern,
 }
 
 static bool
-isDecisionTreePattern(const MatchPattern *Pattern,
-                      const MatchPatternInstantiation *Instantiation) {
+isFullyPlannablePattern(const MatchPattern *Pattern,
+                        const MatchPatternInstantiation *Instantiation) {
   Pattern = Pattern->IgnoreParens();
   if (isa<WildcardPattern>(Pattern))
     return true;
@@ -216,14 +234,14 @@ isDecisionTreePattern(const MatchPattern *Pattern,
         llvm::enumerate(Or->alternatives()), [&](auto Alternative) {
           return !Instantiation->isViableOrAlternative(Or,
                                                        Alternative.index()) ||
-                 isDecisionTreePattern(Alternative.value(), Instantiation);
+                 isFullyPlannablePattern(Alternative.value(), Instantiation);
         });
   if (isa<AndPattern, DeclarationPattern>(Pattern))
     return false;
   if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
     return llvm::all_of(Instantiation->getDecompositionPatterns(Decomposition),
                         [&](const MatchPattern *Child) {
-                          return isDecisionTreePattern(Child, Instantiation);
+                          return isFullyPlannablePattern(Child, Instantiation);
                         });
   if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
     if (!getDecisionProjection(Alternative, Instantiation))
@@ -236,7 +254,7 @@ isDecisionTreePattern(const MatchPattern *Pattern,
         return false;
     }
     return !Alternative->getSubPattern() ||
-           isDecisionTreePattern(Alternative->getSubPattern(), Instantiation);
+           isFullyPlannablePattern(Alternative->getSubPattern(), Instantiation);
   }
   if (isa<ExpressionPattern, TypePattern>(Pattern)) {
     if (getDecisionProjection(Pattern, Instantiation))
@@ -255,27 +273,25 @@ isDecisionTreePattern(const MatchPattern *Pattern,
 static SmallVector<MatchRow, 4>
 expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
                   const MatchPatternInstantiation *Instantiation,
-                  ArrayRef<const MatchProjection *> ProjectionPath,
                   ArrayRef<MatchPathComponent> SubjectPath,
                   const ASTContext &Context);
 
 static SmallVector<MatchRow, 4>
 expandDecompositionRows(MatchRow Row, ArrayRef<MatchPattern *> Patterns,
                         const MatchPatternInstantiation *Instantiation,
-                        ArrayRef<const MatchProjection *> ProjectionPath,
                         ArrayRef<MatchPathComponent> SubjectPath,
+                        const MatchProjection *Projection,
                         const ASTContext &Context) {
   SmallVector<MatchRow, 4> Rows;
   Rows.push_back(std::move(Row));
   for (auto [Index, Pattern] : llvm::enumerate(Patterns)) {
     SmallVector<MatchPathComponent, 4> ChildPath(SubjectPath);
     ChildPath.push_back(
-        {MatchPathComponent::Decomposition, unsigned(Index), {}});
+        {MatchPathComponent::Decomposition, Projection, unsigned(Index), {}});
     SmallVector<MatchRow, 4> Expanded;
     for (MatchRow &Current : Rows) {
-      SmallVector<MatchRow, 4> PatternRows =
-          expandPatternRows(std::move(Current), Pattern, Instantiation,
-                            ProjectionPath, ChildPath, Context);
+      SmallVector<MatchRow, 4> PatternRows = expandPatternRows(
+          std::move(Current), Pattern, Instantiation, ChildPath, Context);
       Expanded.append(std::make_move_iterator(PatternRows.begin()),
                       std::make_move_iterator(PatternRows.end()));
     }
@@ -287,25 +303,23 @@ expandDecompositionRows(MatchRow Row, ArrayRef<MatchPattern *> Patterns,
 static SmallVector<MatchRow, 4>
 expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
                   const MatchPatternInstantiation *Instantiation,
-                  ArrayRef<const MatchProjection *> ProjectionPath,
                   ArrayRef<MatchPathComponent> SubjectPath,
                   const ASTContext &Context) {
   Pattern = Pattern->IgnoreParens();
 
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     SmallVector<MatchRow, 4> Result;
-    bool IsDecisionTreePattern = isDecisionTreePattern(Or, Instantiation);
-    if (!IsDecisionTreePattern)
+    bool IsFullyPlannable = isFullyPlannablePattern(Or, Instantiation);
+    if (!IsFullyPlannable)
       Row.AllowResidualTests = false;
     else
       Row.NeedsSharedAction = true;
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives())) {
       if (!Instantiation->isViableOrAlternative(Or, I))
         continue;
-      SmallVector<MatchRow, 4> AlternativeRows =
-          expandPatternRows(Row, Alternative, Instantiation, ProjectionPath,
-                            SubjectPath, Context);
-      if (IsDecisionTreePattern)
+      SmallVector<MatchRow, 4> AlternativeRows = expandPatternRows(
+          Row, Alternative, Instantiation, SubjectPath, Context);
+      if (IsFullyPlannable)
         for (MatchRow &AlternativeRow : AlternativeRows)
           AlternativeRow.CompletedWhenExhausted.push_back(Or);
       Result.append(std::make_move_iterator(AlternativeRows.begin()),
@@ -316,20 +330,16 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
 
   if (const auto *And = dyn_cast<AndPattern>(Pattern))
     return expandPatternRows(std::move(Row), And->conjuncts().front(),
-                             Instantiation, ProjectionPath, SubjectPath,
-                             Context);
+                             Instantiation, SubjectPath, Context);
 
   if (isa<WildcardPattern>(Pattern)) {
-    SmallVector<MatchRow, 4> Result;
-    Result.push_back(std::move(Row));
-    return Result;
+    return singleRow(std::move(Row));
   }
 
   const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
   if (!Decomposition) {
     MatchColumn &Column = Row.Columns.emplace_back();
     Column.Pattern = Pattern;
-    Column.ProjectionPath.append(ProjectionPath.begin(), ProjectionPath.end());
     Column.SubjectPath.append(SubjectPath.begin(), SubjectPath.end());
     if (const MatchProjection *Projection =
             getDecisionProjection(Pattern, Instantiation)) {
@@ -352,9 +362,7 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
       Column.IntegralComparison = Test->Comparison;
       Column.IntegralConstructor = std::move(Test->Value);
     }
-    SmallVector<MatchRow, 4> Result;
-    Result.push_back(std::move(Row));
-    return Result;
+    return singleRow(std::move(Row));
   }
 
   const MatchPatternInfo *Info = Instantiation->find(Decomposition);
@@ -362,11 +370,9 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
   assert(Projection &&
          Projection->getKind() == MatchProjection::DecompositionProjection &&
          "expected decomposition projection");
-  SmallVector<const MatchProjection *, 4> ChildPath(ProjectionPath);
-  ChildPath.push_back(Projection);
   return expandDecompositionRows(
       std::move(Row), Instantiation->getDecompositionPatterns(Decomposition),
-      Instantiation, ChildPath, SubjectPath, Context);
+      Instantiation, SubjectPath, Projection, Context);
 }
 
 static SmallVector<MatchRow, 4> specializeColumn(const MatchRow &Source,
@@ -378,30 +384,25 @@ static SmallVector<MatchRow, 4> specializeColumn(const MatchRow &Source,
   Row.Columns.erase(Row.Columns.begin() + Index);
 
   const auto *Alternative = dyn_cast<AlternativePattern>(Column->Pattern);
-  if (!Alternative || !Alternative->getSubPattern()) {
-    SmallVector<MatchRow, 4> Result;
-    Result.push_back(std::move(Row));
-    return Result;
-  }
+  if (!Alternative || !Alternative->getSubPattern())
+    return singleRow(std::move(Row));
 
   const MatchPatternInfo *Info =
       Source.Case->PatternInstantiation->find(Alternative);
   assert(Info && Info->Projection && "expected alternative projection");
-  SmallVector<const MatchProjection *, 4> PayloadPath;
-  PayloadPath.append(Column->ProjectionPath.begin(),
-                     Column->ProjectionPath.end());
-  PayloadPath.push_back(Info->Projection);
   SmallVector<MatchPathComponent, 4> SubjectPath(Column->SubjectPath.begin(),
                                                  Column->SubjectPath.end());
   if (Column->Kind == MatchColumn::ClosedAlternative)
-    SubjectPath.push_back(
-        {MatchPathComponent::ClosedAlternative, Column->AlternativeIndex, {}});
+    SubjectPath.push_back({MatchPathComponent::ClosedAlternative,
+                           Info->Projection,
+                           Column->AlternativeIndex,
+                           {}});
   else
-    SubjectPath.push_back(
-        {MatchPathComponent::OpenAlternative, 0, Column->ProjectionType});
+    SubjectPath.push_back({MatchPathComponent::OpenAlternative,
+                           Info->Projection, 0, Column->ProjectionType});
   return expandPatternRows(std::move(Row), Alternative->getSubPattern(),
-                           Source.Case->PatternInstantiation, PayloadPath,
-                           SubjectPath, Context);
+                           Source.Case->PatternInstantiation, SubjectPath,
+                           Context);
 }
 
 static bool canEmitResidualTest(const MatchColumn &Column,
@@ -435,9 +436,7 @@ static bool canNormalizeRow(const MatchRow &Row) {
 static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row,
                                              const ASTContext &Context) {
   if (!canNormalizeRow(Row)) {
-    SmallVector<MatchRow, 4> Result;
-    Result.push_back(std::move(Row));
-    return Result;
+    return singleRow(std::move(Row));
   }
 
   for (const MatchPattern *Pattern : Row.CompletedWhenExhausted)
@@ -451,9 +450,7 @@ static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row,
   if (Row.RemainingConjuncts.empty()) {
     Row.CompletedPatterns.push_back(Row.SequencePattern);
     Row.SequencePattern = nullptr;
-    SmallVector<MatchRow, 4> Result;
-    Result.push_back(std::move(Row));
-    return Result;
+    return singleRow(std::move(Row));
   }
 
   const MatchPattern *Next = Row.RemainingConjuncts.front();
@@ -463,7 +460,7 @@ static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row,
   const MatchPatternInstantiation *Instantiation =
       Row.Case->PatternInstantiation;
   SmallVector<MatchRow, 4> Expanded =
-      expandPatternRows(std::move(Row), Next, Instantiation, {}, {}, Context);
+      expandPatternRows(std::move(Row), Next, Instantiation, {}, Context);
   SmallVector<MatchRow, 4> Result;
   for (MatchRow &ExpandedRow : Expanded) {
     SmallVector<MatchRow, 4> Normalized =
@@ -472,6 +469,21 @@ static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row,
                   std::make_move_iterator(Normalized.end()));
   }
   return Result;
+}
+
+static ArrayRef<MatchRow> dropCaseInstantiationRows(ArrayRef<MatchRow> Rows) {
+  const MatchCaseInstantiation *Case = Rows.front().Case;
+  auto FirstDifferent = llvm::find_if_not(
+      Rows, [&](const MatchRow &Row) { return Row.Case == Case; });
+  return Rows.drop_front(FirstDifferent - Rows.begin());
+}
+
+static ArrayRef<MatchRow> dropSourceCaseRows(ArrayRef<MatchRow> Rows) {
+  unsigned CaseIndex = Rows.front().Case->CaseIndex;
+  auto FirstDifferent = llvm::find_if_not(Rows, [&](const MatchRow &Row) {
+    return Row.Case->CaseIndex == CaseIndex;
+  });
+  return Rows.drop_front(FirstDifferent - Rows.begin());
 }
 
 static std::unique_ptr<MatchDecisionTree::Node>
@@ -490,43 +502,36 @@ buildDecisionTree(ArrayRef<MatchRow> Rows, const ASTContext &Context) {
     return buildDecisionTree(NormalizedRows, Context);
   }
 
+  const MatchRow &First = Rows.front();
   auto BuildCandidate = [&] {
     auto Result = std::make_unique<Node>(Node::NK_Candidate);
-    Result->MatchCandidate.Case = Rows.front().Case;
-    Result->MatchCandidate.KnownTestPatterns = Rows.front().KnownTests;
-    Result->MatchCandidate.CompletedPatterns = Rows.front().CompletedPatterns;
-    if (Rows.front().Columns.empty())
-      for (const MatchPattern *Pattern : Rows.front().CompletedWhenExhausted)
+    Result->MatchCandidate.Case = First.Case;
+    Result->MatchCandidate.KnownTestPatterns = First.KnownTests;
+    Result->MatchCandidate.CompletedPatterns = First.CompletedPatterns;
+    bool Exhausted = First.Columns.empty();
+    if (Exhausted)
+      for (const MatchPattern *Pattern : First.CompletedWhenExhausted)
         if (!llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
                                 Pattern))
           Result->MatchCandidate.CompletedPatterns.push_back(Pattern);
-    if (Rows.front().Columns.empty() && Rows.front().NeedsSharedAction &&
+    if (Exhausted && First.NeedsSharedAction &&
         !llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
-                            Rows.front().Case->Pattern))
-      Result->MatchCandidate.CompletedPatterns.push_back(
-          Rows.front().Case->Pattern);
+                            First.Case->Pattern))
+      Result->MatchCandidate.CompletedPatterns.push_back(First.Case->Pattern);
     Result->MatchCandidate.ShareAction =
-        Rows.front().NeedsSharedAction &&
+        First.NeedsSharedAction &&
         llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
-                           Rows.front().Case->Pattern);
-    ArrayRef<MatchRow> FollowingPattern = Rows.drop_front();
-    while (!FollowingPattern.empty() &&
-           FollowingPattern.front().Case == Rows.front().Case)
-      FollowingPattern = FollowingPattern.drop_front();
-    Result->Failure = buildDecisionTree(FollowingPattern, Context);
-    if (Rows.size() > 1 &&
-        Rows[1].Case->CaseIndex == Rows.front().Case->CaseIndex &&
-        Rows.front().Case->Guard.hasGuard()) {
-      ArrayRef<MatchRow> FollowingCase = Rows.drop_front();
-      while (!FollowingCase.empty() && FollowingCase.front().Case->CaseIndex ==
-                                           Rows.front().Case->CaseIndex)
-        FollowingCase = FollowingCase.drop_front();
-      Result->GuardFailure = buildDecisionTree(FollowingCase, Context);
+                           First.Case->Pattern);
+    Result->Failure =
+        buildDecisionTree(dropCaseInstantiationRows(Rows), Context);
+    if (Rows.size() > 1 && Rows[1].Case->CaseIndex == First.Case->CaseIndex &&
+        First.Case->Guard.hasGuard()) {
+      Result->GuardFailure =
+          buildDecisionTree(dropSourceCaseRows(Rows), Context);
     }
     return Result;
   };
 
-  const MatchRow &First = Rows.front();
   const MatchColumn *Selected = nullptr;
   unsigned SelectedFrequency = 0;
   // Among columns in the first row, choose the one tested by the greatest
@@ -552,9 +557,10 @@ buildDecisionTree(ArrayRef<MatchRow> Rows, const ASTContext &Context) {
       SuccessRows.append(Rows.drop_front().begin(), Rows.drop_front().end());
 
       auto Result = std::make_unique<Node>(Node::NK_PatternTest);
-      Result->ResidualTest.Case = First.Case;
-      Result->ResidualTest.Pattern = Column->Pattern;
-      Result->ResidualTest.ProjectionPath = Column->ProjectionPath;
+      Result->PatternMatch.Case = First.Case;
+      Result->PatternMatch.Pattern = Column->Pattern;
+      Result->PatternMatch.ProjectionPath =
+          getProjectionPath(Column->SubjectPath);
       Result->Success = buildDecisionTree(SuccessRows, Context);
       Result->Failure = buildDecisionTree(Rows.drop_front(), Context);
       return Result;
@@ -593,17 +599,22 @@ buildDecisionTree(ArrayRef<MatchRow> Rows, const ASTContext &Context) {
       Selected->Kind == MatchColumn::IntegralValue ? Node::NK_PatternTest
                                                    : Node::NK_Test);
   if (Selected->Kind == MatchColumn::IntegralValue) {
-    Result->ResidualTest.Case = First.Case;
-    Result->ResidualTest.Pattern = Selected->Pattern;
-    Result->ResidualTest.IntegralComparison = Selected->IntegralComparison;
-    Result->ResidualTest.ProjectionPath = Selected->ProjectionPath;
+    Result->PatternMatch.Kind = MatchDecisionTree::PatternTest::IntegralValue;
+    Result->PatternMatch.Case = First.Case;
+    Result->PatternMatch.Pattern = Selected->Pattern;
+    Result->PatternMatch.IntegralComparison = Selected->IntegralComparison;
+    Result->PatternMatch.ProjectionPath =
+        getProjectionPath(Selected->SubjectPath);
   } else {
+    Result->MatchTest.Kind = Selected->Kind == MatchColumn::ClosedAlternative
+                                 ? MatchDecisionTree::Test::ClosedAlternative
+                                 : MatchDecisionTree::Test::OpenProjection;
     Result->MatchTest.Case = First.Case;
     if (Selected->Kind == MatchColumn::ClosedAlternative)
       Result->MatchTest.AlternativeIndex = Selected->AlternativeIndex;
     Result->MatchTest.Projection = Selected->Projection;
     Result->MatchTest.MaterializeProjection = MaterializeProjection;
-    Result->MatchTest.ProjectionPath = Selected->ProjectionPath;
+    Result->MatchTest.ProjectionPath = getProjectionPath(Selected->SubjectPath);
   }
   Result->Success = buildDecisionTree(SuccessRows, Context);
   Result->Failure = buildDecisionTree(FailureRows, Context);
@@ -643,7 +654,7 @@ MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases,
       Pattern = Row.ActiveConjunct;
     }
     SmallVector<MatchRow, 4> Expanded = expandPatternRows(
-        std::move(Row), Pattern, Case.PatternInstantiation, {}, {}, Context);
+        std::move(Row), Pattern, Case.PatternInstantiation, {}, Context);
     Rows.append(std::make_move_iterator(Expanded.begin()),
                 std::make_move_iterator(Expanded.end()));
   }

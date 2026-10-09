@@ -3404,17 +3404,19 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
   using SharedCaseIncomingReferences =
       SmallVector<SmallVector<IncomingReference, 4>, 2>;
   struct SharedCaseHandler {
-    unsigned CaseBegin;
+    ArrayRef<MatchCaseInstantiation> Cases;
     SharedCaseDeclarations Declarations;
     SharedCaseIncomingReferences IncomingReferences;
     llvm::BasicBlock *ActionBB = nullptr;
   };
+  struct CompletedCaseAction {
+    llvm::BasicBlock *Block = nullptr;
+    const MatchCaseInstantiation *Case = nullptr;
+  };
 
   MatchDecisionTree Decision = MatchDecisionTree::build(Cases, getContext());
   SmallVector<SharedCaseHandler, 4> SharedCaseHandlers;
-  SmallVector<llvm::BasicBlock *, 8> CompletedCaseActions(S.getNumCases());
-  SmallVector<const MatchCaseInstantiation *, 8> CompletedActionCases(
-      S.getNumCases());
+  SmallVector<CompletedCaseAction, 8> CompletedCaseActions(S.getNumCases());
   SmallVector<unsigned, 8> SharedHandlerForSourceCase(S.getNumCases(),
                                                       Cases.size());
   for (unsigned CaseBegin = 0; CaseBegin != Cases.size();) {
@@ -3428,7 +3430,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       unsigned HandlerIndex = SharedCaseHandlers.size();
       SharedHandlerForSourceCase[Cases[CaseBegin].CaseIndex] = HandlerIndex;
       SharedCaseHandler &Handler = SharedCaseHandlers.emplace_back();
-      Handler.CaseBegin = CaseBegin;
+      Handler.Cases = Cases.slice(CaseBegin, CaseEnd - CaseBegin);
       Handler.IncomingReferences.resize(Declarations->front().size());
       Handler.Declarations = std::move(*Declarations);
     }
@@ -3461,7 +3463,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                              /*isInit=*/true);
       EmitAutoVarCleanups(Emission);
     }
-    EmitCaseHandler(Cases[Shared.CaseBegin]);
+    EmitCaseHandler(Shared.Cases.front());
     EmitBranch(SelectEndBB);
   };
 
@@ -3492,7 +3494,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     if (SharedCaseHandler *Shared = GetSharedCaseHandler(Case)) {
       if (!Shared->ActionBB)
         Shared->ActionBB = createBasicBlock("match.select.shared_action");
-      size_t InstantiationIndex = &Case - Cases.data() - Shared->CaseBegin;
+      size_t InstantiationIndex = &Case - Shared->Cases.begin();
       assert(InstantiationIndex < Shared->Declarations.size() &&
              "case is outside its shared-handler group");
       ArrayRef<const VarDecl *> Declarations =
@@ -3521,12 +3523,12 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         !hasMatchPatternDeclarations(Case.Pattern, Case.PatternInstantiation) &&
         !Case.Guard.hasGuard()) {
       if (ShareAction) {
-        llvm::BasicBlock *&Action = CompletedCaseActions[Case.CaseIndex];
-        if (!Action) {
-          Action = createBasicBlock("match.select.action");
-          CompletedActionCases[Case.CaseIndex] = &Case;
+        CompletedCaseAction &Action = CompletedCaseActions[Case.CaseIndex];
+        if (!Action.Block) {
+          Action.Block = createBasicBlock("match.select.action");
+          Action.Case = &Case;
         }
-        EmitBranch(Action);
+        EmitBranch(Action.Block);
       } else {
         {
           RunCleanupsScope CaseScope(*this);
@@ -3630,21 +3632,22 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       return;
     }
     case MatchDecisionTree::Node::NK_PatternTest: {
-      if (Node.ResidualTest.IntegralComparison) {
-        const auto *First = &Node.ResidualTest;
+      if (Node.PatternMatch.Kind ==
+          MatchDecisionTree::PatternTest::IntegralValue) {
+        const auto *First = &Node.PatternMatch;
         SmallVector<const MatchDecisionTree::Node *, 4> Tests;
         SmallVector<llvm::ConstantInt *, 4> Values;
         const MatchDecisionTree::Node *Default = &Node;
         do {
-          const auto *Test = &Default->ResidualTest;
-          if (!Test->IntegralComparison ||
+          const auto *Test = &Default->PatternMatch;
+          if (Test->Kind != MatchDecisionTree::PatternTest::IntegralValue ||
               Test->IntegralComparison->getLHS()->IgnoreParenImpCasts() !=
                   First->IntegralComparison->getLHS()->IgnoreParenImpCasts() ||
               !getContext().hasSameType(
                   Test->IntegralComparison->getLHS()->getType(),
                   First->IntegralComparison->getLHS()->getType()) ||
-              Default->ResidualTest.ProjectionPath !=
-                  Node.ResidualTest.ProjectionPath)
+              Default->PatternMatch.ProjectionPath !=
+                  Node.PatternMatch.ProjectionPath)
             break;
           auto *Value = dyn_cast<llvm::ConstantInt>(
               EmitScalarExpr(Test->IntegralComparison->getRHS()));
@@ -3657,7 +3660,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         } while (Default->Kind == MatchDecisionTree::Node::NK_PatternTest);
 
         if (Tests.size() > 1) {
-          EmitProjectionPath(Node.ResidualTest.ProjectionPath);
+          EmitProjectionPath(Node.PatternMatch.ProjectionPath);
           llvm::Value *Discriminator =
               EmitScalarExpr(First->IntegralComparison->getLHS());
           Discriminator->setName("match.value");
@@ -3666,17 +3669,17 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         }
       }
 
-      EmitProjectionPath(Node.ResidualTest.ProjectionPath);
+      EmitProjectionPath(Node.PatternMatch.ProjectionPath);
       llvm::BasicBlock *Success = createBasicBlock("match.decision.success");
       llvm::BasicBlock *Failure = createBasicBlock("match.decision.failure");
       llvm::Value *Condition =
-          EmitMatchPattern(Node.ResidualTest.Pattern,
-                           Node.ResidualTest.Case->PatternInstantiation,
-                           Node.ResidualTest.ProjectionPath.empty()
+          EmitMatchPattern(Node.PatternMatch.Pattern,
+                           Node.PatternMatch.Case->PatternInstantiation,
+                           Node.PatternMatch.ProjectionPath.empty()
                                ? S.getSubject()
                                : nullptr)
               .getScalarVal();
-      Condition = ApplyCaseLikelihood(Condition, *Node.ResidualTest.Case);
+      Condition = ApplyCaseLikelihood(Condition, *Node.PatternMatch.Case);
       if (const auto *Constant = dyn_cast<llvm::ConstantInt>(Condition))
         EmitBranch(Constant->isOne() ? Success : Failure);
       else
@@ -3694,7 +3697,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     EmitProjectionPath(Node.MatchTest.ProjectionPath);
     EmitMatchDiscriminator(*Node.MatchTest.Projection);
     const VarDecl *IndexVar = Node.MatchTest.Projection->getIntermediateVar();
-    if (Node.MatchTest.AlternativeIndex &&
+    if (Node.MatchTest.Kind == MatchDecisionTree::Test::ClosedAlternative &&
         IndexVar->getType()->isIntegralOrEnumerationType()) {
       auto *IndexType =
           cast<llvm::IntegerType>(ConvertType(IndexVar->getType()));
@@ -3706,14 +3709,15 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       const MatchDecisionTree::Node *Default = &Node;
       do {
         auto *Value = llvm::ConstantInt::get(
-            IndexType, *Default->MatchTest.AlternativeIndex);
+            IndexType, Default->MatchTest.AlternativeIndex);
         if (llvm::is_contained(Values, Value))
           break;
         Tests.push_back(Default);
         Values.push_back(Value);
         Default = Default->Failure.get();
       } while (Default->Kind == MatchDecisionTree::Node::NK_Test &&
-               Default->MatchTest.AlternativeIndex &&
+               Default->MatchTest.Kind ==
+                   MatchDecisionTree::Test::ClosedAlternative &&
                Default->MatchTest.Projection->getIntermediateVar() == IndexVar);
 
       llvm::Value *Discriminator = EmitLoadOfScalar(
@@ -3749,15 +3753,14 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
   };
 
   EmitDecision(EmitDecision, Decision.getRoot());
-  for (auto [Action, Case] :
-       llvm::zip_equal(CompletedCaseActions, CompletedActionCases)) {
-    if (!Action)
+  for (const CompletedCaseAction &Action : CompletedCaseActions) {
+    if (!Action.Block)
       continue;
     llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
-    EmitBlock(Action, /*IsFinished=*/true);
+    EmitBlock(Action.Block, /*IsFinished=*/true);
     {
       RunCleanupsScope CaseScope(*this);
-      EmitCaseHandler(*Case);
+      EmitCaseHandler(*Action.Case);
     }
     EmitBranch(SelectEndBB);
   }
