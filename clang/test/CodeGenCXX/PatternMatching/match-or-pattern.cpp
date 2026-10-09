@@ -9,6 +9,12 @@
 // CHECK: %[[IN_RANGE:.*]] = icmp ult i32 %[[VALUE]], 2
 // CHECK: %[[RESULT:.*]] = zext i1 %[[IN_RANGE]] to i32
 // CHECK: ret i32 %[[RESULT]]
+// OR-TREE-LABEL: define{{.*}} i32 @_Z8classifyi(
+// OR-TREE: switch i32 %match.value, label %{{.*}} [
+// OR-TREE-DAG: i32 0, label %{{.*}}
+// OR-TREE-DAG: i32 1, label %{{.*}}
+// OR-TREE: match.select.action:
+// OR-TREE-COUNT-1: store i32 1
 int classify(int value) {
   return match (value) {
     case 0 or 1 => 1;
@@ -46,9 +52,35 @@ bool short_circuit(int value) {
 // CHECK-LABEL: define{{.*}} i32 @_Z23selection_short_circuiti(
 // CHECK-COUNT-1: call{{.*}} i1 @_Z5firsti
 // CHECK-COUNT-1: call{{.*}} i1 @_Z6secondi
+// OR-TREE-LABEL: define{{.*}} i32 @_Z23selection_short_circuiti(
+// OR-TREE-COUNT-1: call{{.*}} i1 @_Zeqi12FirstPattern
+// OR-TREE-COUNT-1: call{{.*}} i1 @_Zeqi13SecondPattern
+// OR-TREE: match.select.action:
+// OR-TREE-COUNT-1: store i32 1
 int selection_short_circuit(int value) {
   return match (value) {
     case first_pattern or second_pattern => 1;
+    case _ => 0;
+  };
+}
+
+struct Base {
+  virtual ~Base();
+};
+struct Derived : Base {};
+struct Tag {};
+
+inline constexpr Tag first_tag;
+inline constexpr Tag second_tag;
+bool operator==(const Base&, Tag);
+
+// Completing an or-pattern conjunct does not complete a following test.
+// OR-TREE-LABEL: define{{.*}} i32 @_Z22planned_or_before_castR4Base
+// OR-TREE-COUNT-2: call{{.*}} i1 @_ZeqRK4Base3Tag
+// OR-TREE: call ptr @__dynamic_cast
+int planned_or_before_cast(Base& value) {
+  return match (value) {
+    case (first_tag or second_tag) and Derived& => 1;
     case _ => 0;
   };
 }
