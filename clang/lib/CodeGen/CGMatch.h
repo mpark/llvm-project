@@ -14,7 +14,6 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 namespace clang::CodeGen {
@@ -40,8 +39,10 @@ public:
   };
 
   struct Test {
+    enum TestKind { ClosedAlternative, OpenProjection } Kind = OpenProjection;
+
     const MatchCaseInstantiation *Case = nullptr;
-    std::optional<unsigned> AlternativeIndex;
+    unsigned AlternativeIndex = 0;
     const MatchProjection *Projection = nullptr;
     bool MaterializeProjection = false;
     /// Ancestor projections needed to reach the test projection.
@@ -49,6 +50,8 @@ public:
   };
 
   struct PatternTest {
+    enum TestKind { Residual, IntegralValue } Kind = Residual;
+
     const MatchCaseInstantiation *Case = nullptr;
     const MatchPattern *Pattern = nullptr;
     const BinaryOperator *IntegralComparison = nullptr;
@@ -61,7 +64,7 @@ public:
 
     Candidate MatchCandidate = {};
     Test MatchTest = {};
-    PatternTest ResidualTest = {};
+    PatternTest PatternMatch = {};
     std::unique_ptr<Node> Success;
     std::unique_ptr<Node> Failure;
     std::unique_ptr<Node> GuardFailure;
