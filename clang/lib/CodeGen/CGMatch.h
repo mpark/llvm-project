@@ -14,6 +14,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace clang::CodeGen {
@@ -25,23 +26,24 @@ bool hasMatchPatternDeclarations(
 /// A decision tree over the refutable columns of a match.
 ///
 /// Test nodes specialize source-ordered rows on closed-alternative states or
-/// residual expression conditions. A successful test can expose additional
+/// open-protocol projection conditions. Pattern-test nodes evaluate residual
+/// expression and type conditions. A successful test can expose additional
 /// columns from a decomposition or projected payload. Candidate nodes hand any
-/// remaining pattern tests and the action back to the ordinary match emitter.
+/// remaining tests and the action back to the ordinary match emitter.
 class MatchDecisionTree {
 public:
   struct Candidate {
     const MatchCaseInstantiation *Case = nullptr;
-    SmallVector<const MatchPattern *, 2> KnownDiscriminatorPatterns;
+    SmallVector<const MatchPattern *, 2> KnownTestPatterns;
     SmallVector<const MatchPattern *, 2> CompletedPatterns;
     bool ShareAction = false;
   };
 
   struct Test {
     const MatchCaseInstantiation *Case = nullptr;
-    unsigned AlternativeIndex = 0;
-    const MatchProjection *Discriminator = nullptr;
-    /// Ancestor projections needed to reach the discriminator.
+    std::optional<unsigned> AlternativeIndex;
+    const MatchProjection *Projection = nullptr;
+    /// Ancestor projections needed to reach the test projection.
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
 
