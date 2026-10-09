@@ -394,10 +394,10 @@ void match_guarded_then_shared_base(HierarchyChoice& value) {
   }
 }
 
-// A closed alternative nested under a residual and-pattern is emitted as a
-// source-ordered candidate while sharing the expanded source handler.
+// An irrefutable first conjunct exposes the closed alternative in the second
+// conjunct to the decision tree while sharing the expanded source handler.
 // CHECK-LABEL: define{{.*}} void @{{.*}}match_residual_shared_base
-// CHECK-NOT: switch
+// CHECK: switch
 // CHECK: match.select.shared_action:
 // CHECK: phi ptr
 // CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
