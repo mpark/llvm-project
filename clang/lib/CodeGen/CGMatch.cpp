@@ -30,10 +30,12 @@ struct MatchRow {
   SmallVector<MatchColumn, 4> Columns;
   SmallVector<const MatchPattern *, 2> KnownDiscriminators;
   SmallVector<const MatchPattern *, 2> CompletedPatterns;
+  SmallVector<const MatchPattern *, 2> CompletedWhenExhausted;
   const MatchPattern *SequencePattern = nullptr;
   const MatchPattern *ActiveConjunct = nullptr;
   SmallVector<const MatchPattern *, 2> RemainingConjuncts;
   bool AllowResidualTests = true;
+  bool HasExpandedOr = false;
 
   const MatchColumn *find(const VarDecl *IndexVar) const {
     auto It = llvm::find_if(Columns, [&](const MatchColumn &Column) {
@@ -42,6 +44,19 @@ struct MatchRow {
     return It == Columns.end() ? nullptr : &*It;
   }
 };
+
+static const MatchProjection *
+getClosedDiscriminator(const MatchPattern *Pattern,
+                       const MatchPatternInstantiation *Instantiation) {
+  const MatchPatternInfo *Info = Instantiation->find(Pattern);
+  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+  if (!Info || Info->IsOpenAlternative || !Projection ||
+      Projection->getKind() != MatchProjection::AlternativeProjection ||
+      !Projection->getIntermediateVar() ||
+      Info->SelectedAlternatives.size() != 1)
+    return nullptr;
+  return Projection;
+}
 
 static bool
 hasPatternDeclarationsImpl(const MatchPattern *Pattern,
@@ -77,6 +92,50 @@ collectAndConjuncts(const MatchPattern *Pattern,
   Conjuncts.push_back(Pattern);
 }
 
+static bool
+isDecisionTreePattern(const MatchPattern *Pattern,
+                      const MatchPatternInstantiation *Instantiation) {
+  Pattern = Pattern->IgnoreParens();
+  if (isa<WildcardPattern>(Pattern))
+    return true;
+  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
+    return llvm::all_of(
+        llvm::enumerate(Or->alternatives()), [&](auto Alternative) {
+          return !Instantiation->isViableOrAlternative(Or,
+                                                       Alternative.index()) ||
+                 isDecisionTreePattern(Alternative.value(), Instantiation);
+        });
+  if (isa<AndPattern, DeclarationPattern, TypePattern>(Pattern))
+    return false;
+  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+    return llvm::all_of(Instantiation->getDecompositionPatterns(Decomposition),
+                        [&](const MatchPattern *Child) {
+                          return isDecisionTreePattern(Child, Instantiation);
+                        });
+  if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern)) {
+    if (!getClosedDiscriminator(Alternative, Instantiation))
+      return false;
+    if (const TypePattern *Selector = Alternative->getTypeSelector()) {
+      const MatchPatternInfo *SelectorInfo = Instantiation->find(Selector);
+      if (SelectorInfo && SelectorInfo->Projection &&
+          SelectorInfo->Projection->getKind() ==
+              MatchProjection::CastProjection)
+        return false;
+    }
+    return !Alternative->getSubPattern() ||
+           isDecisionTreePattern(Alternative->getSubPattern(), Instantiation);
+  }
+  if (isa<ExpressionPattern>(Pattern)) {
+    if (getClosedDiscriminator(Pattern, Instantiation))
+      return true;
+    const MatchPatternInfo *Info = Instantiation->find(Pattern);
+    return !Info || !Info->Projection ||
+           Info->Projection->getKind() !=
+               MatchProjection::AlternativeProjection;
+  }
+  return false;
+}
+
 static SmallVector<MatchRow, 4>
 expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
                   const MatchPatternInstantiation *Instantiation,
@@ -109,12 +168,19 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
 
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     SmallVector<MatchRow, 4> Result;
-    Row.AllowResidualTests = false;
+    bool IsDecisionTreePattern = isDecisionTreePattern(Or, Instantiation);
+    if (!IsDecisionTreePattern)
+      Row.AllowResidualTests = false;
+    else
+      Row.HasExpandedOr = true;
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives())) {
       if (!Instantiation->isViableOrAlternative(Or, I))
         continue;
       SmallVector<MatchRow, 4> AlternativeRows =
           expandPatternRows(Row, Alternative, Instantiation, ProjectionPath);
+      if (IsDecisionTreePattern)
+        for (MatchRow &AlternativeRow : AlternativeRows)
+          AlternativeRow.CompletedWhenExhausted.push_back(Or);
       Result.append(std::make_move_iterator(AlternativeRows.begin()),
                     std::make_move_iterator(AlternativeRows.end()));
     }
@@ -125,17 +191,20 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
     return expandPatternRows(std::move(Row), And->conjuncts().front(),
                              Instantiation, ProjectionPath);
 
+  if (isa<WildcardPattern>(Pattern)) {
+    SmallVector<MatchRow, 4> Result;
+    Result.push_back(std::move(Row));
+    return Result;
+  }
+
   const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
   if (!Decomposition) {
     MatchColumn &Column = Row.Columns.emplace_back();
     Column.Pattern = Pattern;
     Column.ProjectionPath.append(ProjectionPath.begin(), ProjectionPath.end());
-    const MatchPatternInfo *Info = Instantiation->find(Pattern);
-    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
-    if (Info && !Info->IsOpenAlternative && Projection &&
-        Projection->getKind() == MatchProjection::AlternativeProjection &&
-        Projection->getIntermediateVar() &&
-        Info->SelectedAlternatives.size() == 1) {
+    if (const MatchProjection *Projection =
+            getClosedDiscriminator(Pattern, Instantiation)) {
+      const MatchPatternInfo *Info = Instantiation->find(Pattern);
       Column.Discriminator = Projection;
       Column.AlternativeIndex = Info->SelectedAlternatives.front();
     }
@@ -201,11 +270,7 @@ static MatchRow specializeResidualTest(const MatchRow &Source,
 }
 
 static bool canNormalizeRow(const MatchRow &Row) {
-  return Row.ActiveConjunct &&
-         (Row.Columns.empty() ||
-          llvm::all_of(Row.Columns, [](const MatchColumn &Column) {
-            return isa<WildcardPattern>(Column.Pattern);
-          }));
+  return Row.ActiveConjunct && Row.Columns.empty();
 }
 
 static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row) {
@@ -215,9 +280,10 @@ static SmallVector<MatchRow, 4> normalizeRow(MatchRow Row) {
     return Result;
   }
 
-  for (const MatchColumn &Column : Row.Columns)
-    Row.CompletedPatterns.push_back(Column.Pattern);
-  Row.Columns.clear();
+  for (const MatchPattern *Pattern : Row.CompletedWhenExhausted)
+    if (!llvm::is_contained(Row.CompletedPatterns, Pattern))
+      Row.CompletedPatterns.push_back(Pattern);
+  Row.CompletedWhenExhausted.clear();
   if (!llvm::is_contained(Row.CompletedPatterns, Row.ActiveConjunct))
     Row.CompletedPatterns.push_back(Row.ActiveConjunct);
   Row.ActiveConjunct = nullptr;
@@ -265,9 +331,24 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
 
   auto BuildCandidate = [&] {
     auto Result = std::make_unique<Node>(Node::NK_Candidate);
-    Result->MatchCandidate = {Rows.front().Case,
-                              Rows.front().KnownDiscriminators,
-                              Rows.front().CompletedPatterns};
+    Result->MatchCandidate.Case = Rows.front().Case;
+    Result->MatchCandidate.KnownDiscriminatorPatterns =
+        Rows.front().KnownDiscriminators;
+    Result->MatchCandidate.CompletedPatterns = Rows.front().CompletedPatterns;
+    if (Rows.front().Columns.empty())
+      for (const MatchPattern *Pattern : Rows.front().CompletedWhenExhausted)
+        if (!llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
+                                Pattern))
+          Result->MatchCandidate.CompletedPatterns.push_back(Pattern);
+    if (Rows.front().Columns.empty() && Rows.front().HasExpandedOr &&
+        !llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
+                            Rows.front().Case->Pattern))
+      Result->MatchCandidate.CompletedPatterns.push_back(
+          Rows.front().Case->Pattern);
+    Result->MatchCandidate.ShareAction =
+        Rows.front().HasExpandedOr &&
+        llvm::is_contained(Result->MatchCandidate.CompletedPatterns,
+                           Rows.front().Case->Pattern);
     ArrayRef<MatchRow> FollowingPattern = Rows.drop_front();
     while (!FollowingPattern.empty() &&
            FollowingPattern.front().Case == Rows.front().Case)
