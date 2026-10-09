@@ -51,6 +51,7 @@ public:
   struct PatternTest {
     const MatchCaseInstantiation *Case = nullptr;
     const MatchPattern *Pattern = nullptr;
+    const BinaryOperator *IntegralComparison = nullptr;
     /// Ancestor projections needed to reach the pattern subject.
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
@@ -75,7 +76,8 @@ private:
       : Root(std::move(Root)) {}
 
 public:
-  static MatchDecisionTree build(ArrayRef<MatchCaseInstantiation> Cases);
+  static MatchDecisionTree build(ArrayRef<MatchCaseInstantiation> Cases,
+                                 const ASTContext &Context);
 
   const Node &getRoot() const { return *Root; }
 };
