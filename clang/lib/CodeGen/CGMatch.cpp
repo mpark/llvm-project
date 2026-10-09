@@ -13,85 +13,69 @@
 using namespace clang;
 using namespace CodeGen;
 
-const VarDecl *MatchDecisionTree::Discriminator::getIndexVar() const {
-  const MatchPatternInfo *Info = Case->PatternInstantiation->find(Pattern);
-  assert(Info && Info->Projection &&
-         Info->Projection->getIntermediateVar() &&
-         "discriminator has no index variable");
-  return Info->Projection->getIntermediateVar();
-}
-
-static const MatchPattern *
-getDirectDiscriminatorPattern(const MatchPattern *Pattern,
-                              const MatchPatternInstantiation *Instantiation) {
-  while (const auto *Paren = dyn_cast<ParenPattern>(Pattern))
-    Pattern = Paren->getSubPattern();
-  const MatchPatternInfo *Info = Instantiation->find(Pattern);
-  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
-  if (!Info || Info->IsOpenAlternative || !Projection ||
-      Projection->getKind() != MatchProjection::AlternativeProjection ||
-      !Projection->getIntermediateVar() ||
-      Info->SelectedAlternatives.size() != 1)
-    return nullptr;
-  return Pattern;
-}
-
 namespace {
 struct MatchColumn {
-  const MatchPattern *Pattern;
-  const MatchProjection *Projection;
-  unsigned AlternativeIndex;
+  const MatchPattern *Pattern = nullptr;
+  const MatchProjection *Discriminator = nullptr;
+  unsigned AlternativeIndex = 0;
+  SmallVector<const MatchProjection *, 2> ProjectionPath;
+
+  const VarDecl *getIndexVar() const {
+    return Discriminator ? Discriminator->getIntermediateVar() : nullptr;
+  }
 };
 
 struct MatchRow {
-  const MatchCaseInstantiation *Case;
+  const MatchCaseInstantiation *Case = nullptr;
   SmallVector<MatchColumn, 4> Columns;
   SmallVector<const MatchPattern *, 2> KnownDiscriminators;
 
   const MatchColumn *find(const VarDecl *IndexVar) const {
     auto It = llvm::find_if(Columns, [&](const MatchColumn &Column) {
-      return Column.Projection->getIntermediateVar() == IndexVar;
+      return Column.getIndexVar() == IndexVar;
     });
     return It == Columns.end() ? nullptr : &*It;
   }
 };
 
-static void appendDiscriminator(
-    SmallVectorImpl<MatchDecisionTree::Discriminator> &Discriminators,
-    const MatchCaseInstantiation &Case, const MatchColumn &Column) {
-  MatchDecisionTree::Discriminator Discriminator = {&Case, Column.Pattern};
-  if (llvm::none_of(Discriminators, [&](const auto &Existing) {
-        return Existing.getIndexVar() == Discriminator.getIndexVar();
-      }))
-    Discriminators.push_back(Discriminator);
-}
-
 static void
-collectDirectDiscriminators(const MatchPattern *Pattern,
-                            const MatchPatternInstantiation *Instantiation,
-                            SmallVectorImpl<MatchColumn> &Columns) {
-  while (const auto *Paren = dyn_cast<ParenPattern>(Pattern))
-    Pattern = Paren->getSubPattern();
+appendPatternColumns(const MatchPattern *Pattern,
+                     const MatchPatternInstantiation *Instantiation,
+                     ArrayRef<const MatchProjection *> ProjectionPath,
+                     SmallVectorImpl<MatchColumn> &Columns) {
+  Pattern = Pattern->IgnoreParens();
 
-  if (const MatchPattern *Discriminator =
-          getDirectDiscriminatorPattern(Pattern, Instantiation)) {
-    const MatchPatternInfo *Info = Instantiation->find(Discriminator);
-    Columns.push_back(
-        {Discriminator, Info->Projection, Info->SelectedAlternatives.front()});
+  const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
+  if (!Decomposition) {
+    MatchColumn &Column = Columns.emplace_back();
+    Column.Pattern = Pattern;
+    Column.ProjectionPath.append(ProjectionPath.begin(), ProjectionPath.end());
+    const MatchPatternInfo *Info = Instantiation->find(Pattern);
+    const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+    if (Info && !Info->IsOpenAlternative && Projection &&
+        Projection->getKind() == MatchProjection::AlternativeProjection &&
+        Projection->getIntermediateVar() &&
+        Info->SelectedAlternatives.size() == 1) {
+      Column.Discriminator = Projection;
+      Column.AlternativeIndex = Info->SelectedAlternatives.front();
+    }
     return;
   }
 
-  const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
-  if (!Decomposition)
-    return;
+  const MatchPatternInfo *Info = Instantiation->find(Decomposition);
+  const MatchProjection *Projection = Info ? Info->Projection : nullptr;
+  assert(Projection &&
+         Projection->getKind() == MatchProjection::DecompositionProjection &&
+         "expected decomposition projection");
+  SmallVector<const MatchProjection *, 4> ChildPath(ProjectionPath);
+  ChildPath.push_back(Projection);
   for (const MatchPattern *SubPattern :
        Instantiation->getDecompositionPatterns(Decomposition))
-    collectDirectDiscriminators(SubPattern, Instantiation, Columns);
+    appendPatternColumns(SubPattern, Instantiation, ChildPath, Columns);
 }
 
-static MatchRow specializeColumn(
-    const MatchRow &Source, const MatchColumn *Column,
-    SmallVectorImpl<MatchDecisionTree::Discriminator> &NewDiscriminators) {
+static MatchRow specializeColumn(const MatchRow &Source,
+                                 const MatchColumn *Column) {
   unsigned Index = Column - Source.Columns.begin();
   MatchRow Row = Source;
   Row.KnownDiscriminators.push_back(Column->Pattern);
@@ -101,12 +85,16 @@ static MatchRow specializeColumn(
   if (!Alternative || !Alternative->getSubPattern())
     return Row;
 
-  size_t FirstNewColumn = Row.Columns.size();
-  collectDirectDiscriminators(Alternative->getSubPattern(),
-                              Source.Case->PatternInstantiation, Row.Columns);
-  for (const MatchColumn &NewColumn :
-       ArrayRef(Row.Columns).drop_front(FirstNewColumn))
-    appendDiscriminator(NewDiscriminators, *Source.Case, NewColumn);
+  const MatchPatternInfo *Info =
+      Source.Case->PatternInstantiation->find(Alternative);
+  assert(Info && Info->Projection && "expected alternative projection");
+  SmallVector<const MatchProjection *, 4> PayloadPath;
+  PayloadPath.append(Column->ProjectionPath.begin(),
+                     Column->ProjectionPath.end());
+  PayloadPath.push_back(Info->Projection);
+  appendPatternColumns(Alternative->getSubPattern(),
+                       Source.Case->PatternInstantiation, PayloadPath,
+                       Row.Columns);
   return Row;
 }
 
@@ -116,7 +104,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   if (Rows.empty())
     return std::make_unique<Node>(Node::NK_Failure);
 
-  if (Rows.front().Columns.empty()) {
+  auto BuildCandidate = [&] {
     auto Result = std::make_unique<Node>(Node::NK_Candidate);
     Result->MatchCandidate = {Rows.front().Case,
                               Rows.front().KnownDiscriminators};
@@ -125,14 +113,13 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
         Rows[1].Case->CaseIndex == Rows.front().Case->CaseIndex &&
         Rows.front().Case->Guard.hasGuard()) {
       ArrayRef<MatchRow> FollowingCase = Rows.drop_front();
-      while (!FollowingCase.empty() &&
-             FollowingCase.front().Case->CaseIndex ==
-                 Rows.front().Case->CaseIndex)
+      while (!FollowingCase.empty() && FollowingCase.front().Case->CaseIndex ==
+                                           Rows.front().Case->CaseIndex)
         FollowingCase = FollowingCase.drop_front();
       Result->GuardFailure = buildDecisionTree(FollowingCase);
     }
     return Result;
-  }
+  };
 
   const MatchRow &First = Rows.front();
   const MatchColumn *Selected = nullptr;
@@ -140,7 +127,9 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   // Among columns in the first row, choose the one tested by the greatest
   // number of remaining rows. This is Jacobs's duplication heuristic.
   for (const MatchColumn &Column : First.Columns) {
-    const VarDecl *IndexVar = Column.Projection->getIntermediateVar();
+    if (!Column.Discriminator)
+      continue;
+    const VarDecl *IndexVar = Column.getIndexVar();
     unsigned Frequency = llvm::count_if(Rows, [&](const MatchRow &Row) {
       return Row.find(IndexVar) != nullptr;
     });
@@ -150,11 +139,12 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
     }
   }
 
-  assert(Selected && "first row has no discriminator");
-  const VarDecl *IndexVar = Selected->Projection->getIntermediateVar();
+  if (!Selected)
+    return BuildCandidate();
+
+  const VarDecl *IndexVar = Selected->getIndexVar();
   SmallVector<MatchRow, 8> SuccessRows;
   SmallVector<MatchRow, 8> FailureRows;
-  SmallVector<MatchDecisionTree::Discriminator, 2> SuccessDiscriminators;
   for (const MatchRow &Row : Rows) {
     const MatchColumn *Column = Row.find(IndexVar);
     // Rows without this column apply on both edges. A matching constructor
@@ -164,8 +154,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
       SuccessRows.push_back(Row);
       FailureRows.push_back(Row);
     } else if (Column->AlternativeIndex == Selected->AlternativeIndex) {
-      SuccessRows.push_back(
-          specializeColumn(Row, Column, SuccessDiscriminators));
+      SuccessRows.push_back(specializeColumn(Row, Column));
     } else {
       FailureRows.push_back(Row);
     }
@@ -174,47 +163,24 @@ buildDecisionTree(ArrayRef<MatchRow> Rows) {
   auto Result = std::make_unique<Node>(Node::NK_Test);
   Result->MatchTest.Case = First.Case;
   Result->MatchTest.AlternativeIndex = Selected->AlternativeIndex;
-  Result->MatchTest.ConditionProjection = Selected->Projection;
+  Result->MatchTest.Discriminator = Selected->Discriminator;
+  Result->MatchTest.ProjectionPath = Selected->ProjectionPath;
   Result->Success = buildDecisionTree(SuccessRows);
-  Result->Success->EntryDiscriminators = std::move(SuccessDiscriminators);
   Result->Failure = buildDecisionTree(FailureRows);
   return Result;
 }
 
 } // namespace
 
-std::optional<MatchDecisionTree>
+MatchDecisionTree
 MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases) {
-  if (Cases.empty())
-    return std::nullopt;
-
   SmallVector<MatchRow, 8> Rows;
   Rows.reserve(Cases.size());
   for (const MatchCaseInstantiation &Case : Cases) {
     MatchRow &Row = Rows.emplace_back();
     Row.Case = &Case;
-    collectDirectDiscriminators(Case.Pattern, Case.PatternInstantiation,
-                                Row.Columns);
-    for (unsigned I = 0; I != Row.Columns.size(); ++I) {
-      const MatchColumn &Column = Row.Columns[I];
-      if (llvm::any_of(ArrayRef(Row.Columns).take_front(I),
-                       [&](const MatchColumn &Previous) {
-                         return Previous.Projection->getIntermediateVar() ==
-                                Column.Projection->getIntermediateVar();
-                       }))
-        return std::nullopt;
-    }
+    appendPatternColumns(Case.Pattern, Case.PatternInstantiation, {},
+                         Row.Columns);
   }
-
-  if (Rows.front().Columns.empty())
-    return std::nullopt;
-
-  SmallVector<Discriminator, 4> Discriminators;
-  for (const MatchRow &Row : Rows) {
-    for (const MatchColumn &Column : Row.Columns)
-      appendDiscriminator(Discriminators, *Row.Case, Column);
-  }
-  std::unique_ptr<Node> Root = buildDecisionTree(Rows);
-  Root->EntryDiscriminators = std::move(Discriminators);
-  return MatchDecisionTree(std::move(Root));
+  return MatchDecisionTree(buildDecisionTree(Rows));
 }
