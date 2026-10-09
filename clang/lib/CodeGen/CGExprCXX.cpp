@@ -2464,7 +2464,7 @@ llvm::Value *CodeGenFunction::EmitDynamicCast(Address ThisAddr,
 
 void CodeGenFunction::EmitMatchDiscriminator(
     const MatchProjection &Projection) {
-  assert(Projection.getHoldingVar() && "expected alternative projection");
+  assert(Projection.getHoldingVar() && "expected projection subject");
   if (!LocalDeclMap.count(Projection.getHoldingVar()))
     EmitVarDecl(*Projection.getHoldingVar());
   if (const VarDecl *Intermediate = Projection.getIntermediateVar();
@@ -2521,7 +2521,7 @@ void CodeGenFunction::EmitMatchPatternBranch(
   }
 
   if (llvm::is_contained(KnownTestPatterns, Pattern) &&
-      isa<ExpressionPattern>(Pattern)) {
+      isa<ExpressionPattern, TypePattern, DeclarationPattern>(Pattern)) {
     EmitBranch(Success);
     return;
   }
@@ -2714,10 +2714,7 @@ RValue CodeGenFunction::EmitMatchPattern(
     if (!Projection || Projection->getKind() != MatchProjection::CastProjection)
       return RValue::get(Builder.getTrue());
 
-    if (!LocalDeclMap.count(Projection->getHoldingVar()))
-      EmitVarDecl(*Projection->getHoldingVar());
-    if (!LocalDeclMap.count(Projection->getIntermediateVar()))
-      EmitVarDecl(*Projection->getIntermediateVar());
+    EmitMatchDiscriminator(*Projection);
     if (!LocalDeclMap.count(Projection->getConditionVar()))
       EmitVarDecl(*Projection->getConditionVar());
     return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
@@ -2729,10 +2726,7 @@ RValue CodeGenFunction::EmitMatchPattern(
     const MatchProjection *Projection = Info->Projection;
     if (Projection &&
         Projection->getKind() == MatchProjection::CastProjection) {
-      if (!LocalDeclMap.count(Projection->getHoldingVar()))
-        EmitVarDecl(*Projection->getHoldingVar());
-      if (!LocalDeclMap.count(Projection->getIntermediateVar()))
-        EmitVarDecl(*Projection->getIntermediateVar());
+      EmitMatchDiscriminator(*Projection);
       if (!LocalDeclMap.count(Projection->getConditionVar()))
         EmitVarDecl(*Projection->getConditionVar());
       return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
@@ -2746,10 +2740,7 @@ RValue CodeGenFunction::EmitMatchPattern(
     if (const MatchProjection *Projection = Info->Projection) {
       assert(Projection->getKind() == MatchProjection::AlternativeProjection &&
              "unexpected expression-pattern projection");
-      if (!LocalDeclMap.count(Projection->getHoldingVar()))
-        EmitVarDecl(*Projection->getHoldingVar());
-      if (!LocalDeclMap.count(Projection->getIntermediateVar()))
-        EmitVarDecl(*Projection->getIntermediateVar());
+      EmitMatchDiscriminator(*Projection);
       if (!LocalDeclMap.count(Projection->getConditionVar()))
         EmitVarDecl(*Projection->getConditionVar());
     }
@@ -2883,11 +2874,7 @@ void CodeGenFunction::EmitSelectedMatchPatternProjections(
       EmitVarDecl(*Intermediate);
     if (NeedsCondition && !LocalDeclMap.count(Condition))
       EmitVarDecl(*Condition);
-    if (Projected && !LocalDeclMap.count(Projected))
-      EmitVarDecl(*Projected);
-    else if (!Projected && Projection->getProjectedExpr() &&
-             Projection->getProjectedExpr()->getType()->isVoidType())
-      EmitIgnoredExpr(Projection->getProjectedExpr());
+    EmitMatchProjectionValue(*Projection);
     if (Decomposition && !LocalDeclMap.count(Decomposition))
       EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
   }
@@ -3791,6 +3778,8 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     Builder.CreateCondBr(Condition, Success, Failure);
 
     EmitBlock(Success);
+    if (Node.MatchTest.MaterializeProjection)
+      EmitMatchProjectionValue(*Projection);
     Self(Self, *Node.Success);
     EmitBlock(Failure);
     Self(Self, *Node.Failure);
