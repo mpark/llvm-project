@@ -5431,7 +5431,8 @@ public:
       const MatchPatternInstantiation *Instantiation, const Expr *Subject,
       llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
       StagedPatternDeclarations *StagedDeclarations = nullptr,
-      ArrayRef<const MatchPattern *> KnownDiscriminatorPatterns = {});
+      ArrayRef<const MatchPattern *> KnownDiscriminatorPatterns = {},
+      ArrayRef<const MatchPattern *> CompletedPatterns = {});
   void EmitMatchDiscriminator(const MatchProjection &Projection);
   void EmitMatchProjectionValue(const MatchProjection &Projection);
   void EmitSharedDeclarationProjections(
