@@ -282,7 +282,8 @@ bool accept_instantiated();
 // CHECK: br i1 {{.*}}, label %match.select.action, label %match.select.guard_failed
 // CHECK: match.select.guard_failed:
 // CHECK: match.decision.next_pattern:
-// CHECK-NOT: alternative_traitsI12SwitchChoiceE3getILm1E
+// CHECK-NEXT: br label %[[FALLBACK:.*]]
+// CHECK: [[FALLBACK]]:
 // CHECK: store i32 -1
 int match_instantiated_guard(SwitchChoice& value) {
   return match (value) {
