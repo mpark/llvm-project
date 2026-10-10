@@ -1769,7 +1769,7 @@ ExprResult Sema::ActOnMatchSelectExpr(
     ArrayRef<Stmt *> Preamble, SmallVectorImpl<MatchCase> &SourceCases,
     SourceRange Braces, bool ExpandDeferredCases,
     std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
-    std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
+    MatchUsefulnessContext *UsefulnessContext) {
   if (ExpandDeferredCases) {
     auto *E = MatchSelectExpr::Create(
         Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr,
@@ -1798,11 +1798,11 @@ ExprResult Sema::ActOnMatchSelectExpr(
     RetTy = Context.VoidTy;
 
   bool IsFullyCovered = false;
-  if (std::optional<MatchExhaustivenessResult> Exhaustiveness =
-          CheckMatchExhaustiveness(
-              Subject, SourceCases,
-              DiagnosticInstantiations.value_or(
-                  ArrayRef<MatchCaseInstantiation>(CaseInstantiations))))
+  std::optional<MatchExhaustivenessResult> Exhaustiveness =
+      UsefulnessContext
+          ? FinalizeMatchUsefulness(*UsefulnessContext, Subject, SourceCases)
+          : CheckMatchExhaustiveness(Subject, SourceCases, CaseInstantiations);
+  if (Exhaustiveness)
     IsFullyCovered = Exhaustiveness->IsFullyCovered;
   return MatchSelectExpr::Create(
       Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
@@ -2999,14 +2999,25 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     Selected.assign(1, Chosen);
   }
 
+  MatchPatternInfo &PatternInfo = State.get(Pattern);
+  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
+
+  if (ProjectionCache && ProjectionCache->CandidateUsefulness.Context &&
+      ProjectionCache->CandidateUsefulness.RootPattern &&
+      S.UpdateMatchCandidateDomainUsefulness(
+          *ProjectionCache->CandidateUsefulness.Context,
+          ProjectionCache->CandidateUsefulness.RootPattern, Pattern, State,
+          ProjectionCache->CandidateUsefulness.CaseIndex) ==
+          Sema::MatchPatternUsefulness::NotUseful) {
+    ProjectionCache->CandidateUsefulness.IsNotUseful = true;
+    return true;
+  }
+
   if (Pattern->getSubPattern() && !Traits.Projectable[Selected.front()]) {
     S.Diag(Loc, diag::err_alternative_state_not_projectable)
         << SubjectType << Selected.front();
     return true;
   }
-
-  MatchPatternInfo &PatternInfo = State.get(Pattern);
-  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
 
   auto CheckSubPattern = [&](Expr *ProjectedSubject) {
     size_t SavedProjectionPathSize =

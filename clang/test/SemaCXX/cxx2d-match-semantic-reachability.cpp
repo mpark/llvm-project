@@ -138,16 +138,146 @@ int use_value_arm() {
 }
 
 template<class T>
-int refutable_arms_do_not_collect(T value) {
+constexpr int refutable_arms_collectively_close(T value) {
   return match (value) {
     case true => 1;
     case false => 0;
-    case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'bool' is not a structure or union}}
+    case auto&& other => other.size();
   };
 }
 
-int use_refutable_arms() {
-  return refutable_arms_do_not_collect(true); // expected-note {{in instantiation of function template specialization 'refutable_arms_do_not_collect<bool>' requested here}}
+static_assert(refutable_arms_collectively_close(true) == 1);
+static_assert(refutable_arms_collectively_close(false) == 0);
+static_assert(refutable_arms_collectively_close(Sized{5}) == 5);
+
+struct BoolChoice {
+  unsigned state;
+  bool boolean;
+  Sized sized;
+};
+
+template<>
+struct std::alternative_traits<BoolChoice> {
+  static constexpr alternative_info alternatives[] = {
+    ^^bool, ^^Sized
+  };
+  static constexpr bool has_residual_states = false;
+
+  static constexpr __SIZE_TYPE__ index(const BoolChoice& choice) noexcept {
+    return choice.state;
+  }
+
+  template<__SIZE_TYPE__ I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(choice).boolean);
+    else
+      return (static_cast<Self&&>(choice).sized);
+  }
+};
+
+constexpr int collectively_closed_alternative(BoolChoice choice) {
+  return match (choice) {
+    case { true } => 1;
+    case { false } => 0;
+    case { auto&& other } => other.size();
+  };
+}
+
+static_assert(collectively_closed_alternative({0, true, {}}) == 1);
+static_assert(collectively_closed_alternative({0, false, {}}) == 0);
+static_assert(collectively_closed_alternative({1, false, {7}}) == 7);
+
+template<class T>
+struct CandidateConstraint {
+  static_assert(!__is_same(T, bool),
+                "covered alternative candidate was instantiated");
+  static constexpr bool value = __is_same(T, Sized);
+};
+
+template<class T>
+concept UsefulCandidate = CandidateConstraint<T>::value;
+
+constexpr int skip_covered_alternative_candidate(BoolChoice choice) {
+  return match (choice) {
+    case { true } => 1;
+    case { false } => 0;
+    case { UsefulCandidate: auto&& other } => other.size();
+  };
+}
+
+static_assert(skip_covered_alternative_candidate({0, true, {}}) == 1);
+static_assert(skip_covered_alternative_candidate({0, false, {}}) == 0);
+static_assert(skip_covered_alternative_candidate({1, false, {8}}) == 8);
+
+struct NestedBoolChoice {
+  BoolChoice choice;
+  int marker;
+};
+
+constexpr int skip_nested_covered_candidate(NestedBoolChoice nested) {
+  return match (nested) {
+    case [{ true }, _] => 1;
+    case [{ false }, _] => 0;
+    case [{ UsefulCandidate: auto&& other }, _] => other.size();
+  };
+}
+
+static_assert(skip_nested_covered_candidate({{0, true, {}}, 0}) == 1);
+static_assert(skip_nested_covered_candidate({{0, false, {}}, 0}) == 0);
+static_assert(skip_nested_covered_candidate({{1, false, {9}}, 0}) == 9);
+
+struct TwoBoolChoices {
+  BoolChoice first;
+  BoolChoice second;
+};
+
+constexpr int skip_covered_first_field(TwoBoolChoices choices) {
+  return match (choices) {
+    case [{ true }, _] => 1;
+    case [{ false }, _] => 0;
+    case [{ UsefulCandidate: auto&& other }, _] => other.size();
+  };
+}
+
+static_assert(skip_covered_first_field({{0, true, {}}, {0, false, {}}}) == 1);
+static_assert(skip_covered_first_field({{0, false, {}}, {1, false, {}}}) == 0);
+static_assert(skip_covered_first_field({{1, false, {10}}, {0, true, {}}}) == 10);
+
+constexpr int skip_covered_second_field(TwoBoolChoices choices) {
+  return match (choices) {
+    case [_, { true }] => 1;
+    case [_, { false }] => 0;
+    case [_, { UsefulCandidate: auto&& other }] => other.size();
+  };
+}
+
+static_assert(skip_covered_second_field({{0, false, {}}, {0, true, {}}}) == 1);
+static_assert(skip_covered_second_field({{1, false, {}}, {0, false, {}}}) == 0);
+static_assert(skip_covered_second_field({{0, true, {}}, {1, false, {11}}}) == 11);
+
+int coverage_is_path_sensitive(TwoBoolChoices choices) {
+  return match (choices) {
+    case [{ true }, _] => 1;
+    case [{ false }, _] => 0;
+    case [_, { auto&& other }] => other.size(); // expected-error {{member reference base type 'bool' is not a structure or union}}
+  };
+}
+
+int partially_covered_alternative(BoolChoice choice) {
+  return match (choice) {
+    case { true } => 1;
+    case { auto&& other } => other.size(); // expected-error {{member reference base type 'bool' is not a structure or union}}
+  };
+}
+
+constexpr int precisely_redundant_candidate(BoolChoice choice) {
+  return match (choice) {
+    case { true } => 1;
+    case { true } => 2; // expected-error {{match case is redundant}}
+    case { false } => 0;
+    case { auto&& other } => other.size();
+  };
 }
 
 struct Base {
