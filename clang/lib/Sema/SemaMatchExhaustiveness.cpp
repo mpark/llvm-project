@@ -627,6 +627,122 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
   llvm_unreachable("unhandled pattern kind");
 }
 
+CoveragePattern makeAlternativeDomainPattern(
+    const MatchPatternInfo &Info, unsigned Index,
+    std::optional<CoveragePattern> Field, SourceLocation Loc) {
+  CtorKey C = CtorKey::alternativeCtor(
+      Info.AlternativeTraitsType, Index, Info.AlternativeTypes,
+      Info.ProjectableAlternatives, Info.EmptyAlternatives,
+      Info.AlternativeValues, Info.IsExhaustive,
+      Info.HasParameterizedIndexName);
+  CoveragePattern Result = CoveragePattern::ctor(std::move(C), Loc);
+  if (Field && Info.ProjectableAlternatives[Index]) {
+    Result.FieldTypes.push_back(Info.AlternativeTypes[Index]);
+    Result.Fields.push_back(
+        std::make_shared<CoveragePattern>(std::move(*Field)));
+  }
+  return Result;
+}
+
+// Build an upper bound on the candidate's structural domain. Constraints away
+// from the path to Candidate become wildcards, so an imprecise result can only
+// retain an unnecessary specialization.
+std::optional<CoveragePattern> makeCandidateDomainPattern(
+    MatchPattern *Pattern, const AlternativePattern *Candidate,
+    const Sema::MatchPatternState &State) {
+  if (Pattern == Candidate) {
+    const MatchPatternInfo *Info = State.find(Pattern);
+    if (!Info || Info->SelectedAlternatives.size() != 1)
+      return std::nullopt;
+    std::optional<CoveragePattern> Field;
+    if (Candidate->getSubPattern())
+      Field = CoveragePattern::wild(Candidate->getSubPattern()->getBeginLoc());
+    return makeAlternativeDomainPattern(
+        *Info, Info->SelectedAlternatives.front(), std::move(Field),
+        Pattern->getBeginLoc());
+  }
+
+  switch (Pattern->getMatchPatternClass()) {
+  case MatchPattern::ParenPatternClass:
+    return makeCandidateDomainPattern(
+        static_cast<ParenPattern *>(Pattern)->getSubPattern(), Candidate, State);
+
+  case MatchPattern::AndPatternClass:
+  case MatchPattern::OrPatternClass:
+    for (MatchPattern *Child : Pattern->children())
+      if (std::optional<CoveragePattern> Domain =
+              makeCandidateDomainPattern(Child, Candidate, State))
+        return Domain;
+    break;
+
+  case MatchPattern::AlternativePatternClass: {
+    auto *Alternative = static_cast<AlternativePattern *>(Pattern);
+    const MatchPatternInfo *Info = State.find(Alternative);
+    if (!Info || Info->SelectedAlternatives.size() != 1 ||
+        !Alternative->getSubPattern())
+      break;
+    std::optional<CoveragePattern> Field = makeCandidateDomainPattern(
+        Alternative->getSubPattern(), Candidate, State);
+    if (!Field)
+      break;
+    return makeAlternativeDomainPattern(
+        *Info, Info->SelectedAlternatives.front(), std::move(*Field),
+        Pattern->getBeginLoc());
+  }
+
+  case MatchPattern::DecompositionPatternClass: {
+    auto *Decomposition = static_cast<DecompositionPattern *>(Pattern);
+    const MatchPatternInfo *Info = State.find(Decomposition);
+    if (!Info || !Info->Projection ||
+        !Info->Projection->getDecomposedDecl())
+      break;
+
+    ArrayRef<MatchPattern *> Patterns =
+        Info->HasExpandedPatterns ? Info->ExpandedPatterns
+                                  : Decomposition->patterns();
+    SmallVector<BindingDecl *, 4> Bindings;
+    llvm::append_range(
+        Bindings, Info->Projection->getDecomposedDecl()->flat_bindings());
+    if (Bindings.size() != Patterns.size())
+      break;
+
+    std::optional<unsigned> CandidateField;
+    std::optional<CoveragePattern> CandidateDomain;
+    for (auto [I, Child] : llvm::enumerate(Patterns)) {
+      CandidateDomain = makeCandidateDomainPattern(Child, Candidate, State);
+      if (CandidateDomain) {
+        CandidateField = I;
+        break;
+      }
+    }
+    if (!CandidateField)
+      break;
+
+    CoveragePattern Result = CoveragePattern::ctor(
+        CtorKey::productCtor(Patterns.size()), Pattern->getBeginLoc());
+    for (auto [I, Child, Binding] : llvm::enumerate(Patterns, Bindings)) {
+      QualType FieldType = Binding->getBinding()->getType();
+      Result.FieldTypes.push_back(FieldType);
+      CoveragePattern Field =
+          I == *CandidateField
+              ? std::move(*CandidateDomain)
+              : CoveragePattern::wild(Child->getBeginLoc());
+      Result.Fields.push_back(
+          std::make_shared<CoveragePattern>(std::move(Field)));
+    }
+    Result.C.FieldTypes = Result.FieldTypes;
+    return Result;
+  }
+
+  case MatchPattern::WildcardPatternClass:
+  case MatchPattern::DeclarationPatternClass:
+  case MatchPattern::TypePatternClass:
+  case MatchPattern::ExpressionPatternClass:
+    break;
+  }
+  return std::nullopt;
+}
+
 void appendCtorFields(const CoveragePattern &P, const CtorKey &C,
                       PatternRow &OutPatterns, TypeRow &OutTypes) {
   switch (C.K) {
@@ -1171,38 +1287,121 @@ bool isResolvedForExhaustiveness(
 
 } // namespace
 
+struct Sema::MatchUsefulnessContext::Impl {
+  struct Candidate {
+    unsigned CaseIndex;
+    bool ContributesCoverage;
+    CoveragePatterns Patterns;
+  };
+
+  TypeRow InitialTypes;
+  SmallVector<PatternRow, 8> CoverageMatrix;
+  SmallVector<Candidate, 16> Candidates;
+  bool HasUnresolvedPattern = false;
+
+  explicit Impl(QualType SubjectType) { InitialTypes.push_back(SubjectType); }
+
+  Usefulness addCandidate(Sema &S, unsigned CaseIndex,
+                          CoveragePatterns Patterns, bool ContributesCoverage,
+                          bool ClassifyContinuation) {
+    bool AnyUseful = false;
+    bool AnyMaybeUseful = false;
+    for (const CoveragePattern &Pattern : Patterns) {
+      PatternRow Row;
+      Row.push_back(Pattern);
+      if (ClassifyContinuation) {
+        Usefulness Result =
+            isUseful(S, CoverageMatrix, Row, InitialTypes,
+                     ConstructorDomain::RequiredAndResidual, nullptr);
+        AnyUseful |= Result == Usefulness::Useful;
+        AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
+      }
+
+      if (ContributesCoverage && Pattern.K != CoveragePattern::Opaque)
+        CoverageMatrix.push_back(std::move(Row));
+    }
+
+    Candidates.push_back(
+        {CaseIndex, ContributesCoverage, std::move(Patterns)});
+    if (AnyUseful)
+      return Usefulness::Useful;
+    if (AnyMaybeUseful)
+      return Usefulness::MaybeUseful;
+    return Usefulness::NotUseful;
+  }
+};
+
+Sema::MatchUsefulnessContext::MatchUsefulnessContext(QualType SubjectType)
+    : State(std::make_unique<Impl>(SubjectType)) {}
+
+Sema::MatchUsefulnessContext::~MatchUsefulnessContext() = default;
+
+Sema::MatchPatternUsefulness Sema::UpdateMatchUsefulness(
+    MatchUsefulnessContext &Context, MatchPattern *Pattern,
+    const MatchPatternInstantiation *PatternInstantiation, unsigned CaseIndex,
+    bool ContributesCoverage) {
+  MatchUsefulnessContext::Impl &State = *Context.State;
+  State.HasUnresolvedPattern |= static_cast<bool>(
+      Pattern->getDependence() &
+      (ExprDependence::Instantiation | ExprDependence::Error));
+  CoveragePatterns Patterns = makePatterns(*this, Pattern, PatternInstantiation,
+                                           State.InitialTypes.front());
+  Usefulness Result = State.addCandidate(*this, CaseIndex, std::move(Patterns),
+                                         ContributesCoverage,
+                                         /*ClassifyContinuation=*/true);
+  if (Result == Usefulness::Useful)
+    return MatchPatternUsefulness::Useful;
+  if (Result == Usefulness::MaybeUseful)
+    return MatchPatternUsefulness::MaybeUseful;
+  return MatchPatternUsefulness::NotUseful;
+}
+
+Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
+    MatchUsefulnessContext &Context, MatchPattern *RootPattern,
+    AlternativePattern *Candidate, const MatchPatternState &PatternState,
+    unsigned CaseIndex) {
+  MatchUsefulnessContext::Impl &State = *Context.State;
+  if (State.CoverageMatrix.empty())
+    return MatchPatternUsefulness::Useful;
+
+  CoveragePattern Domain =
+      makeCandidateDomainPattern(RootPattern, Candidate, PatternState)
+          .value_or(CoveragePattern::wild(RootPattern->getBeginLoc()));
+  PatternRow Row;
+  Row.push_back(Domain);
+  Usefulness Result =
+      isUseful(*this, State.CoverageMatrix, Row, State.InitialTypes,
+               ConstructorDomain::RequiredAndResidual, nullptr);
+  if (Result == Usefulness::Useful)
+    return MatchPatternUsefulness::Useful;
+  if (Result == Usefulness::MaybeUseful)
+    return MatchPatternUsefulness::MaybeUseful;
+
+  State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
+                     /*ContributesCoverage=*/false,
+                     /*ClassifyContinuation=*/false);
+  return MatchPatternUsefulness::NotUseful;
+}
+
 std::optional<Sema::MatchExhaustivenessResult>
-Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
-                               ArrayRef<MatchCaseInstantiation> Instantiations,
-                               bool DiagnoseExhaustiveness,
-                               bool UseResolvedInstantiationDependentPatterns) {
-  if (!Subject || Subject->isTypeDependent() ||
-      llvm::any_of(Instantiations, [&](const MatchCaseInstantiation &Case) {
-        if (!UseResolvedInstantiationDependentPatterns)
-          return static_cast<bool>(
-              Case.Pattern->getDependence() &
-              (ExprDependence::Instantiation | ExprDependence::Error));
-        return !isResolvedForExhaustiveness(Case.Pattern,
-                                            Case.PatternInstantiation);
-      }))
+Sema::FinalizeMatchUsefulness(MatchUsefulnessContext &UsefulnessContext,
+                              Expr *Subject, ArrayRef<MatchCase> Cases,
+                              bool DiagnoseExhaustiveness) {
+  MatchUsefulnessContext::Impl &State = *UsefulnessContext.State;
+  if (!Subject || Subject->isTypeDependent() || State.HasUnresolvedPattern)
     return std::nullopt;
 
   QualType SubjectType = Subject->getType();
   SmallVector<PatternRow, 8> DefiniteMatrix;
-  SmallVector<PatternRow, 8> CoverageMatrix;
-  TypeRow InitialTypes;
-  InitialTypes.push_back(SubjectType);
 
-  for (unsigned I = 0; I < Instantiations.size();) {
-    assert(Instantiations[I].CaseIndex < Cases.size());
-    unsigned CaseIndex = Instantiations[I].CaseIndex;
+  for (unsigned I = 0; I < State.Candidates.size();) {
+    assert(State.Candidates[I].CaseIndex < Cases.size());
+    unsigned CaseIndex = State.Candidates[I].CaseIndex;
     unsigned GroupEnd = I + 1;
-    while (GroupEnd < Instantiations.size() &&
-           Instantiations[GroupEnd].CaseIndex == CaseIndex)
+    while (GroupEnd < State.Candidates.size() &&
+           State.Candidates[GroupEnd].CaseIndex == CaseIndex)
       ++GroupEnd;
 
-    bool CheckedPattern = false;
-    bool CheckedUsefulness = false;
     bool AnyPattern = false;
     bool AnyUseful = false;
     bool AnyMaybeUseful = false;
@@ -1217,17 +1416,15 @@ Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
     SmallVector<PatternRow, 8> IntraCaseMatrix(DefiniteMatrix.begin(),
                                                DefiniteMatrix.end());
     for (unsigned J = I; J < GroupEnd; ++J) {
-      const MatchCaseInstantiation &Case = Instantiations[J];
-      CoveragePatterns Patterns = makePatterns(
-          *this, Case.Pattern, Case.PatternInstantiation, SubjectType);
-      CheckedPattern = true;
+      const MatchUsefulnessContext::Impl::Candidate &Candidate =
+          State.Candidates[J];
+      const CoveragePatterns &Patterns = Candidate.Patterns;
       AnyPattern |= !Patterns.empty();
-      CheckedUsefulness = true;
       for (const CoveragePattern &Pattern : Patterns) {
         PatternRow Row;
         Row.push_back(Pattern);
         Usefulness Result =
-            isUseful(*this, IntraCaseMatrix, Row, InitialTypes,
+            isUseful(*this, IntraCaseMatrix, Row, State.InitialTypes,
                      ConstructorDomain::RequiredAndResidual, nullptr);
         AnyUseful |= Result == Usefulness::Useful;
         AnyMaybeUseful |= Result == Usefulness::MaybeUseful;
@@ -1248,25 +1445,22 @@ Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
         if (Pattern.K != CoveragePattern::Opaque)
           IntraCaseMatrix.push_back(Row);
       }
-      if (hasGuard(Case))
+      if (!Candidate.ContributesCoverage || Cases[CaseIndex].MaybeUseful)
         continue;
-      for (CoveragePattern &Pattern : Patterns) {
-        if (Pattern.K != CoveragePattern::Opaque) {
-          PatternRow Row;
-          Row.push_back(Pattern);
-          CoverageMatrix.push_back(Row);
-          if (!Cases[CaseIndex].MaybeUseful)
-            DefiniteMatrix.push_back(std::move(Row));
-        }
+      for (const CoveragePattern &Pattern : Patterns) {
+        if (Pattern.K == CoveragePattern::Opaque)
+          continue;
+        PatternRow Row;
+        Row.push_back(Pattern);
+        DefiniteMatrix.push_back(std::move(Row));
       }
     }
     bool GroupIsMaybeUseful = Cases[CaseIndex].MaybeUseful;
-    if (!GroupIsMaybeUseful && CheckedPattern && !AnyPattern)
+    if (!GroupIsMaybeUseful && !AnyPattern)
       Diag(Cases[CaseIndex].Pattern->getBeginLoc(),
            diag::err_match_case_impossible)
           << SubjectType;
-    else if (CheckedUsefulness && !GroupIsMaybeUseful && !AnyUseful &&
-             !AnyMaybeUseful)
+    else if (!GroupIsMaybeUseful && !AnyUseful && !AnyMaybeUseful)
       Diag(Cases[CaseIndex].Pattern->getBeginLoc(),
            diag::err_match_case_redundant);
     else if (!GroupIsMaybeUseful)
@@ -1279,18 +1473,46 @@ Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
   PatternRow WildRow;
   WildRow.push_back(CoveragePattern::wild(Subject->getBeginLoc()));
   SmallVector<CtorKey, 4> Witness;
-  Usefulness Exhaustive = isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
-                                   ConstructorDomain::Required, &Witness);
+  Usefulness Exhaustive =
+      isUseful(*this, State.CoverageMatrix, WildRow, State.InitialTypes,
+               ConstructorDomain::Required, &Witness);
   if (DiagnoseExhaustiveness && Exhaustive == Usefulness::Useful) {
     Diag(Subject->getBeginLoc(), diag::err_match_not_exhaustive)
         << true << printWitness(Context, Witness);
   }
 
   bool IsFullyCovered =
-      isUseful(*this, CoverageMatrix, WildRow, InitialTypes,
+      isUseful(*this, State.CoverageMatrix, WildRow, State.InitialTypes,
                ConstructorDomain::RequiredAndResidual,
                nullptr) == Usefulness::NotUseful;
-  return MatchExhaustivenessResult{
-      .IsExhaustive = Exhaustive == Usefulness::NotUseful,
-      .IsFullyCovered = IsFullyCovered};
+  return MatchExhaustivenessResult{Exhaustive == Usefulness::NotUseful,
+                                   IsFullyCovered};
+}
+
+std::optional<Sema::MatchExhaustivenessResult>
+Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
+                               ArrayRef<MatchCaseInstantiation> Instantiations,
+                               bool DiagnoseExhaustiveness,
+                               bool UseResolvedInstantiationDependentPatterns) {
+  if (!Subject || Subject->isTypeDependent() ||
+      llvm::any_of(Instantiations, [&](const MatchCaseInstantiation &Case) {
+        if (!UseResolvedInstantiationDependentPatterns)
+          return static_cast<bool>(
+              Case.Pattern->getDependence() &
+              (ExprDependence::Instantiation | ExprDependence::Error));
+        return !isResolvedForExhaustiveness(Case.Pattern,
+                                            Case.PatternInstantiation);
+      }))
+    return std::nullopt;
+
+  MatchUsefulnessContext Usefulness(Subject->getType());
+  for (const MatchCaseInstantiation &Case : Instantiations) {
+    CoveragePatterns Patterns = makePatterns(
+        *this, Case.Pattern, Case.PatternInstantiation, Subject->getType());
+    Usefulness.State->addCandidate(*this, Case.CaseIndex, std::move(Patterns),
+                                   /*ContributesCoverage=*/!hasGuard(Case),
+                                   /*ClassifyContinuation=*/false);
+  }
+  return FinalizeMatchUsefulness(Usefulness, Subject, Cases,
+                                 DiagnoseExhaustiveness);
 }
