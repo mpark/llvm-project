@@ -11461,6 +11461,7 @@ public:
   std::optional<MatchExhaustivenessResult>
   GetPatternDeclarationExhaustiveness(CaseConditionExpr *Condition);
   StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
+  class MatchUsefulnessContext;
   ExprResult ActOnMatchSelectExpr(
       Stmt *InitStmt, VarDecl *HoldingVar, Expr *Subject,
       SourceLocation MatchLoc, bool IsConstexpr, bool IsStatement,
@@ -11469,8 +11470,8 @@ public:
       bool ExpandDeferredCases = false,
       std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations =
           std::nullopt,
-      std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations =
-          std::nullopt);
+      MatchUsefulnessContext *UsefulnessContext = nullptr);
+
   ArrayRef<const Attr *>
   ActOnMatchCaseAttributes(const ParsedAttributes &Attributes, Stmt *Handler);
   ExprResult ExpandDeferredMatchExpr(Expr *E);
@@ -11555,6 +11556,12 @@ public:
     bool RequiresTemplateRegion = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
+    struct {
+      MatchUsefulnessContext *Context = nullptr;
+      MatchPattern *RootPattern = nullptr;
+      unsigned CaseIndex = 0;
+      bool IsNotUseful = false;
+    } CandidateUsefulness;
 
     bool hasDeferredAlternativeChoices() const {
       return DeferAlternativeChoices && !AlternativeChoices.empty();
@@ -11597,31 +11604,48 @@ public:
       return nullptr;
     }
   };
-  enum class MatchPatternRefutability { Impossible, Refutable, Irrefutable };
+  /// Classify irrefutability of one checked pattern without consulting prior
+  /// arms or the usefulness matrix.
+  bool isMatchPatternIrrefutable(MatchPattern *Pattern,
+                                 const MatchPatternState &State);
 
-  /// A closed-choice state restriction under which a semantic match arm is
-  /// instantiated. An empty set of constraints denotes the whole subject.
-  struct MatchSemanticDomainConstraint {
-    const Expr *Subject = nullptr;
-    QualType AlternativeTraitsType;
-    SmallVector<unsigned, 2> Alternatives;
+  enum class MatchPatternUsefulness { NotUseful, MaybeUseful, Useful };
+
+  /// Incremental coverage and normalized candidate state for a match.
+  class MatchUsefulnessContext {
+    struct Impl;
+    std::unique_ptr<Impl> State;
+
+    friend class Sema;
+
+  public:
+    explicit MatchUsefulnessContext(QualType SubjectType);
+    ~MatchUsefulnessContext();
+
+    MatchUsefulnessContext(const MatchUsefulnessContext &) = delete;
+    MatchUsefulnessContext &operator=(const MatchUsefulnessContext &) = delete;
   };
 
-  /// Classifies one fully checked pattern without consulting prior arms or the
-  /// usefulness matrix.
-  struct MatchPatternSemanticAnalysis {
-    MatchPatternRefutability Refutability = MatchPatternRefutability::Refutable;
-    SmallVector<MatchSemanticDomainConstraint, 4> Domain;
+  /// Record a specialized candidate and classify it against the coverage of
+  /// the preceding unguarded candidates.
+  MatchPatternUsefulness
+  UpdateMatchUsefulness(MatchUsefulnessContext &Context, MatchPattern *Pattern,
+                        const MatchPatternInstantiation *PatternInstantiation,
+                        unsigned CaseIndex, bool ContributesCoverage);
 
-    bool isUnconditionallyMatched() const {
-      return Domain.empty() &&
-             Refutability == MatchPatternRefutability::Irrefutable;
-    }
-  };
+  /// Classify an alternative candidate using its enclosing structural domain,
+  /// before checking the candidate's selector and payload pattern.
+  MatchPatternUsefulness UpdateMatchCandidateDomainUsefulness(
+      MatchUsefulnessContext &Context, MatchPattern *RootPattern,
+      AlternativePattern *Candidate, const MatchPatternState &State,
+      unsigned CaseIndex);
 
-  MatchPatternSemanticAnalysis
-  AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
-                               const MatchPatternState &State);
+  /// Diagnose source-level usefulness and compute final coverage from the
+  /// candidates accumulated in Context.
+  std::optional<MatchExhaustivenessResult>
+  FinalizeMatchUsefulness(MatchUsefulnessContext &Context, Expr *Subject,
+                          ArrayRef<MatchCase> Cases,
+                          bool DiagnoseExhaustiveness = true);
   bool
   CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
                             MatchPatternState &State,

@@ -586,7 +586,6 @@ struct MatchPatternInfo {
   bool IsOpenAlternative = false;
   bool IsOpenAlternativeInitialization = false;
   bool TypePatternResolved = false;
-  bool TypePatternMatches = false;
   bool HasExpandedPatterns = false;
 };
 

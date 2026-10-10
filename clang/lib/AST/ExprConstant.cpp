@@ -21557,7 +21557,7 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
       return EvaluateProjectionCondition(Projection, Info, ProjectionCache) &&
              EvaluateAsBooleanCondition(Projection->getConditionExpr(), Result,
                                         Info);
-    Result = PatternInfo->TypePatternMatches;
+    Result = PatternInfo->TypePatternResolved;
     return true;
   }
   case MatchPattern::ExpressionPatternClass: {

@@ -2731,7 +2731,7 @@ RValue CodeGenFunction::EmitMatchPattern(
         EmitVarDecl(*Projection->getConditionVar());
       return RValue::get(EmitScalarExpr(Projection->getConditionExpr()));
     }
-    return RValue::get(Builder.getInt1(Info->TypePatternMatches));
+    return RValue::get(Builder.getInt1(Info->TypePatternResolved));
   }
   case MatchPattern::MatchPatternClass::ExpressionPatternClass: {
     auto *PatternExpr = static_cast<const ExpressionPattern *>(Pattern);

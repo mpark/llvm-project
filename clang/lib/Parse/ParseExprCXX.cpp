@@ -4095,9 +4095,8 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
       ProjectionCache.hasDeferredPatterns() ||
       (Subject.get()->isTypeDependent() &&
        Sema::MatchAlternativeSelectionPlan::isRequired(Pattern));
-  Sema::MatchPatternSemanticAnalysis Semantic =
-      Actions.AnalyzeMatchPatternSemantics(Pattern, PatternState);
-  bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+  bool PatternIsIrrefutable =
+      Actions.isMatchPatternIrrefutable(Pattern, PatternState);
   ExprResult Result = Actions.ActOnCaseConditionExpr(
       HoldingVar, Subject.get(), CaseLoc, Pattern,
       MatchPatternInstantiation::Create(Actions.Context, Pattern,
@@ -4272,13 +4271,13 @@ Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI,
       ProjectionCache.hasDeferredPatterns() ||
       (Subject.get()->isTypeDependent() &&
        Sema::MatchAlternativeSelectionPlan::isRequired(FRI.Pattern));
-  Sema::MatchPatternSemanticAnalysis Semantic =
-      Actions.AnalyzeMatchPatternSemantics(FRI.Pattern, PatternState);
+  bool PatternIsIrrefutable =
+      Actions.isMatchPatternIrrefutable(FRI.Pattern, PatternState);
   ExprResult Result = Actions.ActOnCaseConditionExpr(
       /*HoldingVar=*/nullptr, Subject.get(), FRI.PatternCaseLoc, FRI.Pattern,
       MatchPatternInstantiation::Create(Actions.Context, FRI.Pattern,
                                         PatternState.Infos),
-      Semantic.isUnconditionallyMatched(), NeedsCaseInstantiation);
+      PatternIsIrrefutable, NeedsCaseInstantiation);
   if (Result.isUsable())
     cast<CaseConditionExpr>(Result.get())->setRegion(Region.getRegion());
   return Result;
@@ -4776,9 +4775,8 @@ ExprResult Parser::ParseMatchTestExpression() {
       ProjectionCache.hasDeferredPatterns() ||
       (Subject.get()->isTypeDependent() &&
        Sema::MatchAlternativeSelectionPlan::isRequired(Pattern.get()));
-  Sema::MatchPatternSemanticAnalysis Semantic =
-      Actions.AnalyzeMatchPatternSemantics(Pattern.get(), PatternState);
-  bool PatternIsIrrefutable = Semantic.isUnconditionallyMatched();
+  bool PatternIsIrrefutable =
+      Actions.isMatchPatternIrrefutable(Pattern.get(), PatternState);
   ExprResult Result = Actions.ActOnMatchTestExpr(
       HoldingVar, Subject.get(), MatchLoc, Pattern.get(),
       MatchPatternInstantiation::Create(Actions.Context, Pattern.get(),

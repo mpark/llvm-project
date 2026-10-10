@@ -232,6 +232,48 @@ static_assert(nested_multiple_projectable_states({true, {0, 17, 0.0}}) == 17);
 static_assert(nested_multiple_projectable_states({true, {1, 0, 29.0}}) == 29);
 static_assert(nested_multiple_projectable_states({false, {0, 17, 0.0}}) == -1);
 
+void covered_multiple_projectable_states(Choice value) {
+  match (value) {
+    case { int } => ;
+    case { double } => ;
+    case { auto payload } => static_assert(false, "not instantiated"); // expected-error {{match case is redundant}}
+  }
+}
+
+void one_uncovered_projectable_state(Choice value) {
+  match (value) {
+    case { int } => ;
+    case { auto payload } => {
+      if constexpr (__is_same(decltype(payload), double))
+        (void)payload;
+      else
+        static_assert(false, "coverage does not change source dependence");
+    }
+  }
+}
+
+template <class T>
+concept Integer = __is_same(T, int);
+
+void one_viable_projectable_state(Choice value) {
+  match (value) {
+    case { Integer auto payload } => {
+      if constexpr (true)
+        (void)payload;
+      else
+        static_assert(false, "constraints do not change source dependence");
+    }
+    case _ => ;
+  }
+}
+
+void covered_repeated_projectable_states(RepeatedChoice value) {
+  match (value) {
+    case { int } => ;
+    case { auto payload } => static_assert(false, "not instantiated"); // expected-error {{match case is redundant}}
+  }
+}
+
 int deferred_assertion(Choice value) {
   return match (value) {
     case { auto payload } => // expected-note 2{{while instantiating this pattern match}}

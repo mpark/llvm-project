@@ -1775,7 +1775,7 @@ ExprResult Sema::ActOnMatchSelectExpr(
     ArrayRef<Stmt *> Preamble, SmallVectorImpl<MatchCase> &SourceCases,
     SourceRange Braces, bool ExpandDeferredCases,
     std::optional<ArrayRef<MatchCaseInstantiation>> Instantiations,
-    std::optional<ArrayRef<MatchCaseInstantiation>> DiagnosticInstantiations) {
+    MatchUsefulnessContext *UsefulnessContext) {
   if (ExpandDeferredCases) {
     auto *E = MatchSelectExpr::Create(
         Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr,
@@ -1804,11 +1804,11 @@ ExprResult Sema::ActOnMatchSelectExpr(
     RetTy = Context.VoidTy;
 
   bool IsFullyCovered = false;
-  if (std::optional<MatchExhaustivenessResult> Exhaustiveness =
-          CheckMatchExhaustiveness(
-              Subject, SourceCases,
-              DiagnosticInstantiations.value_or(
-                  ArrayRef<MatchCaseInstantiation>(CaseInstantiations))))
+  std::optional<MatchExhaustivenessResult> Exhaustiveness =
+      UsefulnessContext
+          ? FinalizeMatchUsefulness(*UsefulnessContext, Subject, SourceCases)
+          : CheckMatchExhaustiveness(Subject, SourceCases, CaseInstantiations);
+  if (Exhaustiveness)
     IsFullyCovered = Exhaustiveness->IsFullyCovered;
   return MatchSelectExpr::Create(
       Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
@@ -2651,7 +2651,6 @@ completeClosedAlternativeTypeSelector(TypePattern *Selector,
                                       Sema::MatchPatternState &State) {
   MatchPatternInfo &Info = State.get(Selector);
   Info.TypePatternResolved = true;
-  Info.TypePatternMatches = true;
   Info.CheckedSubjectType = AdvertisedType;
 }
 
@@ -3017,15 +3016,26 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     Selected.assign(1, Chosen);
   }
 
+  MatchPatternInfo &PatternInfo = State.get(Pattern);
+  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
+
+  if (ProjectionCache && ProjectionCache->CandidateUsefulness.Context &&
+      ProjectionCache->CandidateUsefulness.RootPattern &&
+      S.UpdateMatchCandidateDomainUsefulness(
+          *ProjectionCache->CandidateUsefulness.Context,
+          ProjectionCache->CandidateUsefulness.RootPattern, Pattern, State,
+          ProjectionCache->CandidateUsefulness.CaseIndex) ==
+          Sema::MatchPatternUsefulness::NotUseful) {
+    ProjectionCache->CandidateUsefulness.IsNotUseful = true;
+    return true;
+  }
+
   if (Pattern->getSubPattern() &&
       !Traits.HasAlternativeType[Selected.front()]) {
     S.Diag(Loc, diag::err_alternative_state_not_projectable)
         << SubjectType << Selected.front();
     return true;
   }
-
-  MatchPatternInfo &PatternInfo = State.get(Pattern);
-  storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
 
   auto CheckSubPattern = [&](Expr *ProjectedSubject) {
     size_t SavedProjectionPathSize =
@@ -3360,7 +3370,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         return true;
       }
       Info.TypePatternResolved = true;
-      Info.TypePatternMatches = true;
       Info.CheckedSubjectType = Subject->getType();
       return false;
     }
@@ -3369,7 +3378,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (CheckInitialization(Subject))
         return true;
       Info.TypePatternResolved = true;
-      Info.TypePatternMatches = true;
       Info.CheckedSubjectType = Subject->getType();
       return false;
     }
@@ -3379,7 +3387,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
     case CastProjectionResult::Success:
       if (PatternType->isVoidType()) {
         Info.TypePatternResolved = true;
-        Info.TypePatternMatches = true;
         Info.CheckedSubjectType = Subject->getType();
         return false;
       }
@@ -3388,7 +3395,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         if (CheckInitialization(Info.Projection->getProjectedExpr()))
           return true;
         Info.TypePatternResolved = true;
-        Info.TypePatternMatches = true;
         Info.CheckedSubjectType = Subject->getType();
         return false;
       }
@@ -3695,141 +3701,63 @@ void Sema::DiscardUninitializedMatchPatternDeclarations(
   });
 }
 
-Sema::MatchPatternSemanticAnalysis
-Sema::AnalyzeMatchPatternSemantics(MatchPattern *Pattern,
-                                   const MatchPatternState &State) {
-  MatchPatternSemanticAnalysis Result;
+bool Sema::isMatchPatternIrrefutable(MatchPattern *Pattern,
+                                     const MatchPatternState &State) {
+  const MatchPatternInfo *Info = State.find(Pattern);
+  switch (Pattern->getMatchPatternClass()) {
+  case MatchPattern::WildcardPatternClass:
+    return true;
 
-  auto Analyze = [&](MatchPattern *P,
-                     auto &Recurse) -> MatchPatternRefutability {
-    const MatchPatternInfo *Info = State.find(P);
-    switch (P->getMatchPatternClass()) {
-    case MatchPattern::WildcardPatternClass:
-      return MatchPatternRefutability::Irrefutable;
+  case MatchPattern::ExpressionPatternClass:
+    return false;
 
-    case MatchPattern::ExpressionPatternClass:
-      return MatchPatternRefutability::Refutable;
+  case MatchPattern::ParenPatternClass:
+    return isMatchPatternIrrefutable(
+        cast<ParenPattern>(Pattern)->getSubPattern(), State);
 
-    case MatchPattern::ParenPatternClass:
-      return Recurse(static_cast<ParenPattern *>(P)->getSubPattern(), Recurse);
+  case MatchPattern::TypePatternClass:
+    if (!Info || !Info->TypePatternResolved)
+      return false;
+    [[fallthrough]];
+  case MatchPattern::DeclarationPatternClass:
+    return !Info || !Info->Projection ||
+           Info->Projection->getKind() != MatchProjection::CastProjection;
 
-    case MatchPattern::DeclarationPatternClass:
-      if (Info && Info->Projection &&
-          Info->Projection->getKind() == MatchProjection::CastProjection)
-        return MatchPatternRefutability::Refutable;
-      return MatchPatternRefutability::Irrefutable;
+  case MatchPattern::AndPatternClass:
+    return llvm::all_of(cast<AndPattern>(Pattern)->conjuncts(),
+                        [&](MatchPattern *Child) {
+                          return isMatchPatternIrrefutable(Child, State);
+                        });
 
-    case MatchPattern::TypePatternClass:
-      if (!Info || !Info->TypePatternResolved)
-        return MatchPatternRefutability::Refutable;
-      if (!Info->TypePatternMatches)
-        return MatchPatternRefutability::Impossible;
-      if (Info->Projection &&
-          Info->Projection->getKind() == MatchProjection::CastProjection)
-        return MatchPatternRefutability::Refutable;
-      return MatchPatternRefutability::Irrefutable;
+  case MatchPattern::OrPatternClass: {
+    auto *Or = cast<OrPattern>(Pattern);
+    if (!Info || Info->ViableOrAlternatives.empty())
+      return false;
+    for (auto [Viable, Alternative] :
+         llvm::zip(Info->ViableOrAlternatives, Or->alternatives()))
+      if (Viable && isMatchPatternIrrefutable(Alternative, State))
+        return true;
+    return false;
+  }
 
-    case MatchPattern::AndPatternClass: {
-      MatchPatternRefutability Refutability =
-          MatchPatternRefutability::Irrefutable;
-      for (MatchPattern *Conjunct : static_cast<AndPattern *>(P)->conjuncts()) {
-        MatchPatternRefutability Child = Recurse(Conjunct, Recurse);
-        if (Child == MatchPatternRefutability::Impossible)
-          return Child;
-        if (Child == MatchPatternRefutability::Refutable)
-          Refutability = Child;
-      }
-      return Refutability;
-    }
+  case MatchPattern::AlternativePatternClass: {
+    auto *Alternative = cast<AlternativePattern>(Pattern);
+    if (!Info || Info->IsOpenAlternative ||
+        (Info->Projection && !Info->AlternativeTraitsType.isNull()))
+      return false;
+    if (Alternative->isTypeSelected() &&
+        !isMatchPatternIrrefutable(Alternative->getSelector(), State))
+      return false;
+    return !Alternative->getSubPattern() ||
+           isMatchPatternIrrefutable(Alternative->getSubPattern(), State);
+  }
 
-    case MatchPattern::OrPatternClass: {
-      auto *Or = static_cast<OrPattern *>(P);
-      if (!Info || Info->ViableOrAlternatives.empty())
-        return MatchPatternRefutability::Refutable;
-
-      unsigned ViableCount = llvm::count(Info->ViableOrAlternatives, 1);
-      if (ViableCount == 1)
-        for (auto [Viable, Alternative] :
-             llvm::zip(Info->ViableOrAlternatives, Or->alternatives()))
-          if (Viable)
-            return Recurse(Alternative, Recurse);
-
-      bool AnyRefutable = false;
-      for (auto [Viable, Alternative] :
-           llvm::zip(Info->ViableOrAlternatives, Or->alternatives())) {
-        if (!Viable)
-          continue;
-        size_t SavedDomainSize = Result.Domain.size();
-        MatchPatternRefutability Child = Recurse(Alternative, Recurse);
-        bool IsUnconditional = Child == MatchPatternRefutability::Irrefutable &&
-                               Result.Domain.size() == SavedDomainSize;
-        Result.Domain.resize(SavedDomainSize);
-        if (IsUnconditional)
-          return MatchPatternRefutability::Irrefutable;
-        AnyRefutable |= Child != MatchPatternRefutability::Impossible;
-      }
-      return AnyRefutable ? MatchPatternRefutability::Refutable
-                          : MatchPatternRefutability::Impossible;
-    }
-
-    case MatchPattern::AlternativePatternClass: {
-      auto *Alternative = static_cast<AlternativePattern *>(P);
-      if (!Info)
-        return MatchPatternRefutability::Refutable;
-
-      MatchPatternRefutability Refutability =
-          MatchPatternRefutability::Irrefutable;
-      if (Info->IsOpenAlternative)
-        return MatchPatternRefutability::Refutable;
-
-      if (Info->Projection && !Info->AlternativeTraitsType.isNull()) {
-        const VarDecl *HoldingVar = Info->Projection->getHoldingVar();
-        assert(HoldingVar && HoldingVar->getInit() &&
-               "closed alternative projection has no subject");
-        MatchSemanticDomainConstraint Constraint;
-        Constraint.Subject = HoldingVar->getInit();
-        Constraint.AlternativeTraitsType = Info->AlternativeTraitsType;
-        Constraint.Alternatives.append(Info->SelectedAlternatives.begin(),
-                                       Info->SelectedAlternatives.end());
-        Result.Domain.push_back(std::move(Constraint));
-      }
-
-      if (Alternative->isTypeSelected()) {
-        MatchPatternRefutability Selector =
-            Recurse(Alternative->getSelector(), Recurse);
-        if (Selector == MatchPatternRefutability::Impossible)
-          return Selector;
-        if (Selector == MatchPatternRefutability::Refutable)
-          Refutability = Selector;
-      }
-      if (!Alternative->getSubPattern())
-        return Refutability;
-      MatchPatternRefutability SubPattern =
-          Recurse(Alternative->getSubPattern(), Recurse);
-      if (SubPattern == MatchPatternRefutability::Impossible)
-        return SubPattern;
-      if (SubPattern == MatchPatternRefutability::Refutable)
-        Refutability = SubPattern;
-      return Refutability;
-    }
-
-    case MatchPattern::DecompositionPatternClass: {
-      MatchPatternRefutability Decomposition =
-          MatchPatternRefutability::Irrefutable;
-      auto *Pattern = static_cast<DecompositionPattern *>(P);
-      for (MatchPattern *Child : getDecompositionPatterns(Pattern, State)) {
-        MatchPatternRefutability ChildResult = Recurse(Child, Recurse);
-        if (ChildResult == MatchPatternRefutability::Impossible)
-          return MatchPatternRefutability::Impossible;
-        if (ChildResult == MatchPatternRefutability::Refutable)
-          Decomposition = MatchPatternRefutability::Refutable;
-      }
-      return Decomposition;
-    }
-    }
-    llvm_unreachable("unknown match pattern kind");
-  };
-
-  Result.Refutability = Analyze(Pattern, Analyze);
-  return Result;
+  case MatchPattern::DecompositionPatternClass:
+    return llvm::all_of(
+        getDecompositionPatterns(cast<DecompositionPattern>(Pattern), State),
+        [&](MatchPattern *Child) {
+          return isMatchPatternIrrefutable(Child, State);
+        });
+  }
+  llvm_unreachable("unknown match pattern kind");
 }
