@@ -435,6 +435,69 @@ int generic_selector_named_projection(GenericSelectorChoice choice) {
   };
 }
 
+struct ProjectionBase {
+  virtual ~ProjectionBase() = default;
+};
+
+struct ProjectionDerived : ProjectionBase {};
+
+struct ConcreteProjectionChoice {
+  ProjectionDerived value;
+};
+
+template<>
+struct std::alternative_traits<ConcreteProjectionChoice> {
+  static constexpr alternative_info alternatives[] = {^^ProjectionBase};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const ConcreteProjectionChoice&) noexcept {
+    return 0;
+  }
+
+  template<unsigned, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+int declaration_uses_concrete_projection(ConcreteProjectionChoice choice) {
+  return match (choice) {
+    case { ProjectionDerived& value } => 1;
+  };
+}
+
+int declaration_preserves_derived_to_base(ConcreteProjectionChoice choice) {
+  return match (choice) {
+    case { ProjectionBase& value } => 1;
+  };
+}
+
+struct ErasedProjectionChoice {
+  ProjectionDerived value;
+};
+
+template<>
+struct std::alternative_traits<ErasedProjectionChoice> {
+  static constexpr alternative_info alternatives[] = {^^ProjectionBase};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const ErasedProjectionChoice&) noexcept {
+    return 0;
+  }
+
+  template<unsigned, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    return static_cast<ProjectionBase&>(choice.value);
+  }
+};
+
+int declaration_preserves_dynamic_cast(ErasedProjectionChoice choice) {
+  return match (choice) {
+    case { ProjectionDerived& value } => 1;
+    case _ => 0;
+  };
+}
+
 struct ReflectedOnlyChoice {
   int value;
 };
