@@ -58,12 +58,14 @@ bool Sema::MatchAlternativeSelectionPlan::isRequired(
 }
 
 void Sema::MatchAlternativeSelectionPlan::beginCandidate(
-    MatchProjectionCache &Cache) const {
+    MatchProjectionCache &Cache, bool IsExpandingCandidate) const {
   Cache.AlternativeChoices.clear();
   Cache.PlannedAlternativeSelections = Selections;
   Cache.NextPlannedAlternativeSelection = 0;
   Cache.CurrentProjectionPath.clear();
   Cache.CurrentDiscriminatorPath.clear();
+  Cache.IsExpandingCandidate = IsExpandingCandidate;
+  Cache.CandidateIsNotViable = false;
 }
 
 bool Sema::MatchAlternativeSelectionPlan::advance(
@@ -2284,20 +2286,19 @@ static bool isDeclarationPatternApplicable(Sema &S, Expr *Subject,
           SCS.DirectBinding && SCS.Second == ICK_Derived_To_Base);
 }
 
-static bool isDeducedDeclarationPatternApplicable(Sema &S, VarDecl *Declaration,
-                                                  Expr *Subject) {
-  if (!Declaration->getType()->isUndeducedType())
-    return true;
-
+static QualType
+deduceApplicableDeclarationPatternType(Sema &S, VarDecl *Declaration,
+                                       Expr *Subject) {
   QualType DeducedType;
   TemplateDeductionInfo Info(Subject->getExprLoc());
   Sema::SFINAETrap Trap(S, /*WithAccessChecking=*/true);
   TemplateDeductionResult Result =
       S.DeduceAutoType(Declaration->getTypeSourceInfo()->getTypeLoc(), Subject,
                        DeducedType, Info);
-  return Result == TemplateDeductionResult::Success &&
-         !Trap.hasErrorOccurred() &&
-         isExactDeclarationPatternMatch(S, Subject, DeducedType);
+  if (Result != TemplateDeductionResult::Success || Trap.hasErrorOccurred() ||
+      !isExactDeclarationPatternMatch(S, Subject, DeducedType))
+    return QualType();
+  return DeducedType;
 }
 
 static bool isDecompositionDeclarationPatternApplicable(
@@ -3278,10 +3279,21 @@ bool Sema::CheckCompleteMatchPatternImpl(
     QualType PatternType = VD->getType();
     bool IsApplicable = true;
     if (!Subject->isTypeDependent() && PatternType->getContainedAutoType()) {
-      IsApplicable =
-          isDeducedDeclarationPatternApplicable(*this, VD, Subject) &&
-          (!Decomposition || isDecompositionDeclarationPatternApplicable(
-                                 *this, Decomposition, Subject));
+      QualType DeducedType =
+          deduceApplicableDeclarationPatternType(*this, VD, Subject);
+      IsApplicable = !DeducedType.isNull() &&
+                     (!Decomposition ||
+                      isDecompositionDeclarationPatternApplicable(
+                          *this, Decomposition, Subject));
+      // Structured bindings have additional array deduction rules in
+      // AddInitializerToDecl that plain placeholder deduction does not model.
+      if (IsApplicable) {
+        if (!Decomposition)
+          VD->setType(DeducedType);
+      } else if (ProjectionCache && ProjectionCache->IsExpandingCandidate) {
+        ProjectionCache->CandidateIsNotViable = true;
+        return true;
+      }
     } else if (!Subject->isTypeDependent()) {
       if (!isDeclarationPatternApplicable(*this, Subject, PatternType)) {
         switch (buildDeclarationLikeCastProjection(
