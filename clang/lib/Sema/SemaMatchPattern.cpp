@@ -392,6 +392,7 @@ struct AlternativeTraitsInfo {
   llvm::SmallVector<QualType, 4> AdvertisedTypes;
   llvm::SmallVector<bool, 4> HasAlternativeType;
   llvm::SmallVector<QualType, 4> ProjectionTypes;
+  llvm::SmallVector<ExprValueKind, 4> ProjectionValueKinds;
   llvm::SmallVector<bool, 4> Empty;
   llvm::SmallVector<Expr *, 4> Values;
 };
@@ -593,6 +594,7 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
     Info.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
     Info.HasAlternativeType = {false, true};
     Info.ProjectionTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
+    Info.ProjectionValueKinds = {VK_PRValue, VK_LValue};
     Info.Empty = {true, false};
     Info.Values = {nullptr, nullptr};
     return false;
@@ -853,9 +855,28 @@ static QualType getAlternativeProjectionBindingType(Sema &S, SourceLocation Loc,
 
 static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
                                             Expr *Subject,
-                                            AlternativeTraitsInfo &Info) {
+                                            AlternativeTraitsInfo &Info,
+                                            Sema::MatchProjectionCache *Cache) {
   if (Info.IsBuiltinPointer)
     return false;
+
+  if (Cache) {
+    auto Cached = llvm::find_if(
+        Cache->AlternativeProjections,
+        [&](const Sema::MatchProjectionCache::AlternativeProjectionInfo &P) {
+          return S.Context.hasSameType(P.TraitsType, Info.Type) &&
+                 S.Context.hasSameType(P.SubjectType, Subject->getType()) &&
+                 P.SubjectValueKind == Subject->getValueKind() &&
+                 P.SubjectObjectKind == Subject->getObjectKind();
+        });
+    if (Cached != Cache->AlternativeProjections.end()) {
+      Info.ProjectionTypes = Cached->ProjectionTypes;
+      Info.ProjectionValueKinds = Cached->ProjectionValueKinds;
+      Info.IndexType = Cached->IndexType;
+      Info.HasParameterizedIndexName = Cached->HasParameterizedIndexName;
+      return false;
+    }
+  }
 
   {
     auto *Probe = new (S.Context)
@@ -890,6 +911,8 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
 
   Info.ProjectionTypes.clear();
   Info.ProjectionTypes.reserve(Info.Size);
+  Info.ProjectionValueKinds.clear();
+  Info.ProjectionValueKinds.reserve(Info.Size);
   for (unsigned I = 0; I < Info.Size; ++I) {
     if (Info.Empty[I] && Info.HasAlternativeType[I]) {
       S.Diag(Loc, diag::err_alternative_info_empty_and_typed)
@@ -899,11 +922,13 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
 
     if (!Info.HasAlternativeType[I]) {
       Info.ProjectionTypes.push_back(S.Context.VoidTy);
+      Info.ProjectionValueKinds.push_back(VK_PRValue);
       continue;
     }
 
     bool IsCompatible = false;
     QualType ProjectionType = S.Context.VoidTy;
+    ExprValueKind ProjectionValueKind = VK_PRValue;
     {
       auto *Probe = new (S.Context)
           OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
@@ -915,6 +940,7 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
           buildAlternativeTraitsGetCall(S, Loc, Info, Probe, I);
       if (GetCall.isUsable() && !Trap.hasErrorOccurred()) {
         ProjectionType = GetCall.get()->getType();
+        ProjectionValueKind = GetCall.get()->getValueKind();
         QualType AdvertisedType = Info.AdvertisedTypes[I];
         if (AdvertisedType->isVoidType()) {
           IsCompatible = ProjectionType->isVoidType();
@@ -936,6 +962,19 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
     }
 
     Info.ProjectionTypes.push_back(ProjectionType);
+    Info.ProjectionValueKinds.push_back(ProjectionValueKind);
+  }
+
+  if (Cache) {
+    auto &Cached = Cache->AlternativeProjections.emplace_back();
+    Cached.TraitsType = Info.Type;
+    Cached.SubjectType = Subject->getType();
+    Cached.IndexType = Info.IndexType;
+    Cached.SubjectValueKind = Subject->getValueKind();
+    Cached.SubjectObjectKind = Subject->getObjectKind();
+    Cached.HasParameterizedIndexName = Info.HasParameterizedIndexName;
+    Cached.ProjectionTypes = Info.ProjectionTypes;
+    Cached.ProjectionValueKinds = Info.ProjectionValueKinds;
   }
   return false;
 }
@@ -944,10 +983,6 @@ static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
                                        const AlternativeTraitsInfo &Traits,
                                        ArrayRef<unsigned> Selected,
                                        bool IsAlternativeValuePattern = false) {
-  QualType *AlternativeTypes =
-      S.Context.Allocate<QualType>(Traits.ProjectionTypes.size());
-  std::uninitialized_copy(Traits.ProjectionTypes.begin(),
-                          Traits.ProjectionTypes.end(), AlternativeTypes);
   auto CopyFlags = [&](ArrayRef<bool> Flags) {
     auto *Storage = S.Context.Allocate<unsigned char>(Flags.size());
     llvm::transform(Flags, Storage, [](bool Value) {
@@ -955,21 +990,13 @@ static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
     });
     return ArrayRef<unsigned char>(Storage, Flags.size());
   };
-  Expr **Values = S.Context.Allocate<Expr *>(Traits.Values.size());
-  std::uninitialized_copy(Traits.Values.begin(), Traits.Values.end(), Values);
-  unsigned *SelectedAlternatives =
-      S.Context.Allocate<unsigned>(Selected.size());
-  std::uninitialized_copy(Selected.begin(), Selected.end(),
-                          SelectedAlternatives);
-
   PatternInfo.AlternativeTraitsType = Traits.Type;
   PatternInfo.AlternativeTypes =
-      ArrayRef(AlternativeTypes, Traits.ProjectionTypes.size());
+      ArrayRef(Traits.ProjectionTypes).copy(S.Context);
   PatternInfo.ProjectableAlternatives = CopyFlags(Traits.HasAlternativeType);
   PatternInfo.EmptyAlternatives = CopyFlags(Traits.Empty);
-  PatternInfo.AlternativeValues = ArrayRef(Values, Traits.Values.size());
-  PatternInfo.SelectedAlternatives =
-      ArrayRef(SelectedAlternatives, Selected.size());
+  PatternInfo.AlternativeValues = ArrayRef(Traits.Values).copy(S.Context);
+  PatternInfo.SelectedAlternatives = Selected.copy(S.Context);
   PatternInfo.IsExhaustive = Traits.IsExhaustive;
   PatternInfo.HasParameterizedIndexName = Traits.HasParameterizedIndexName;
   PatternInfo.IsAlternativeValuePattern = IsAlternativeValuePattern;
@@ -1044,23 +1071,16 @@ classifyAlternativeValuePattern(Sema &S, Expr *Subject,
     if (Pattern->getExpr()->isNullPointerConstant(
             S.Context, Expr::NPC_ValueDependentIsNotNull) == Expr::NPCK_NotNull)
       return false;
-    const auto *Pointer = SubjectType->castAs<PointerType>();
-    Traits.Type = SubjectType;
-    Traits.IndexType = S.Context.BoolTy;
-    Traits.Size = 2;
-    Traits.IsBuiltinPointer = true;
-    Traits.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
-    Traits.HasAlternativeType = {false, true};
-    Traits.ProjectionTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
-    Traits.Empty = {true, false};
-    Traits.Values = {Pattern->getExpr(), nullptr};
+    if (lookupAlternativeTraits(S, Pattern->getBeginLoc(), SubjectType, Traits))
+      return true;
+    Traits.Values[0] = Pattern->getExpr();
     Selected.push_back(0);
   } else {
     if (!tryLookupAlternativeTraitsForValuePattern(S, Pattern->getBeginLoc(),
                                                    SubjectType, Traits))
       return false;
     if (determineAlternativeProjections(S, Pattern->getBeginLoc(), Subject,
-                                        Traits))
+                                        Traits, ProjectionCache))
       return true;
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (Traits.Values[I] && alternativeValueMatchesPattern(
@@ -2457,6 +2477,46 @@ static bool isDynamicCastDeclaration(Sema &S, SourceLocation Loc,
          S.IsDerivedFrom(Loc, TargetClass, SourceClass);
 }
 
+static QualType
+getDirectConcreteDeclarationType(const AlternativePattern *Pattern) {
+  const MatchPattern *SubPattern = Pattern->getSubPattern();
+  if (!SubPattern)
+    return {};
+  SubPattern = SubPattern->IgnoreParens();
+
+  QualType Type;
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(SubPattern)) {
+    const VarDecl *Variable = Declaration->getDeclaration();
+    if (isa<DecompositionDecl>(Variable))
+      return {};
+    Type = Variable->getType();
+  } else if (const auto *Typed = dyn_cast<TypePattern>(SubPattern)) {
+    Type = Typed->getType();
+  } else {
+    return {};
+  }
+
+  if (Type.isNull() || Type->getContainedAutoType() || Type->isDependentType())
+    return {};
+  return Type;
+}
+
+static bool canDeclarationMatchAlternativeProjection(
+    Sema &S, SourceLocation Loc, QualType PatternType,
+    QualType ProjectionType, ExprValueKind ProjectionValueKind) {
+  if (PatternType->isVoidType() || ProjectionType->isVoidType())
+    return PatternType->isVoidType() && ProjectionType->isVoidType();
+
+  auto *Probe = new (S.Context)
+      OpaqueValueExpr(Loc, ProjectionType, ProjectionValueKind, OK_Ordinary);
+  if (isDeclarationPatternApplicable(S, Probe, PatternType))
+    return true;
+
+  QualType TargetType =
+      PatternType.getNonReferenceType().getUnqualifiedType();
+  return isDynamicCastDeclaration(S, Loc, ProjectionType, TargetType);
+}
+
 static Expr *asValueKind(Sema &S, Expr *E, ExprValueKind ValueKind) {
   if (ValueKind == VK_LValue)
     return E;
@@ -2865,7 +2925,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       NumProjectableStates > 1)
     ProjectionCache->RequiresTemplateRegion = true;
 
-  if (determineAlternativeProjections(S, Loc, Subject, Traits))
+  if (determineAlternativeProjections(S, Loc, Subject, Traits,
+                                      ProjectionCache))
     return true;
 
   llvm::SmallVector<unsigned, 4> Selected;
@@ -2888,6 +2949,9 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   bool UsesAdvertisedTypes =
       Pattern->isTypeSelected() || Pattern->isTypeConstraintSelected();
+  QualType DirectDeclarationType =
+      UsesAdvertisedTypes ? QualType()
+                          : getDirectConcreteDeclarationType(Pattern);
 
   if (Pattern->isEmpty()) {
     for (unsigned I = 0; I < Traits.Size; ++I)
@@ -2901,6 +2965,11 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     for (unsigned I = 0; I < Traits.Size; ++I) {
       if (!Traits.HasAlternativeType[I])
         continue;
+      if (!DirectDeclarationType.isNull() &&
+          !canDeclarationMatchAlternativeProjection(
+              S, Loc, DirectDeclarationType, Traits.ProjectionTypes[I],
+              Traits.ProjectionValueKinds[I]))
+        continue;
       // A type selector names the advertised alternative; it does not test
       // whether the projection could initialize an object of that type.
       if (Pattern->isTypeSelected() &&
@@ -2909,6 +2978,12 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         continue;
       Selected.push_back(I);
     }
+    // Preselection is an optimization. Preserve candidate-based diagnostics
+    // and any unusual projection behavior when it cannot identify a state.
+    if (Selected.empty() && !DirectDeclarationType.isNull())
+      for (unsigned I = 0; I < Traits.Size; ++I)
+        if (Traits.HasAlternativeType[I])
+          Selected.push_back(I);
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_braced_alternative_no_viable_state) << SubjectType;
       return true;
