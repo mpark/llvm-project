@@ -19747,7 +19747,7 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
       Sema::MatchAlternativeSelectionPlan::isRequired(E->getPattern());
 
   while (true) {
-    SelectionPlan.beginCandidate(ProjectionCache);
+    SelectionPlan.beginCandidate(ProjectionCache, PatternHasAlternativeChoice);
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
     MatchCandidateInstantiationScope CandidateScope(getSema(), E->getRegion());
@@ -19771,7 +19771,8 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(
     if (PatternHasAlternativeChoice) {
       Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
       if (TransformAndCheckPattern()) {
-        if (!Trap.hasErrorOccurred())
+        if (!ProjectionCache.CandidateIsNotViable &&
+            !Trap.hasErrorOccurred())
           return ExprError();
         NoMatch = true;
       }
@@ -20008,8 +20009,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                           ExprDependence::Instantiation);
     SourceCases[CaseIndex].MaybeUseful |= IsSubstitutionDependent;
     bool AllowsSubstitutionFailure =
-        IsSubstitutionDependent ||
-        Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
+        IsSubstitutionDependent || ProjectionCache.IsExpandingCandidate;
     ProjectionCache.CandidateUsefulness.Context =
         AllowsSubstitutionFailure ? &UsefulnessContext : nullptr;
     ProjectionCache.CandidateUsefulness.CaseIndex = CaseIndex;
@@ -20029,6 +20029,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       if (TransformAndCheckPattern()) {
         if (ProjectionCache.CandidateUsefulness.IsNotUseful)
           return TransformCaseResult::NotUseful;
+        if (ProjectionCache.CandidateIsNotViable)
+          return TransformCaseResult::NoMatch;
         return Trap.hasErrorOccurred() ? TransformCaseResult::NoMatch
                                        : TransformCaseResult::Error;
       }
@@ -20165,9 +20167,12 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   bool ConstexprSelectionComplete = false;
   for (const auto &[CaseIndex, Case] : CasesToTransform) {
     Sema::MatchAlternativeSelectionPlan SelectionPlan;
+    bool PatternHasAlternativeChoice =
+        Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
     bool SawViableCandidate = false;
     while (true) {
-      SelectionPlan.beginCandidate(ProjectionCache);
+      SelectionPlan.beginCandidate(ProjectionCache,
+                                   PatternHasAlternativeChoice);
       size_t SavedProjectionCount = ProjectionCache.Entries.size();
       MatchCaseInstantiation ExpandedCase;
       std::optional<bool> ConstexprConditionValue;
