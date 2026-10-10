@@ -11438,6 +11438,18 @@ public:
                             SourceRange Squares);
 
   struct MatchProjectionCache {
+    struct AlternativeProjectionInfo {
+      QualType TraitsType;
+      QualType SubjectType;
+      QualType IndexType;
+      ExprValueKind SubjectValueKind;
+      ExprObjectKind SubjectObjectKind;
+      bool HasParameterizedIndexName;
+      SmallVector<QualType, 4> ProjectionTypes;
+      SmallVector<ExprValueKind, 4> ProjectionValueKinds;
+      SmallVector<bool, 4> Projectable;
+    };
+
     struct Entry {
       const Expr *Subject;
       MatchProjection *Projection;
@@ -11456,6 +11468,7 @@ public:
     };
 
     SmallVector<Entry, 8> Entries;
+    SmallVector<AlternativeProjectionInfo, 2> AlternativeProjections;
     SmallVector<AlternativeChoice, 4> AlternativeChoices;
     ArrayRef<unsigned> PlannedAlternativeSelections;
     unsigned NextPlannedAlternativeSelection = 0;
