@@ -11426,6 +11426,8 @@ public:
     unsigned NextPlannedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
+    bool IsExpandingCandidate = false;
+    bool CandidateIsNotViable = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
     struct {
@@ -11444,7 +11446,8 @@ public:
     bool SawAlternativeChoice = false;
 
     static bool isRequired(const MatchPattern *Pattern);
-    void beginCandidate(MatchProjectionCache &Cache) const;
+    void beginCandidate(MatchProjectionCache &Cache,
+                        bool IsExpandingCandidate) const;
     bool advance(const MatchProjectionCache &Cache);
   };
   struct MatchPatternState {

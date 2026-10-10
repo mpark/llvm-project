@@ -570,6 +570,13 @@ int type_constraint_selectors(Choice choice) {
   };
 }
 
+int constrained_declaration_patterns(Choice choice) {
+  return match (choice) {
+    case { SameAs<int> auto value } => value;
+    case { SameAs<double> auto value } => static_cast<int>(value);
+  };
+}
+
 int no_viable_type_constraint_selector(Choice choice) {
   return match (choice) {
     case { SameAs<char>: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
