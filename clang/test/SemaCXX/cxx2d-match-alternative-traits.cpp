@@ -902,6 +902,13 @@ int no_viable_alternative(Choice choice) {
   };
 }
 
+int no_viable_alternative_after_wildcard(Choice choice) {
+  return match (choice) {
+    case _ => 0;
+    case { char value } => value; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+  };
+}
+
 int no_viable_type_selector(Choice choice) {
   return match (choice) {
     case { char: _ } => 0; // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
@@ -1052,7 +1059,7 @@ concept CanDirectlyMatchChar = requires(T value) {
 static_assert(!CanDirectlyMatchChar<ChoicePair>);
 
 bool invalid_direct_alternative(ChoicePair pair) {
-  return match(pair, case [{ char c }, _]); // expected-error {{braced alternative pattern does not match any projectable state of 'ChoicePair'}}
+  return match(pair, case [{ char c }, _]); // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
 }
 
 struct NoTraits {};

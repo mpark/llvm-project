@@ -1359,7 +1359,7 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchUsefulness(
 Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
     MatchUsefulnessContext &Context, MatchPattern *RootPattern,
     AlternativePattern *Candidate, const MatchPatternState &PatternState,
-    unsigned CaseIndex) {
+    unsigned CaseIndex, bool RecordNotUseful) {
   MatchUsefulnessContext::Impl &State = *Context.State;
   if (State.CoverageMatrix.empty())
     return MatchPatternUsefulness::Useful;
@@ -1377,9 +1377,10 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
   if (Result == Usefulness::MaybeUseful)
     return MatchPatternUsefulness::MaybeUseful;
 
-  State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
-                     /*ContributesCoverage=*/false,
-                     /*ClassifyContinuation=*/false);
+  if (RecordNotUseful)
+    State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
+                       /*ContributesCoverage=*/false,
+                       /*ClassifyContinuation=*/false);
   return MatchPatternUsefulness::NotUseful;
 }
 

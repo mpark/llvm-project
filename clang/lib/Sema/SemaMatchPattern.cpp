@@ -2485,15 +2485,14 @@ getDirectConcreteDeclarationType(const AlternativePattern *Pattern) {
   return Type;
 }
 
-static bool canDeclarationMatchAlternativeProjection(
-    Sema &S, SourceLocation Loc, QualType PatternType,
-    QualType ProjectionType, ExprValueKind ProjectionValueKind) {
+static bool canDeclarationMatchProjection(Sema &S, SourceLocation Loc,
+                                          QualType PatternType,
+                                          Expr *Projection) {
+  QualType ProjectionType = Projection->getType();
   if (PatternType->isVoidType() || ProjectionType->isVoidType())
     return PatternType->isVoidType() && ProjectionType->isVoidType();
 
-  auto *Probe = new (S.Context)
-      OpaqueValueExpr(Loc, ProjectionType, ProjectionValueKind, OK_Ordinary);
-  if (isDeclarationPatternApplicable(S, Probe, PatternType))
+  if (isDeclarationPatternApplicable(S, Projection, PatternType))
     return true;
 
   QualType TargetType =
@@ -2878,6 +2877,127 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   return CompleteProjection(Projected.get());
 }
 
+class MatchCandidatePlanner {
+  Sema &S;
+  AlternativePattern *Candidate;
+  const AlternativeTraitsInfo &Traits;
+  Sema::MatchPatternState &State;
+  Sema::MatchProjectionCache &Cache;
+
+  bool canMatchDeclaration(DeclarationPattern *Pattern, Expr *Subject) {
+    VarDecl *VD = Pattern->getDeclaration();
+    if (auto *Decomposition = dyn_cast<DecompositionDecl>(VD))
+      return isDecompositionDeclarationPatternApplicable(S, Decomposition,
+                                                         Subject);
+
+    if (VD->getType()->getContainedAutoType())
+      return !deduceApplicableDeclarationPatternType(S, VD, Subject).isNull();
+
+    return canDeclarationMatchProjection(S, Pattern->getBeginLoc(),
+                                         VD->getType(), Subject);
+  }
+
+  bool canMatchDecomposition(DecompositionPattern *Pattern, Expr *Subject) {
+    Sema::SFINAETrap Trap(S, /*WithAccessChecking=*/true);
+    UnsignedOrNone ElementCount = S.GetDecompositionElementCount(
+        Subject->getType().getNonReferenceType(), Pattern->getBeginLoc());
+    if (!ElementCount || Trap.hasErrorOccurred())
+      return true;
+
+    if (getDecompositionSubpatternPack(Pattern))
+      return *ElementCount >= Pattern->getNumPatterns() - 1;
+    return *ElementCount == Pattern->getNumPatterns();
+  }
+
+  bool canMatch(MatchPattern *Pattern, Expr *Subject) {
+    switch (Pattern->getMatchPatternClass()) {
+    case MatchPattern::WildcardPatternClass:
+      return true;
+
+    case MatchPattern::ParenPatternClass:
+      return canMatch(cast<ParenPattern>(Pattern)->getSubPattern(), Subject);
+
+    case MatchPattern::DeclarationPatternClass:
+      return canMatchDeclaration(cast<DeclarationPattern>(Pattern), Subject);
+
+    case MatchPattern::DecompositionPatternClass:
+      return canMatchDecomposition(cast<DecompositionPattern>(Pattern),
+                                   Subject);
+
+    case MatchPattern::AndPatternClass:
+      for (MatchPattern *Conjunct : cast<AndPattern>(Pattern)->conjuncts()) {
+        if (!canMatch(Conjunct, Subject))
+          return false;
+      }
+      return true;
+
+    case MatchPattern::OrPatternClass:
+      for (MatchPattern *Alternative :
+           cast<OrPattern>(Pattern)->alternatives()) {
+        if (canMatch(Alternative, Subject))
+          return true;
+      }
+      return false;
+
+    default:
+      return true;
+    }
+  }
+
+  bool isCovered(MatchPatternInfo &Info, unsigned Index) {
+    Info.SelectedAlternatives = ArrayRef<unsigned>(&Index, 1);
+    return S.UpdateMatchCandidateDomainUsefulness(
+               *Cache.CandidateUsefulness.Context,
+               Cache.CandidateUsefulness.RootPattern, Candidate, State,
+               Cache.CandidateUsefulness.CaseIndex,
+               /*RecordNotUseful=*/false) ==
+           Sema::MatchPatternUsefulness::NotUseful;
+  }
+
+public:
+  MatchCandidatePlanner(Sema &S, AlternativePattern *Candidate,
+                        const AlternativeTraitsInfo &Traits,
+                        Sema::MatchPatternState &State,
+                        Sema::MatchProjectionCache &Cache)
+      : S(S), Candidate(Candidate), Traits(Traits), State(State), Cache(Cache) {
+  }
+
+  void preselect(SmallVectorImpl<unsigned> &Selected) {
+    if (!Cache.IsExpandingCandidate ||
+        !Cache.PlannedAlternativeSelections.empty() ||
+        !Cache.CandidateUsefulness.Context ||
+        !Cache.CandidateUsefulness.RootPattern || !Candidate->getSubPattern())
+      return;
+
+    MatchPatternInfo &Info = State.get(Candidate);
+    storeAlternativeTraitsInfo(S, Info, Traits, {});
+    llvm::scope_exit ClearSelection(
+        [&] { Info.SelectedAlternatives = ArrayRef<unsigned>(); });
+
+    SmallVector<unsigned, 4> Retained;
+    bool NeedsApplicabilityCheck =
+        getDirectConcreteDeclarationType(Candidate).isNull();
+    for (unsigned Index : Selected) {
+      if (isCovered(Info, Index))
+        continue;
+
+      if (!NeedsApplicabilityCheck) {
+        Retained.push_back(Index);
+        continue;
+      }
+      OpaqueValueExpr Projected(
+          Candidate->getBeginLoc(), Traits.ProjectionTypes[Index],
+          Traits.ProjectionValueKinds[Index], OK_Ordinary);
+      if (canMatch(Candidate->getSubPattern(), &Projected))
+        Retained.push_back(Index);
+    }
+
+    // Preserve candidate-based diagnostics when no state is viable.
+    if (!Retained.empty())
+      Selected = std::move(Retained);
+  }
+};
+
 static bool
 checkBracedAlternativePattern(Sema &S, Expr *Subject,
                               AlternativePattern *Pattern,
@@ -2944,11 +3064,13 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       if (!Traits.Projectable[I] ||
           (UsesAdvertisedTypes && !Traits.HasAlternativeType[I]))
         continue;
-      if (!DirectDeclarationType.isNull() &&
-          !canDeclarationMatchAlternativeProjection(
-              S, Loc, DirectDeclarationType, Traits.ProjectionTypes[I],
-              Traits.ProjectionValueKinds[I]))
-        continue;
+      if (!DirectDeclarationType.isNull()) {
+        OpaqueValueExpr Projection(Loc, Traits.ProjectionTypes[I],
+                                   Traits.ProjectionValueKinds[I], OK_Ordinary);
+        if (!canDeclarationMatchProjection(S, Loc, DirectDeclarationType,
+                                           &Projection))
+          continue;
+      }
       // A type selector names the advertised alternative; it does not test
       // whether the projection could initialize an object of that type.
       if (Pattern->isTypeSelected() &&
@@ -2957,12 +3079,13 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         continue;
       Selected.push_back(I);
     }
-    // Preselection is an optimization. Preserve candidate-based diagnostics
-    // and any unusual projection behavior when it cannot identify a state.
-    if (Selected.empty() && !DirectDeclarationType.isNull())
-      for (unsigned I = 0; I < Traits.Size; ++I)
-        if (Traits.Projectable[I])
-          Selected.push_back(I);
+
+    // Cheap planning precedes candidate declarations and their initializers.
+    // Covered domains are omitted without instantiating their constraints.
+    if (!UsesAdvertisedTypes && ProjectionCache)
+      MatchCandidatePlanner(S, Pattern, Traits, State, *ProjectionCache)
+          .preselect(Selected);
+
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_braced_alternative_no_viable_state) << SubjectType;
       return true;
