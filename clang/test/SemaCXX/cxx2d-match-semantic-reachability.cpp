@@ -198,6 +198,16 @@ struct CandidateConstraint {
 template<class T>
 concept UsefulCandidate = CandidateConstraint<T>::value;
 
+template<class T>
+concept NoCandidate = false;
+
+int preserve_no_viable_candidate_diagnostic(BoolChoice choice) {
+  return match (choice) {
+    case { NoCandidate auto&& value } => value.size(); // expected-error {{braced alternative pattern does not match any projectable state of 'BoolChoice'}}
+    case _ => 0;
+  };
+}
+
 constexpr int skip_covered_alternative_candidate(BoolChoice choice) {
   return match (choice) {
     case { true } => 1;
@@ -209,6 +219,22 @@ constexpr int skip_covered_alternative_candidate(BoolChoice choice) {
 static_assert(skip_covered_alternative_candidate({0, true, {}}) == 1);
 static_assert(skip_covered_alternative_candidate({0, false, {}}) == 0);
 static_assert(skip_covered_alternative_candidate({1, false, {8}}) == 8);
+
+constexpr int skip_covered_constrained_declaration_candidate(
+    BoolChoice choice) {
+  return match (choice) {
+    case { true } => 1;
+    case { false } => 0;
+    case { (UsefulCandidate auto const& other) and _ } => other.size();
+  };
+}
+
+static_assert(
+    skip_covered_constrained_declaration_candidate({0, true, {}}) == 1);
+static_assert(
+    skip_covered_constrained_declaration_candidate({0, false, {}}) == 0);
+static_assert(
+    skip_covered_constrained_declaration_candidate({1, false, {12}}) == 12);
 
 struct NestedBoolChoice {
   BoolChoice choice;
