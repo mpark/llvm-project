@@ -11574,7 +11574,7 @@ public:
   MatchPatternUsefulness UpdateMatchCandidateDomainUsefulness(
       MatchUsefulnessContext &Context, MatchPattern *RootPattern,
       AlternativePattern *Candidate, const MatchPatternState &State,
-      unsigned CaseIndex);
+      unsigned CaseIndex, bool RecordNotUseful = true);
 
   /// Diagnose source-level usefulness and compute final coverage from the
   /// candidates accumulated in Context.
