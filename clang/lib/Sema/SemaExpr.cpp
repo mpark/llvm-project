@@ -13018,10 +13018,8 @@ static bool checkThreeWayNarrowingConversion(Sema &S, QualType ToType, Expr *E,
   llvm_unreachable("unhandled case in switch");
 }
 
-static QualType checkArithmeticOrEnumeralThreeWayCompare(Sema &S,
-                                                         ExprResult &LHS,
-                                                         ExprResult &RHS,
-                                                         SourceLocation Loc) {
+QualType Sema::ConvertArithmeticOrEnumeralThreeWayCompareOperands(
+    ExprResult &LHS, ExprResult &RHS, SourceLocation Loc) {
   QualType LHSType = LHS.get()->getType();
   QualType RHSType = RHS.get()->getType();
   // Dig out the original argument type and expression before implicit casts
@@ -13035,7 +13033,7 @@ static QualType checkArithmeticOrEnumeralThreeWayCompare(Sema &S,
   // C++2a [expr.spaceship]p3: If one of the operands is of type bool and the
   // other is not, the program is ill-formed.
   if (LHSStrippedType->isBooleanType() != RHSStrippedType->isBooleanType()) {
-    S.InvalidOperands(Loc, LHSStripped, RHSStripped);
+    InvalidOperands(Loc, LHSStripped, RHSStripped);
     return QualType();
   }
 
@@ -13046,7 +13044,7 @@ static QualType checkArithmeticOrEnumeralThreeWayCompare(Sema &S,
     bool LHSIsEnum = LHSStrippedType->isEnumeralType();
     QualType OtherTy = LHSIsEnum ? RHSStrippedType : LHSStrippedType;
     if (OtherTy->hasFloatingRepresentation()) {
-      S.InvalidOperands(Loc, LHSStripped, RHSStripped);
+      InvalidOperands(Loc, LHSStripped, RHSStripped);
       return QualType();
     }
   }
@@ -13054,8 +13052,8 @@ static QualType checkArithmeticOrEnumeralThreeWayCompare(Sema &S,
     // C++2a [expr.spaceship]p5: If both operands have the same enumeration
     // type E, the operator yields the result of converting the operands
     // to the underlying type of E and applying <=> to the converted operands.
-    if (!S.Context.hasSameUnqualifiedType(LHSStrippedType, RHSStrippedType)) {
-      S.InvalidOperands(Loc, LHS, RHS);
+    if (!Context.hasSameUnqualifiedType(LHSStrippedType, RHSStrippedType)) {
+      InvalidOperands(Loc, LHS, RHS);
       return QualType();
     }
     QualType IntType = LHSStrippedType->castAsEnumDecl()->getIntegerType();
@@ -13064,40 +13062,52 @@ static QualType checkArithmeticOrEnumeralThreeWayCompare(Sema &S,
     // We can't use `CK_IntegralCast` when the underlying type is 'bool', so we
     // promote the boolean type, and all other promotable integer types, to
     // avoid this.
-    if (S.Context.isPromotableIntegerType(IntType))
-      IntType = S.Context.getPromotedIntegerType(IntType);
+    if (Context.isPromotableIntegerType(IntType))
+      IntType = Context.getPromotedIntegerType(IntType);
 
-    LHS = S.ImpCastExprToType(LHS.get(), IntType, CK_IntegralCast);
-    RHS = S.ImpCastExprToType(RHS.get(), IntType, CK_IntegralCast);
+    LHS = ImpCastExprToType(LHS.get(), IntType, CK_IntegralCast);
+    RHS = ImpCastExprToType(RHS.get(), IntType, CK_IntegralCast);
     LHSType = RHSType = IntType;
   }
 
   // C++2a [expr.spaceship]p4: If both operands have arithmetic types, the
   // usual arithmetic conversions are applied to the operands.
   QualType Type =
-      S.UsualArithmeticConversions(LHS, RHS, Loc, ArithConvKind::Comparison);
+      UsualArithmeticConversions(LHS, RHS, Loc, ArithConvKind::Comparison);
   if (LHS.isInvalid() || RHS.isInvalid())
     return QualType();
   if (Type.isNull()) {
-    QualType ResultTy = S.InvalidOperands(Loc, LHS, RHS);
-    diagnoseScopedEnums(S, Loc, LHS, RHS, BO_Cmp);
+    QualType ResultTy = InvalidOperands(Loc, LHS, RHS);
+    diagnoseScopedEnums(*this, Loc, LHS, RHS, BO_Cmp);
     return ResultTy;
   }
 
   std::optional<ComparisonCategoryType> CCT =
       getComparisonCategoryForBuiltinCmp(Type);
   if (!CCT)
-    return S.InvalidOperands(Loc, LHS, RHS);
+    return InvalidOperands(Loc, LHS, RHS);
 
   bool HasNarrowing = checkThreeWayNarrowingConversion(
-      S, Type, LHS.get(), LHSType, LHS.get()->getBeginLoc());
-  HasNarrowing |= checkThreeWayNarrowingConversion(S, Type, RHS.get(), RHSType,
-                                                   RHS.get()->getBeginLoc());
+      *this, Type, LHS.get(), LHSType, LHS.get()->getBeginLoc());
+  HasNarrowing |= checkThreeWayNarrowingConversion(
+      *this, Type, RHS.get(), RHSType, RHS.get()->getBeginLoc());
   if (HasNarrowing)
     return QualType();
 
   assert(!Type.isNull() && "composite type for <=> has not been set");
 
+  return Type;
+}
+
+static QualType checkArithmeticOrEnumeralThreeWayCompare(
+    Sema &S, ExprResult &LHS, ExprResult &RHS, SourceLocation Loc) {
+  QualType Type =
+      S.ConvertArithmeticOrEnumeralThreeWayCompareOperands(LHS, RHS, Loc);
+  if (Type.isNull())
+    return QualType();
+  std::optional<ComparisonCategoryType> CCT =
+      getComparisonCategoryForBuiltinCmp(Type);
+  assert(CCT && "validated arithmetic or enumeration comparison type");
   return S.CheckComparisonCategoryType(
       *CCT, Loc, Sema::ComparisonCategoryUsage::OperatorInExpression);
 }

@@ -8393,6 +8393,8 @@ public:
   QualType CheckCompareOperands( // C99 6.5.8/9
       ExprResult &LHS, ExprResult &RHS, SourceLocation Loc,
       BinaryOperatorKind Opc);
+  QualType ConvertArithmeticOrEnumeralThreeWayCompareOperands(
+      ExprResult &LHS, ExprResult &RHS, SourceLocation Loc);
   QualType CheckBitwiseOperands( // C99 6.5.[10...12]
       ExprResult &LHS, ExprResult &RHS, SourceLocation Loc,
       BinaryOperatorKind Opc);
