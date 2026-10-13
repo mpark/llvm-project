@@ -112,8 +112,8 @@ int impossible_promoted_integer_value(unsigned char value) {
 
 int converted_unsigned_integer_value(unsigned value) {
   return match (value) {
-    case -1 => 0;
-    case ~0u => 1; // expected-error {{match case is redundant}}
+    case -1 => 0; // expected-error {{expression pattern of type 'int' is not compatible with a subject of type 'unsigned int' under built-in value-pattern comparison}}
+    case ~0u => 1;
     case _ => 2;
   };
 }
@@ -168,7 +168,7 @@ int exhaustive_signed_small_integer(S2 value) {
 
 int impossible_bool_value(bool value) {
   return match (value) {
-    case 2 => 0; // expected-error {{match case can never match a subject of type 'bool'}}
+    case 2 => 0; // expected-error {{expression pattern of type 'int' is not compatible with a subject of type 'bool' under built-in value-pattern comparison}}
     case _ => 1;
   };
 }
@@ -325,21 +325,32 @@ int gapless_enum_has_no_residual_values(Gapless value) {
   };
 }
 
+enum OverloadedEnum { OverloadedA, OverloadedB };
+
+bool operator==(OverloadedEnum, OverloadedEnum);
+
+int overloaded_enum_equality_remains_structural(OverloadedEnum value) {
+  return match (value) {
+    case OverloadedA => 0;
+    case OverloadedB => 1;
+  };
+}
+
 enum Gapped { GappedC = 0, GappedD = 2 };
 
 int explicit_values_cover_gapped_enum_domain(Gapped value) {
   return match (value) {
     case GappedC => 0;
-    case 1 => 1;
-    case 2 => 2;
-    case 3 => 3;
+    case static_cast<Gapped>(1) => 1;
+    case static_cast<Gapped>(2) => 2;
+    case static_cast<Gapped>(3) => 3;
     case _ => 4; // expected-error {{match case is redundant}}
   };
 }
 
 int integer_value_covers_named_enumerator(Gapped value) {
   return match (value) {
-    case 2 => 0;
+    case static_cast<Gapped>(2) => 0;
     case GappedD => 1; // expected-error {{match case is redundant}}
     case _ => 2;
   };
@@ -703,10 +714,10 @@ int residual_enum_domain_is_recursive(EnumAndBool value) {
 int explicit_enum_domain_coverage_is_recursive(GappedAndBool value) {
   return match (value) {
     case [GappedC, _] => 0;
-    case [1, false] => 1;
-    case [1, true] => 2;
-    case [2, _] => 3;
-    case [3, _] => 4;
+    case [static_cast<Gapped>(1), false] => 1;
+    case [static_cast<Gapped>(1), true] => 2;
+    case [static_cast<Gapped>(2), _] => 3;
+    case [static_cast<Gapped>(3), _] => 4;
     case _ => 5; // expected-error {{match case is redundant}}
   };
 }
@@ -831,6 +842,15 @@ int missing_projected_alternative_value(Choice choice) {
     case { .flag: true } => 0;
     case { .number: _ } => 1;
     case {} => 2;
+  };
+}
+
+int boolean_state_does_not_match_integer_alternative(Choice choice) {
+  return match (choice) {
+    case { true } => 0;
+    case { false } => 1;
+    case { .number: _ } => 2;
+    case {} => 3;
   };
 }
 

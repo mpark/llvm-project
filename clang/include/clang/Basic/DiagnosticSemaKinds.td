@@ -14698,6 +14698,9 @@ def err_type_pattern_not_exact_match : Error<
 def err_expression_pattern_not_testable : Error<
   "expression pattern of type %0 is neither equality-comparable with a "
   "subject of type %1 nor callable with it">;
+def err_expression_pattern_incompatible_builtin_operands : Error<
+  "expression pattern of type %0 is not compatible with a subject of type %1 "
+  "under built-in value-pattern comparison">;
 def err_or_pattern_binding_mismatch : Error<
   "all alternatives in an or-pattern must introduce the same bindings">;
 def err_declaration_pattern_pack_not_in_decomposition : Error<
