@@ -150,7 +150,7 @@ static_assert(dependent(1) == 1);
 static_assert(dependent(Unrelated{}) == 0);
 
 int predicate_is_not_exhaustive(int value) {
-  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: 0}}
+  return match (value) { // expected-error {{match expression is not exhaustive; example of a missing case: _}}
     case at_least_three => 1;
   };
 }

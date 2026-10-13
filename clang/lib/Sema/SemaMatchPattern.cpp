@@ -1129,13 +1129,42 @@ static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
   return Pattern;
 }
 
-enum class ExpressionPatternConditionKind { Equality, Invocation };
+enum class ExpressionPatternConditionKind {
+  StructuralEquality,
+  Equality,
+  Invocation
+};
+
+static bool hasStructuralValuePatternOperands(Expr *Subject, Expr *Pattern) {
+  QualType SubjectType = Subject->getType().getNonReferenceType();
+  QualType PatternType = Pattern->getType().getNonReferenceType();
+  return SubjectType->isIntegralOrEnumerationType() &&
+         PatternType->isIntegralOrEnumerationType();
+}
+
+static ExprResult buildStructuralValuePatternCondition(
+    Sema &S, SourceLocation Loc, Expr *Subject, Expr *Pattern) {
+  ExprResult ConvertedSubject = S.DefaultLvalueConversion(Subject);
+  ExprResult ConvertedPattern = S.DefaultLvalueConversion(Pattern);
+  if (ConvertedSubject.isInvalid() || ConvertedPattern.isInvalid())
+    return ExprError();
+  if (S.ConvertArithmeticOrEnumeralThreeWayCompareOperands(
+          ConvertedSubject, ConvertedPattern, Loc)
+          .isNull())
+    return ExprError();
+  return S.CreateBuiltinBinOp(Loc, BO_EQ, ConvertedSubject.get(),
+                              ConvertedPattern.get());
+}
 
 static ExprResult buildExpressionPatternCondition(
     Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
     ExpressionPatternConditionKind Kind) {
   ExprResult Condition;
   switch (Kind) {
+  case ExpressionPatternConditionKind::StructuralEquality:
+    Condition =
+        buildStructuralValuePatternCondition(S, Loc, Subject, Pattern);
+    break;
   case ExpressionPatternConditionKind::Equality:
     Condition =
         S.ActOnBinOp(Scope, Loc, tok::TokenKind::equalequal, Subject, Pattern);
@@ -1151,7 +1180,7 @@ static ExprResult buildExpressionPatternCondition(
   return S.PerformContextuallyConvertToBool(Condition.get());
 }
 
-static bool isViableExpressionPatternCondition(
+static ExprResult probeExpressionPatternCondition(
     Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
     ExpressionPatternConditionKind Kind) {
   auto *SubjectProbe = new (S.Context)
@@ -1167,7 +1196,16 @@ static bool isViableExpressionPatternCondition(
   Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
   ExprResult Condition = buildExpressionPatternCondition(
       S, Scope, Loc, SubjectProbe, PatternProbe, Kind);
-  return Condition.isUsable() && !Trap.hasErrorOccurred();
+  if (Trap.hasErrorOccurred())
+    return ExprError();
+  return Condition;
+}
+
+static bool isViableExpressionPatternCondition(
+    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
+    ExpressionPatternConditionKind Kind) {
+  return probeExpressionPatternCondition(S, Scope, Loc, Subject, Pattern, Kind)
+      .isUsable();
 }
 
 static ExprResult buildOpenAlternativeTraitsCall(
@@ -3297,17 +3335,28 @@ bool Sema::CheckCompleteMatchPatternImpl(
     Expr *PatternValue =
         ConstantPattern.isUsable() ? ConstantPattern.get() : P->getExpr();
     std::optional<ExpressionPatternConditionKind> Kind;
-    if (isViableExpressionPatternCondition(
-            *this, S, Loc, Subject, PatternValue,
-            ExpressionPatternConditionKind::Equality))
-      Kind = ExpressionPatternConditionKind::Equality;
-    else if (isViableExpressionPatternCondition(
-                 *this, S, Loc, Subject, PatternValue,
-                 ExpressionPatternConditionKind::Invocation))
-      Kind = ExpressionPatternConditionKind::Invocation;
+    bool HasStructuralOperands =
+        hasStructuralValuePatternOperands(Subject, PatternValue);
+    if (HasStructuralOperands) {
+      if (isViableExpressionPatternCondition(
+              *this, S, Loc, Subject, PatternValue,
+              ExpressionPatternConditionKind::StructuralEquality))
+        Kind = ExpressionPatternConditionKind::StructuralEquality;
+    } else {
+      if (isViableExpressionPatternCondition(
+              *this, S, Loc, Subject, PatternValue,
+              ExpressionPatternConditionKind::Equality))
+        Kind = ExpressionPatternConditionKind::Equality;
+      else if (isViableExpressionPatternCondition(
+                   *this, S, Loc, Subject, PatternValue,
+                   ExpressionPatternConditionKind::Invocation))
+        Kind = ExpressionPatternConditionKind::Invocation;
+    }
 
     if (!Kind) {
-      Diag(Loc, diag::err_expression_pattern_not_testable)
+      Diag(Loc, HasStructuralOperands
+                    ? diag::err_expression_pattern_incompatible_builtin_operands
+                    : diag::err_expression_pattern_not_testable)
           << P->getExpr()->getType() << Subject->getType()
           << P->getExpr()->getSourceRange();
       return true;

@@ -241,6 +241,14 @@ using PatternRow = SmallVector<CoveragePattern, 4>;
 using TypeRow = SmallVector<QualType, 4>;
 using CoveragePatterns = SmallVector<CoveragePattern, 4>;
 
+bool containsOpaquePattern(const CoveragePattern &Pattern) {
+  if (Pattern.K == CoveragePattern::Opaque)
+    return true;
+  return llvm::any_of(Pattern.Fields, [](const auto &Field) {
+    return containsOpaquePattern(*Field);
+  });
+}
+
 struct IntegralValueDomain {
   llvm::APSInt Min;
   llvm::APSInt Max;
@@ -1298,12 +1306,16 @@ struct Sema::MatchUsefulnessContext::Impl {
   SmallVector<PatternRow, 8> CoverageMatrix;
   SmallVector<Candidate, 16> Candidates;
   bool HasUnresolvedPattern = false;
+  bool HasOpaquePattern = false;
 
   explicit Impl(QualType SubjectType) { InitialTypes.push_back(SubjectType); }
 
   Usefulness addCandidate(Sema &S, unsigned CaseIndex,
                           CoveragePatterns Patterns, bool ContributesCoverage,
-                          bool ClassifyContinuation) {
+                          bool ClassifyContinuation,
+                          bool RecordOpaquePattern) {
+    if (RecordOpaquePattern)
+      HasOpaquePattern |= llvm::any_of(Patterns, containsOpaquePattern);
     bool AnyUseful = false;
     bool AnyMaybeUseful = false;
     for (const CoveragePattern &Pattern : Patterns) {
@@ -1348,7 +1360,8 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchUsefulness(
                                            State.InitialTypes.front());
   Usefulness Result = State.addCandidate(*this, CaseIndex, std::move(Patterns),
                                          ContributesCoverage,
-                                         /*ClassifyContinuation=*/true);
+                                         /*ClassifyContinuation=*/true,
+                                         /*RecordOpaquePattern=*/true);
   if (Result == Usefulness::Useful)
     return MatchPatternUsefulness::Useful;
   if (Result == Usefulness::MaybeUseful)
@@ -1380,7 +1393,8 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
   if (RecordNotUseful)
     State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
                        /*ContributesCoverage=*/false,
-                       /*ClassifyContinuation=*/false);
+                       /*ClassifyContinuation=*/false,
+                       /*RecordOpaquePattern=*/false);
   return MatchPatternUsefulness::NotUseful;
 }
 
@@ -1478,8 +1492,10 @@ Sema::FinalizeMatchUsefulness(MatchUsefulnessContext &UsefulnessContext,
       isUseful(*this, State.CoverageMatrix, WildRow, State.InitialTypes,
                ConstructorDomain::Required, &Witness);
   if (DiagnoseExhaustiveness && Exhaustive == Usefulness::Useful) {
+    std::string Missing =
+        State.HasOpaquePattern ? "_" : printWitness(Context, Witness);
     Diag(Subject->getBeginLoc(), diag::err_match_not_exhaustive)
-        << true << printWitness(Context, Witness);
+        << true << Missing;
   }
 
   bool IsFullyCovered =
@@ -1512,7 +1528,8 @@ Sema::CheckMatchExhaustiveness(Expr *Subject, ArrayRef<MatchCase> Cases,
         *this, Case.Pattern, Case.PatternInstantiation, Subject->getType());
     Usefulness.State->addCandidate(*this, Case.CaseIndex, std::move(Patterns),
                                    /*ContributesCoverage=*/!hasGuard(Case),
-                                   /*ClassifyContinuation=*/false);
+                                   /*ClassifyContinuation=*/false,
+                                   /*RecordOpaquePattern=*/true);
   }
   return FinalizeMatchUsefulness(Usefulness, Subject, Cases,
                                  DiagnoseExhaustiveness);

@@ -402,7 +402,7 @@ void test_match_precedence(int* p) {
     4 * match((2), case 0);
     match(2, case 0 + 1);
     match(2, case 0 * 1);
-    match(2, case 0 == 1);
+    match(true, case 0 == 1);
     match((2), case 0 * 1);
     struct S { int i; };
     static constexpr S s{};
@@ -782,7 +782,7 @@ int test_match_select_with_guards(const int (&p)[2]) {
   };
 }
 
-void test_match_in_condition(const int *p, const int (*q)[2]) {
+void test_match_in_condition(const int *p, const int (*q)[2], const bool *bp) {
   match(p, case { auto&& v });
   v; // expected-error {{use of undeclared identifier 'v'}}
   if (match(p, case { auto&& v })) v; // expected-error {{use of undeclared identifier 'v'}}
@@ -851,7 +851,7 @@ void test_match_in_condition(const int *p, const int (*q)[2]) {
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}
   }
-  if (match(p, case { (match(0, case auto&& w)) })) {
+  if (match(bp, case { (match(0, case auto&& w)) })) {
     w; // expected-error {{use of undeclared identifier 'w'}}
   } else {
     w; // expected-error {{use of undeclared identifier 'w'}}

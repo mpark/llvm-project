@@ -1158,6 +1158,16 @@ int bad_conversion(int value) {
   };
 }
 
+constexpr int floating_value_pattern_uses_equality(int value) {
+  return match (value) {
+    case 1.0 => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(floating_value_pattern_uses_equality(1) == 1);
+static_assert(floating_value_pattern_uses_equality(2) == 0);
+
 int bad_promotion(char value) {
   return match (value) {
     case int promoted => promoted; // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'char'}}
