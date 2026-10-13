@@ -2,20 +2,20 @@
 
 int redundant_type(int value) {
   return match (value) {
-    case double => 0; // expected-error {{type pattern of type 'double' is not an exact match for subject of type 'int'}}
+    case double => 0; // expected-error {{type pattern of type 'double' is not applicable to subject of type 'int'}}
     case _ => 1;
   };
 }
 
 int impossible_guarded_type(int value) {
   return match (value) {
-    case double if (value > 0) => 0; // expected-error {{type pattern of type 'double' is not an exact match for subject of type 'int'}}
+    case double if (value > 0) => 0; // expected-error {{type pattern of type 'double' is not applicable to subject of type 'int'}}
     case _ => 1;
   };
 }
 
 bool incompatible_single_type_pattern(int value) {
-  return match(value, case double); // expected-error {{type pattern of type 'double' is not an exact match for subject of type 'int'}}
+  return match(value, case double); // expected-error {{type pattern of type 'double' is not applicable to subject of type 'int'}}
 }
 
 constexpr const int constant = 0;
@@ -69,14 +69,14 @@ struct Pair {
 
 static_assert(match(Pair{1, 2}, case [int, long]));
 bool incompatible_nested_type_pattern(Pair value) {
-  return match(value, case [long, int]); // expected-error {{type pattern of type 'long' is not an exact match for subject of type 'int'}}
+  return match(value, case [long, int]); // expected-error {{type pattern of type 'long' is not applicable to subject of type 'int'}}
 }
 
 struct NoMatch {};
 
 int redundant_nested(Pair value) {
   return match (value) {
-    case [int, NoMatch] => 0; // expected-error {{type pattern of type 'NoMatch' is not an exact match for subject of type 'long'}}
+    case [int, NoMatch] => 0; // expected-error {{type pattern of type 'NoMatch' is not applicable to subject of type 'long'}}
     case _ => 1;
   };
 }
@@ -111,7 +111,7 @@ static_assert(!MatchesIntTypePattern<double>);
 
 template<class T>
 bool dependent_single_type_pattern(T value) {
-  return match(value, case int); // expected-error {{type pattern of type 'int' is not an exact match for subject of type 'double'}}
+  return match(value, case int); // expected-error {{type pattern of type 'int' is not applicable to subject of type 'double'}}
 }
 
 bool instantiate_invalid_single_type_pattern() {
