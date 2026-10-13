@@ -215,7 +215,7 @@ void loop_control(Pair pair) {
 
 template <class T>
 void strict_viability(T value) {
-  case [T& first, T& second] = value else return; // expected-error {{declaration pattern of type 'Pair &' is not an exact match for subject of type 'int'}}
+  case [T& first, T& second] = value else return; // expected-error {{declaration pattern of type 'Pair &' is not applicable to subject of type 'int'}}
   (void)first;
   (void)second;
 }
@@ -226,7 +226,7 @@ void instantiate_strict_viability() {
 
 template <class T>
 void dependent_pattern(Pair pair) {
-  case [T first, int second] = pair else return; // expected-error {{declaration pattern of type 'double' is not an exact match for subject of type 'int'}}
+  case [T first, int second] = pair else return; // expected-error {{declaration pattern of type 'double' is not applicable to subject of type 'int'}}
   (void)first;
   (void)second;
 }

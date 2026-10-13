@@ -161,7 +161,7 @@ static_assert(dependent(1) == 0);
 static_assert(dependent(NotAnInt{}) == 0);
 
 void strict_viability(NotAnInt value) {
-  (void)match(value, case (int) and 0); // expected-error {{type pattern of type 'int' is not an exact match for subject of type 'NotAnInt'}}
+  (void)match(value, case (int) and 0); // expected-error {{type pattern of type 'int' is not applicable to subject of type 'NotAnInt'}}
 }
 
 void impossible(bool value) {

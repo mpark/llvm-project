@@ -14691,10 +14691,10 @@ def err_match_handler_type_mismatch : Error<
   "match handler yields type %0, conflicting with previously deduced type %1">;
 def err_dependent_match_result_type_missing_body : Error<
   "expected '{' after match result type">;
-def err_declaration_pattern_not_exact_match : Error<
-  "declaration pattern of type %0 is not an exact match for subject of type %1">;
-def err_type_pattern_not_exact_match : Error<
-  "type pattern of type %0 is not an exact match for subject of type %1">;
+def err_declaration_pattern_not_applicable : Error<
+  "declaration pattern of type %0 is not applicable to subject of type %1">;
+def err_type_pattern_not_applicable : Error<
+  "type pattern of type %0 is not applicable to subject of type %1">;
 def err_expression_pattern_not_testable : Error<
   "expression pattern of type %0 is neither equality-comparable with a "
   "subject of type %1 nor callable with it">;

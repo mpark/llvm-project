@@ -23,14 +23,16 @@ constexpr bool declaration_equivalent_types() {
   int array[2] = {};
   return (match(value, case int&)) && (match(value, case const int&)) &&
          (match(static_cast<int&&>(value), case int&&)) &&
-         (match(constant, case int)) && (match(array, case const int*));
+         (match(42, case const int&)) &&
+         (match(constant, case int)) &&
+         (match(array, case const int (&)[2]));
 }
 
 static_assert(declaration_equivalent_types());
 
 void function_subject() noexcept;
-using Function = void();
-static_assert(match(function_subject, case Function*));
+using Function = void() noexcept;
+static_assert(match(function_subject, case Function&));
 
 struct CopyCounter {
   int* copies;
