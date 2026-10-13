@@ -2302,13 +2302,6 @@ getDeclarationPatternConversion(Sema &S, Expr *Subject, QualType PatternType) {
       /*AllowObjCWritebackConversion=*/false);
 }
 
-static bool isExactDeclarationPatternMatch(Sema &S, Expr *Subject,
-                                           QualType PatternType) {
-  ImplicitConversionSequence ICS =
-      getDeclarationPatternConversion(S, Subject, PatternType);
-  return ICS.isStandard() && ICS.Standard.getRank() == ICR_Exact_Match;
-}
-
 static bool isDeclarationPatternApplicable(Sema &S, Expr *Subject,
                                            QualType PatternType) {
   ImplicitConversionSequence ICS =
@@ -2316,12 +2309,32 @@ static bool isDeclarationPatternApplicable(Sema &S, Expr *Subject,
   if (!ICS.isStandard())
     return false;
 
+  QualType SubjectType = Subject->getType();
+  QualType DeclaredType = PatternType.getNonReferenceType();
+
   const StandardConversionSequence &SCS = ICS.Standard;
-  // Direct reference binding to a base subobject preserves object identity and
-  // does not introduce the conversion ambiguity that exact matching avoids.
-  return SCS.getRank() == ICR_Exact_Match ||
-         (PatternType->isReferenceType() && SCS.ReferenceBinding &&
-          SCS.DirectBinding && SCS.Second == ICK_Derived_To_Base);
+  if (PatternType->isReferenceType())
+    return S.CompareReferenceRelationship(Subject->getExprLoc(), DeclaredType,
+                                          SubjectType) == Sema::Ref_Compatible;
+
+  if (S.Context.hasSameUnqualifiedType(SubjectType, DeclaredType))
+    return true;
+
+  // A non-reference base declaration copies or moves the corresponding base
+  // subobject. Access is checked in the context of the match.
+  if (SCS.Second == ICK_Derived_To_Base)
+    return true;
+
+  // Permit qualification, function-pointer, object-pointer-to-void, and
+  // derived-to-base pointer conversions. Requiring the subject itself to be a
+  // pointer excludes decay and null pointer constants.
+  if ((DeclaredType->isPointerType() || DeclaredType->isMemberPointerType()) &&
+      (SubjectType->isPointerType() || SubjectType->isMemberPointerType()))
+    return SCS.Second == ICK_Identity ||
+           (DeclaredType->isPointerType() &&
+            SCS.Second == ICK_Pointer_Conversion);
+
+  return false;
 }
 
 static QualType
@@ -2334,7 +2347,7 @@ deduceApplicableDeclarationPatternType(Sema &S, VarDecl *Declaration,
       S.DeduceAutoType(Declaration->getTypeSourceInfo()->getTypeLoc(), Subject,
                        DeducedType, Info);
   if (Result != TemplateDeductionResult::Success || Trap.hasErrorOccurred() ||
-      !isExactDeclarationPatternMatch(S, Subject, DeducedType))
+      !isDeclarationPatternApplicable(S, Subject, DeducedType))
     return QualType();
   return DeducedType;
 }
@@ -3480,7 +3493,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
           Subject = State.get(P).Projection->getProjectedExpr();
           break;
         case CastProjectionResult::NotApplicable:
-          Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_exact_match)
+          Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_applicable)
               << PatternType << Subject->getType();
           VD->setInvalidDecl();
           return true;
@@ -3537,7 +3550,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
     };
     if (Subject->getType()->isVoidType()) {
       if (!PatternType->isVoidType()) {
-        Diag(P->getBeginLoc(), diag::err_type_pattern_not_exact_match)
+        Diag(P->getBeginLoc(), diag::err_type_pattern_not_applicable)
             << PatternType << Subject->getType();
         return true;
       }
@@ -3565,7 +3578,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
         Info.CheckedSubjectType = Subject->getType();
         return false;
       }
-      if (isExactDeclarationPatternMatch(
+      if (isDeclarationPatternApplicable(
               *this, Info.Projection->getProjectedExpr(), PatternType)) {
         if (CheckInitialization(Info.Projection->getProjectedExpr()))
           return true;
@@ -3577,7 +3590,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
       Info.Projection = nullptr;
       [[fallthrough]];
     case CastProjectionResult::NotApplicable:
-      Diag(P->getBeginLoc(), diag::err_type_pattern_not_exact_match)
+      Diag(P->getBeginLoc(), diag::err_type_pattern_not_applicable)
           << PatternType << Subject->getType();
       return true;
     case CastProjectionResult::Error:

@@ -472,6 +472,38 @@ int declaration_preserves_derived_to_base(ConcreteProjectionChoice choice) {
   };
 }
 
+int declaration_base_value_is_exhaustive(ConcreteProjectionChoice choice) {
+  return match (choice) {
+    case { ProjectionBase value } => 1;
+  };
+}
+
+struct PointerProjectionChoice {
+  ProjectionDerived *value;
+};
+
+template<>
+struct std::alternative_traits<PointerProjectionChoice> {
+  static constexpr alternative_info alternatives[] = {^^ProjectionDerived *};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const PointerProjectionChoice&) noexcept {
+    return 0;
+  }
+
+  template<unsigned, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    return (static_cast<Self&&>(choice).value);
+  }
+};
+
+int declaration_pointer_conversion_is_exhaustive(
+    PointerProjectionChoice choice) {
+  return match (choice) {
+    case { ProjectionBase *value } => value != nullptr;
+  };
+}
+
 struct ErasedProjectionChoice {
   ProjectionDerived value;
 };
@@ -1287,7 +1319,7 @@ struct std::alternative_traits<ConstOpenChoice> {
 int mutable_reference_does_not_bind_to_const_projection(
     ConstOpenChoice choice) {
   return match (choice) {
-    case { int: int& value } => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'const int'}}
+    case { int: int& value } => value; // expected-error {{declaration pattern of type 'int &' is not applicable to subject of type 'const int'}}
     case _ => 0;
   };
 }

@@ -546,7 +546,7 @@ void test_parenthesized_declarator_suffix_disambiguation(int value) {
 
   int array[2] = {};
   match (array) {
-    // expected-error@+1 {{declaration pattern of type 'int[2]' is not an exact match for subject of type 'int[2]'}}
+    // expected-error@+1 {{declaration pattern of type 'int[2]' is not applicable to subject of type 'int[2]'}}
     case int(copy)[2] => 0;
     case _ => 0;
   }

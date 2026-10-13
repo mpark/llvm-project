@@ -301,7 +301,7 @@ int case_condition(int value) {
 
 template <class T>
 int dependent_case_condition(T value) {
-  if (case int copy = value) // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
+  if (case int copy = value) // expected-error {{declaration pattern of type 'int' is not applicable to subject of type 'double'}}
     return copy;
   return -1;
 }
@@ -358,17 +358,56 @@ int derived_to_base_unnamed_reference(PlainDerived &derived) {
   };
 }
 
-int derived_to_base_does_not_slice(PlainDerived derived) {
-  return match (derived) {
-    // expected-error@+1 {{declaration pattern of type 'PlainBase' is not an exact match for subject of type 'PlainDerived'}}
+struct PrivatelyDerived : private PlainBase { // expected-note 3{{declared private here}}
+  static int match_from_privileged_context(PrivatelyDerived &derived) {
+    return match (derived) {
+      case PlainBase &base => &base == static_cast<PlainBase *>(&derived);
+    };
+  }
+
+  static int match_pointer_from_privileged_context(PrivatelyDerived *derived) {
+    return match (derived) {
+      case PlainBase *base => base == static_cast<PlainBase *>(derived);
+    };
+  }
+
+  static int match_value_from_privileged_context(PrivatelyDerived derived) {
+    return match (derived) {
+      case PlainBase base => 1;
+    };
+  }
+};
+
+int private_base_is_inaccessible(PrivatelyDerived &derived) {
+  return match (derived) { // expected-error {{cannot cast 'PrivatelyDerived' to its private base class 'PlainBase'}}
+    case PlainBase &base => 1;
+    case _ => 0;
+  };
+}
+
+int private_base_pointer_is_inaccessible(PrivatelyDerived *derived) {
+  return match (derived) { // expected-error {{cannot cast 'PrivatelyDerived' to its private base class 'PlainBase'}}
+    case PlainBase *base => 1;
+    case _ => 0;
+  };
+}
+
+int private_base_value_is_inaccessible(PrivatelyDerived derived) {
+  return match (derived) { // expected-error {{cannot cast 'const PrivatelyDerived' to its private base class 'const PlainBase'}}
     case PlainBase base => 1;
     case _ => 0;
   };
 }
 
+int derived_to_base_slices(PlainDerived derived) {
+  return match (derived) {
+    case PlainBase base => 1;
+  };
+}
+
 int derived_to_base_preserves_value_category(PlainDerived &&derived) {
   return match (static_cast<PlainDerived &&>(derived)) {
-    // expected-error@+1 {{declaration pattern of type 'PlainBase &' is not an exact match for subject of type 'PlainDerived'}}
+    // expected-error@+1 {{declaration pattern of type 'PlainBase &' is not applicable to subject of type 'PlainDerived'}}
     case PlainBase &base => 1;
     case _ => 0;
   };
@@ -376,7 +415,7 @@ int derived_to_base_preserves_value_category(PlainDerived &&derived) {
 
 int polymorphic_pointer_is_not_refined(Shape *shape) {
   return match (shape) {
-    // expected-error@+1 {{declaration pattern of type 'Circle *' is not an exact match for subject of type 'Shape *'}}
+    // expected-error@+1 {{declaration pattern of type 'Circle *' is not applicable to subject of type 'Shape *'}}
     case Circle *circle => circle->radius;
     case _ => -1;
   };
@@ -388,6 +427,99 @@ int static_pointer_lvalue_reference(Circle *circle) {
   };
 }
 
+bool derived_pointer_conversion(PlainDerived *derived) {
+  return match (derived) {
+    case PlainBase *base => base == static_cast<PlainBase *>(derived);
+  };
+}
+
+bool object_to_void_pointer_conversion(PlainDerived *derived) {
+  return match (derived) {
+    case const void *pointer =>
+      pointer == static_cast<const void *>(derived);
+  };
+}
+
+bool qualified_pointer_reference_binds_directly(int *pointer) {
+  return match (pointer) {
+    case const int *const &qualified =>
+      static_cast<const void *>(&qualified) ==
+      static_cast<const void *>(&pointer);
+  };
+}
+
+int noexcept_function() noexcept;
+
+int function_pointer_conversion() {
+  return match (&noexcept_function) {
+    case int (*pointer)() => pointer();
+  };
+}
+
+struct MemberOwner {
+  int member;
+};
+
+bool member_pointer_qualification(int MemberOwner::*pointer) {
+  return match (pointer) {
+    case const int MemberOwner::*qualified => qualified == pointer;
+  };
+}
+
+struct MemberDerived : MemberOwner {};
+
+bool member_pointer_base_conversion_is_not_applicable(
+    int MemberOwner::*pointer) {
+  return match (pointer) {
+    case int MemberDerived::*converted => converted != nullptr; // expected-error {{declaration pattern of type 'int MemberDerived::*' is not applicable to subject of type 'int MemberOwner::*'}}
+    case int MemberOwner::*exact => exact != nullptr;
+  };
+}
+
+int converted_reference_temporary_is_not_applicable(short value) {
+  return match (value) {
+    case const int &converted => converted; // expected-error {{declaration pattern of type 'const int &' is not applicable to subject of type 'short'}}
+    case const short &exact => exact;
+  };
+}
+
+bool converted_pointer_reference_temporary_is_not_applicable(int *pointer) {
+  return match (pointer) {
+    case const void *const &converted => converted != nullptr; // expected-error {{declaration pattern of type 'const void *const &' is not applicable to subject of type 'int *'}}
+    case int *const &exact => exact != nullptr;
+  };
+}
+
+bool null_pointer_conversion_is_not_applicable(decltype(nullptr) null) {
+  return match (null) {
+    case int *pointer => pointer == nullptr; // expected-error {{declaration pattern of type 'int *' is not applicable to subject of type 'decltype(nullptr)' (aka 'std::nullptr_t')}}
+    case _ => false;
+  };
+}
+
+bool null_member_pointer_conversion_is_not_applicable(decltype(nullptr) null) {
+  return match (null) {
+    case int PlainBase::*pointer => pointer == nullptr; // expected-error {{declaration pattern of type 'int PlainBase::*' is not applicable to subject of type 'decltype(nullptr)' (aka 'std::nullptr_t')}}
+    case _ => false;
+  };
+}
+
+int array_decay_is_not_applicable(int (&array)[2]) {
+  return match (array) {
+    case int *pointer => pointer[0]; // expected-error {{declaration pattern of type 'int *' is not applicable to subject of type 'int[2]'}}
+    case _ => 0;
+  };
+}
+
+int function_subject();
+
+int function_decay_is_not_applicable() {
+  return match (function_subject) {
+    case int (*pointer)() => pointer(); // expected-error {{declaration pattern of type 'int (*)()' is not applicable to subject of type 'int ()'}}
+    case _ => 0;
+  };
+}
+
 struct Erased {};
 
 template<class T>
@@ -395,7 +527,7 @@ T* try_cast(Erased&);
 
 int naked_declaration_does_not_use_adl_try_cast(Erased& erased) {
   return match (erased) {
-    case int& value => value; // expected-error {{declaration pattern of type 'int &' is not an exact match for subject of type 'Erased'}}
+    case int& value => value; // expected-error {{declaration pattern of type 'int &' is not applicable to subject of type 'Erased'}}
     case _ => 0;
   };
 }
@@ -763,7 +895,7 @@ static_assert(!MatchesPairDecomposition<int>);
 
 template<class T>
 bool dependent_single_match(T value) {
-  return match(value, case int copy); // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'double'}}
+  return match(value, case int copy); // expected-error {{declaration pattern of type 'int' is not applicable to subject of type 'double'}}
 }
 
 bool instantiate_invalid_single_match() {
@@ -1142,14 +1274,28 @@ int binding_pack_does_not_alias_a_fixed_arity_decomposition(Pair &value) {
 
 int bad_conversion(int value) {
   return match (value) {
-    case char converted => converted; // expected-error {{declaration pattern of type 'char' is not an exact match for subject of type 'int'}}
+    case char converted => converted; // expected-error {{declaration pattern of type 'char' is not applicable to subject of type 'int'}}
     case _ => 0;
+  };
+}
+
+int boolean_conversion_is_not_applicable(int value) {
+  return match (value) {
+    case bool converted => converted; // expected-error {{declaration pattern of type 'bool' is not applicable to subject of type 'int'}}
+    case int exact => exact;
+  };
+}
+
+int boolean_value_pattern_is_not_applicable(int value) {
+  return match (value) {
+    case true => 1; // expected-error {{expression pattern of type 'bool' is not compatible with a subject of type 'int' under built-in value-pattern comparison}}
+    case int exact => exact;
   };
 }
 
 int bad_promotion(char value) {
   return match (value) {
-    case int promoted => promoted; // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'char'}}
+    case int promoted => promoted; // expected-error {{declaration pattern of type 'int' is not applicable to subject of type 'char'}}
     case _ => 0;
   };
 }

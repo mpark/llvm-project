@@ -1010,7 +1010,7 @@ int residual_alternative_state_is_recursive(ResidualChoiceAndBool value) {
 
 int unbraced_type_pattern_does_not_project(Choice choice) {
   return match (choice) {
-    case int => 0; // expected-error {{type pattern of type 'int' is not an exact match for subject of type 'Choice'}}
+    case int => 0; // expected-error {{type pattern of type 'int' is not applicable to subject of type 'Choice'}}
     case _ => 1;
   };
 }
