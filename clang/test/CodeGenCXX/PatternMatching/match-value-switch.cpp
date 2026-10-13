@@ -116,17 +116,44 @@ int repeated_value_after_guard(int value) {
 // CHECK: match.decision.next_pattern:
 // CHECK-NEXT: store i32 2, ptr %match.select.result
 
-int repeated_converted_value_after_guard(unsigned value) {
+int repeated_converted_value_after_guard(long value) {
   return match (value) {
-    case -1 if (guard()) => 1;
-    case ~0u => 2;
+    case 1 if (guard()) => 1;
+    case 1L => 2;
     case _ => 3;
   };
 }
 
 // Constants are grouped after conversion to the comparison type.
-// CHECK-LABEL: define{{.*}} i32 @_Z36repeated_converted_value_after_guardj
-// CHECK-COUNT-1: icmp eq i32
+// CHECK-LABEL: define{{.*}} i32 @_Z36repeated_converted_value_after_guardl
+// CHECK-COUNT-1: icmp eq i64
 // CHECK: call{{.*}} i1 @_Z5guardv
 // CHECK: match.decision.next_pattern:
 // CHECK-NEXT: store i32 2, ptr %match.select.result
+
+enum OverloadedEquality { First, Second };
+
+bool operator==(OverloadedEquality, OverloadedEquality);
+
+int structural_enum_equality(OverloadedEquality value) {
+  return match (value) {
+    case First => 1;
+    case Second => 2;
+  };
+}
+
+// Structural enum patterns ignore overloaded equality and lower as a switch.
+// CHECK-LABEL: define{{.*}} i32 @_Z24structural_enum_equality18OverloadedEquality
+// CHECK-NOT: call{{.*}} @_Zeq18OverloadedEqualityS_
+// CHECK: switch i32 %match.value
+
+int guarded_enum_equality(OverloadedEquality value) {
+  return match (value) {
+    case OverloadedEquality matched if (matched == First) => 1;
+    case _ => 2;
+  };
+}
+
+// A guard explicitly requests the overloaded equality operation.
+// CHECK-LABEL: define{{.*}} i32 @_Z21guarded_enum_equality18OverloadedEquality
+// CHECK: call{{.*}} i1 @_Zeq18OverloadedEqualityS_

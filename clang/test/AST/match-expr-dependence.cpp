@@ -21,7 +21,7 @@ void test_match_dependence(int x, T value) {
 #pragma clang __debug dump match (x) { case _ if (T guard = value) => 0; case _ => 1; }
 
   // expected-warning@+1 {{value-dependent expression}}
-#pragma clang __debug dump match (x) { case sizeof(T) => 0; case _ => 1; }
+#pragma clang __debug dump match ((unsigned long)x) { case sizeof(T) => 0; case _ => 1; }
 
   // expected-warning@+1 {{value-dependent expression}}
 #pragma clang __debug dump match (x) -> unsigned { case _ => sizeof(T); }

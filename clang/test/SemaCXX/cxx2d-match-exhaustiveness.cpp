@@ -112,8 +112,8 @@ int impossible_promoted_integer_value(unsigned char value) {
 
 int converted_unsigned_integer_value(unsigned value) {
   return match (value) {
-    case -1 => 0;
-    case ~0u => 1; // expected-error {{match case is redundant}}
+    case -1 => 0; // expected-error {{expression pattern of type 'int' is not compatible with a subject of type 'unsigned int' under built-in value-pattern comparison}}
+    case ~0u => 1;
     case _ => 2;
   };
 }
@@ -168,7 +168,7 @@ int exhaustive_signed_small_integer(S2 value) {
 
 int impossible_bool_value(bool value) {
   return match (value) {
-    case 2 => 0; // expected-error {{match case can never match a subject of type 'bool'}}
+    case 2 => 0; // expected-error {{expression pattern of type 'int' is not compatible with a subject of type 'bool' under built-in value-pattern comparison}}
     case _ => 1;
   };
 }
@@ -325,21 +325,48 @@ int gapless_enum_has_no_residual_values(Gapless value) {
   };
 }
 
+enum OverloadedEnum { OverloadedA, OverloadedB };
+
+bool operator==(OverloadedEnum, OverloadedEnum);
+bool operator==(OverloadedEnum, double);
+bool operator==(double, OverloadedEnum);
+
+int overloaded_enum_equality_remains_structural(OverloadedEnum value) {
+  return match (value) {
+    case OverloadedA => 0;
+    case OverloadedB => 1;
+  };
+}
+
+int floating_pattern_cannot_use_enum_equality(OverloadedEnum value) {
+  return match (value) {
+    case 1.0 => 1; // expected-error {{expression pattern of type 'double' is not compatible with a subject of type 'OverloadedEnum' under built-in value-pattern comparison}}
+    case _ => 0;
+  };
+}
+
+int enum_pattern_cannot_use_floating_equality(double value) {
+  return match (value) {
+    case OverloadedA => 1; // expected-error {{expression pattern of type 'OverloadedEnum' is not compatible with a subject of type 'double' under built-in value-pattern comparison}}
+    case _ => 0;
+  };
+}
+
 enum Gapped { GappedC = 0, GappedD = 2 };
 
 int explicit_values_cover_gapped_enum_domain(Gapped value) {
   return match (value) {
     case GappedC => 0;
-    case 1 => 1;
-    case 2 => 2;
-    case 3 => 3;
+    case static_cast<Gapped>(1) => 1;
+    case static_cast<Gapped>(2) => 2;
+    case static_cast<Gapped>(3) => 3;
     case _ => 4; // expected-error {{match case is redundant}}
   };
 }
 
 int integer_value_covers_named_enumerator(Gapped value) {
   return match (value) {
-    case 2 => 0;
+    case static_cast<Gapped>(2) => 0;
     case GappedD => 1; // expected-error {{match case is redundant}}
     case _ => 2;
   };
@@ -703,10 +730,10 @@ int residual_enum_domain_is_recursive(EnumAndBool value) {
 int explicit_enum_domain_coverage_is_recursive(GappedAndBool value) {
   return match (value) {
     case [GappedC, _] => 0;
-    case [1, false] => 1;
-    case [1, true] => 2;
-    case [2, _] => 3;
-    case [3, _] => 4;
+    case [static_cast<Gapped>(1), false] => 1;
+    case [static_cast<Gapped>(1), true] => 2;
+    case [static_cast<Gapped>(2), _] => 3;
+    case [static_cast<Gapped>(3), _] => 4;
     case _ => 5; // expected-error {{match case is redundant}}
   };
 }
@@ -833,6 +860,57 @@ int missing_projected_alternative_value(Choice choice) {
     case {} => 2;
   };
 }
+
+int boolean_state_does_not_match_integer_alternative(Choice choice) {
+  return match (choice) {
+    case { true } => 0;
+    case { false } => 1;
+    case { .number: _ } => 2;
+    case {} => 3;
+  };
+}
+
+struct BoolDoubleChoice {
+  unsigned state;
+  bool flag;
+  double number;
+};
+
+template<>
+struct std::alternative_traits<BoolDoubleChoice> {
+  static constexpr alternative_info alternatives[] = {^^bool, ^^double};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const BoolDoubleChoice& choice) noexcept {
+    return choice.state;
+  }
+
+  template<unsigned I, class Self>
+  static constexpr decltype(auto) get(Self&& choice) {
+    if constexpr (I == 0)
+      return (static_cast<Self&&>(choice).flag);
+    else
+      return (static_cast<Self&&>(choice).number);
+  }
+};
+
+constexpr int boolean_state_does_not_match_floating_alternative(
+    BoolDoubleChoice choice) {
+  return match (choice) {
+    case { true } => 0;
+    case { false } => 1;
+    case { double } => 2;
+  };
+}
+
+static_assert(boolean_state_does_not_match_floating_alternative(
+                  {0, true, 0.0}) == 0);
+static_assert(boolean_state_does_not_match_floating_alternative(
+                  {0, false, 0.0}) == 1);
+static_assert(boolean_state_does_not_match_floating_alternative(
+                  {1, true, 1.0}) == 2);
+static_assert(boolean_state_does_not_match_floating_alternative(
+                  {1, false, 0.0}) == 2);
 
 int exhaustive_nested_alternatives(Choice choice) {
   return match (choice) {

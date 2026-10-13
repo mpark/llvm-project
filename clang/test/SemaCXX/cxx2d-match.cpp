@@ -1158,6 +1158,52 @@ int bad_conversion(int value) {
   };
 }
 
+int boolean_value_pattern_is_not_applicable(double value) {
+  return match (value) {
+    case true => 1; // expected-error {{expression pattern of type 'bool' is not compatible with a subject of type 'double' under built-in value-pattern comparison}}
+    case _ => 0;
+  };
+}
+
+int floating_value_pattern_is_not_applicable(bool value) {
+  return match (value) {
+    case 1.0 => 1; // expected-error {{expression pattern of type 'double' is not compatible with a subject of type 'bool' under built-in value-pattern comparison}}
+    case _ => 0;
+  };
+}
+
+constexpr int floating_value_pattern_uses_equality(int value) {
+  return match (value) {
+    case 1.0 => 1;
+    case _ => 0;
+  };
+}
+
+static_assert(floating_value_pattern_uses_equality(1) == 1);
+static_assert(floating_value_pattern_uses_equality(2) == 0);
+
+constexpr int dependent_arithmetic_value_patterns(auto value) {
+  return match (value) {
+    case true => 1;
+    case 0.0 => 2;
+    case 1 => 3;
+    case _ => 4;
+  };
+}
+
+static_assert(dependent_arithmetic_value_patterns(true) == 1);
+static_assert(dependent_arithmetic_value_patterns(false) == 4);
+static_assert(dependent_arithmetic_value_patterns(0) == 2);
+static_assert(dependent_arithmetic_value_patterns(1) == 3);
+static_assert(dependent_arithmetic_value_patterns(0.0) == 2);
+static_assert(dependent_arithmetic_value_patterns(1.0) == 3);
+
+constexpr bool lossy_integer_to_floating_comparison(long long value) {
+  return match(value, case 9007199254740992.0);
+}
+
+static_assert(lossy_integer_to_floating_comparison(9007199254740993LL));
+
 int bad_promotion(char value) {
   return match (value) {
     case int promoted => promoted; // expected-error {{declaration pattern of type 'int' is not an exact match for subject of type 'char'}}
