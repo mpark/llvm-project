@@ -4734,6 +4734,7 @@ public:
           QualType PackPattern = Expansion->getPattern();
           SmallVector<UnexpandedParameterPack, 2> Unexpanded;
           getSema().collectUnexpandedParameterPacks(PackPattern, Unexpanded);
+          SmallVector<Decl *, 4> ExpandedDeclarations;
 
           auto BuildPattern = [&](TypeSourceInfo *TInfo) {
             if (TP)
@@ -4748,6 +4749,7 @@ public:
               VD->setImplicit();
             if (Old->hasAttrs())
               VD->setAttrs(Old->getAttrs());
+            ExpandedDeclarations.push_back(VD);
             return getSema().ActOnDeclarationPattern(VD, C->getSourceRange());
           };
 
@@ -4792,6 +4794,9 @@ public:
                 return true;
               Patterns.push_back(NewPattern.get());
             }
+            if (DP)
+              getDerived().transformedLocalDecl(DP->getDeclaration(),
+                                                ExpandedDeclarations);
             continue;
           }
         }

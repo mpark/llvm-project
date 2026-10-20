@@ -1121,9 +1121,29 @@ static_assert(fixed_value_subpattern_pack<1, 2, 3, 4>({1, 2, 3, 4}));
 static_assert(!fixed_value_subpattern_pack<1, 2, 3, 5>({1, 2, 3, 4}));
 
 template<class... Types>
-void named_fixed_type_subpattern_pack_is_rejected(DeclarationPackFour value) {
-  match(value, case [Types ...elements]); // expected-error {{fixed declaration pattern pack cannot introduce a name}}
+constexpr int named_fixed_type_subpattern_pack(DeclarationPackFour value) {
+  return match (value) -> int {
+    case [Types... elements] if (((elements > 0) && ...)) =>
+        int(sizeof...(elements)) + (0 + ... + elements);
+    case _ => -1;
+  };
 }
+
+static_assert(
+    named_fixed_type_subpattern_pack<int, int, int, int>({1, 2, 3, 4}) == 14);
+static_assert(
+    named_fixed_type_subpattern_pack<int, long, int, int>({1, 2, 3, 4}) == -1);
+static_assert(
+    named_fixed_type_subpattern_pack<int, int, int, int>({1, -2, 3, 4}) == -1);
+
+template<class... Types>
+constexpr int empty_named_fixed_type_pack(EmptyDecomposition value) {
+  return match (value) {
+    case [Types... elements] => int(sizeof...(elements));
+  };
+}
+
+static_assert(empty_named_fixed_type_pack<>(EmptyDecomposition{}) == 0);
 
 constexpr int wildcard_subpattern_pack(DeclarationPackFour value) {
   return match (value) {

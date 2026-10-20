@@ -2090,17 +2090,6 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
   for (MatchPattern *Pattern : Patterns) {
     if (QualType Type = getDeclarationPatternPackType(Pattern); !Type.isNull()) {
       QualType PackPattern = cast<PackExpansionType>(Type)->getPattern();
-      if (PackPattern->containsUnexpandedParameterPack() &&
-          isa<DeclarationPattern>(Pattern->IgnoreParens()) &&
-          cast<DeclarationPattern>(Pattern->IgnoreParens())
-              ->getDeclaration()
-              ->getIdentifier()) {
-        Diag(Pattern->getBeginLoc(),
-             diag::err_decomp_pattern_named_fixed_declaration_pack);
-        for (MatchPattern *P : Patterns)
-          DiscardUninitializedMatchPatternDeclarations(P);
-        return true;
-      }
       if (!PackPattern->containsUnexpandedParameterPack() &&
           !PackPattern->getContainedAutoType()) {
         Diag(Pattern->getBeginLoc(),
