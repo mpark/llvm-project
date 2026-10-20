@@ -679,8 +679,6 @@ def err_decomp_pattern_pack_too_small : Error<
   "at least %2">;
 def err_decomp_pattern_concrete_declaration_pack : Error<
   "arity-inferred declaration pattern pack requires a placeholder type">;
-def err_decomp_pattern_named_fixed_declaration_pack : Error<
-  "fixed declaration pattern pack cannot introduce a name">;
 def err_decomp_pattern_unbindable_type : Error<
   "cannot decompose type %0 in pattern">;
 def err_decomp_decl_unbindable_type : Error<
