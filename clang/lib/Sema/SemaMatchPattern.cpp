@@ -1628,13 +1628,11 @@ ExprResult Sema::ActOnCaseConditionExpr(
     MatchPattern *Pattern, MatchPatternInstantiation *Instantiation,
     bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
     ArrayRef<MatchTestInstantiation> Instantiations,
-    bool IsPatternDeclaration,
-    bool DiagnoseRedundantPatternDeclarationElse) {
+    bool IsPatternDeclaration) {
   return new (Context) CaseConditionExpr(
       Context, HoldingVar, Subject, CaseLoc, Pattern, Instantiation,
       PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,
-      IsPatternDeclaration,
-      DiagnoseRedundantPatternDeclarationElse);
+      IsPatternDeclaration);
 }
 
 ExprResult Sema::BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS,
@@ -1672,8 +1670,7 @@ ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
       E->getHoldingVar(), E->getSubject(), E->getMatchLoc(), E->getPattern(),
       E->getPatternInstantiation(), E->isPatternIrrefutable(),
       /*NeedsCaseInstantiation=*/false, ArrayRef(Instantiation),
-      E->isPatternDeclaration(),
-      E->shouldDiagnoseRedundantPatternDeclarationElse());
+      E->isPatternDeclaration());
 }
 
 bool Sema::CheckPatternDeclarationScope(Scope *S,

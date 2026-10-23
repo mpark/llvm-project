@@ -28,13 +28,15 @@ struct std::alternative_traits<Choice> {
   };
   static constexpr bool has_residual_states = false;
 
-  static constexpr __SIZE_TYPE__ index(const Choice& choice) noexcept {
-    return choice.active;
+  enum class state { integer, real };
+
+  static constexpr state index(const Choice& choice) noexcept {
+    return static_cast<state>(choice.active);
   }
 
-  template<__SIZE_TYPE__ I, class Self>
+  template<state I, class Self>
   static constexpr decltype(auto) get(Self&& choice) {
-    if constexpr (I == 0)
+    if constexpr (I == state::integer)
       return (static_cast<Self&&>(choice).integer);
     else
       return (static_cast<Self&&>(choice).real);
@@ -83,6 +85,16 @@ int constexpr_condition_if() {
 // CHECK-NEXT: ret i32 -1
 int constexpr_condition_if_false() {
   if constexpr (case { int value } = Choice{1, 42, 1.0})
+    return value;
+  else
+    return -1;
+}
+
+// CHECK-LABEL: define{{.*}} i32 @_Z31constexpr_condition_named_falsev
+// CHECK-NEXT: entry:
+// CHECK-NEXT: ret i32 -1
+int constexpr_condition_named_false() {
+  if constexpr (case { .integer: auto value } = Choice{1, 42, 1.0})
     return value;
   else
     return -1;

@@ -274,6 +274,54 @@ void covered_repeated_projectable_states(RepeatedChoice value) {
   }
 }
 
+void condition_region(Choice value) {
+  if (case { auto payload } = value) {
+    if constexpr (sizeof(payload) > 0)
+      (void)payload;
+    else
+      static_assert(false, "discarded in the condition region");
+  } else {
+    static_assert(false, "else is outside the condition region"); // expected-error {{static assertion failed: else is outside the condition region}}
+  }
+}
+
+void pattern_declaration_region(Choice value) {
+  case { auto payload } = value;
+  if constexpr (sizeof(payload) > 0)
+    (void)payload;
+  else
+    static_assert(false, "discarded after resuming the region");
+}
+
+void singleton_condition(MaybeInt value) {
+  if (case { auto payload } = value) {
+    if constexpr (sizeof(payload) > 0)
+      (void)payload;
+    else
+      static_assert(false, "a singleton condition is not dependent"); // expected-error {{static assertion failed: a singleton condition is not dependent}}
+  }
+}
+
+constexpr int condition_chain(Choice first, RepeatedChoice second, int extra) {
+  if (extra > 0 && case { auto payload } = first &&
+      [] {
+        if constexpr (true)
+          return true;
+        else
+          static_assert(false, "discarded in a subsequent condition");
+      }() && case { auto other } = second && other > 0) {
+    if constexpr (sizeof(payload) > 0)
+      return static_cast<int>(payload) + other + extra;
+    else
+      static_assert(false, "discarded in each condition instantiation");
+  }
+  return -1;
+}
+
+static_assert(condition_chain({0, 42, 0.0}, {0, 1, 2}, 3) == 46);
+static_assert(condition_chain({1, 0, 2.0}, {1, 1, 2}, 3) == 7);
+static_assert(condition_chain({1, 0, 2.0}, {1, 1, 0}, 3) == -1);
+
 int deferred_assertion(Choice value) {
   return match (value) {
     case { auto payload } => // expected-note 2{{while instantiating this pattern match}}

@@ -4617,13 +4617,32 @@ ExprResult Sema::ExpandDeferredMatchExpr(Expr *E) {
   return Instantiator.TransformExpr(E);
 }
 
-StmtResult Sema::ExpandDeferredMatchConditionStmt(Stmt *S,
-                                                  SourceLocation MatchLoc) {
+bool Sema::ExpandMatchCondition(ConditionResult &Condition, SourceLocation Loc,
+                                Stmt *&Handler, Expr *&Increment,
+                                ConditionKind Kind) {
+  assert(
+      (Kind == ConditionKind::Boolean || Kind == ConditionKind::ConstexprIf) &&
+      "unsupported case-condition kind");
   LocalInstantiationScope Scope(*this);
   MultiLevelTemplateArgumentList TemplateArgs;
-  TemplateInstantiator Instantiator(*this, TemplateArgs, MatchLoc,
+  TemplateInstantiator Instantiator(*this, TemplateArgs, Loc,
                                     DeclarationName());
-  return Instantiator.TransformStmt(S);
+  auto Transformed = Instantiator.TransformCaseConditionChain(
+      Condition.get().second, Handler, Increment,
+      Kind == ConditionKind::ConstexprIf);
+  if (Transformed.isInvalid())
+    return true;
+
+  Condition = ActOnCondition(nullptr, Loc, Transformed.Condition.get(), Kind,
+                             /*MissingOK=*/false);
+  if (Condition.isInvalid())
+    return true;
+
+  // A null replacement means the handler is represented by candidate-specific
+  // instantiations or was discarded by an if constexpr.
+  Handler = Transformed.Handler;
+  Increment = Transformed.Increment;
+  return false;
 }
 
 bool Sema::SubstTemplateArgument(

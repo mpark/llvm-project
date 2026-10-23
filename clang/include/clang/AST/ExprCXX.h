@@ -5790,8 +5790,7 @@ public:
 };
 
 class CaseConditionExpr final : public MatchTestExpr {
-  bool IsPatternDeclaration;
-  bool DiagnoseRedundantPatternDeclarationElse;
+  bool IsPatternDeclaration = false;
   bool FailureIsUnreachable = false;
 
 public:
@@ -5801,30 +5800,19 @@ public:
       MatchPatternInstantiation *PatternInstantiation,
       bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
       ArrayRef<MatchTestInstantiation> Instantiations = {},
-      bool IsPatternDeclaration = false,
-      bool DiagnoseRedundantPatternDeclarationElse = true)
+      bool IsPatternDeclaration = false)
       : MatchTestExpr(CaseConditionExprClass, Ctx, HoldingVar, Subject, CaseLoc,
                       Pattern, PatternInstantiation, /*IfLoc=*/{},
                       /*Guard=*/{}, PatternIsIrrefutable,
                       NeedsCaseInstantiation, Instantiations,
                       /*HasSubjectProduct=*/false),
-        IsPatternDeclaration(IsPatternDeclaration),
-        DiagnoseRedundantPatternDeclarationElse(
-            DiagnoseRedundantPatternDeclarationElse) {}
+        IsPatternDeclaration(IsPatternDeclaration) {}
 
   explicit CaseConditionExpr(EmptyShell Empty)
-      : MatchTestExpr(CaseConditionExprClass, Empty),
-        IsPatternDeclaration(false),
-        DiagnoseRedundantPatternDeclarationElse(true) {}
+      : MatchTestExpr(CaseConditionExprClass, Empty) {}
 
   bool isPatternDeclaration() const { return IsPatternDeclaration; }
-  void setIsPatternDeclaration(bool DiagnoseRedundantElse = true) {
-    IsPatternDeclaration = true;
-    DiagnoseRedundantPatternDeclarationElse = DiagnoseRedundantElse;
-  }
-  bool shouldDiagnoseRedundantPatternDeclarationElse() const {
-    return DiagnoseRedundantPatternDeclarationElse;
-  }
+  void setIsPatternDeclaration() { IsPatternDeclaration = true; }
   bool isFailureUnreachable() const { return FailureIsUnreachable; }
   void setFailureUnreachable() { FailureIsUnreachable = true; }
 

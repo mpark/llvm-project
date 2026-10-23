@@ -4105,7 +4105,7 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   if (Result.isInvalid())
     return Sema::ConditionError();
   if (Region)
-    cast<MatchTestExpr>(Result.get())->setRegion(Region->getRegion());
+    cast<CaseConditionExpr>(Result.get())->setRegion(Region->getRegion());
 
   Scope::decl_range DR = getCurScope()->decls();
   InjectedDeclSet Decls = {DR.begin(), DR.end()};
