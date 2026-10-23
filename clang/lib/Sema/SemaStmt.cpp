@@ -1041,11 +1041,6 @@ StmtResult Sema::ActOnIfStmt(SourceLocation IfLoc,
              diag::err_pattern_declaration_requires_else);
         return StmtError();
       }
-      if (elseStmt && Exhaustiveness->IsFullyCovered &&
-          Match->shouldDiagnoseRedundantPatternDeclarationElse()) {
-        Diag(ElseLoc, diag::err_match_case_redundant);
-        return StmtError();
-      }
       if (Exhaustiveness->IsFullyCovered ||
           (!elseStmt && Exhaustiveness->IsExhaustive))
         Match->setFailureUnreachable();

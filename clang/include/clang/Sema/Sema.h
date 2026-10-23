@@ -11374,8 +11374,8 @@ public:
       MatchPattern *Pattern, MatchPatternInstantiation *PatternInstantiation,
       bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
       ArrayRef<MatchTestInstantiation> Instantiations = {},
-      bool HasSemanticInstantiations = false, bool IsPatternDeclaration = false,
-      bool DiagnoseRedundantPatternDeclarationElse = true);
+      bool HasSemanticInstantiations = false,
+      bool IsPatternDeclaration = false);
   ExprResult BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS, Expr *RHS);
   ExprResult AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
                                       Expr *Increment = nullptr);
@@ -11388,7 +11388,9 @@ public:
   std::optional<MatchExhaustivenessResult>
   GetPatternDeclarationExhaustiveness(CaseConditionExpr *Condition);
   ExprResult ExpandDeferredMatchTestExpr(MatchTestExpr *E);
-  StmtResult ExpandDeferredMatchConditionStmt(Stmt *S, SourceLocation MatchLoc);
+  bool ExpandMatchCondition(ConditionResult &Condition, SourceLocation Loc,
+                            Stmt *&Handler, Expr *&Increment,
+                            ConditionKind Kind);
   class MatchUsefulnessContext;
   ExprResult ActOnMatchSelectExpr(
       Stmt *InitStmt, VarDecl *HoldingVar, Expr *Subject,
