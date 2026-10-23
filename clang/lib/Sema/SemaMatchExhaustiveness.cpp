@@ -1477,11 +1477,11 @@ Sema::FinalizeMatchUsefulness(MatchUsefulnessContext &UsefulnessContext,
           << SubjectType;
     else if (!GroupIsMaybeUseful && !AnyUseful && !AnyMaybeUseful)
       Diag(Cases[CaseIndex].Pattern->getBeginLoc(),
-           diag::err_match_case_redundant);
+           diag::warn_match_case_redundant);
     else if (!GroupIsMaybeUseful)
       for (const OrAlternativeUsefulness &Alternative : OrUsefulness)
         if (!Alternative.Useful && !Alternative.MaybeUseful)
-          Diag(Alternative.Loc, diag::err_or_pattern_alternative_redundant);
+          Diag(Alternative.Loc, diag::warn_or_pattern_alternative_redundant);
     I = GroupEnd;
   }
 

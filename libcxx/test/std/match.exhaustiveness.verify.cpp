@@ -52,7 +52,7 @@ int duplicate_strong_ordering_alias(std::strong_ordering value) {
   return match (value) {
     case std::strong_ordering::less => -1;
     case std::strong_ordering::equal => 0;
-    case std::strong_ordering::equivalent => 0; // expected-error {{match case is redundant}}
+    case std::strong_ordering::equivalent => 0; // expected-warning {{match case is redundant}}
     case std::strong_ordering::greater => 1;
   };
 }
@@ -60,7 +60,7 @@ int duplicate_strong_ordering_alias(std::strong_ordering value) {
 int duplicate_weekday_alias(std::chrono::weekday value) {
   return match (value) {
     case std::chrono::Sunday => 0;
-    case std::chrono::weekday{7} => 1; // expected-error {{match case is redundant}}
+    case std::chrono::weekday{7} => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -68,7 +68,7 @@ int duplicate_weekday_alias(std::chrono::weekday value) {
 int duplicate_optional_empty_state(std::optional<int> value) {
   return match (value) {
     case std::nullopt => 0;
-    case {} => 1; // expected-error {{match case is redundant}}
+    case {} => 1; // expected-warning {{match case is redundant}}
     case { int number } => number;
   };
 }
@@ -88,7 +88,7 @@ int opaque_pattern_after_complete_optional_coverage(std::optional<int> value) {
   return match (value) {
     case { auto number } => number;
     case {} => -1;
-    case 0 => 0; // expected-error {{match case is redundant}}
+    case 0 => 0; // expected-warning {{match case is redundant}}
   };
 }
 

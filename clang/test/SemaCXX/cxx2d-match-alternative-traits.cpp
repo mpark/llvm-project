@@ -626,7 +626,7 @@ int type_constraint_uses_declared_alternative_type(Choice& choice) {
 int redundant_after_type_constraint_selector(Choice choice) {
   return match (choice) {
     case { Integral: _ } => 0;
-    case { int: _ } => 1; // expected-error {{match case is redundant}}
+    case { int: _ } => 1; // expected-warning {{match case is redundant}}
     case { _ } => 2;
   };
 }
