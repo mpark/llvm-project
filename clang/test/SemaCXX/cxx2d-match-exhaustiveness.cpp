@@ -36,21 +36,21 @@ int guarded_case_is_not_coverage(bool b) {
 int redundant_bool(bool b) {
   return match (b) {
     case _ => 0;
-    case true => 1; // expected-error {{match case is redundant}}
+    case true => 1; // expected-warning {{match case is redundant}}
   };
 }
 
 int guarded_case_after_wildcard_is_redundant(bool b) {
   return match (b) {
     case _ => 0;
-    case true if (b) => 1; // expected-error {{match case is redundant}}
+    case true if (b) => 1; // expected-warning {{match case is redundant}}
   };
 }
 
 int guarded_case_after_same_value_is_redundant(bool b) {
   return match (b) {
     case true => 0;
-    case true if (b) => 1; // expected-error {{match case is redundant}}
+    case true if (b) => 1; // expected-warning {{match case is redundant}}
     case false => 2;
   };
 }
@@ -91,14 +91,14 @@ int exhaustive_integer(int value) {
 int redundant_integer_catch_all(int value) {
   return match (value) {
     case _ => 0;
-    case _ => 1; // expected-error {{match case is redundant}}
+    case _ => 1; // expected-warning {{match case is redundant}}
   };
 }
 
 int redundant_integer_value(int value) {
   return match (value) {
     case 0 => 0;
-    case 0 => 1; // expected-error {{match case is redundant}}
+    case 0 => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -143,7 +143,7 @@ int redundant_small_integer_catch_all(U2 value) {
     case 1 => 1;
     case 2 => 2;
     case 3 => 3;
-    case _ => 4; // expected-error {{match case is redundant}}
+    case _ => 4; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -162,7 +162,7 @@ int exhaustive_signed_small_integer(S2 value) {
     case -1 => -1;
     case 0 => 0;
     case 1 => 1;
-    case _ => 2; // expected-error {{match case is redundant}}
+    case _ => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -261,7 +261,7 @@ int explicit_residual_value_completes_enum_domain(E e) {
     case B => 1;
     case C => 2;
     case static_cast<E>(3) => 3;
-    case _ => 4; // expected-error {{match case is redundant}}
+    case _ => 4; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -275,7 +275,7 @@ int out_of_range_enum_value_is_impossible(E e) {
 int duplicate_residual_value(E e) {
   return match (e) {
     case static_cast<E>(3) => 0;
-    case static_cast<E>(3) => 1; // expected-error {{match case is redundant}}
+    case static_cast<E>(3) => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -285,15 +285,15 @@ int wildcard_covers_enumerators_and_residual_values(E e) {
     case A => 0;
     case B => 1;
     case _ => 2;
-    case C => 3; // expected-error {{match case is redundant}}
-    case static_cast<E>(3) => 4; // expected-error {{match case is redundant}}
+    case C => 3; // expected-warning {{match case is redundant}}
+    case static_cast<E>(3) => 4; // expected-warning {{match case is redundant}}
   };
 }
 
 int redundant_enum(E e) {
   return match (e) {
     case A => 0;
-    case A => 1; // expected-error {{match case is redundant}}
+    case A => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -310,7 +310,7 @@ int exhaustive_enum_aliases(Aliased value) {
 int redundant_enum_alias(Aliased value) {
   return match (value) {
     case Aliased::First => 0;
-    case Aliased::AlsoFirst => 1; // expected-error {{match case is redundant}}
+    case Aliased::AlsoFirst => 1; // expected-warning {{match case is redundant}}
     case Aliased::Second => 2;
   };
 }
@@ -321,7 +321,7 @@ int gapless_enum_has_no_residual_values(Gapless value) {
   return match (value) {
     case GaplessA => 0;
     case GaplessB => 1;
-    case _ => 2; // expected-error {{match case is redundant}}
+    case _ => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -344,14 +344,14 @@ int explicit_values_cover_gapped_enum_domain(Gapped value) {
     case static_cast<Gapped>(1) => 1;
     case static_cast<Gapped>(2) => 2;
     case static_cast<Gapped>(3) => 3;
-    case _ => 4; // expected-error {{match case is redundant}}
+    case _ => 4; // expected-warning {{match case is redundant}}
   };
 }
 
 int integer_value_covers_named_enumerator(Gapped value) {
   return match (value) {
     case static_cast<Gapped>(2) => 0;
-    case GappedD => 1; // expected-error {{match case is redundant}}
+    case GappedD => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -374,7 +374,7 @@ int explicit_value_completes_signed_enum_domain(Signed value) {
     case Zero => 0;
     case Positive => 1;
     case static_cast<Signed>(-2) => -2;
-    case _ => 2; // expected-error {{match case is redundant}}
+    case _ => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -414,7 +414,7 @@ int pointer_wildcard_after_both_states(int *pointer) {
   return match (pointer) {
     case {} => 0;
     case { int &value } => value;
-    case _ => 2; // expected-error {{match case is redundant}}
+    case _ => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -441,7 +441,7 @@ int null_pointer_constant_covers_empty_state(int *pointer) {
 int empty_pointer_state_redundant_after_nullptr(int *pointer) {
   return match (pointer) {
     case nullptr => 0;
-    case {} => 1; // expected-error {{match case is redundant}}
+    case {} => 1; // expected-warning {{match case is redundant}}
     case { int &value } => value;
   };
 }
@@ -516,7 +516,7 @@ int missing_singleton_state(FiniteChoice value) {
 int singleton_alias_is_redundant(FiniteChoice value) {
   return match (value) {
     case FiniteFirst => 0;
-    case FiniteFirstAlias => 1; // expected-error {{match case is redundant}}
+    case FiniteFirstAlias => 1; // expected-warning {{match case is redundant}}
     case FiniteSecond => 2;
     case FiniteThird => 3;
   };
@@ -718,7 +718,7 @@ int explicit_enum_domain_coverage_is_recursive(GappedAndBool value) {
     case [static_cast<Gapped>(1), true] => 2;
     case [static_cast<Gapped>(2), _] => 3;
     case [static_cast<Gapped>(3), _] => 4;
-    case _ => 5; // expected-error {{match case is redundant}}
+    case _ => 5; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -729,7 +729,7 @@ int integer_domain_coverage_is_recursive(SmallIntegerAndBool value) {
     case [2, false] => 2;
     case [2, true] => 3;
     case [3, _] => 4;
-    case _ => 5; // expected-error {{match case is redundant}}
+    case _ => 5; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -874,7 +874,7 @@ int no_residual_state_after_all_alternatives(Choice choice) {
   return match (choice) {
     case { auto&& value } => static_cast<int>(value);
     case {} => 2;
-    case _ => 3; // expected-error {{match case is redundant}}
+    case _ => 3; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -926,7 +926,7 @@ int aliases_combine_for_exhaustiveness(NullableChoice choice) {
 int alias_of_covered_state_is_redundant(NullableChoice choice) {
   return match (choice) {
     case { .value: _ } => 0;
-    case { .some: _ } => 1; // expected-error {{match case is redundant}}
+    case { .some: _ } => 1; // expected-warning {{match case is redundant}}
     case { .none } => 2;
   };
 }
@@ -935,7 +935,7 @@ int complete_alias_set_makes_other_alias_redundant(NullableChoice choice) {
   return match (choice) {
     case { .some: _ } => 0;
     case { .none } => 1;
-    case { .value: _ } => 2; // expected-error {{match case is redundant}}
+    case { .value: _ } => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -949,7 +949,7 @@ int complete_nested_alias_set_makes_other_alias_redundant(
   return match (value) {
     case [{ .some: _ }, _] => 0;
     case [{ .none }, _] => 1;
-    case [{ .value: _ }, _] => 2; // expected-error {{match case is redundant}}
+    case [{ .value: _ }, _] => 2; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -1018,17 +1018,17 @@ int unbraced_type_pattern_does_not_project(Choice choice) {
 int redundant_alternative(Choice choice) {
   return match (choice) {
     case { .flag: _ } => 0;
-    case { .flag: false } => 1; // expected-error {{match case is redundant}}
+    case { .flag: false } => 1; // expected-warning {{match case is redundant}}
     case { .number: _ } => 2;
     case {} => 3;
-    case {} => 4; // expected-error {{match case is redundant}}
+    case {} => 4; // expected-warning {{match case is redundant}}
   };
 }
 
 int generic_makes_typed_alternative_redundant(Choice choice) {
   return match (choice) {
     case { auto&& value } => static_cast<int>(value);
-    case { .flag: _ } => 1; // expected-error {{match case is redundant}}
+    case { .flag: _ } => 1; // expected-warning {{match case is redundant}}
     case {} => 2;
   };
 }
@@ -1052,7 +1052,7 @@ int parameterized_names_are_exhaustive(Choice choice) {
 int type_selector_makes_index_redundant(Choice choice) {
   return match (choice) {
     case { bool: _ } => 0;
-    case { .index<0>: _ } => 1; // expected-error {{match case is redundant}}
+    case { .index<0>: _ } => 1; // expected-warning {{match case is redundant}}
     case { int: _ } => 2;
     case {} => 3;
   };
@@ -1104,7 +1104,7 @@ int missing_open_alternative(OpenChoice choice) {
 int repeated_open_empty_is_redundant(OpenChoice choice) {
   return match (choice) {
     case {} => 0;
-    case {} => 1; // expected-error {{match case is redundant}}
+    case {} => 1; // expected-warning {{match case is redundant}}
     case _ => 2;
   };
 }
@@ -1112,7 +1112,7 @@ int repeated_open_empty_is_redundant(OpenChoice choice) {
 int opaque_pattern_after_complete_open_coverage(OpenChoice choice) {
   return match (choice) {
     case _ => 0;
-    case 0 => 1; // expected-error {{match case is redundant}}
+    case 0 => 1; // expected-warning {{match case is redundant}}
   };
 }
 
@@ -1126,7 +1126,7 @@ int open_wildcard_is_not_an_open_pattern(OpenChoice choice) {
 int open_type_coverage_ignores_cvref(OpenChoice choice) {
   return match (choice) {
     case { int: const int& value } => value;
-    case { int: int value } => value; // expected-error {{match case is redundant}}
+    case { int: int value } => value; // expected-warning {{match case is redundant}}
     case _ => 1;
   };
 }
@@ -1142,7 +1142,7 @@ int open_cast_and_initialization_are_distinct(OpenChoice choice) {
 int repeated_open_initialization_is_redundant(OpenChoice choice) {
   return match (choice) {
     case { int value } => value;
-    case { int other } => other; // expected-error {{match case is redundant}}
+    case { int other } => other; // expected-warning {{match case is redundant}}
     case _ => 1;
   };
 }

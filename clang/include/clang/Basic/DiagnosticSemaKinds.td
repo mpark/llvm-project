@@ -14666,7 +14666,8 @@ def err_match_multiple_subject_void : Error<
 def err_match_multiple_subject_pattern : Error<
   "multiple match subjects require a decomposition pattern, structured "
   "binding declaration pattern, or wildcard">;
-def err_match_case_redundant : Error<"match case is redundant">;
+def warn_match_case_redundant : Warning<"match case is redundant">,
+  InGroup<RedundantMatchCases>;
 def err_match_case_impossible : Error<
   "match case can never match a subject of type %0">;
 def err_case_condition_guard : Error<
@@ -14708,8 +14709,8 @@ def note_or_pattern_binding_interface : Note<
   "binding interface established by this alternative">;
 def err_or_pattern_no_viable_alternative : Error<
   "no alternative in the or-pattern can match a subject of type %0">;
-def err_or_pattern_alternative_redundant : Error<
-  "or-pattern alternative is redundant">;
+def warn_or_pattern_alternative_redundant : Warning<
+  "or-pattern alternative is redundant">, InGroup<RedundantMatchCases>;
 def err_guarded_declaration_pattern_move : Error<
   "guarded declaration pattern of type %0 invokes a non-trivial move "
   "constructor before its guard; bind a reference and move in the handler "

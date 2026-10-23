@@ -769,7 +769,7 @@ StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
     auto *PreparedMatch = cast<CaseConditionExpr>(
         MatchTestExpr::findInCondition(Condition.get().second));
     if (PreparedMatch->isFailureUnreachable())
-      Diag(ElseLoc, diag::err_match_case_redundant);
+      Diag(ElseLoc, diag::warn_match_case_redundant);
   }
   return Result;
 }

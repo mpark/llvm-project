@@ -34,14 +34,14 @@ static_assert(exhaustive_bool(true) == 1);
 
 constexpr int redundant_alternative(bool value) {
   return match (value) {
-    case false or false => 0; // expected-error {{or-pattern alternative is redundant}}
+    case false or false => 0; // expected-warning {{or-pattern alternative is redundant}}
     case true => 1;
   };
 }
 
 constexpr int dominated_alternative(bool value) {
   return match (value) {
-    case _ or true => 0; // expected-error {{or-pattern alternative is redundant}}
+    case _ or true => 0; // expected-warning {{or-pattern alternative is redundant}}
   };
 }
 
