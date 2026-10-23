@@ -748,24 +748,29 @@ StmtResult Parser::ParsePatternDeclaration(ParsedStmtContext StmtCtx) {
   if (InvalidScope)
     return StmtError();
 
-  bool DiagnoseRedundantElse =
-      !Match->getSubject()->isTypeDependent() &&
-      !static_cast<bool>(Pattern->getDependence() &
-                         ExprDependence::Instantiation);
-  Match->setIsPatternDeclaration(DiagnoseRedundantElse);
-  if (AttachCaseCondition(Condition, CaseLoc, Continuation.get()))
+  Match->setIsPatternDeclaration();
+  Stmt *Handler = Continuation.get();
+  Expr *Increment = nullptr;
+  if (PrepareCaseCondition(Condition, CaseLoc, Handler, Increment,
+                           Sema::ConditionKind::Boolean,
+                           /*ExpandImmediately=*/!IsNestedPatternDeclaration) ==
+      CaseConditionPreparation::Invalid)
     return StmtError();
+  assert(!Increment && "pattern declaration acquired an increment");
+  if (!Handler)
+    Handler = new (Actions.Context) CompoundStmt(
+        Continuation.get()->getBeginLoc(), Continuation.get()->getEndLoc());
 
-  StmtResult Result = Actions.ActOnIfStmt(
-      CaseLoc, IfStatementKind::Ordinary,
-      /*LParenLoc=*/{}, /*InitStmt=*/nullptr, Condition,
-      /*RParenLoc=*/{}, Continuation.get(), ElseLoc, Failure.get());
-  if (Result.isInvalid())
-    return Result;
-
-  if (!Actions.CurContext->isDependentContext() &&
-      !IsNestedPatternDeclaration)
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(), CaseLoc);
+  StmtResult Result =
+      Actions.ActOnIfStmt(CaseLoc, IfStatementKind::Ordinary,
+                          /*LParenLoc=*/{}, /*InitStmt=*/nullptr, Condition,
+                          /*RParenLoc=*/{}, Handler, ElseLoc, Failure.get());
+  if (Result.isUsable() && Failure.isUsable()) {
+    auto *PreparedMatch = cast<CaseConditionExpr>(
+        MatchTestExpr::findInCondition(Condition.get().second));
+    if (PreparedMatch->isFailureUnreachable())
+      Diag(ElseLoc, diag::err_match_case_redundant);
+  }
   return Result;
 }
 
@@ -1636,28 +1641,49 @@ struct MisleadingIndentationChecker {
 
 }
 
-bool Parser::AttachCaseCondition(Sema::ConditionResult &Condition,
-                                 SourceLocation Loc, Stmt *Handler,
-                                 Expr *Increment) {
+Parser::CaseConditionPreparation Parser::PrepareCaseCondition(
+    Sema::ConditionResult &Condition, SourceLocation Loc, Stmt *&Handler,
+    Expr *&Increment, Sema::ConditionKind Kind, bool ExpandImmediately) {
   Expr *ConditionExpr = Condition.get().second;
-  bool IsConstexprCondition =
-      ConditionExpr && isa<ConstantExpr>(ConditionExpr->IgnoreParens());
   auto *Match = dyn_cast_if_present<CaseConditionExpr>(
       MatchTestExpr::findInCondition(ConditionExpr));
-  if (!Match || Match->needsCaseInstantiation() ||
-      Actions.CurContext->isDependentContext())
-    return false;
+  if (Actions.CurContext->isDependentContext())
+    return CaseConditionPreparation::Ready;
 
-  ExprResult Attached =
-      Actions.AttachMatchTestCondition(Match, Handler, Increment);
-  if (Attached.isInvalid())
-    return true;
-  Condition = Actions.ActOnCondition(getCurScope(), Loc, Attached.get(),
-                                     IsConstexprCondition
-                                         ? Sema::ConditionKind::ConstexprIf
-                                         : Sema::ConditionKind::Boolean,
-                                     /*MissingOK=*/false);
-  return Condition.isInvalid();
+  const bool ExpandPatternDeclaration =
+      ExpandImmediately && Match && Match->isPatternDeclaration();
+  if (Match && !Match->needsCaseInstantiation() &&
+      !ExpandPatternDeclaration) {
+    ExprResult Attached =
+        Actions.AttachMatchTestCondition(Match, Handler, Increment);
+    if (Attached.isInvalid())
+      return CaseConditionPreparation::Invalid;
+    Condition = Actions.ActOnCondition(getCurScope(), Loc, Attached.get(), Kind,
+                                       /*MissingOK=*/false);
+    if (Condition.isInvalid())
+      return CaseConditionPreparation::Invalid;
+    return CaseConditionPreparation::Ready;
+  }
+
+  if (!ExpandImmediately)
+    return CaseConditionPreparation::Ready;
+
+  MatchTestExpr *MatchToExpand =
+      Match && Match->needsCaseInstantiation()
+          ? Match
+          : MatchTestExpr::findCaseConditionRequiringInstantiation(
+                ConditionExpr);
+  // An outer pattern declaration owns its whole continuation, which may
+  // contain nested deferred declarations even when this pattern is concrete.
+  if (!MatchToExpand && ExpandPatternDeclaration)
+    MatchToExpand = Match;
+  if (!MatchToExpand)
+    return CaseConditionPreparation::Ready;
+
+  if (Actions.ExpandMatchCondition(Condition, MatchToExpand->getMatchLoc(),
+                                   Handler, Increment, Kind))
+    return CaseConditionPreparation::Invalid;
+  return CaseConditionPreparation::Expanded;
 }
 
 StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
@@ -1894,28 +1920,32 @@ StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
     Kind = NotLocation.isValid() ? IfStatementKind::ConstevalNegated
                                  : IfStatementKind::ConstevalNonNegated;
 
-  bool AttachPatternCondition = Kind == IfStatementKind::Ordinary ||
-                                (Kind == IfStatementKind::Constexpr &&
-                                 ConstexprCondition.value_or(false));
-  if (AttachPatternCondition &&
-      AttachCaseCondition(Cond, IfLoc, ThenStmt.get()))
+  bool AttachPatternCondition =
+      Kind == IfStatementKind::Ordinary || Kind == IfStatementKind::Constexpr;
+  Stmt *Then = ThenStmt.get();
+  Expr *Increment = nullptr;
+  CaseConditionPreparation Preparation = CaseConditionPreparation::Ready;
+  if (AttachPatternCondition)
+    Preparation = PrepareCaseCondition(Cond, IfLoc, Then, Increment,
+                                       Kind == IfStatementKind::Constexpr
+                                           ? Sema::ConditionKind::ConstexprIf
+                                           : Sema::ConditionKind::Boolean);
+  if (Preparation == CaseConditionPreparation::Invalid)
     return StmtError();
-  StmtResult Result =
-      Actions.ActOnIfStmt(IfLoc, Kind, LParen, InitStmt.get(), Cond, RParen,
-                          ThenStmt.get(), ElseLoc, ElseStmt.get());
-  if (Result.isInvalid())
-    return Result;
-  if (auto *Match = MatchTestExpr::findInCondition(Cond.get().second);
-      Match && Match->needsCaseInstantiation() &&
-      !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  if (auto *Match = MatchTestExpr::findCaseConditionRequiringInstantiation(
-          Cond.get().second);
-      Match && !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  return Result;
+  assert(!Increment && "if condition acquired an increment");
+
+  bool SelectedConstexprHandler =
+      Kind == IfStatementKind::Constexpr &&
+      Preparation == CaseConditionPreparation::Expanded && Then;
+  if (!Then)
+    Then = new (Actions.Context) CompoundStmt(ThenStmt.get()->getBeginLoc(),
+                                              ThenStmt.get()->getEndLoc());
+  if (SelectedConstexprHandler && ElseStmt.get())
+    ElseStmt = new (Actions.Context) CompoundStmt(ElseStmt.get()->getBeginLoc(),
+                                                  ElseStmt.get()->getEndLoc());
+
+  return Actions.ActOnIfStmt(IfLoc, Kind, LParen, InitStmt.get(), Cond, RParen,
+                             Then, ElseLoc, ElseStmt.get());
 }
 
 StmtResult Parser::ParseSwitchStatement(SourceLocation *TrailingElseLoc,
@@ -2075,24 +2105,18 @@ StmtResult Parser::ParseWhileStatement(SourceLocation *TrailingElseLoc,
   if (Cond.isInvalid() || Body.isInvalid())
     return StmtError();
 
-  if (AttachCaseCondition(Cond, WhileLoc, Body.get()))
+  Stmt *TransformedBody = Body.get();
+  Expr *Increment = nullptr;
+  if (PrepareCaseCondition(Cond, WhileLoc, TransformedBody, Increment) ==
+      CaseConditionPreparation::Invalid)
     return StmtError();
+  assert(!Increment && "while condition acquired an increment");
+  if (!TransformedBody)
+    TransformedBody = new (Actions.Context)
+        CompoundStmt(Body.get()->getBeginLoc(), Body.get()->getEndLoc());
 
-  StmtResult Result =
-      Actions.ActOnWhileStmt(WhileLoc, LParen, Cond, RParen, Body.get());
-  if (Result.isInvalid())
-    return Result;
-  if (auto *Match = dyn_cast<MatchTestExpr>(Cond.get().second);
-      Match && Match->needsCaseInstantiation() &&
-      !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  if (auto *Match = MatchTestExpr::findCaseConditionRequiringInstantiation(
-          Cond.get().second);
-      Match && !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  return Result;
+  return Actions.ActOnWhileStmt(WhileLoc, LParen, Cond, RParen,
+                                TransformedBody);
 }
 
 StmtResult Parser::ParseDoStatement(LabelDecl *PrecedingLabel) {
@@ -2653,19 +2677,19 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   InnerScope.Exit();
 
   if (Body.isUsable() && ForRangeInfo.Pattern) {
-    if (AttachCaseCondition(PatternRangeCondition, ForLoc, Body.get()))
+    Stmt *TransformedBody = Body.get();
+    Expr *Increment = nullptr;
+    if (PrepareCaseCondition(PatternRangeCondition, ForLoc, TransformedBody,
+                             Increment) == CaseConditionPreparation::Invalid)
       return StmtError();
+    assert(!Increment && "range condition acquired an increment");
+    if (!TransformedBody)
+      TransformedBody = new (Actions.Context)
+          CompoundStmt(Body.get()->getBeginLoc(), Body.get()->getEndLoc());
     Body = Actions.ActOnIfStmt(
         ForLoc, IfStatementKind::Ordinary, /*LParenLoc=*/{},
         /*InitStmt=*/nullptr, PatternRangeCondition, /*RParenLoc=*/{},
-        Body.get(), /*ElseLoc=*/{}, /*ElseStmt=*/nullptr);
-    if (Body.isUsable()) {
-      auto *Match = cast<MatchTestExpr>(PatternRangeCondition.get().second);
-      if (Match->needsCaseInstantiation() &&
-          !Actions.CurContext->isDependentContext())
-        Body = Actions.ExpandDeferredMatchConditionStmt(Body.get(),
-                                                        Match->getMatchLoc());
-    }
+        TransformedBody, /*ElseLoc=*/{}, /*ElseStmt=*/nullptr);
   }
 
   getActions().OpenACC().ActOnForStmtEnd(ForLoc, Body);
@@ -2700,26 +2724,21 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   if (ForRangeInfo.ParsedForRangeDecl())
     return Actions.FinishCXXForRangeStmt(ForRangeStmt.get(), Body.get());
 
-  if (AttachCaseCondition(SecondPart, ForLoc, Body.get(), ThirdPart.get()))
+  Stmt *TransformedBody = Body.get();
+  Expr *Increment = ThirdPart.get();
+  CaseConditionPreparation Preparation =
+      PrepareCaseCondition(SecondPart, ForLoc, TransformedBody, Increment);
+  if (Preparation == CaseConditionPreparation::Invalid)
     return StmtError();
-  StmtResult Result = Actions.ActOnForStmt(
-      ForLoc, T.getOpenLocation(), FirstPart.get(), SecondPart, ThirdPart,
-      T.getCloseLocation(), Body.get());
-  if (Result.isInvalid())
-    return Result;
-  Expr *Condition = SecondPart.get().second;
-  if (auto *Match = dyn_cast_if_present<MatchTestExpr>(
-          Condition ? Condition->IgnoreParens() : nullptr);
-      Match && Match->needsCaseInstantiation() &&
-      !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  if (auto *Match =
-          MatchTestExpr::findCaseConditionRequiringInstantiation(Condition);
-      Match && !Actions.CurContext->isDependentContext())
-    return Actions.ExpandDeferredMatchConditionStmt(Result.get(),
-                                                    Match->getMatchLoc());
-  return Result;
+  if (!TransformedBody)
+    TransformedBody = new (Actions.Context)
+        CompoundStmt(Body.get()->getBeginLoc(), Body.get()->getEndLoc());
+  if (Preparation == CaseConditionPreparation::Expanded)
+    ThirdPart = Actions.MakeFullDiscardedValueExpr(Increment);
+
+  return Actions.ActOnForStmt(ForLoc, T.getOpenLocation(), FirstPart.get(),
+                              SecondPart, ThirdPart, T.getCloseLocation(),
+                              TransformedBody);
 }
 
 StmtResult Parser::ParseGotoStatement() {

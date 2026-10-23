@@ -4571,9 +4571,12 @@ private:
                                                 InjectedDeclSet *InjectedDecls,
                                                 ForRangeInfo *FRI = nullptr);
   ExprResult BuildCaseForRangeCondition(const ForRangeInfo &FRI);
-  bool AttachCaseCondition(Sema::ConditionResult &Condition,
-                           SourceLocation Loc, Stmt *Handler,
-                           Expr *Increment = nullptr);
+  enum class CaseConditionPreparation { Ready, Expanded, Invalid };
+  CaseConditionPreparation
+  PrepareCaseCondition(Sema::ConditionResult &Condition, SourceLocation Loc,
+                       Stmt *&Handler, Expr *&Increment,
+                       Sema::ConditionKind Kind = Sema::ConditionKind::Boolean,
+                       bool ExpandImmediately = true);
 
   bool ParseMatchBody(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       SmallVectorImpl<Stmt *> &Preamble,
