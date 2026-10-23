@@ -108,7 +108,7 @@ int one_state(One one) {
   return match (one) {
     case { int i } => i;
     // expected-error@+2 {{member reference base type 'int' is not a structure or union}}
-    // expected-error@+1 {{match case is redundant}}
+    // expected-warning@+1 {{match case is redundant}}
     case { auto&& other } => other.no_such_member();
   };
 }
@@ -300,7 +300,7 @@ int partially_covered_alternative(BoolChoice choice) {
 constexpr int precisely_redundant_candidate(BoolChoice choice) {
   return match (choice) {
     case { true } => 1;
-    case { true } => 2; // expected-error {{match case is redundant}}
+    case { true } => 2; // expected-warning {{match case is redundant}}
     case { false } => 0;
     case { auto&& other } => other.size();
   };

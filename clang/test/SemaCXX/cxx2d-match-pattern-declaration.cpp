@@ -151,9 +151,18 @@ void refutable_without_else(Pair pair) {
 }
 
 void redundant_else(Pair pair) {
-  case [int first, int second] = pair else return; // expected-error {{match case is redundant}}
+  case [int first, int second] = pair else return; // expected-warning {{match case is redundant}}
   use(first + second);
 }
+
+template <class T>
+void redundant_else_template(Pair pair) {
+  case [int first, int second] = pair else return; // expected-warning {{match case is redundant}}
+  use(first + second);
+}
+
+template void redundant_else_template<int>(Pair);
+template void redundant_else_template<long>(Pair);
 
 void fallthrough_else(Pair pair) {
   case [0, int value] = pair else {} // expected-error {{'else' statement of a pattern declaration must not complete normally}}

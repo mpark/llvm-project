@@ -236,7 +236,7 @@ void covered_multiple_projectable_states(Choice value) {
   match (value) {
     case { int } => ;
     case { double } => ;
-    case { auto payload } => static_assert(false, "not instantiated"); // expected-error {{match case is redundant}}
+    case { auto payload } => static_assert(false, "not instantiated"); // expected-warning {{match case is redundant}}
   }
 }
 
@@ -270,9 +270,38 @@ void one_viable_projectable_state(Choice value) {
 void covered_repeated_projectable_states(RepeatedChoice value) {
   match (value) {
     case { int } => ;
-    case { auto payload } => static_assert(false, "not instantiated"); // expected-error {{match case is redundant}}
+    case { auto payload } => static_assert(false, "not instantiated"); // expected-warning {{match case is redundant}}
   }
 }
+
+void covered_singleton_projectable_state(MaybeInt value) {
+  match (value) {
+    case { int } => ;
+    case {} => ;
+    case { auto payload } => static_assert(false, "checked without instantiation"); // expected-error {{static assertion failed: checked without instantiation}} expected-warning {{match case is redundant}}
+  }
+}
+
+void no_projectable_states(EmptyChoice value) {
+  match (value) {
+    case { auto payload } => ; // expected-error {{braced alternative pattern does not match any projectable state of 'EmptyChoice'}}
+    case {} => ;
+  }
+}
+
+template <class T>
+concept NoCandidate = false;
+
+bool no_viable_test_candidate(Choice value) {
+  return match (value, case { NoCandidate auto payload }); // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
+}
+
+constexpr bool failing_test_guard(Choice value) {
+  return match (value, case { auto payload } if (false));
+}
+
+static_assert(!failing_test_guard({0, 42, 0.0}));
+static_assert(!failing_test_guard({1, 0, 2.0}));
 
 void condition_region(Choice value) {
   if (case { auto payload } = value) {

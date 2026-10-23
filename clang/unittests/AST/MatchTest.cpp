@@ -73,7 +73,7 @@ void use(double);
 std::unique_ptr<ASTUnit> buildMatchAST(llvm::StringRef Code) {
   auto AST = tooling::buildASTFromCodeWithArgs(
       (Traits + Code).str(),
-      {"-std=c++2d", "-fpattern-matching"});
+      {"-std=c++2d", "-fpattern-matching", "-Wno-redundant-match-cases"});
   if (AST)
     EXPECT_FALSE(AST->getDiagnostics().hasErrorOccurred());
   return AST;
