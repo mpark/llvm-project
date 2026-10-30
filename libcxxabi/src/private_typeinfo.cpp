@@ -317,6 +317,97 @@ const void* dyn_cast_slow(
   return nullptr;
 }
 
+const void* dyn_cast_with_derived_info(
+    const void* static_ptr,
+    const __class_type_info* static_type,
+    const __class_type_info* dst_type,
+    std::ptrdiff_t src2dst_offset,
+    const derived_object_info& derived_info) {
+  if (is_equal(derived_info.dynamic_type, dst_type, false)) {
+    return dyn_cast_to_derived(
+        static_ptr, derived_info.dynamic_ptr, static_type, dst_type, derived_info.offset_to_derived, src2dst_offset);
+  }
+
+  if (const void* res = dyn_cast_try_downcast(
+          static_ptr, derived_info.dynamic_ptr, dst_type, derived_info.dynamic_type, src2dst_offset))
+    return res;
+
+  return dyn_cast_slow(
+      static_ptr, derived_info.dynamic_ptr, static_type, dst_type, derived_info.dynamic_type, src2dst_offset);
+}
+
+// An incomplete scan may still identify a hint-proven match.
+struct single_inheritance_result {
+  size_t selected;
+  bool complete;
+};
+
+single_inheritance_result dyn_cast_first_single_inheritance(
+    const void* static_ptr,
+    const __class_type_info* static_type,
+    const __dynamic_cast_target* targets,
+    size_t count,
+    const derived_object_info& derived_info) {
+  size_t first     = count;
+  size_t confirmed = count;
+  for (const __class_type_info* type = derived_info.dynamic_type;;) {
+    if (is_equal(type, static_type, false)) {
+      if (derived_info.dynamic_ptr != static_ptr)
+        return {confirmed, false};
+      return {first, true};
+    }
+
+    // A more-derived target may be encountered before an earlier target in the
+    // batch. A nonnegative hint can prove a match without walking its bases, but
+    // earlier targets still have priority over that match.
+    for (size_t i = 0; i < first; ++i) {
+      if (is_equal(type, targets[i].type, false)) {
+        first = i;
+        if (targets[i].src2dst_offset >= 0 && derived_info.offset_to_derived == -targets[i].src2dst_offset) {
+          confirmed = i;
+          if (i == 0)
+            return {i, true};
+        }
+        break;
+      }
+    }
+
+    // This RTTI representation guarantees a public, nonvirtual base at offset
+    // zero. If the walk stops, retain any hint-proven match so the general search
+    // only needs to check the targets preceding it.
+    if (typeid(*type) != typeid(__si_class_type_info))
+      return {confirmed, false};
+    type = static_cast<const __si_class_type_info*>(type)->__base_type;
+  }
+}
+
+// Keep traversal and target-specific search state out of the exact first-target
+// fast path.
+__attribute__((noinline)) const void* dyn_cast_first_general(
+    const void* static_ptr,
+    const __class_type_info* static_type,
+    const __dynamic_cast_target* targets,
+    size_t count,
+    size_t* selected,
+    const __class_type_info* dynamic_type,
+    std::ptrdiff_t offset_to_derived) {
+  const derived_object_info derived_info = {
+      static_cast<const char*>(static_ptr) + offset_to_derived, dynamic_type, offset_to_derived};
+  const single_inheritance_result scan =
+      dyn_cast_first_single_inheritance(static_ptr, static_type, targets, count, derived_info);
+  if (!scan.complete) {
+    for (size_t i = 0; i < scan.selected; ++i) {
+      if (const void* result = dyn_cast_with_derived_info(
+              static_ptr, static_type, targets[i].type, targets[i].src2dst_offset, derived_info)) {
+        *selected = i;
+        return result;
+      }
+    }
+  }
+  *selected = scan.selected;
+  return scan.selected == count ? nullptr : derived_info.dynamic_ptr;
+}
+
 } // namespace
 
 // __shim_type_info
@@ -845,6 +936,28 @@ __dynamic_cast(const void* static_ptr,
     return dyn_cast_slow(
         static_ptr, derived_info.dynamic_ptr, static_type, dst_type, derived_info.dynamic_type, src2dst_offset);
   }
+}
+
+extern "C" _LIBCXXABI_FUNC_VIS const void* __dynamic_cast_first(
+    const void* static_ptr,
+    const __class_type_info* static_type,
+    const __dynamic_cast_target* targets,
+    size_t count,
+    size_t* selected) noexcept {
+  if (static_ptr == nullptr || count == 0) {
+    *selected = count;
+    return nullptr;
+  }
+
+  derived_object_info derived_info = dyn_cast_get_derived_info(static_ptr);
+  if (is_equal(derived_info.dynamic_type, targets[0].type, false) && targets[0].src2dst_offset >= 0 &&
+      derived_info.offset_to_derived == -targets[0].src2dst_offset) {
+    *selected = 0;
+    return derived_info.dynamic_ptr;
+  }
+
+  return dyn_cast_first_general(
+      static_ptr, static_type, targets, count, selected, derived_info.dynamic_type, derived_info.offset_to_derived);
 }
 
 #pragma GCC diagnostic pop
