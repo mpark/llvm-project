@@ -11,3 +11,6 @@ __ZTIN10__cxxabiv121__vmi_class_type_infoE
 # This symbol is not an implementation detail of libc++abi, but it also causes issues when moving
 # to libc++. This needs further investigation.
 ___cxa_rethrow_primary_exception
+
+# Experimental multi-target dynamic cast runtime entry point.
+___dynamic_cast_first

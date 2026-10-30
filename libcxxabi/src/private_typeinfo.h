@@ -61,6 +61,23 @@ enum
 
 class _LIBCXXABI_TYPE_VIS __class_type_info;
 
+struct __dynamic_cast_target {
+  const __class_type_info* type;
+  ptrdiff_t src2dst_offset;
+};
+
+// Experimental ordered batch of casts that would otherwise call __dynamic_cast.
+// Each target carries the same source-to-destination hint as __dynamic_cast.
+// Returns the adjusted pointer for the first successful target. On failure,
+// returns nullptr and sets *selected to count. A null source or empty batch is
+// permitted. The selected output pointer must be nonnull.
+extern "C" _LIBCXXABI_FUNC_VIS const void* __dynamic_cast_first(
+    const void* static_ptr,
+    const __class_type_info* static_type,
+    const __dynamic_cast_target* targets,
+    size_t count,
+    size_t* selected) noexcept;
+
 struct catch_info {
   const __class_type_info* static_type;
 
