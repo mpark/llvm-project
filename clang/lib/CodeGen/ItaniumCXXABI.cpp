@@ -249,6 +249,12 @@ public:
                                    QualType DestRecordTy,
                                    llvm::BasicBlock *CastEnd) override;
 
+  bool supportsDynamicCastFirst() const override { return true; }
+  llvm::Value *emitDynamicCastFirstCall(CodeGenFunction &CGF, Address Value,
+                                        QualType SrcRecordTy,
+                                        ArrayRef<QualType> DestRecordTypes,
+                                        Address Selected) override;
+
   llvm::Value *emitExactDynamicCast(CodeGenFunction &CGF, Address ThisAddr,
                                     QualType SrcRecordTy, QualType DestTy,
                                     QualType DestRecordTy,
@@ -1651,6 +1657,58 @@ llvm::Value *ItaniumCXXABI::emitDynamicCastCall(
   }
 
   return Value;
+}
+
+llvm::Value *ItaniumCXXABI::emitDynamicCastFirstCall(
+    CodeGenFunction &CGF, Address ThisAddr, QualType SrcRecordTy,
+    ArrayRef<QualType> DestRecordTypes, Address Selected) {
+  llvm::Type *PtrDiffTy = CGF.ConvertType(getContext().getPointerDiffType());
+  auto *TargetTy = llvm::StructType::get(CGM.GlobalsInt8PtrTy, PtrDiffTy);
+  SmallVector<llvm::Constant *, 4> Targets;
+  const CXXRecordDecl *SrcDecl = SrcRecordTy->getAsCXXRecordDecl();
+  for (QualType DestTy : DestRecordTypes) {
+    int64_t OffsetHint =
+        CodeGenUtils::computeOffsetHint(getContext(), SrcDecl,
+                                        DestTy->getAsCXXRecordDecl())
+            .getQuantity();
+    llvm::Constant *Fields[] = {
+        CGM.GetAddrOfRTTIDescriptor(DestTy.getUnqualifiedType()),
+        llvm::ConstantInt::getSigned(PtrDiffTy, OffsetHint)};
+    Targets.push_back(llvm::ConstantStruct::get(TargetTy, Fields));
+  }
+  auto *TableTy = llvm::ArrayType::get(TargetTy, Targets.size());
+  auto *Table = new llvm::GlobalVariable(
+      CGM.getModule(), TableTy, /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantArray::get(TableTy, Targets), "__dynamic_cast.targets",
+      nullptr, llvm::GlobalVariable::NotThreadLocal,
+      CGM.GlobalsInt8PtrTy->getAddressSpace());
+  Table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  Table->setAlignment(
+      CGM.getModule().getDataLayout().getABITypeAlign(TargetTy));
+
+  llvm::Type *Args[] = {CGF.Int8PtrTy, CGF.GlobalsInt8PtrTy,
+                        CGF.GlobalsInt8PtrTy, CGF.SizeTy, CGF.Int8PtrTy};
+  auto *FnTy = llvm::FunctionType::get(CGF.Int8PtrTy, Args, false);
+  llvm::AttrBuilder FuncAttrs(CGF.getLLVMContext());
+  FuncAttrs.addAttribute(llvm::Attribute::NoUnwind);
+  FuncAttrs.addAttribute(llvm::Attribute::WillReturn);
+  llvm::AttributeList Attrs = llvm::AttributeList::get(
+      CGF.getLLVMContext(), llvm::AttributeList::FunctionIndex, FuncAttrs);
+  llvm::FunctionCallee Fn =
+      CGM.CreateRuntimeFunction(FnTy, "__dynamic_cast_first", Attrs);
+
+  if (CGM.getCodeGenOpts().PointerAuth.CXXVTablePointers) {
+    // Retain the vtable authentication performed by ordinary dynamic_cast.
+    CGF.GetVTablePtr(ThisAddr, CGM.Int8PtrTy, SrcDecl,
+                     CodeGenFunction::VTableAuthMode::MustTrap);
+  }
+  llvm::Value *Values[] = {
+      ThisAddr.emitRawPointer(CGF),
+      CGM.GetAddrOfRTTIDescriptor(SrcRecordTy.getUnqualifiedType()), Table,
+      llvm::ConstantInt::get(CGF.SizeTy, Targets.size()),
+      Selected.emitRawPointer(CGF)};
+  return CGF.EmitNounwindRuntimeCall(Fn, Values);
 }
 
 std::optional<CGCXXABI::ExactDynamicCastInfo>

@@ -290,6 +290,16 @@ public:
                                            QualType DestRecordTy,
                                            llvm::BasicBlock *CastEnd) = 0;
 
+  virtual bool supportsDynamicCastFirst() const { return false; }
+
+  /// Return the adjusted pointer and store the first matching target's index,
+  /// or the number of targets on failure. Requires supportsDynamicCastFirst().
+  virtual llvm::Value *emitDynamicCastFirstCall(
+      CodeGenFunction &CGF, Address Value, QualType SrcRecordTy,
+      ArrayRef<QualType> DestRecordTypes, Address Selected) {
+    llvm_unreachable("batched dynamic casts are not supported by this ABI");
+  }
+
   virtual llvm::Value *emitDynamicCastToVoid(CodeGenFunction &CGF,
                                              Address Value,
                                              QualType SrcRecordTy) = 0;

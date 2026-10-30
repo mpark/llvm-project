@@ -8036,6 +8036,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // -fassume-unique-vtables is on by default.
   Args.addOptOutFlag(CmdArgs, options::OPT_fassume_unique_vtables,
                      options::OPT_fno_assume_unique_vtables);
+  Args.addOptInFlag(CmdArgs, options::OPT_fexperimental_batched_dynamic_cast,
+                    options::OPT_fno_experimental_batched_dynamic_cast);
 
   // -freflection is off by default, as it and its implied extensions are
   // experimental.

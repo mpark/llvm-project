@@ -3335,6 +3335,47 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S) {
   return EmitMatchSelectExpr(S, AggValueSlot::ignored());
 }
 
+static const CXXDynamicCastExpr *
+getBatchableMatchCast(const MatchDecisionTree::Node &Node) {
+  // A successful cast must select the case without any further matching or
+  // guard tests. Otherwise the next successful target need not be the next
+  // case.
+  if (Node.Kind != MatchDecisionTree::Node::NK_Test ||
+      Node.MatchTest.Kind != MatchDecisionTree::Test::OpenProjection ||
+      !Node.MatchTest.ProjectionPath.empty() ||
+      Node.MatchTest.Projection->getKind() != MatchProjection::CastProjection ||
+      Node.MatchTest.Case->Guard.hasGuard() ||
+      Node.Success->Kind != MatchDecisionTree::Node::NK_Candidate ||
+      Node.Success->MatchCandidate.Case != Node.MatchTest.Case)
+    return nullptr;
+
+  const MatchPattern *Pattern = Node.MatchTest.Case->Pattern->IgnoreParens();
+  QualType PatternType;
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
+    PatternType = Declaration->getDeclaration()->getType();
+  else if (const auto *Type = dyn_cast<TypePattern>(Pattern))
+    PatternType = Type->getType();
+  else
+    return nullptr;
+  if (!PatternType->isReferenceType())
+    return nullptr;
+
+  const auto *Cast = dyn_cast<CXXDynamicCastExpr>(
+      Node.MatchTest.Projection->getIntermediateVar()
+          ->getInit()
+          ->IgnoreParenImpCasts());
+  if (!Cast || Cast->getCastKind() != CK_Dynamic || Cast->isAlwaysNull())
+    return nullptr;
+  QualType Source = Cast->getSubExpr()->getType()->getPointeeType();
+  QualType Target = Cast->getType()->getPointeeType();
+  if (Source.isVolatileQualified() || Target.isNull() ||
+      !Target->isRecordType() || Source.getAddressSpace() != LangAS::Default ||
+      Target.getAddressSpace() != LangAS::Default ||
+      Target->getAsCXXRecordDecl()->isEffectivelyFinal())
+    return nullptr;
+  return Cast;
+}
+
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                                             AggValueSlot Dest) {
   // FIXME: check if we can constant fold to simple integer,
@@ -3621,20 +3662,24 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         [&](llvm::Value *Discriminator,
             ArrayRef<const MatchDecisionTree::Node *> Tests,
             ArrayRef<llvm::ConstantInt *> Values,
-            const MatchDecisionTree::Node *Default) {
-          SmallVector<llvm::BasicBlock *, 4> SuccessBlocks;
-          for ([[maybe_unused]] const MatchDecisionTree::Node *Test : Tests)
-            SuccessBlocks.push_back(createBasicBlock("match.decision.success"));
+            const MatchDecisionTree::Node *Default,
+            llvm::function_ref<void(const MatchDecisionTree::Node &)>
+                EmitSuccess = nullptr) {
           llvm::BasicBlock *DefaultBlock =
               createBasicBlock("match.decision.failure");
           auto *Switch = Builder.CreateSwitch(Discriminator, DefaultBlock,
-                                              SuccessBlocks.size());
-          for (auto [Value, Success] : llvm::zip_equal(Values, SuccessBlocks))
+                                              Tests.size());
+          for (auto [Test, Value] : llvm::zip_equal(Tests, Values)) {
+            llvm::BasicBlock *Success =
+                createBasicBlock("match.decision.success");
             Switch->addCase(Value, Success);
-
-          for (auto [Test, Success] : llvm::zip_equal(Tests, SuccessBlocks)) {
             EmitBlock(Success);
-            Self(Self, *Test->Success);
+            if (EmitSuccess) {
+              llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
+              EmitSuccess(*Test);
+            } else {
+              Self(Self, *Test->Success);
+            }
           }
           EmitBlock(DefaultBlock);
           Self(Self, *Default);
@@ -3725,6 +3770,74 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     }
     case MatchDecisionTree::Node::NK_Test:
       break;
+    }
+
+    if (CGM.getCodeGenOpts().ExperimentalBatchedDynamicCast &&
+        CGM.getCXXABI().supportsDynamicCastFirst()) {
+      if (const CXXDynamicCastExpr *First = getBatchableMatchCast(Node)) {
+        const MatchProjection *FirstProjection = Node.MatchTest.Projection;
+        const Expr *Subject =
+            FirstProjection->getHoldingVar()->getInit()->IgnoreParenImpCasts();
+        SmallVector<const MatchDecisionTree::Node *, 4> Tests;
+        SmallVector<QualType, 4> TargetTypes;
+        SmallVector<llvm::ConstantInt *, 4> Values;
+        const MatchDecisionTree::Node *Default = &Node;
+        while (const CXXDynamicCastExpr *Cast =
+                   getBatchableMatchCast(*Default)) {
+          if (Default->MatchTest.Projection->getHoldingVar()
+                      ->getInit()
+                      ->IgnoreParenImpCasts() != Subject ||
+              !getContext().hasSameType(Cast->getSubExpr()->getType(),
+                                        First->getSubExpr()->getType()))
+            break;
+          QualType Target =
+              Cast->getType()->getPointeeType().getUnqualifiedType();
+          Tests.push_back(Default);
+          TargetTypes.push_back(Target);
+          Values.push_back(llvm::ConstantInt::get(SizeTy, Values.size()));
+          Default = Default->Failure.get();
+        }
+
+        if (Tests.size() > 1) {
+          if (!LocalDeclMap.count(FirstProjection->getHoldingVar()))
+            EmitVarDecl(*FirstProjection->getHoldingVar());
+          Address Source = EmitPointerWithAlignment(First->getSubExpr());
+          QualType SourceType =
+              First->getSubExpr()->getType()->getPointeeType();
+          EmitTypeCheck(TCK_DynamicOperation, First->getExprLoc(), Source,
+                        SourceType);
+          Address Selected =
+              CreateMemTemp(getContext().getSizeType(), "match.cast.index");
+          llvm::Value *Adjusted = CGM.getCXXABI().emitDynamicCastFirstCall(
+              *this, Source, SourceType, TargetTypes, Selected);
+          llvm::Value *Index =
+              Builder.CreateLoad(Selected, "match.cast.selected");
+          EmitSwitchDecision(
+              Index, Tests, Values, Default,
+              [&](const MatchDecisionTree::Node &Test) {
+                RunCleanupsScope CaseScope(*this);
+                const MatchCaseInstantiation &Case = *Test.MatchTest.Case;
+                if (const auto *Pattern = dyn_cast<DeclarationPattern>(
+                        Case.Pattern->IgnoreParens())) {
+                  const VarDecl *D = Pattern->getDeclaration();
+                  assert(D->getType()->isReferenceType());
+                  AutoVarEmission Emission = EmitAutoVarAlloca(*D);
+                  LValue Storage = MakeAddrLValue(
+                      Emission.getObjectAddress(*this), D->getType());
+                  EmitTypeCheck(TCK_ReferenceBinding,
+                                D->getInit()->getExprLoc(), Adjusted,
+                                D->getType().getNonReferenceType());
+                  EmitStoreThroughLValue(RValue::get(Adjusted), Storage,
+                                         /*isInit=*/true);
+                  EmitAutoVarCleanups(Emission);
+                }
+                EmitCaseHandler(Case);
+                CaseScope.ForceCleanup();
+                EmitBranch(SelectEndBB);
+              });
+          return;
+        }
+      }
     }
 
     EmitProjectionPath(Node.MatchTest.ProjectionPath);

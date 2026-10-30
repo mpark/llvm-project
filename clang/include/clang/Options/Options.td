@@ -1776,6 +1776,12 @@ defm assume_unique_vtables : BoolFOption<"assume-unique-vtables",
           "Disable optimizations based on vtable pointer identity">,
   BothFlags<[], [ClangOption, CLOption]>>;
 
+defm experimental_batched_dynamic_cast : BoolFOption<"experimental-batched-dynamic-cast",
+  CodeGenOpts<"ExperimentalBatchedDynamicCast">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Batch built-in cast patterns using the experimental libc++abi runtime">,
+  NegFlag<SetFalse, [], [ClangOption, CC1Option]>>;
+
 def fassume_sane_operator_new : Flag<["-"], "fassume-sane-operator-new">, Group<f_Group>;
 def fastcp : Flag<["-"], "fastcp">, Group<f_Group>;
 def fastf : Flag<["-"], "fastf">, Group<f_Group>;
