@@ -12,17 +12,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "CheckExprLifetime.h"
-#include "TreeTransform.h"
-#include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Analysis/Analyses/ReachableCode.h"
 #include "clang/Analysis/CFG.h"
+#include "clang/Basic/DiagnosticParse.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
+#include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/FoldingSet.h"
@@ -244,7 +244,8 @@ bool Sema::CheckMatchSubjectBindingReferences(Expr *Subject,
 }
 
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
-                             Expr *Init, bool IsConstexpr = false) {
+                             Expr *Init, bool IsConstexpr = false,
+                             bool IsFullExpression = true) {
   DeclContext *DC = SemaRef.CurContext;
   TypeSourceInfo *TInfo = SemaRef.Context.getTrivialTypeSourceInfo(Type, Loc);
   VarDecl *Decl = VarDecl::Create(SemaRef.Context, DC, Loc, Loc, /*Id=*/nullptr,
@@ -252,7 +253,8 @@ static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
   Decl->setImplicit();
   Decl->setConstexpr(IsConstexpr);
   // TODO: Consider ActOnInitializerError
-  SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false);
+  SemaRef.AddInitializerToDecl(Decl, Init, /*DirectInit=*/false,
+                               IsFullExpression);
   SemaRef.FinalizeDeclaration(Decl);
   return Decl;
 }
@@ -1244,107 +1246,17 @@ static ExprResult buildOpenAlternativeTraitsCall(
   return S.BuildCallExpr(nullptr, Callee.get(), Loc, Subject, Loc);
 }
 
-namespace {
-class MatchSubjectDefaultArgFinder
-    : public EvaluatedExprVisitor<MatchSubjectDefaultArgFinder> {
-  using Inherited = EvaluatedExprVisitor<MatchSubjectDefaultArgFinder>;
-
-public:
-  bool ContainsDefaultArg = false;
-  bool NeedsRebuild = false;
-
-  explicit MatchSubjectDefaultArgFinder(ASTContext &Context)
-      : Inherited(Context) {}
-
-  void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
-    ContainsDefaultArg = true;
-    NeedsRebuild |= !E->hasRewrittenInit();
-  }
-};
-
-class MatchSubjectLifetimeRebuilder
-    : public TreeTransform<MatchSubjectLifetimeRebuilder> {
-public:
-  explicit MatchSubjectLifetimeRebuilder(Sema &S) : TreeTransform(S) {}
-
-  bool AlreadyTransformed(QualType T) {
-    return T.isNull() || !T->isInstantiationDependentType();
-  }
-
-  ExprResult TransformLambdaExpr(LambdaExpr *E) { return E; }
-  ExprResult TransformBlockExpr(BlockExpr *E) { return E; }
-  ExprResult TransformOpaqueValueExpr(OpaqueValueExpr *E) { return E; }
-
-  bool ReplacingOriginal() { return true; }
-  bool AllowSkippingCXXConstructExpr() { return false; }
-};
-} // namespace
-
-static ExprResult rebuildMatchSubjectForLifetimeExtension(
-    Sema &S, Expr *Subject,
-    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries,
-    bool &ContainsDefaultArg) {
-  MatchSubjectDefaultArgFinder Finder(S.Context);
-  Finder.Visit(Subject);
-  ContainsDefaultArg = Finder.ContainsDefaultArg;
-  if (!Finder.NeedsRebuild)
-    return Subject;
-
-  EnterExpressionEvaluationContext LifetimeContext(
-      S, Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
-      /*LambdaContextDecl=*/nullptr,
-      Sema::ExpressionEvaluationContextRecord::EK_Other,
-      /*ShouldEnter=*/true);
-  auto &Record = S.currentEvaluationContext();
-  Record.InLifetimeExtendingContext = true;
-  Record.RebuildDefaultArgOrDefaultInit = true;
-
-  ExprResult Rebuilt = MatchSubjectLifetimeRebuilder(S).TransformExpr(Subject);
-  Temporaries = std::move(Record.ForRangeLifetimeExtendTemps);
-  return Rebuilt;
-}
-
-static void extendMatchSubjectTemporaries(
-    Sema &S, VarDecl *HoldingVar,
-    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries) {
-  class TemporaryCollector : public EvaluatedExprVisitor<TemporaryCollector> {
-    using Inherited = EvaluatedExprVisitor<TemporaryCollector>;
-    SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries;
-
-  public:
-    TemporaryCollector(ASTContext &Context,
-                       SmallVectorImpl<MaterializeTemporaryExpr *> &Temporaries)
-        : Inherited(Context), Temporaries(Temporaries) {}
-
-    void VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
-      if (!E->getExtendingDecl())
-        Temporaries.push_back(E);
-      Inherited::VisitStmt(E);
-    }
-
-    void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
-      if (E->hasRewrittenInit())
-        Visit(E->getRewrittenExpr());
-    }
-  };
-
-  TemporaryCollector(S.Context, Temporaries).Visit(HoldingVar->getInit());
-  llvm::SmallPtrSet<MaterializeTemporaryExpr *, 8> Seen;
+static void extendMatchSubjectTemporaries(Sema &S, VarDecl *HoldingVar) {
+  auto Temporaries =
+      std::move(S.currentEvaluationContext().ForRangeLifetimeExtendTemps);
   llvm::erase_if(Temporaries, [&](MaterializeTemporaryExpr *Temporary) {
-    return Temporary->getExtendingDecl() || !Seen.insert(Temporary).second;
+    return Temporary->getExtendingDecl();
   });
   S.ApplyForRangeOrExpansionStatementLifetimeExtension(HoldingVar, Temporaries);
 }
 
-ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
-  SmallVector<MaterializeTemporaryExpr *, 8> RebuiltTemporaries;
-  bool ContainsDefaultArg = false;
-  ExprResult Rebuilt = rebuildMatchSubjectForLifetimeExtension(
-      *this, Subject, RebuiltTemporaries, ContainsDefaultArg);
-  if (Rebuilt.isInvalid())
-    return ExprError();
-  Subject = Rebuilt.get();
-
+ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar,
+                                   bool IsFullExpression) {
   if (Subject->getType()->isVoidType())
     return Subject;
 
@@ -1359,7 +1271,8 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
                     Subject->isCXX11ConstantExpr(Context, ConstantValue);
   bool MaterializeConstantPrValue =
       IsConstant && Subject->isPRValue() && Subject->getType()->isRecordType();
-  if (IsConstant && !MaterializeConstantPrValue && !ContainsDefaultArg)
+  if (IsConstant && !MaterializeConstantPrValue &&
+      currentEvaluationContext().ForRangeLifetimeExtendTemps.empty())
     return Subject;
 
   QualType Deduced = Subject->refersToBitField() ? Context.getAutoDeductType()
@@ -1367,15 +1280,13 @@ ExprResult Sema::ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar) {
                          ? Subject->getType()
                          : Context.getAutoRRefDeductType();
   VarDecl *VD = BuildVarDecl(*this, Subject->getExprLoc(), Deduced, Subject,
-                             MaterializeConstantPrValue);
+                             MaterializeConstantPrValue, IsFullExpression);
   if (VD->isInvalidDecl()) {
     return ExprError();
   }
   HoldingVar = VD;
 
-  SmallVector<MaterializeTemporaryExpr *, 8> Temporaries =
-      std::move(RebuiltTemporaries);
-  extendMatchSubjectTemporaries(*this, HoldingVar, Temporaries);
+  extendMatchSubjectTemporaries(*this, HoldingVar);
 
   ExprResult Ref = BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
@@ -1394,30 +1305,19 @@ bool Sema::isMatchSubjectProductType(QualType Type) const {
 
 ExprResult Sema::ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
                                     SourceLocation MatchLoc,
-                                    VarDecl *&HoldingVar, bool ForceProduct) {
+                                    VarDecl *&HoldingVar, bool ForceProduct,
+                                    bool IsFullExpression) {
   assert((ForceProduct || !Subjects.empty()) &&
          "a source-level match selection requires a subject");
   if (!ForceProduct && Subjects.size() == 1 &&
       !isa<PackExpansionExpr>(Subjects.front()))
-    return ActOnMatchSubject(Subjects.front(), HoldingVar);
+    return ActOnMatchSubject(Subjects.front(), HoldingVar, IsFullExpression);
 
-  SmallVector<Expr *, 4> RebuiltSubjects;
-  SmallVector<MaterializeTemporaryExpr *, 8> RebuiltTemporaries;
-  RebuiltSubjects.reserve(Subjects.size());
   for (Expr *Subject : Subjects) {
     if (Subject->getType()->isVoidType()) {
       Diag(Subject->getExprLoc(), diag::err_match_multiple_subject_void);
       return ExprError();
     }
-
-    SmallVector<MaterializeTemporaryExpr *, 4> SubjectTemporaries;
-    bool ContainsDefaultArg = false;
-    ExprResult Rebuilt = rebuildMatchSubjectForLifetimeExtension(
-        *this, Subject, SubjectTemporaries, ContainsDefaultArg);
-    if (Rebuilt.isInvalid())
-      return ExprError();
-    RebuiltSubjects.push_back(Rebuilt.get());
-    llvm::append_range(RebuiltTemporaries, SubjectTemporaries);
   }
 
   auto *Product = CXXRecordDecl::Create(Context, TagDecl::TagKind::Struct,
@@ -1430,7 +1330,7 @@ ExprResult Sema::ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
   // prvalues are stored directly so a constant product can remain a constant
   // expression. Decomposition restores each field's original value category
   // below.
-  for (auto [Index, Subject] : llvm::enumerate(RebuiltSubjects)) {
+  for (auto [Index, Subject] : llvm::enumerate(Subjects)) {
     QualType FieldType = Subject->getType();
     bool StorePrValue = Subject->isPRValue() && !FieldType->isRecordType();
     if (!Subject->refersToBitField() && !StorePrValue) {
@@ -1453,12 +1353,14 @@ ExprResult Sema::ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
   Product->completeDefinition();
   CurContext->addDecl(Product);
 
-  ExprResult Init = BuildInitList(MatchLoc, RebuiltSubjects, MatchLoc,
+  SmallVector<Expr *, 4> Initializers(Subjects);
+  ExprResult Init = BuildInitList(MatchLoc, Initializers, MatchLoc,
                                   /*IsExplicit=*/true);
   if (Init.isInvalid())
     return ExprError();
   QualType ProductType = Context.getCanonicalTagType(Product);
-  HoldingVar = BuildVarDecl(*this, MatchLoc, ProductType, Init.get());
+  HoldingVar = BuildVarDecl(*this, MatchLoc, ProductType, Init.get(),
+                            /*IsConstexpr=*/false, IsFullExpression);
   if (HoldingVar->isInvalidDecl())
     return ExprError();
   APValue ConstantValue;
@@ -1466,7 +1368,7 @@ ExprResult Sema::ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
       HoldingVar->getInit()->isCXX11ConstantExpr(Context, ConstantValue))
     HoldingVar->setConstexpr(true);
 
-  extendMatchSubjectTemporaries(*this, HoldingVar, RebuiltTemporaries);
+  extendMatchSubjectTemporaries(*this, HoldingVar);
 
   ExprResult Ref =
       BuildDeclRefExpr(HoldingVar, ProductType, VK_LValue, MatchLoc);
@@ -1617,6 +1519,9 @@ Sema::ActOnMatchTestExpr(VarDecl *HoldingVar, Expr *Subject,
                          SourceLocation IfLoc, MatchGuard Guard,
                          bool PatternIsIrrefutable, bool NeedsCaseInstantiation,
                          ArrayRef<MatchTestInstantiation> Instantiations) {
+  // Hidden subjects and pattern bindings belong to the containing
+  // full-expression.
+  Cleanup.setExprNeedsCleanups(true);
   return new (Context) MatchTestExpr(
       Context, HoldingVar, Subject, MatchLoc, Pattern, Instantiation, IfLoc,
       Guard, PatternIsIrrefutable, NeedsCaseInstantiation, Instantiations,

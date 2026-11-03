@@ -2291,7 +2291,7 @@ void CodeGenFunction::emitAutoVarTypeCleanup(
     if (emission.NRVOFlag) {
       assert(!type->isArrayType());
       CXXDestructorDecl *dtor = type->getAsCXXRecordDecl()->getDestructor();
-      EHStack.pushCleanup<DestroyNRVOVariableCXX>(cleanupKind, addr, type, dtor,
+      pushFullExprCleanup<DestroyNRVOVariableCXX>(cleanupKind, addr, type, dtor,
                                                   emission.NRVOFlag);
       return;
     }
@@ -2316,7 +2316,7 @@ void CodeGenFunction::emitAutoVarTypeCleanup(
     destroyer = CodeGenFunction::destroyNonTrivialCStruct;
     if (emission.NRVOFlag) {
       assert(!type->isArrayType());
-      EHStack.pushCleanup<DestroyNRVOVariableC>(cleanupKind, addr,
+      pushFullExprCleanup<DestroyNRVOVariableC>(cleanupKind, addr,
                                                 emission.NRVOFlag, type);
       return;
     }
@@ -2329,7 +2329,7 @@ void CodeGenFunction::emitAutoVarTypeCleanup(
   // Use an EH cleanup in array destructors iff the destructor itself
   // is being pushed as an EH cleanup.
   bool useEHCleanup = (cleanupKind & EHCleanup);
-  EHStack.pushCleanup<DestroyObject>(cleanupKind, addr, type, destroyer,
+  pushFullExprCleanup<DestroyObject>(cleanupKind, addr, type, destroyer,
                                      useEHCleanup);
 }
 
@@ -2357,7 +2357,7 @@ void CodeGenFunction::EmitAutoVarCleanups(const AutoVarEmission &emission) {
   // In GC mode, honor objc_precise_lifetime.
   if (getLangOpts().getGC() != LangOptions::NonGC &&
       D.hasAttr<ObjCPreciseLifetimeAttr>()) {
-    EHStack.pushCleanup<ExtendGCLifetime>(NormalCleanup, &D);
+    pushFullExprCleanup<ExtendGCLifetime>(NormalCleanup, &D);
   }
 
   // Handle the cleanup attribute.
@@ -2368,7 +2368,7 @@ void CodeGenFunction::EmitAutoVarCleanups(const AutoVarEmission &emission) {
     assert(F && "Could not find function!");
 
     const CGFunctionInfo &Info = CGM.getTypes().arrangeFunctionDeclaration(FD);
-    EHStack.pushCleanup<CallCleanupFunction>(NormalAndEHCleanup, F, &Info, &D,
+    pushFullExprCleanup<CallCleanupFunction>(NormalAndEHCleanup, F, &Info, &D,
                                              CA);
   }
 

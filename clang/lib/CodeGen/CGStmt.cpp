@@ -48,24 +48,40 @@ void CodeGenFunction::EmitCaseConditionChain(
     const Expr *Condition,
     llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
     JumpDest FailureDest) {
-  Condition = Condition->IgnoreParens();
-  if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
-    Condition = Constant->getSubExpr()->IgnoreParens();
+  RunCleanupsScope ConditionScope(*this);
+  SmallVector<EHScopeStack::stable_iterator, 4> TemporaryCleanups;
+  EmitCaseConditionChainImpl(
+      Condition,
+      [&](const MatchTestInstantiation *Instantiation) {
+        EmitConditionTemporaryCleanups(TemporaryCleanups);
+        EmitSuccess(Instantiation);
+      },
+      FailureDest, TemporaryCleanups);
+}
+
+void CodeGenFunction::EmitCaseConditionChainImpl(
+    const Expr *Condition,
+    llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
+    JumpDest FailureDest,
+    SmallVectorImpl<EHScopeStack::stable_iterator> &TemporaryCleanups) {
+  unsigned OldSize = TemporaryCleanups.size();
+  llvm::scope_exit RestoreCleanups([&] { TemporaryCleanups.resize(OldSize); });
+  Condition = MatchTestExpr::getConditionSubExpr(Condition);
 
   if (const auto *And = dyn_cast<BinaryOperator>(Condition);
       And && And->getOpcode() == BO_LAnd) {
-    EmitCaseConditionChain(
+    EmitCaseConditionChainImpl(
         And->getLHS(),
         [&](const MatchTestInstantiation *LeftInstantiation) {
-          EmitCaseConditionChain(
+          EmitCaseConditionChainImpl(
               And->getRHS(),
               [&](const MatchTestInstantiation *RightInstantiation) {
                 EmitSuccess(RightInstantiation ? RightInstantiation
                                                : LeftInstantiation);
               },
-              FailureDest);
+              FailureDest, TemporaryCleanups);
         },
-        FailureDest);
+        FailureDest, TemporaryCleanups);
     return;
   }
 
@@ -75,13 +91,13 @@ void CodeGenFunction::EmitCaseConditionChain(
         *Match, FailureDest,
         [&](const MatchTestInstantiation &Instantiation) {
           if (Instantiation.Condition) {
-            EmitCaseConditionChain(
+            EmitCaseConditionChainImpl(
                 Instantiation.Condition,
                 [&](const MatchTestInstantiation *NestedInstantiation) {
                   EmitSuccess(NestedInstantiation ? NestedInstantiation
                                                   : &Instantiation);
                 },
-                FailureDest);
+                FailureDest, TemporaryCleanups);
           } else {
             EmitSuccess(&Instantiation);
           }
@@ -92,7 +108,11 @@ void CodeGenFunction::EmitCaseConditionChain(
 
   llvm::BasicBlock *Passed = createBasicBlock("case.condition.next");
   llvm::BasicBlock *Failed = createBasicBlock("case.condition.failed");
+  auto OldDepth = EHStack.stable_begin();
+  llvm::Instruction *InitIP =
+      Builder.CreateFlagLoad(llvm::Constant::getNullValue(Int8PtrTy));
   EmitBranchOnBoolExpr(Condition, Passed, Failed, getProfileCount(Condition));
+  CaptureConditionTemporaryCleanups(OldDepth, InitIP, TemporaryCleanups);
 
   EmitBlock(Failed);
   EmitBranchThroughCleanup(FailureDest);
@@ -2139,27 +2159,7 @@ Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
     else
       EmitStmt(Init);
   }
-  for (size_t I = OldLifetimeExtendedSize,
-              End = LifetimeExtendedCleanupStack.size();
-       I != End;) {
-    LifetimeExtendedCleanupHeader &Header =
-        reinterpret_cast<LifetimeExtendedCleanupHeader &>(
-            LifetimeExtendedCleanupStack[I]);
-    I += sizeof(Header);
-
-    EHStack.pushCopyOfCleanup(Header.getKind(),
-                              &LifetimeExtendedCleanupStack[I],
-                              Header.getSize());
-    I += Header.getSize();
-
-    if (Header.isConditional()) {
-      RawAddress ActiveFlag =
-          reinterpret_cast<RawAddress &>(LifetimeExtendedCleanupStack[I]);
-      initFullExprCleanupWithFlag(ActiveFlag);
-      I += sizeof(ActiveFlag);
-    }
-  }
-  LifetimeExtendedCleanupStack.resize(OldLifetimeExtendedSize);
+  PushLifetimeExtendedCleanups(OldLifetimeExtendedSize);
 
   JumpDest EndBlock = getJumpDestInCurrentScope("doexpr.end");
   // The NRVO candidate is looked up out of this frame when its declaration is

@@ -662,11 +662,12 @@ namespace {
     llvm::PointerIntPair<APValue*, 2, ScopeKind> Value;
     APValue::LValueBase Base;
     QualType T;
+    uint64_t Sequence;
 
   public:
-    Cleanup(APValue *Val, APValue::LValueBase Base, QualType T,
-            ScopeKind Scope)
-        : Value(Val, Scope), Base(Base), T(T) {}
+    Cleanup(APValue *Val, APValue::LValueBase Base, QualType T, ScopeKind Scope,
+            uint64_t Sequence)
+        : Value(Val, Scope), Base(Base), T(T), Sequence(Sequence) {}
 
     /// Determine whether this cleanup should be performed at the end of the
     /// given kind of scope.
@@ -675,6 +676,7 @@ namespace {
     }
     APValue::LValueBase getBase() const { return Base; }
     const APValue *getValuePtr() const { return Value.getPointer(); }
+    uint64_t getSequence() const { return Sequence; }
     void setDestroyedAtEndOf(ScopeKind K) { Value.setInt(K); }
     bool endLifetime(EvalInfo &Info, bool RunDestructors) {
       if (RunDestructors) {
@@ -794,6 +796,7 @@ namespace {
     /// A stack of values whose lifetimes end at the end of some surrounding
     /// evaluation frame.
     llvm::SmallVector<Cleanup, 16> CleanupStack;
+    uint64_t NextCleanupSequence = 0;
 
     /// EvaluatingDecl - This is the declaration whose initializer is being
     /// evaluated, if any.
@@ -1258,41 +1261,51 @@ namespace {
   template<ScopeKind Kind>
   class ScopeRAII {
     EvalInfo &Info;
-    unsigned OldStackSize;
+    uint64_t FirstCleanup;
+
   public:
     ScopeRAII(EvalInfo &Info)
-        : Info(Info), OldStackSize(Info.CleanupStack.size()) {
+        : Info(Info), FirstCleanup(Info.NextCleanupSequence) {
       // Push a new temporary version. This is needed to distinguish between
       // temporaries created in different iterations of a loop.
       Info.CurrentCall->pushTempVersion();
     }
     bool destroy(bool RunDestructors = true) {
-      bool OK = cleanup(Info, RunDestructors, OldStackSize);
-      OldStackSize = std::numeric_limits<unsigned>::max();
+      bool OK = cleanup(Info, RunDestructors, FirstCleanup);
+      FirstCleanup = std::numeric_limits<uint64_t>::max();
       return OK;
     }
     void extendToFullExpression() {
       static_assert(Kind == ScopeKind::Block);
-      assert(OldStackSize <= Info.CleanupStack.size() &&
-             "extending cleanups out of order?");
       // Transfer this scope's objects to the surrounding full-expression.
-      for (unsigned I = OldStackSize, End = Info.CleanupStack.size(); I != End;
-           ++I)
-        Info.CleanupStack[I].setDestroyedAtEndOf(ScopeKind::FullExpression);
-      OldStackSize = std::numeric_limits<unsigned>::max();
+      for (Cleanup &C : llvm::drop_begin(Info.CleanupStack,
+                                         getStartIndex(Info, FirstCleanup)))
+        C.setDestroyedAtEndOf(ScopeKind::FullExpression);
+      FirstCleanup = std::numeric_limits<uint64_t>::max();
     }
     ~ScopeRAII() {
-      if (OldStackSize != std::numeric_limits<unsigned>::max())
+      if (FirstCleanup != std::numeric_limits<uint64_t>::max())
         destroy(false);
       // Body moved to a static method to encourage the compiler to inline away
       // instances of this class.
       Info.CurrentCall->popTempVersion();
     }
   private:
+    static unsigned getStartIndex(EvalInfo &Info, uint64_t FirstCleanup) {
+      assert(FirstCleanup <= Info.NextCleanupSequence &&
+             "scope cleanup already completed");
+      // Full-expression cleanup can compact the stack while a surrounding
+      // pattern-condition scope still retains its bindings.
+      return llvm::partition_point(Info.CleanupStack,
+                                   [FirstCleanup](const Cleanup &C) {
+                                     return C.getSequence() < FirstCleanup;
+                                   }) -
+             Info.CleanupStack.begin();
+    }
+
     static bool cleanup(EvalInfo &Info, bool RunDestructors,
-                        unsigned OldStackSize) {
-      assert(OldStackSize <= Info.CleanupStack.size() &&
-             "running cleanups out of order?");
+                        uint64_t FirstCleanup) {
+      unsigned OldStackSize = getStartIndex(Info, FirstCleanup);
 
       // Run all cleanups for a block scope, and non-lifetime-extended cleanups
       // for a full-expression scope.
@@ -1915,7 +1928,8 @@ APValue &CallStackFrame::createLocal(APValue::LValueBase Base, const void *Key,
     if (T.isDestructedType())
       Info.noteSideEffect();
   } else {
-    Info.CleanupStack.push_back(Cleanup(&Result, Base, T, Scope));
+    Info.CleanupStack.emplace_back(&Result, Base, T, Scope,
+                                   Info.NextCleanupSequence++);
   }
   return Result;
 }
@@ -6078,9 +6092,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
     llvm::function_ref<EvalStmtResult(const MatchTestInstantiation *)>
         OnSuccess,
     bool &Matched) {
-  Condition = Condition->IgnoreParens();
-  if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
-    Condition = Constant->getSubExpr()->IgnoreParens();
+  Condition = MatchTestExpr::getConditionSubExpr(Condition);
 
   if (const auto *And = dyn_cast<BinaryOperator>(Condition);
       And && And->getOpcode() == BO_LAnd) {
@@ -6105,7 +6117,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
     return ESR;
   }
 
-  const auto *Match = dyn_cast<MatchTestExpr>(Condition);
+  const auto *Match = dyn_cast<CaseConditionExpr>(Condition);
   if (!Match) {
     bool ConditionValue;
     if (!EvaluateAsBooleanCondition(Condition, ConditionValue, Info))
@@ -6166,9 +6178,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
                                                  : Instantiation);
           },
           CandidateMatched);
-    } else if (PatternMatched &&
-               !(Instantiation && Match->hasSemanticInstantiations() &&
-                 !Instantiation->Handler)) {
+    } else if (PatternMatched && !(Instantiation && !Instantiation->Handler)) {
       CandidateMatched = true;
       ESR = OnSuccess(Instantiation);
     }
@@ -6192,7 +6202,7 @@ static EvalStmtResult EvaluateCaseConditionChain(
       if (ESR)
         return *ESR;
     }
-  } else if (!Match->hasSemanticInstantiations()) {
+  } else {
     std::optional<EvalStmtResult> ESR =
         EvaluateCandidate(Match->getPattern(), Match->getPatternInstantiation(),
                           Match->getGuard(), nullptr);
@@ -10689,11 +10699,15 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
     if (!EvaluateIgnoredValue(Info, E))
       return false;
 
+  const auto *VD = dyn_cast_or_null<VarDecl>(E->getExtendingDecl());
+  bool IsMatchExprLocal = VD && Info.MatchExprLocalVarDecls.contains(VD);
+
   // A materialized temporary with static storage duration can appear within the
   // result of a constant expression evaluation, so we need to preserve its
-  // value for use outside this evaluation.
+  // value for use outside this evaluation. Namespace-scope match declarations
+  // and their lifetime-extended temporaries use local evaluator storage instead.
   APValue *Value;
-  if (E->getStorageDuration() == SD_Static) {
+  if (E->getStorageDuration() == SD_Static && !IsMatchExprLocal) {
     if (Info.EvalMode == EvaluationMode::ConstantFold)
       return false;
     // FIXME: What about SD_Thread?
@@ -21783,147 +21797,74 @@ static bool EvaluateSharedDeclarationProjections(
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
-  std::optional<CallStackFrame> SyntheticFrame;
-  if (Info.CurrentCall == &Info.BottomFrame)
-    SyntheticFrame.emplace(Info, E->getSourceRange(), /*Callee=*/nullptr,
-                           /*This=*/nullptr, /*CallExpr=*/E, CallRef());
-
+  // Keep full-expression objects in the enclosing frame, even at namespace
+  // scope, rather than in a frame that ends with the test.
   BlockScopeRAII MatchScope(Info);
   auto Finish = [&](bool Success) {
     if (!Success)
       return false;
-    if (isa<CaseConditionExpr>(E)) {
-      MatchScope.extendToFullExpression();
-      return true;
-    }
-    return MatchScope.destroy();
+    MatchScope.extendToFullExpression();
+    return true;
   };
 
-  if (!E->getInstantiations().empty()) {
-    if (const VarDecl *VD = E->getHoldingVar()) {
-      Info.MatchExprLocalVarDecls.insert(VD);
-      if (!EvaluateDecl(Info, VD))
-        return false;
-    } else if (E->getSubject()->getType()->isVoidType() &&
-               !EvaluateIgnoredValue(Info, E->getSubject())) {
-      return false;
-    }
-
-    MatchProjectionEvaluationCache ProjectionCache;
-    for (const MatchTestInstantiation &Instantiation : E->getInstantiations()) {
-      std::optional<BlockScopeRAII> Scope;
-      bool Result;
-      if (!EvaluateMatchPattern(Instantiation.Pattern,
-                                Instantiation.PatternInstantiation, Result,
-                                Info, &ProjectionCache, &Scope))
-        return false;
-      bool PatternSelected = Result;
-      if (Result && !Scope)
-        Scope.emplace(Info);
-      if (Result &&
-          !EvaluateSharedDeclarationProjections(
-              Instantiation.Pattern, Instantiation.PatternInstantiation, Info,
-              ProjectionCache))
-        return false;
-      if (Result &&
-          !EvaluatePatternDeclarations(Instantiation.Pattern,
-                                       Instantiation.PatternInstantiation, Info,
-                                       ProjectionCache))
-        return false;
-      if (Result && Instantiation.Guard.Init) {
-        APValue InitValue;
-        StmtResult InitResult = {InitValue, nullptr};
-        if (EvaluateStmt(InitResult, Info, Instantiation.Guard.Init) !=
-            ESR_Succeeded)
-          return false;
-      }
-      if (Result && Instantiation.Guard.Condition &&
-          !EvaluateCond(Info, Instantiation.Guard.ConditionVariable,
-                        Instantiation.Guard.Condition, Result))
-        return false;
-      if (Result && Instantiation.Condition) {
-        bool ContinuationMatched;
-        if (!EvaluateAsBooleanCondition(Instantiation.Condition,
-                                        ContinuationMatched, Info))
-          return false;
-        Result = ContinuationMatched;
-      }
-      if (Result && isa<CaseConditionExpr>(E))
-        Scope->extendToFullExpression();
-      else if (Scope && !Scope->destroy())
-        return false;
-      if (Result)
-        return Finish(Success(true, E));
-      if (PatternSelected)
-        return Finish(Success(false, E));
-    }
-    return Finish(Success(false, E));
-  }
-
-  bool Result;
-  MatchProjectionEvaluationCache ProjectionCache;
-  if (!E->getHoldingVar() && E->getSubject()->getType()->isVoidType() &&
-      !EvaluateIgnoredValue(Info, E->getSubject()))
-    return false;
+  ArrayRef<MatchTestInstantiation> Instantiations = E->getInstantiations();
   if (const VarDecl *VD = E->getHoldingVar()) {
-    // This means that the subject and the bindings have the lifetime
-    // of a hypothetical condition variable, skip the `BlockScopeRAII`.
     Info.MatchExprLocalVarDecls.insert(VD);
     if (!EvaluateDecl(Info, VD))
       return false;
-    if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
-                              Result, Info, &ProjectionCache))
-      return false;
-    if (Result && !EvaluateSharedDeclarationProjections(
-                      E->getPattern(), E->getPatternInstantiation(), Info,
-                      ProjectionCache))
-      return false;
-    if (Result && !EvaluatePatternDeclarations(E->getPattern(),
-                                               E->getPatternInstantiation(),
-                                               Info, ProjectionCache))
-      return false;
-    if (Result && E->getGuard().Init) {
-      APValue InitValue;
-      StmtResult InitResult = {InitValue, nullptr};
-      if (EvaluateStmt(InitResult, Info, E->getGuard().Init) != ESR_Succeeded)
-        return false;
-    }
-    if (Result && E->getGuard().Condition) {
-      if (!EvaluateCond(Info, E->getGuard().ConditionVariable,
-                        E->getGuard().Condition, Result))
-        return false;
-    }
-    return Finish(Success(Result, E));
-  } else {
-    std::optional<BlockScopeRAII> Scope;
-    if (!isa<CaseConditionExpr>(E))
-      Scope.emplace(Info);
-    if (!EvaluateMatchPattern(E->getPattern(), E->getPatternInstantiation(),
-                              Result, Info, &ProjectionCache))
-      return false;
-    if (Result && !EvaluateSharedDeclarationProjections(
-                      E->getPattern(), E->getPatternInstantiation(), Info,
-                      ProjectionCache))
-      return false;
-    if (Result && !EvaluatePatternDeclarations(E->getPattern(),
-                                               E->getPatternInstantiation(),
-                                               Info, ProjectionCache))
-      return false;
-    if (Result && E->getGuard().Init) {
-      APValue InitValue;
-      StmtResult InitResult = {InitValue, nullptr};
-      if (EvaluateStmt(InitResult, Info, E->getGuard().Init) != ESR_Succeeded)
-        return false;
-    }
-    if (Result && E->getGuard().Condition) {
-      if (!EvaluateCond(Info, E->getGuard().ConditionVariable,
-                        E->getGuard().Condition, Result))
-        return false;
-    }
-    if (Scope && !Scope->destroy())
-      return false;
-    return Finish(Success(Result, E));
+  } else if (E->getSubject()->getType()->isVoidType() &&
+             !EvaluateIgnoredValue(Info, E->getSubject())) {
+    return false;
   }
+  MatchTestInstantiation DirectInstantiation = E->getDirectInstantiation();
+  if (Instantiations.empty())
+    Instantiations = DirectInstantiation;
+
+  MatchProjectionEvaluationCache ProjectionCache;
+  for (const MatchTestInstantiation &Instantiation : Instantiations) {
+    std::optional<BlockScopeRAII> Scope;
+    bool Result;
+    if (!EvaluateMatchPattern(Instantiation.Pattern,
+                              Instantiation.PatternInstantiation, Result, Info,
+                              &ProjectionCache, &Scope))
+      return false;
+    bool PatternSelected = Result;
+    if (Result && !Scope)
+      Scope.emplace(Info);
+    if (Result && !EvaluateSharedDeclarationProjections(
+                      Instantiation.Pattern, Instantiation.PatternInstantiation,
+                      Info, ProjectionCache))
+      return false;
+    if (Result && !EvaluatePatternDeclarations(
+                      Instantiation.Pattern, Instantiation.PatternInstantiation,
+                      Info, ProjectionCache))
+      return false;
+    if (Result && Instantiation.Guard.Init) {
+      APValue InitValue;
+      StmtResult InitResult = {InitValue, nullptr};
+      if (EvaluateStmt(InitResult, Info, Instantiation.Guard.Init) !=
+          ESR_Succeeded)
+        return false;
+    }
+    if (Result && Instantiation.Guard.Condition &&
+        !EvaluateCond(Info, Instantiation.Guard.ConditionVariable,
+                      Instantiation.Guard.Condition, Result))
+      return false;
+    if (Result && Instantiation.Condition) {
+      bool ContinuationMatched;
+      if (!EvaluateAsBooleanCondition(Instantiation.Condition,
+                                      ContinuationMatched, Info))
+        return false;
+      Result = ContinuationMatched;
+    }
+    if (Scope && (Result || !isa<CaseConditionExpr>(E)))
+      Scope->extendToFullExpression();
+    else if (Scope && !Scope->destroy())
+      return false;
+    if (PatternSelected)
+      return Finish(Success(Result, E));
+  }
+  return Finish(Success(false, E));
 }
 
 bool FixedPointExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {

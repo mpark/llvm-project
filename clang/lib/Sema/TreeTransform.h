@@ -913,6 +913,10 @@ public:
     SourceLocation AndLoc;
   };
 
+  template <typename MatchExpr>
+  ExprResult TransformMatchSubject(MatchExpr *E, VarDecl *&HoldingVar,
+                                   bool IsFullExpression = true);
+
   CaseConditionTransformResult
   TransformMatchTestExpr(MatchTestExpr *E, Stmt *Handler, Expr *Increment,
                          bool SelectConstexprHandler = false,
@@ -10272,17 +10276,9 @@ template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
   EnterExpressionEvaluationContext ForRangeInitContext(
-      getSema(), Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
-      /*LambdaContextDecl=*/nullptr,
-      Sema::ExpressionEvaluationContextRecord::EK_Other,
+      getSema(), EnterExpressionEvaluationContext::LifetimeExtending,
+      Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
       getSema().getLangOpts().CPlusPlus23);
-
-  // P2718R0 - Lifetime extension in range-based for loops.
-  if (getSema().getLangOpts().CPlusPlus23) {
-    auto &LastRecord = getSema().currentEvaluationContext();
-    LastRecord.InLifetimeExtendingContext = true;
-    LastRecord.RebuildDefaultArgOrDefaultInit = true;
-  }
   StmtResult Init =
       S->getInit() ? getDerived().TransformStmt(S->getInit()) : StmtResult();
   if (Init.isInvalid())
@@ -10414,9 +10410,8 @@ StmtResult TreeTransform<Derived>::TransformCXXExpansionStmtPattern(
     auto Ctx = SemaRef.currentEvaluationContext().Context;
     if (S->getExpansionVariable()->isConstexpr())
       Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
-    EnterExpressionEvaluationContext ExprEvalCtx(SemaRef, Ctx);
-    SemaRef.currentEvaluationContext().InLifetimeExtendingContext = true;
-    SemaRef.currentEvaluationContext().RebuildDefaultArgOrDefaultInit = true;
+    EnterExpressionEvaluationContext ExprEvalCtx(
+        SemaRef, EnterExpressionEvaluationContext::LifetimeExtending, Ctx);
 
     if (S->isDependent()) {
       // The expansion initializer should not be in the context of the expansion
@@ -19685,14 +19680,12 @@ auto TreeTransform<Derived>::TransformCaseConditionChain(
 }
 
 template <typename Derived>
-auto TreeTransform<Derived>::TransformMatchTestExpr(
-    MatchTestExpr *E, Stmt *Handler, Expr *Increment,
-    bool SelectConstexprHandler, ArrayRef<CaseConditionElement> Continuation,
-    Expr *ConstexprPrefix) -> CaseConditionTransformResult {
-  assert((!SelectConstexprHandler || !Increment) &&
-         "constexpr condition selection has no increment");
-  CaseConditionTransformResult Result;
-  VarDecl *HoldingVar = nullptr;
+template <typename MatchExpr>
+ExprResult TreeTransform<Derived>::TransformMatchSubject(
+    MatchExpr *E, VarDecl *&HoldingVar, bool IsFullExpression) {
+  EnterExpressionEvaluationContext SubjectContext(
+      getSema(), EnterExpressionEvaluationContext::LifetimeExtending,
+      getSema().currentEvaluationContext().Context);
   ExprResult LHS;
   if (E->hasSubjectProduct()) {
     ArrayRef<Expr *> ProductElements = E->getSubjectProductElements();
@@ -19700,24 +19693,27 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
     if (getDerived().TransformExprs(ProductElements.data(),
                                     ProductElements.size(),
                                     /*IsCall=*/false, TransformedElements))
-      return {ExprError()};
+      return ExprError();
     LHS = getSema().ActOnMatchSubjects(TransformedElements, E->getMatchLoc(),
-                                       HoldingVar, /*ForceProduct=*/true);
-  } else if (VarDecl *HV = E->getHoldingVar()) {
-    assert(HV->hasInit() && "match subject holder must have an initializer");
-    ExprResult Subject = getDerived().TransformExpr(HV->getInit());
-    if (Subject.isInvalid())
-      return {ExprError()};
-    LHS = getSema().ActOnMatchSubject(Subject.get(), HoldingVar);
-    if (LHS.isInvalid())
-      return {ExprError()};
-    if (HoldingVar)
-      getDerived().transformedLocalDecl(HV, {HoldingVar});
+                                       HoldingVar, /*ForceProduct=*/true,
+                                       IsFullExpression);
   } else {
-    LHS = getDerived().TransformExpr(E->getSubject());
+    VarDecl *HV = E->getHoldingVar();
+    assert((!HV || HV->hasInit()) &&
+           "match subject holder must have an initializer");
+    ExprResult Subject =
+        getDerived().TransformExpr(HV ? HV->getInit() : E->getSubject());
+    if (Subject.isInvalid())
+      return ExprError();
+    LHS = getSema().ActOnMatchSubject(Subject.get(), HoldingVar,
+                                      IsFullExpression);
+    if (LHS.isInvalid())
+      return ExprError();
+    if (HV && HoldingVar)
+      getDerived().transformedLocalDecl(HV, {HoldingVar});
   }
   if (LHS.isInvalid())
-    return {ExprError()};
+    return ExprError();
   bool SubjectIsXValue = HoldingVar
                              ? HoldingVar->getType()->isRValueReferenceType() ||
                                    (!HoldingVar->getType()->isReferenceType() &&
@@ -19727,6 +19723,22 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
     LHS = ImplicitCastExpr::Create(getSema().Context, LHS.get()->getType(),
                                    CK_NoOp, LHS.get(), nullptr, VK_XValue,
                                    FPOptionsOverride());
+  return LHS;
+}
+
+template <typename Derived>
+auto TreeTransform<Derived>::TransformMatchTestExpr(
+    MatchTestExpr *E, Stmt *Handler, Expr *Increment,
+    bool SelectConstexprHandler, ArrayRef<CaseConditionElement> Continuation,
+    Expr *ConstexprPrefix) -> CaseConditionTransformResult {
+  assert((!SelectConstexprHandler || !Increment) &&
+         "constexpr condition selection has no increment");
+  CaseConditionTransformResult Result;
+  VarDecl *HoldingVar = nullptr;
+  ExprResult LHS = getDerived().TransformMatchSubject(
+      E, HoldingVar, /*IsFullExpression=*/isa<CaseConditionExpr>(E));
+  if (LHS.isInvalid())
+    return {ExprError()};
 
   Sema::MatchProjectionCache ProjectionCache;
   SmallVector<MatchTestInstantiation, 4> Instantiations;
@@ -19786,8 +19798,6 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
         if (GuardInit.isInvalid())
           return {ExprError()};
       }
-      if (E->getGuard().hasGuard())
-        getSema().CheckGuardedMatchPattern(TransformedPattern);
       Sema::ConditionResult Guard = getDerived().TransformCondition(
           E->getIfLoc(), E->getGuard().ConditionVariable,
           E->getGuard().Condition, Sema::ConditionKind::Boolean);
@@ -19892,43 +19902,9 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     return ExprError();
 
   VarDecl *HoldingVar = nullptr;
-  ExprResult LHS;
-  bool IsSubjectProduct = E->hasSubjectProduct();
-  ArrayRef<Expr *> ProductElements = E->getSubjectProductElements();
-  if (IsSubjectProduct) {
-    SmallVector<Expr *, 4> TransformedElements;
-    if (getDerived().TransformExprs(ProductElements.data(),
-                                    ProductElements.size(),
-                                    /*IsCall=*/false, TransformedElements))
-      return ExprError();
-    LHS = getSema().ActOnMatchSubjects(TransformedElements, E->getMatchLoc(),
-                                       HoldingVar, /*ForceProduct=*/true);
-  } else if (VarDecl *OldHoldingVar = E->getHoldingVar()) {
-    assert(OldHoldingVar->hasInit() &&
-           "match subject holder must have an initializer");
-    ExprResult Subject =
-        getDerived().TransformExpr(OldHoldingVar->getInit());
-    if (Subject.isInvalid())
-      return ExprError();
-    LHS = getSema().ActOnMatchSubject(Subject.get(), HoldingVar);
-    if (LHS.isInvalid())
-      return ExprError();
-    if (HoldingVar)
-      getDerived().transformedLocalDecl(OldHoldingVar, {HoldingVar});
-  } else {
-    LHS = getDerived().TransformExpr(E->getSubject());
-  }
+  ExprResult LHS = getDerived().TransformMatchSubject(E, HoldingVar);
   if (LHS.isInvalid())
     return ExprError();
-  bool SubjectIsXValue = HoldingVar
-                             ? HoldingVar->getType()->isRValueReferenceType() ||
-                                   (!HoldingVar->getType()->isReferenceType() &&
-                                    E->getSubject()->isXValue())
-                             : E->getSubject()->isXValue();
-  if (SubjectIsXValue && LHS.get()->isLValue())
-    LHS = ImplicitCastExpr::Create(getSema().Context, LHS.get()->getType(),
-                                   CK_NoOp, LHS.get(), nullptr, VK_XValue,
-                                   FPOptionsOverride());
 
   SmallVector<Stmt *, 8> Preamble;
   Preamble.reserve(E->getPreamble().size());

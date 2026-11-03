@@ -64,6 +64,36 @@ constexpr bool init_lifetime() {
 
 static_assert(init_lifetime());
 
+struct DefaultSubject {
+  int value = 42;
+  constexpr ~DefaultSubject() {}
+};
+
+constexpr const DefaultSubject &default_subject(
+    const DefaultSubject &subject = DefaultSubject()) {
+  return subject;
+}
+
+constexpr int default_subject_selection() {
+  return match (default_subject()) {
+    case [int value] => value;
+  };
+}
+
+template <class T> constexpr int default_subject_product() {
+  return match (default_subject(), T{1}) {
+    case [[int value], int increment] => value + increment;
+  };
+}
+
+constexpr bool default_subject_test() {
+  return match(default_subject(), case [42]);
+}
+
+static_assert(default_subject_selection() == 42);
+static_assert(default_subject_product<int>() == 43);
+static_assert(default_subject_test());
+
 void statement_forms(int source) {
   match (int value = source; value) {
     case int copy => (void)(value + copy);

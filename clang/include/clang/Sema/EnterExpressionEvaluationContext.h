@@ -42,6 +42,19 @@ public:
         NewContext, Sema::ReuseLambdaContextDecl, ExprContext);
   }
 
+  enum LifetimeExtendingTag { LifetimeExtending };
+  EnterExpressionEvaluationContext(Sema &Actions, LifetimeExtendingTag,
+                                   Sema::ExpressionEvaluationContext NewContext,
+                                   bool ShouldEnter = true)
+      : EnterExpressionEvaluationContext(
+            Actions, NewContext, nullptr,
+            Sema::ExpressionEvaluationContextRecord::EK_Other, ShouldEnter) {
+    if (Entered) {
+      Actions.currentEvaluationContext().InLifetimeExtendingContext = true;
+      Actions.currentEvaluationContext().RebuildDefaultArgOrDefaultInit = true;
+    }
+  }
+
   enum InitListTag { InitList };
   EnterExpressionEvaluationContext(Sema &Actions, InitListTag,
                                    bool ShouldEnter = true)

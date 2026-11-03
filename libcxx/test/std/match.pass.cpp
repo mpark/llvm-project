@@ -455,6 +455,29 @@ bool match_constructor_default_argument_lifetime_extended() {
   return false;
 }
 
+bool selection_default_argument_lifetime_extended() {
+  return match(default_argument_identity()) {
+    case _ => default_argument_lifetime_alive;
+  };
+}
+
+bool multiple_default_argument_lifetimes_extended() {
+  return match (default_argument_identity(), DefaultArgumentHolder()) {
+    case [_, _] => default_argument_lifetime_alive;
+  };
+}
+
+bool test_default_argument_lifetime_extended() {
+  return match(default_argument_identity(), case _) &&
+         default_argument_lifetime_alive;
+}
+
+bool init_statement_default_argument_lifetime_not_extended() {
+  return match ([[maybe_unused]] auto&& init = default_argument_identity(); 42) {
+    case _ => !default_argument_lifetime_alive;
+  };
+}
+
 template <class T>
 const T& dependent_default_argument_identity(const T& value = T()) {
   return value;
@@ -476,6 +499,14 @@ void test_match_default_argument_lifetime_extended() {
   check(!default_argument_lifetime_alive);
   check(match_dependent_default_argument_lifetime_extended<
         DefaultArgumentLifetime>());
+  check(!default_argument_lifetime_alive);
+  check(selection_default_argument_lifetime_extended());
+  check(!default_argument_lifetime_alive);
+  check(multiple_default_argument_lifetimes_extended());
+  check(!default_argument_lifetime_alive);
+  check(test_default_argument_lifetime_extended());
+  check(!default_argument_lifetime_alive);
+  check(init_statement_default_argument_lifetime_not_extended());
   check(!default_argument_lifetime_alive);
 }
 

@@ -4594,7 +4594,6 @@ private:
                       Sema::MatchProjectionCache &ProjectionCache,
                       bool IsStatement, bool DeferHandlerChecking);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
-                                        MatchPattern *Pattern,
                                         StmtResult &InitStmt);
   StmtResult ParseMatchHandler(TypeLoc OrigResultType, QualType &RetTy,
                                bool IsStatement, SourceLocation &NotReturnLoc,

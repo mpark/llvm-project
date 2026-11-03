@@ -752,6 +752,29 @@ public:
     }
   };
 
+  /// Retain deferred lifetime-extended cleanups in the surrounding scope
+  /// without running its ordinary cleanups.
+  class LifetimeExtendedCleanupScope {
+    CodeGenFunction &CGF;
+    size_t OldLifetimeExtendedSize;
+    CleanupDeactivationScope DeactivateCleanups;
+
+  public:
+    explicit LifetimeExtendedCleanupScope(CodeGenFunction &CGF)
+        : CGF(CGF),
+          OldLifetimeExtendedSize(CGF.LifetimeExtendedCleanupStack.size()),
+          DeactivateCleanups(CGF) {}
+
+    LifetimeExtendedCleanupScope(const LifetimeExtendedCleanupScope &) = delete;
+    LifetimeExtendedCleanupScope &
+    operator=(const LifetimeExtendedCleanupScope &) = delete;
+
+    ~LifetimeExtendedCleanupScope() {
+      DeactivateCleanups.ForceDeactivate();
+      CGF.PushLifetimeExtendedCleanups(OldLifetimeExtendedSize);
+    }
+  };
+
   llvm::SmallVector<const JumpDest *, 2> SEHTryEpilogueStack;
 
   llvm::Instruction *CurrentFuncletPad = nullptr;
@@ -1052,6 +1075,15 @@ public:
   /// process all branch fixups.
   void PopCleanupBlock(bool FallThroughIsBranchThrough = false,
                        bool ForDeactivation = false);
+
+  /// Push deferred lifetime-extended cleanups into the current cleanup scope.
+  void PushLifetimeExtendedCleanups(size_t OldSize);
+
+  void CaptureConditionTemporaryCleanups(
+      EHScopeStack::stable_iterator OldDepth, llvm::Instruction *InitIP,
+      SmallVectorImpl<EHScopeStack::stable_iterator> &Cleanups);
+  void EmitConditionTemporaryCleanups(
+      ArrayRef<EHScopeStack::stable_iterator> Cleanups);
 
   /// DeactivateCleanupBlock - Deactivates the given cleanup block.
   /// The block cannot be reactivated.  Pops it if it's the top of the
@@ -5394,6 +5426,7 @@ public:
 
   void EmitFakeUse(Address Addr);
   RValue EmitMatchTestExpr(const MatchTestExpr &S);
+  void EmitMatchTestSubject(const MatchTestExpr &S);
   void EmitMatchTestDispatch(
       const MatchTestExpr &S, JumpDest SuccessDest,
       llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
@@ -5402,6 +5435,11 @@ public:
       const Expr *Condition,
       llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
       JumpDest FailureDest);
+  void EmitCaseConditionChainImpl(
+      const Expr *Condition,
+      llvm::function_ref<void(const MatchTestInstantiation *)> EmitSuccess,
+      JumpDest FailureDest,
+      SmallVectorImpl<EHScopeStack::stable_iterator> &TemporaryCleanups);
   void EmitSelectedMatchTestInstantiation(
       const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
       llvm::function_ref<void()> EmitSuccess);
@@ -5419,7 +5457,7 @@ public:
     void markInitialized(CodeGenFunction &CGF);
     void emitCleanups(CodeGenFunction &CGF);
   };
-  enum class MatchCandidateKind { Test, Selection };
+  enum class MatchCandidateKind { Test, Condition, Selection };
   void EmitMatchCandidate(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation, const MatchGuard &Guard,

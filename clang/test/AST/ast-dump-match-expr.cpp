@@ -4,7 +4,8 @@
 
 void test_match_dump(int x, int *p) {
   match(x, case _);
-  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:18> 'bool'
+  // CHECK:      ExprWithCleanups 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:18> 'bool'
+  // CHECK-NEXT: `-MatchTestExpr 0x{{[^ ]*}} <col:3, col:18> 'bool'
   // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:9> col:9 implicit used 'int &' cinit
   // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue Var 0x{{[^ ]*}} <col:9> 'int &'
@@ -65,7 +66,8 @@ void test_case_condition_dump(int x) {
 
 void test_type_pattern_dump(int x) {
   match(x, case int);
-  // CHECK:      MatchTestExpr 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:20> 'bool'
+  // CHECK:      ExprWithCleanups 0x{{[^ ]*}} <line:[[@LINE-1]]:3, col:20> 'bool'
+  // CHECK-NEXT: `-MatchTestExpr 0x{{[^ ]*}} <col:3, col:20> 'bool'
   // CHECK-NEXT: |-VarDecl 0x{{[^ ]*}} <col:9> col:9 implicit used 'int &' cinit
   // CHECK-NEXT: | `-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue ParmVar 0x{{[^ ]*}} 'x' 'int'
   // CHECK-NEXT: |-DeclRefExpr 0x{{[^ ]*}} <col:9> 'int' lvalue Var 0x{{[^ ]*}} <col:9> 'int &'

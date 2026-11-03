@@ -486,10 +486,13 @@ void CodeGenFunction::PopCleanupBlocks(
     EHScopeStack::stable_iterator Old, size_t OldLifetimeExtendedSize,
     std::initializer_list<llvm::Value **> ValuesToReload) {
   PopCleanupBlocks(Old, ValuesToReload);
+  PushLifetimeExtendedCleanups(OldLifetimeExtendedSize);
+}
 
+void CodeGenFunction::PushLifetimeExtendedCleanups(size_t OldSize) {
   // Move our deferred cleanups onto the EH stack.
-  for (size_t I = OldLifetimeExtendedSize,
-              E = LifetimeExtendedCleanupStack.size(); I != E; /**/) {
+  for (size_t I = OldSize, E = LifetimeExtendedCleanupStack.size(); I != E;
+       /**/) {
     // Alignment should be guaranteed by the vptrs in the individual cleanups.
     assert((I % alignof(LifetimeExtendedCleanupHeader) == 0) &&
            "misaligned cleanup stack entry");
@@ -511,7 +514,7 @@ void CodeGenFunction::PopCleanupBlocks(
       I += sizeof(ActiveFlag);
     }
   }
-  LifetimeExtendedCleanupStack.resize(OldLifetimeExtendedSize);
+  LifetimeExtendedCleanupStack.resize(OldSize);
 }
 
 static llvm::BasicBlock *CreateNormalEntry(CodeGenFunction &CGF,
@@ -565,10 +568,9 @@ static llvm::BasicBlock *SimplifyCleanupEntry(CodeGenFunction &CGF,
   return Pred;
 }
 
-static void EmitCleanup(CodeGenFunction &CGF,
-                        EHScopeStack::Cleanup *Fn,
-                        EHScopeStack::Cleanup::Flags flags,
-                        Address ActiveFlag) {
+static void EmitCleanup(CodeGenFunction &CGF, EHScopeStack::Cleanup *Fn,
+                        EHScopeStack::Cleanup::Flags flags, Address ActiveFlag,
+                        bool ClearActiveFlag = false) {
   // If there's an active flag, load it and skip the cleanup if it's
   // false.
   llvm::BasicBlock *ContBB = nullptr;
@@ -579,6 +581,8 @@ static void EmitCleanup(CodeGenFunction &CGF,
       = CGF.Builder.CreateLoad(ActiveFlag, "cleanup.is_active");
     CGF.Builder.CreateCondBr(IsActive, CleanupBB, ContBB);
     CGF.EmitBlock(CleanupBB);
+    if (ClearActiveFlag)
+      CGF.Builder.CreateStore(CGF.Builder.getFalse(), ActiveFlag);
   }
 
   // Ask the cleanup to emit itself.
@@ -588,6 +592,53 @@ static void EmitCleanup(CodeGenFunction &CGF,
   // Emit the continuation block if there was an active flag.
   if (ActiveFlag.isValid())
     CGF.EmitBlock(ContBB);
+}
+
+void CodeGenFunction::CaptureConditionTemporaryCleanups(
+    EHScopeStack::stable_iterator OldDepth, llvm::Instruction *InitIP,
+    SmallVectorImpl<EHScopeStack::stable_iterator> &Cleanups) {
+  unsigned OldSize = Cleanups.size();
+  for (auto I = EHStack.begin(), End = EHStack.find(OldDepth); I != End; ++I) {
+    auto *Cleanup = dyn_cast<EHCleanupScope>(&*I);
+    if (!Cleanup || !Cleanup->isNormalCleanup() || !Cleanup->isActive())
+      continue;
+    if (!Cleanup->hasActiveFlag()) {
+      Address Active = CreateTempAlloca(Builder.getInt1Ty(), CharUnits::One(),
+                                        "condition.cleanup.active");
+      llvm::IRBuilderBase::InsertPointGuard Guard(Builder);
+      Builder.SetInsertPoint(InitIP);
+      Builder.CreateStore(Builder.getTrue(), Active);
+      Cleanup->setActiveFlag(Active);
+    }
+    Cleanup->setTestFlagInNormalCleanup();
+    if (Cleanup->isEHCleanup())
+      Cleanup->setTestFlagInEHCleanup();
+    Cleanups.push_back(EHStack.stabilize(I));
+  }
+  std::reverse(Cleanups.begin() + OldSize, Cleanups.end());
+  InitIP->eraseFromParent();
+}
+
+void CodeGenFunction::EmitConditionTemporaryCleanups(
+    ArrayRef<EHScopeStack::stable_iterator> Cleanups) {
+  // Expression temporaries are interleaved with pattern-condition bindings
+  // whose scopes include the body. Run only the temporary cleanups here, and
+  // retain their inactive entries for failure edges and exception unwinding.
+  for (auto I : llvm::reverse(Cleanups)) {
+    EHCleanupScope &Cleanup = cast<EHCleanupScope>(*EHStack.find(I));
+    EHScopeStack::Cleanup::Flags Flags;
+    Flags.setIsNormalCleanupKind();
+    if (Cleanup.isEHCleanup())
+      Flags.setIsEHCleanupKind();
+
+    size_t Size = Cleanup.getCleanupSize();
+    SmallVector<uint64_t, 16> Buffer((Size + sizeof(uint64_t) - 1) /
+                                     sizeof(uint64_t));
+    memcpy(Buffer.data(), Cleanup.getCleanupBuffer(), Size);
+    Cleanup.MarkEmitted();
+    EmitCleanup(*this, reinterpret_cast<EHScopeStack::Cleanup *>(Buffer.data()),
+                Flags, Cleanup.getActiveFlag(), /*ClearActiveFlag=*/true);
+  }
 }
 
 static void ForwardPrebranchedFallthrough(llvm::BasicBlock *Exit,

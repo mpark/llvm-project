@@ -22,6 +22,10 @@
 #include <utility>
 #include <variant>
 
+static_assert(!match(std::variant<bool, int>{42}, case { false }));
+static_assert(match(std::variant<bool, int>{42}, case { 42 }));
+static_assert(match(std::optional<int>{42}, case { 42 }));
+
 int match_pointer(int* pointer) {
   return match (pointer) {
     case { int& value } => value;

@@ -80,6 +80,14 @@ void invalid(int first, int second) {
   }
 }
 
+void returns_void();
+
+int invalid_subject_with_result_type() {
+  return match (returns_void(), 1) -> int { // expected-error {{void expression cannot be an element of a multiple-subject match}}
+    case [_, _] => 1;
+  };
+}
+
 void malformed(int value) {
   match(, case _); // expected-error {{expected expression}}
   match(value, case); // expected-error {{expected expression}}

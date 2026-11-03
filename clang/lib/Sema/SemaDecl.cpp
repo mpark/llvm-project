@@ -14156,7 +14156,8 @@ void Sema::DiagnoseUniqueObjectDuplication(const VarDecl *VD) {
   }
 }
 
-void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
+void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit,
+                                bool IsFullExpression) {
   llvm::scope_exit ResetDeclForInitializer([this]() {
     if (!this->ExprEvalContexts.empty())
       this->ExprEvalContexts.back().DeclForInitializer = nullptr;
@@ -14483,14 +14484,18 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
   // Set context flag for OverflowBehaviorType initialization analysis
   llvm::SaveAndRestore OBTAssignmentContext(InOverflowBehaviorAssignmentContext,
                                             true);
-  ExprResult Result =
-      ActOnFinishFullExpr(Init, VDecl->getLocation(),
-                          /*DiscardedValue*/ false, VDecl->isConstexpr());
-  if (!Result.isUsable()) {
-    VDecl->setInvalidDecl();
-    return;
+  if (IsFullExpression) {
+    ExprResult Result =
+        ActOnFinishFullExpr(Init, VDecl->getLocation(),
+                            /*DiscardedValue*/ false, VDecl->isConstexpr());
+    if (!Result.isUsable()) {
+      VDecl->setInvalidDecl();
+      return;
+    }
+    Init = Result.get();
+  } else {
+    CheckCompletedExpr(Init, VDecl->getLocation(), VDecl->isConstexpr());
   }
-  Init = Result.get();
 
   // Attach the initializer to the decl.
   VDecl->setInit(Init);

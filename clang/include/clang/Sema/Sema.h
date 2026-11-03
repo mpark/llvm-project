@@ -4338,7 +4338,10 @@ public:
   /// AddInitializerToDecl - Adds the initializer Init to the
   /// declaration dcl. If DirectInit is true, this is C++ direct
   /// initialization rather than copy initialization.
-  void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit);
+  /// Implicit bindings within expressions can share the enclosing
+  /// full-expression by setting IsFullExpression to false.
+  void AddInitializerToDecl(Decl *dcl, Expr *init, bool DirectInit,
+                            bool IsFullExpression = true);
   void ActOnUninitializedDecl(Decl *dcl);
 
   /// ActOnInitializerError - Given that there was an error parsing an
@@ -11421,10 +11424,12 @@ public:
                                             : SourceLocation();
   }
 
-  ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar);
+  ExprResult ActOnMatchSubject(Expr *Subject, VarDecl *&HoldingVar,
+                               bool IsFullExpression = true);
   ExprResult ActOnMatchSubjects(ArrayRef<Expr *> Subjects,
                                 SourceLocation MatchLoc, VarDecl *&HoldingVar,
-                                bool ForceProduct = false);
+                                bool ForceProduct = false,
+                                bool IsFullExpression = true);
   bool isMatchSubjectProductType(QualType Type) const;
   bool CheckMatchSubjectBindingReferences(Expr *Subject,
                                           MatchPattern *Pattern);

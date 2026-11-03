@@ -2243,17 +2243,8 @@ void Parser::ParseForRangeInitializerAfterColon(ForRangeInit &FRI,
     Ctx = Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
 
   EnterExpressionEvaluationContext InitContext(
-      Actions, Ctx,
-      /*LambdaContextDecl=*/nullptr,
-      Sema::ExpressionEvaluationContextRecord::EK_Other,
+      Actions, EnterExpressionEvaluationContext::LifetimeExtending, Ctx,
       getLangOpts().CPlusPlus23);
-
-  // P2718R0 - Lifetime extension in range-based for loops.
-  if (getLangOpts().CPlusPlus23) {
-    auto &LastRecord = Actions.currentEvaluationContext();
-    LastRecord.InLifetimeExtendingContext = true;
-    LastRecord.RebuildDefaultArgOrDefaultInit = true;
-  }
 
   if (FRI.ExpansionStmt) {
     // The expansion-initializer is not in a dependent context and should

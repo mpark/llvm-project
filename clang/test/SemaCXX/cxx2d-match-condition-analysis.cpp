@@ -379,7 +379,7 @@ static_assert(dependent_constexpr_condition<0>() == 42);
 static_assert(dependent_constexpr_condition<1>() == -1);
 
 void nonconstant_constexpr_condition(int value) { // expected-note {{declared here}}
-  if constexpr (case int copy = value) { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}} expected-note {{in call to '<expression body>'}}
+  if constexpr (case int copy = value) { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
     use(copy);
   }
 }

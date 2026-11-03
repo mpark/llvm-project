@@ -5679,6 +5679,10 @@ public:
     return Instantiations;
   }
 
+  MatchTestInstantiation getDirectInstantiation() const {
+    return {Pattern, IfLoc, Guard, PatternInstantiation, PatternIsIrrefutable};
+  }
+
   bool hasSemanticInstantiations() const { return !Instantiations.empty(); }
 
   bool hasConditionInstantiations() const {
@@ -5697,21 +5701,32 @@ public:
 
   bool needsCaseInstantiation() const { return NeedsCaseInstantiation; }
 
+  static const Expr *getConditionSubExpr(const Expr *Condition) {
+    while (Condition) {
+      Condition = Condition->IgnoreParens();
+      if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
+        Condition = Constant->getSubExpr();
+      else if (const auto *Cleanups = dyn_cast<ExprWithCleanups>(Condition))
+        Condition = Cleanups->getSubExpr();
+      else
+        break;
+    }
+    return Condition;
+  }
+
+  static Expr *getConditionSubExpr(Expr *Condition) {
+    return const_cast<Expr *>(
+        getConditionSubExpr(static_cast<const Expr *>(Condition)));
+  }
+
   static MatchTestExpr *findInCondition(Expr *Condition) {
-    if (!Condition)
-      return nullptr;
-    Condition = Condition->IgnoreParens();
-    if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
-      Condition = Constant->getSubExpr()->IgnoreParens();
-    return dyn_cast<MatchTestExpr>(Condition);
+    return dyn_cast_or_null<MatchTestExpr>(getConditionSubExpr(Condition));
   }
 
   static bool containsCaseCondition(const Expr *Condition) {
     if (!Condition)
       return false;
-    Condition = Condition->IgnoreParens();
-    if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
-      Condition = Constant->getSubExpr()->IgnoreParens();
+    Condition = getConditionSubExpr(Condition);
     if (const auto *Match = dyn_cast<MatchTestExpr>(Condition))
       return Match->getStmtClass() == CaseConditionExprClass;
     if (const auto *Binary = dyn_cast<BinaryOperator>(Condition);
@@ -5724,9 +5739,7 @@ public:
   static bool isCaseConditionChain(const Expr *Condition) {
     if (!Condition)
       return false;
-    Condition = Condition->IgnoreParens();
-    if (const auto *Constant = dyn_cast<ConstantExpr>(Condition))
-      Condition = Constant->getSubExpr()->IgnoreParens();
+    Condition = getConditionSubExpr(Condition);
     if (const auto *Match = dyn_cast<MatchTestExpr>(Condition))
       return Match->hasConditionContinuations();
     const auto *Binary = dyn_cast<BinaryOperator>(Condition);
@@ -5738,9 +5751,7 @@ public:
   findCaseConditionRequiringInstantiation(Expr *Condition) {
     if (!Condition)
       return nullptr;
-    Condition = Condition->IgnoreParens();
-    if (auto *Constant = dyn_cast<ConstantExpr>(Condition))
-      Condition = Constant->getSubExpr()->IgnoreParens();
+    Condition = getConditionSubExpr(Condition);
     if (auto *Match = dyn_cast<MatchTestExpr>(Condition);
         Match && Match->getStmtClass() == CaseConditionExprClass &&
         (Match->needsCaseInstantiation() || Match->isInstantiationDependent()))

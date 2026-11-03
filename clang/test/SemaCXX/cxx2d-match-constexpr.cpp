@@ -61,7 +61,7 @@ int runtime_guard_with_constant_condition(int value) {
 }
 
 int runtime_refutable(int value) { // expected-note {{declared here}}
-  return match constexpr (value) { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}} expected-note {{in call to '<expression body>'}}
+  return match constexpr (value) { // expected-error {{constexpr if condition is not a constant expression}} expected-note {{function parameter 'value' with unknown value cannot be used in a constant expression}}
     case 0 => 1;
     case _ => 2;
   };

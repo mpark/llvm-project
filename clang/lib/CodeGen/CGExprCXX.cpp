@@ -20,6 +20,7 @@
 #include "TargetInfo.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/SaveAndRestore.h"
 
@@ -3043,16 +3044,24 @@ void CodeGenFunction::EmitSelectedMatchTestInstantiation(
     const MatchTestExpr &S, const MatchTestInstantiation &Instantiation,
     llvm::function_ref<void()> EmitSuccess) {
   RunCleanupsScope MatchScope(*this);
-  if (const VarDecl *HoldingVar = S.getHoldingVar())
-    EmitVarDecl(*HoldingVar);
-  else if (S.getSubject()->getType()->isVoidType())
-    EmitIgnoredExpr(S.getSubject());
+  EmitMatchTestSubject(S);
 
   EmitSelectedMatchPatternProjections(Instantiation.Pattern,
                                       Instantiation.PatternInstantiation);
   EmitMatchPatternDeclarations(Instantiation.Pattern,
                                Instantiation.PatternInstantiation);
   EmitSuccess();
+}
+
+void CodeGenFunction::EmitMatchTestSubject(const MatchTestExpr &S) {
+  // Register subject destruction before any pattern binding's destruction.
+  std::optional<LifetimeExtendedCleanupScope> SubjectScope;
+  if (!isa<CaseConditionExpr>(S))
+    SubjectScope.emplace(*this);
+  if (const VarDecl *HoldingVar = S.getHoldingVar())
+    EmitVarDecl(*HoldingVar);
+  else if (S.getSubject()->getType()->isVoidType())
+    EmitIgnoredExpr(S.getSubject());
 }
 
 void CodeGenFunction::EmitMatchCandidate(
@@ -3065,10 +3074,12 @@ void CodeGenFunction::EmitMatchCandidate(
     llvm::function_ref<void()> EmitAction, Stmt::Likelihood GuardLikelihood,
     MatchCandidateKind Kind) {
   bool IsSelection = Kind == MatchCandidateKind::Selection;
+  bool IsTestExpression = Kind == MatchCandidateKind::Test;
   StringRef BlockPrefix = IsSelection ? "match.select." : "match.test.";
   StringRef StatePrefix = IsSelection ? "match.case." : "match.test.";
 
   bool HasStagedDeclarations =
+      !IsTestExpression &&
       hasStagedAndPatternDeclarations(Pattern, Instantiation);
   StagedPatternDeclarations StagedDeclarations;
   std::optional<RunCleanupsScope> OrdinaryCaseScope;
@@ -3084,7 +3095,7 @@ void CodeGenFunction::EmitMatchCandidate(
   }
 
   ConditionalEvaluation Conditional(*this);
-  if (HasStagedDeclarations)
+  if (HasStagedDeclarations || IsTestExpression)
     Conditional.begin(*this);
   llvm::BasicBlock *InitializePatternBB =
       createBasicBlock(Twine(BlockPrefix) + "init");
@@ -3108,7 +3119,7 @@ void CodeGenFunction::EmitMatchCandidate(
   EmitSharedDeclarationProjections(Pattern, Instantiation);
   if (HasStagedDeclarations)
     StagedDeclarations.begin(*this);
-  else
+  else if (!IsTestExpression)
     OrdinaryCaseScope.emplace(*this);
   EmitMatchPatternDeclarations(Pattern, Instantiation);
   if (HasStagedDeclarations) {
@@ -3147,8 +3158,10 @@ void CodeGenFunction::EmitMatchCandidate(
   EmitBlock(CleanupBB);
   if (HasStagedDeclarations)
     StagedDeclarations.emitCleanups(*this);
-  else
+  else if (OrdinaryCaseScope)
     OrdinaryCaseScope->ForceCleanup();
+  if (IsTestExpression)
+    Conditional.end(*this);
   Builder.CreateCondBr(Builder.CreateLoad(CaseSelected), Success,
                        HasStagedDeclarations ? CaseFailedBB : GuardFailure);
 
@@ -3163,22 +3176,13 @@ void CodeGenFunction::EmitMatchTestDispatch(
     const MatchTestExpr &S, JumpDest SuccessDest,
     llvm::function_ref<void(const MatchTestInstantiation &)> EmitSuccess,
     JumpDest FailureDest, llvm::function_ref<void()> EmitFailure) {
-  RunCleanupsScope MatchScope(*this);
-  if (const VarDecl *HoldingVar = S.getHoldingVar())
-    EmitVarDecl(*HoldingVar);
-  else if (S.getSubject()->getType()->isVoidType())
-    EmitIgnoredExpr(S.getSubject());
+  bool IsCondition = isa<CaseConditionExpr>(S);
+  std::optional<RunCleanupsScope> MatchScope;
+  if (IsCondition)
+    MatchScope.emplace(*this);
+  EmitMatchTestSubject(S);
 
-  MatchTestInstantiation DirectInstantiation{
-      const_cast<MatchPattern *>(S.getPattern()),
-      S.getIfLoc(),
-      S.getGuard(),
-      const_cast<MatchPatternInstantiation *>(S.getPatternInstantiation()),
-      S.isPatternIrrefutable(),
-      nullptr,
-      nullptr,
-      nullptr,
-  };
+  MatchTestInstantiation DirectInstantiation = S.getDirectInstantiation();
   ArrayRef<MatchTestInstantiation> Instantiations = S.getInstantiations();
   if (Instantiations.empty())
     Instantiations = DirectInstantiation;
@@ -3202,87 +3206,95 @@ void CodeGenFunction::EmitMatchTestDispatch(
         Instantiation.Pattern, Instantiation.PatternInstantiation,
         Instantiation.Guard, NextPatternBB, NoMatchBB, CaseSucceededBB,
         EmitPattern, [&] { EmitSuccess(Instantiation); }, Stmt::LH_None,
-        MatchCandidateKind::Test);
+        IsCondition ? MatchCandidateKind::Condition : MatchCandidateKind::Test);
 
     EmitBlock(CaseSucceededBB);
-    EmitBranchThroughCleanup(SuccessDest);
+    if (IsCondition)
+      EmitBranchThroughCleanup(SuccessDest);
+    else
+      EmitBranch(SuccessDest.getBlock());
     EmitBlock(NextPatternBB);
   }
 
   EmitFailure();
-  if (HaveInsertPoint())
-    EmitBranchThroughCleanup(FailureDest);
+  if (HaveInsertPoint()) {
+    if (IsCondition)
+      EmitBranchThroughCleanup(FailureDest);
+    else
+      EmitBranch(FailureDest.getBlock());
+  }
 }
 
 RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   assert(!S.getType()->isVoidType() && "match test must produce bool");
+  bool IsTestExpression = !isa<CaseConditionExpr>(S);
+  std::optional<LifetimeExtendedCleanupScope> TestScope;
+  if (IsTestExpression)
+    TestScope.emplace(*this);
+
   if (S.getInstantiations().empty()) {
-    bool NeedsCleanup = !S.getHoldingVar() || !isa<CaseConditionExpr>(S);
-    auto EmitTest = [&]() {
-      if (S.getHoldingVar())
-        EmitVarDecl(*S.getHoldingVar());
-      else if (S.getSubject()->getType()->isVoidType())
-        EmitIgnoredExpr(S.getSubject());
+    std::optional<RunCleanupsScope> MatchScope;
+    if (!IsTestExpression && !S.getHoldingVar())
+      MatchScope.emplace(*this);
+    EmitMatchTestSubject(S);
 
-      const Expr *Subject = S.getSubject();
-      if (!hasMatchPatternDeclarations(S.getPattern(),
-                                       S.getPatternInstantiation())) {
-        RValue MatchResult = EmitMatchPattern(
-            S.getPattern(), S.getPatternInstantiation(), Subject);
-        if (S.getGuard().hasGuard())
-          MatchResult =
-              EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
-        return MatchResult;
-      }
-
-      llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
-      llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
-      llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
-      bool HasStagedDeclarations = hasStagedAndPatternDeclarations(
-          S.getPattern(), S.getPatternInstantiation());
-      StagedPatternDeclarations StagedDeclarations;
-      ConditionalEvaluation Conditional(*this);
-      if (HasStagedDeclarations)
-        Conditional.begin(*this);
-      EmitMatchPatternBranch(
-          S.getPattern(), S.getPatternInstantiation(), Subject, InitBB, FailBB,
-          HasStagedDeclarations ? &StagedDeclarations : nullptr);
-
-      EmitBlock(InitBB);
-      EmitSharedDeclarationProjections(S.getPattern(),
-                                       S.getPatternInstantiation());
-      if (HasStagedDeclarations)
-        StagedDeclarations.begin(*this);
-      EmitMatchPatternDeclarations(S.getPattern(), S.getPatternInstantiation());
-      if (HasStagedDeclarations) {
-        StagedDeclarations.markInitialized(*this);
+    bool HasStagedDeclarations =
+        !IsTestExpression && hasStagedAndPatternDeclarations(
+                                 S.getPattern(), S.getPatternInstantiation());
+    ConditionalEvaluation Conditional(*this);
+    if (IsTestExpression || HasStagedDeclarations)
+      Conditional.begin(*this);
+    llvm::scope_exit EndConditional([&] {
+      if (IsTestExpression)
         Conditional.end(*this);
-      }
-      RValue MatchResult = RValue::get(Builder.getTrue());
+    });
+
+    const Expr *Subject = S.getSubject();
+    if (!hasMatchPatternDeclarations(S.getPattern(),
+                                     S.getPatternInstantiation())) {
+      RValue MatchResult = EmitMatchPattern(
+          S.getPattern(), S.getPatternInstantiation(), Subject);
       if (S.getGuard().hasGuard())
         MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
-      llvm::BasicBlock *InitEndBB = Builder.GetInsertBlock();
-      EmitBranch(EndBB);
-
-      EmitBlock(FailBB);
-      llvm::BasicBlock *FailEndBB = Builder.GetInsertBlock();
-      EmitBranch(EndBB);
-
-      EmitBlock(EndBB);
-      llvm::PHINode *Result =
-          Builder.CreatePHI(Builder.getInt1Ty(), 2, "match.test.result");
-      Result->addIncoming(MatchResult.getScalarVal(), InitEndBB);
-      Result->addIncoming(Builder.getFalse(), FailEndBB);
-      if (HasStagedDeclarations)
-        StagedDeclarations.emitCleanups(*this);
-      return RValue::get(Result);
-    };
-
-    if (NeedsCleanup) {
-      RunCleanupsScope MatchScope(*this);
-      return EmitTest();
+      return MatchResult;
     }
-    return EmitTest();
+
+    llvm::BasicBlock *InitBB = createBasicBlock("match.test.init");
+    llvm::BasicBlock *FailBB = createBasicBlock("match.test.fail");
+    llvm::BasicBlock *EndBB = createBasicBlock("match.test.end");
+    StagedPatternDeclarations StagedDeclarations;
+    EmitMatchPatternBranch(
+        S.getPattern(), S.getPatternInstantiation(), Subject, InitBB, FailBB,
+        HasStagedDeclarations ? &StagedDeclarations : nullptr);
+
+    EmitBlock(InitBB);
+    EmitSharedDeclarationProjections(S.getPattern(),
+                                     S.getPatternInstantiation());
+    if (HasStagedDeclarations)
+      StagedDeclarations.begin(*this);
+    EmitMatchPatternDeclarations(S.getPattern(), S.getPatternInstantiation());
+    if (HasStagedDeclarations) {
+      StagedDeclarations.markInitialized(*this);
+      Conditional.end(*this);
+    }
+    RValue MatchResult = RValue::get(Builder.getTrue());
+    if (S.getGuard().hasGuard())
+      MatchResult = EmitMatchGuard(S.getGuard(), MatchResult.getScalarVal());
+    llvm::BasicBlock *InitEndBB = Builder.GetInsertBlock();
+    EmitBranch(EndBB);
+
+    EmitBlock(FailBB);
+    llvm::BasicBlock *FailEndBB = Builder.GetInsertBlock();
+    EmitBranch(EndBB);
+
+    EmitBlock(EndBB);
+    llvm::PHINode *Result =
+        Builder.CreatePHI(Builder.getInt1Ty(), 2, "match.test.result");
+    Result->addIncoming(MatchResult.getScalarVal(), InitEndBB);
+    Result->addIncoming(Builder.getFalse(), FailEndBB);
+    if (HasStagedDeclarations)
+      StagedDeclarations.emitCleanups(*this);
+    return RValue::get(Result);
   }
 
   RawAddress Result = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
