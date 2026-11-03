@@ -2053,9 +2053,11 @@ Decl *TemplateInstantiator::TransformDecl(SourceLocation Loc, Decl *D) {
 }
 
 bool TemplateInstantiator::instantiateMissingDeclsToScopeForConcepts(Decl *D) {
+  // Argument-free expansion keeps existing requires-expression parameters.
   if (!(D && (SemaRef.inConstraintSubstitution() ||
               SemaRef.inParameterMappingSubstitution() ||
-              isa<RequiresExprBodyDecl>(D->getDeclContext()))))
+              (TemplateArgs.getNumLevels() &&
+               isa<RequiresExprBodyDecl>(D->getDeclContext())))))
     return false;
 
   auto *Current = SemaRef.CurrentInstantiationScope;

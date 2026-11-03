@@ -4782,7 +4782,8 @@ ExprResult Parser::ParseMatchTestExpression() {
     Test->setRegion(Region.getRegion());
   }
   if (Result.isInvalid() || !NeedsCaseInstantiation ||
-      Actions.CurContext->isDependentContext())
+      Actions.CurContext->isDependentContext() ||
+      Subject.get()->isTypeDependent())
     return Result;
   return Actions.ExpandDeferredMatchExpr(Result.get());
 }

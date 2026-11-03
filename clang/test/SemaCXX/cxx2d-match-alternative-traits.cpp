@@ -1020,6 +1020,18 @@ concept CanDirectlyProjectChar = requires(T value) {
 
 static_assert(!CanDirectlyProjectChar<SingleChoice>);
 
+template<class T>
+concept CanProjectValue = requires(T value) {
+  match(value, case { auto projected });
+};
+
+static_assert(CanProjectValue<SingleChoice>);
+static_assert(CanProjectValue<RepeatedChoice>);
+
+static_assert(requires(RepeatedChoice choice) {
+  match(choice, case { auto value });
+});
+
 bool invalid_direct_single_alternative(SingleChoice choice) {
   return match(choice, case { char value }); // expected-error {{braced alternative pattern does not match any projectable state of 'SingleChoice'}}
 }
