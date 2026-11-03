@@ -179,6 +179,7 @@ Retry:
       // declaration-shaped statement to avoid unrelated vexing-parse and
       // declaration diagnostics.
       ConsumeToken();
+      TryConsumeToken(tok::kw_constexpr);
       BalancedDelimiterTracker Parens(*this, tok::l_paren);
       if (!Parens.consumeOpen())
         Parens.skipToEnd();

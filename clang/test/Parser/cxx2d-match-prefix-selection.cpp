@@ -162,6 +162,18 @@ int compound_subject(int value) {
   };
 }
 
+void constexpr_statement() {
+  match constexpr 0 { // expected-error {{expected '(' after 'match'}}
+    case _ =>;
+  }
+}
+
+int constexpr_expression() {
+  return match constexpr 0 { // expected-error {{expected '(' after 'match'}}
+    case _ => 0;
+  };
+}
+
 int no_ordinary_name() {
   return match + 1; // expected-error {{expected '(' after 'match'}}
 }
@@ -174,7 +186,7 @@ inline constexpr int one = 1;
 
 struct match {
   match() = default;
-  match(int);
+  constexpr match(int) {}
 
   template<class F>
   match(F);
@@ -204,6 +216,38 @@ void declarations_and_selections(int value) {
   }
 }
 
+void constexpr_declarations_and_selections() {
+  match constexpr (braced) { 1 };
+  match constexpr (parenthesized)(1);
+  match constexpr named { 1 };
+  match constexpr (lambda) { [] { return 1; }() };
+  match constexpr (*pointer) {};
+  match constexpr (array[2]) { 1, 2 };
+
+  static_assert(__is_same(decltype(braced), const match));
+  static_assert(__is_same(decltype(parenthesized), const match));
+  static_assert(__is_same(decltype(named), const match));
+  static_assert(__is_same(decltype(lambda), const match));
+  static_assert(pointer == nullptr);
+  static_assert(__is_same(decltype(array), const match[2]));
+
+  constexpr int value = 1;
+  match constexpr (value) { case _ =>; }
+  match constexpr (value) { [[likely]] case _ =>; }
+  match constexpr (value) {
+    using Alias = int;
+    case Alias copy =>;
+  }
+  match constexpr (value + 1) {
+    _ =>; // expected-error {{expected 'case' before pattern}}
+  }
+
+  constexpr int result = match constexpr (value) -> int {
+    case _ => 42;
+  };
+  static_assert(result == 42);
+}
+
 match expression_construction() {
   return match{0};
 }
@@ -212,6 +256,14 @@ void missing_case(int value) {
   match (value) { // expected-note {{'match' names a type, so this construct is otherwise parsed as a declaration}}
     _ => 0; // expected-error {{expected 'case' before pattern}}
   }
+}
+
+void missing_constexpr_case() {
+  constexpr int value = 0;
+  match constexpr (value) { // expected-note {{'match' names a type, so this construct is otherwise parsed as a declaration}}
+    _ => 0; // expected-error {{expected 'case' before pattern}}
+  }
+  static_assert(true);
 }
 } // namespace declaration_disambiguation
 
@@ -305,6 +357,10 @@ struct Result {};
 
 int missing_body(int value) {
   return match(value)->Result; // expected-error {{expected '{' after match result type}}
+}
+
+int missing_constexpr_body() {
+  return match constexpr (0)->Result; // expected-error {{expected '{' after match result type}}
 }
 
 int unknown_result(int value) {

@@ -4513,9 +4513,8 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
   if (!getLangOpts().PatternMatching || Tok.isNot(tok::identifier) ||
       Tok.getIdentifierInfo() != Ident_match)
     return false;
-  if (NextToken().is(tok::kw_constexpr))
-    return true;
-  if (NextToken().isNot(tok::l_paren)) {
+  bool IsConstexpr = NextToken().is(tok::kw_constexpr);
+  if (GetLookAheadToken(IsConstexpr ? 2 : 1).isNot(tok::l_paren)) {
     // A label does not participate in ordinary name lookup.
     if (StatementContext && NextToken().is(tok::colon))
       return false;
@@ -4544,11 +4543,11 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
   tok::TokenKind FirstBodyToken;
   SourceLocation FirstBodyLoc;
   bool BodyBeginsAttribute = false;
-  bool HasExplicitResultType = false;
   bool ProbeOrdinaryMatchCall = false;
   {
     RevertingTentativeParsingAction Selection(*this, /*Unannotated=*/true);
     ConsumeToken();
+    TryConsumeToken(tok::kw_constexpr);
     ConsumeParen();
     if (!SkipUntil(tok::r_paren))
       return false;
@@ -4557,14 +4556,11 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
       // result type. First use the syntax-only type-id probe for the normative
       // classification. The real type parser is used separately below only
       // for diagnostic recovery.
-      bool CanBeginMemberAccess = false;
       bool CanOnlyBeginTypeId = false;
-      bool HasMatchResultType = false;
-      bool ParsedTypeId = false;
       {
-        TentativeParsingAction TypeId(*this, /*Unannotated=*/true);
+        RevertingTentativeParsingAction TypeId(*this, /*Unannotated=*/true);
         ConsumeToken();
-        CanBeginMemberAccess = Tok.isOneOf(
+        const bool CanBeginMemberAccess = Tok.isOneOf(
             tok::identifier, tok::annot_typename, tok::annot_template_id,
             tok::kw_operator, tok::kw_template, tok::tilde);
         CanOnlyBeginTypeId =
@@ -4574,57 +4570,47 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
              isTypeSpecifierQualifier(Tok));
 
         Sema::TentativeAnalysisScope Trap(Actions);
-        ParsedTypeId =
-            isCXXTypeId(TentativeCXXTypeIdContext::InMatchTrailingReturnType);
-        HasMatchResultType = ParsedTypeId && Tok.is(tok::l_brace);
-        if (HasMatchResultType)
-          TypeId.Commit();
-        else
-          TypeId.Revert();
+        // A complete trailing result type establishes the match prefix without
+        // examining the body's first token or probing a declarator.
+        if (isCXXTypeId(TentativeCXXTypeIdContext::InMatchTrailingReturnType) &&
+            Tok.is(tok::l_brace))
+          return true;
       }
 
-      // When the next token can begin a type-id but not a member name, the
-      // arrow cannot be member access. Commit to the match grammar immediately
-      // and let the real trailing-return-type parser diagnose any malformed
-      // type-id or missing body.
-      if (!HasMatchResultType) {
-        // No recovery parse is needed when the first token cannot begin member
-        // access. Let the real match parser diagnose the type directly.
-        if (CanOnlyBeginTypeId)
-          return true;
+      // Neither constexpr nor a type-only start permits ordinary member
+      // access. Let the real match parser diagnose the type directly.
+      if (IsConstexpr || CanOnlyBeginTypeId)
+        return true;
 
-        // Run the real trailing-return-type parser under rollback. Unlike the
-        // syntax-only probe above, this permits ordinary type recovery and
-        // typo correction. Reaching the immediately following brace is enough
-        // to establish that the ill-formed construct was intended as a match.
-        bool RecoveredToMatchBody = false;
-        {
-          RevertingTentativeParsingAction Recovery(*this,
-                                                   /*Unannotated=*/true);
-          DiagnosticsEngine &Diags = PP.getDiagnostics();
-          bool PreviouslySuppressed = Diags.getSuppressAllDiagnostics();
-          Diags.setSuppressAllDiagnostics(true);
-          llvm::scope_exit RestoreDiagnostics(
-              [&] { Diags.setSuppressAllDiagnostics(PreviouslySuppressed); });
-          auto PreviousTypoFailures = Actions.TypoCorrectionFailures;
-          unsigned PreviousTyposCorrected = Actions.TyposCorrected;
-          SourceRange Range;
-          (void)ParseTrailingReturnType(Range,
-                                        /*MayBeFollowedByDirectInit=*/false);
-          RecoveredToMatchBody = Tok.is(tok::l_brace);
-          Actions.TypoCorrectionFailures = std::move(PreviousTypoFailures);
-          Actions.TyposCorrected = PreviousTyposCorrected;
-        }
-        if (RecoveredToMatchBody)
-          return true;
-
-        // Identifier-like syntax can also be ordinary member access. Decide
-        // using candidate existence, not call viability, after restoring to
-        // the original `match` token below.
-        ProbeOrdinaryMatchCall = true;
-      } else {
-        HasExplicitResultType = true;
+      // Run the real trailing-return-type parser under rollback. Unlike the
+      // syntax-only probe above, this permits ordinary type recovery and
+      // typo correction. Reaching the immediately following brace is enough
+      // to establish that the ill-formed construct was intended as a match.
+      bool RecoveredToMatchBody = false;
+      {
+        RevertingTentativeParsingAction Recovery(*this,
+                                                 /*Unannotated=*/true);
+        DiagnosticsEngine &Diags = PP.getDiagnostics();
+        bool PreviouslySuppressed = Diags.getSuppressAllDiagnostics();
+        Diags.setSuppressAllDiagnostics(true);
+        llvm::scope_exit RestoreDiagnostics(
+            [&] { Diags.setSuppressAllDiagnostics(PreviouslySuppressed); });
+        auto PreviousTypoFailures = Actions.TypoCorrectionFailures;
+        unsigned PreviousTyposCorrected = Actions.TyposCorrected;
+        SourceRange Range;
+        (void)ParseTrailingReturnType(Range,
+                                      /*MayBeFollowedByDirectInit=*/false);
+        RecoveredToMatchBody = Tok.is(tok::l_brace);
+        Actions.TypoCorrectionFailures = std::move(PreviousTypoFailures);
+        Actions.TyposCorrected = PreviousTyposCorrected;
       }
+      if (RecoveredToMatchBody)
+        return true;
+
+      // Identifier-like syntax can also be ordinary member access. Decide
+      // using candidate existence, not call viability, after restoring to
+      // the original `match` token below.
+      ProbeOrdinaryMatchCall = true;
     }
     if (!ProbeOrdinaryMatchCall) {
       if (Tok.isNot(tok::l_brace))
@@ -4640,9 +4626,6 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
   if (ProbeOrdinaryMatchCall)
     return !hasPossibleOrdinaryMatchCall();
 
-  if (HasExplicitResultType)
-    return true;
-
   // Every valid arm starts with one of these tokens, so no declarator probe
   // is needed in the common match-statement case.
   if (FirstBodyToken == tok::kw_case || FirstBodyToken == tok::kw_using ||
@@ -4655,11 +4638,10 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
                            getCurScope()))
     return true;
 
-  // At statement scope, `match (x) { ... }` can be a declaration when match
-  // names a type. Only this case needs a declarator probe. If the contents of
-  // the parentheses do not form a declarator (for example, `x + 1`), this is
-  // a selection. Otherwise, a match arm introducer resolves the remaining
-  // tie in favor of a selection statement.
+  // A type named match can begin an ordinary declaration, with constexpr in
+  // its decl-specifier-seq. Preserve that parsing when the parenthesized
+  // contents form a declarator. Otherwise (for example, `x + 1`), this is a
+  // selection.
   //
   // Merely seeing `[` after the brace is insufficient: a declaration's
   // braced initializer can begin with a lambda. `[[` is sufficient and no
@@ -4667,9 +4649,8 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
   // not an initializer-clause.
   RevertingTentativeParsingAction Declarator(*this);
   ConsumeToken();
-  bool HasDeclarator =
-      TryParseDeclarator(/*mayBeAbstract=*/false) != TPResult::False;
-  if (!HasDeclarator)
+  TryConsumeToken(tok::kw_constexpr);
+  if (TryParseDeclarator(/*mayBeAbstract=*/false) == TPResult::False)
     return true;
 
   // `=>` has no meaning in a braced initializer. Do not use it to choose the
