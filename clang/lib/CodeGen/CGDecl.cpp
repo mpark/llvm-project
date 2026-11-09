@@ -146,6 +146,7 @@ void CodeGenFunction::EmitDecl(const Decl &D, bool EvaluateConditionDecl) {
   case Decl::ImplicitConceptSpecialization:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
+  case Decl::MatchScope:
   case Decl::MatchTemplateRegion:
     // None of these decls require codegen support.
     return;
@@ -347,9 +348,9 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
   else if (const auto *FD = dyn_cast<FunctionDecl>(DC))
     GD = GlobalDecl(FD);
   else {
-    // Don't do anything for Obj-C method decls or global closures. We should
-    // never defer them.
-    assert(isa<ObjCMethodDecl>(DC) && "unexpected parent code decl");
+    // Obj-C methods and match scopes have no parent function to emit.
+    assert((isa<ObjCMethodDecl, MatchScopeDecl>(DC)) &&
+           "unexpected parent code decl");
   }
   if (GD.getDecl()) {
     // Disable emission of the parent function for the OpenMP device codegen.
@@ -1182,6 +1183,8 @@ Address CodeGenModule::createUnnamedGlobalFrom(const VarDecl &D,
       Name = getMangledName(&D).str() + ".const";
     else if (const DeclContext *DC = D.getParentFunctionOrMethod())
       Name = ("__const." + FunctionName(DC) + "." + D.getName()).str();
+    else if (D.getDeclContext()->isMatchScope())
+      Name = ("__const.<match>." + D.getName()).str();
     else
       llvm_unreachable("local variable has no parent function or method");
     llvm::GlobalVariable *GV = new llvm::GlobalVariable(

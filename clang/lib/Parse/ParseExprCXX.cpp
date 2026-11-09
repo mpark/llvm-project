@@ -4293,6 +4293,7 @@ ExprResult Parser::ParseMatchSelection(bool IsStatement,
                                        bool MissingSubjectParens) {
   SourceLocation MatchLoc = ConsumeToken();
   ParseScope MatchScope(this, Scope::DeclScope);
+  Sema::MatchDeclContextRAII MatchContext(Actions, MatchLoc, getCurScope());
   bool IsConstexpr = TryConsumeToken(tok::kw_constexpr);
 
   StmtResult InitStmt;
@@ -4676,6 +4677,7 @@ bool Parser::isPrefixMatchSelection(bool StatementContext,
 ExprResult Parser::ParseMatchTestExpression() {
   SourceLocation MatchLoc = ConsumeToken();
   ParseScope MatchTestScope(this, Scope::DeclScope);
+  Sema::MatchDeclContextRAII MatchContext(Actions, MatchLoc, getCurScope());
   BalancedDelimiterTracker Parens(*this, tok::l_paren);
   if (Parens.expectAndConsume())
     return ExprError();

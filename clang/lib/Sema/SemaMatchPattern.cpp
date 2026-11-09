@@ -13,6 +13,7 @@
 
 #include "CheckExprLifetime.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/MatchPattern.h"
 #include "clang/Analysis/Analyses/ReachableCode.h"
 #include "clang/Analysis/CFG.h"
@@ -31,6 +32,25 @@
 
 using namespace clang;
 using namespace sema;
+
+Sema::MatchDeclContextRAII::MatchDeclContextRAII(Sema &S, SourceLocation Loc,
+                                                 Scope *ParsingScope) {
+  DeclContext *DC = S.CurContext->getRedeclContext();
+  if (DC->isLocalContext())
+    return;
+
+  auto [MCtx, ManglingContextDecl] =
+      S.getCurrentMangleNumberContext(S.CurContext);
+  if (!MCtx)
+    MCtx = &S.Context.getManglingNumberContext(S.CurContext);
+  auto *MatchContext =
+      MatchScopeDecl::Create(S.Context, S.CurContext, Loc,
+                             dyn_cast_or_null<NamedDecl>(ManglingContextDecl),
+                             MCtx->getNextMatchIndex());
+  SavedContext.emplace(S, MatchContext, /*NewThisContext=*/false);
+  if (ParsingScope)
+    ParsingScope->setEntity(MatchContext);
+}
 
 void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
                                           MatchPattern *Pattern,

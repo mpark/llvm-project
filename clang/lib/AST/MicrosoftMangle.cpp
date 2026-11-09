@@ -215,7 +215,7 @@ public:
   void mangleStringLiteral(const StringLiteral *SL, raw_ostream &Out) override;
   bool getNextDiscriminator(const NamedDecl *ND, unsigned &disc) {
     const DeclContext *DC = getEffectiveDeclContext(ND);
-    if (!DC->isFunctionOrMethod())
+    if (!DC->isLocalContext())
       return false;
 
     // Lambda closure types are already numbered, give out a phony number so
@@ -1394,7 +1394,28 @@ void MicrosoftCXXNameMangler::mangleNestedName(GlobalDecl GD) {
       }
     }
 
-    if (const BlockDecl *BD = dyn_cast<BlockDecl>(DC)) {
+    if (const auto *MSD = dyn_cast<MatchScopeDecl>(DC)) {
+      mangleSourceName("<match_" + llvm::utostr(MSD->getManglingNumber()) +
+                       ">");
+      if (const auto *Parm =
+              dyn_cast_or_null<ParmVarDecl>(MSD->getManglingContextDecl())) {
+        mangleSourceName("<default_arg_" +
+                         llvm::utostr(Parm->getFunctionScopeIndex()) + ">");
+        mangle(getGlobalDeclAsDeclContext(
+                   cast<FunctionDecl>(Parm->getDeclContext())),
+               "?");
+        break;
+      }
+      if (const auto *ContextDecl = MSD->getManglingContextDecl()) {
+        ND = ContextDecl;
+        mangleUnqualifiedName(ND);
+        DC = getEffectiveDeclContext(ND);
+      } else {
+        DC = getEffectiveDeclContext(MSD);
+        ND = dyn_cast<NamedDecl>(DC);
+      }
+      continue;
+    } else if (const BlockDecl *BD = dyn_cast<BlockDecl>(DC)) {
       auto Discriminate =
           [](StringRef Name, const unsigned Discriminator,
              const unsigned ParameterDiscriminator) -> std::string {

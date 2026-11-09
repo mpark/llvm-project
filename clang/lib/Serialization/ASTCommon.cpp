@@ -470,6 +470,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::ImplicitConceptSpecialization:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
+  case Decl::MatchScope:
   case Decl::MatchTemplateRegion:
   case Decl::UnresolvedUsingIfExists:
   case Decl::HLSLBuffer:

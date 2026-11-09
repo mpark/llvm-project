@@ -7562,7 +7562,7 @@ static bool isIncompleteDeclExternC(Sema &S, const T *D) {
 
 static bool shouldConsiderLinkage(const VarDecl *VD) {
   const DeclContext *DC = VD->getDeclContext()->getRedeclContext();
-  if (DC->isFunctionOrMethod() || isa<OMPDeclareReductionDecl>(DC) ||
+  if (DC->isLocalContext() || isa<OMPDeclareReductionDecl>(DC) ||
       isa<OMPDeclareMapperDecl>(DC))
     return VD->hasExternalStorage();
   if (DC->isFileContext())
@@ -7579,7 +7579,7 @@ static bool shouldConsiderLinkage(const VarDecl *VD) {
 
 static bool shouldConsiderLinkage(const FunctionDecl *FD) {
   const DeclContext *DC = FD->getDeclContext()->getRedeclContext();
-  if (DC->isFileContext() || DC->isFunctionOrMethod() ||
+  if (DC->isFileContext() || DC->isLocalContext() ||
       isa<OMPDeclareReductionDecl>(DC) || isa<OMPDeclareMapperDecl>(DC))
     return true;
   if (DC->isRecord() || isa<CXXExpansionStmtDecl>(DC))
@@ -7606,7 +7606,7 @@ static bool hasParsedAttr(Scope *S, const Declarator &PD,
 }
 
 bool Sema::adjustContextForLocalExternDecl(DeclContext *&DC) {
-  if (!DC->isFunctionOrMethod())
+  if (!DC->isLocalContext())
     return false;
 
   // If this is a local extern function or variable declared within a function
@@ -7906,7 +7906,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
 
   DeclSpec::SCS SCSpec = D.getDeclSpec().getStorageClassSpec();
   StorageClass SC = StorageClassSpecToVarDeclStorageClass(D.getDeclSpec());
-  if (LangOpts.CPlusPlus && (DC->isClosure() || DC->isFunctionOrMethod()) &&
+  if (LangOpts.CPlusPlus && (DC->isClosure() || DC->isLocalContext()) &&
       SC != SC_Static && SC != SC_Extern && II && II->isPlaceholder()) {
 
     IsPlaceholderVariable = true;

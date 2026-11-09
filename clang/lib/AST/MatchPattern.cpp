@@ -80,11 +80,20 @@ void clang::visitMatchPatternEvaluation(
       VisitStmt(S);
   };
   auto VisitDeclaration = [&](const Decl *D) {
-    if (!D || !VisitedDecls.insert(D).second)
-      return;
-    VisitDecl(D);
-    if (const auto *VD = dyn_cast<VarDecl>(D))
-      VisitStatement(VD->getInit());
+    SmallVector<const Decl *, 4> Worklist{D};
+    while (!Worklist.empty()) {
+      const Decl *Current = Worklist.pop_back_val();
+      if (!Current || !VisitedDecls.insert(Current).second)
+        continue;
+      VisitDecl(Current);
+      if (const auto *VD = dyn_cast<VarDecl>(Current))
+        VisitStatement(VD->getInit());
+      if (const auto *DD = dyn_cast<DecompositionDecl>(Current))
+        for (const BindingDecl *Binding : DD->all_bindings()) {
+          VisitStatement(Binding->getBinding());
+          Worklist.push_back(Binding->getHoldingVar());
+        }
+    }
   };
 
   auto VisitPattern = [&](const MatchPattern *P, auto &Recurse) -> void {

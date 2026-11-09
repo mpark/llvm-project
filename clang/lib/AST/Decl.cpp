@@ -301,11 +301,12 @@ LinkageInfo LinkageComputer::getLVForTemplateParameterList(
   return LV;
 }
 
-static const Decl *getOutermostFuncOrBlockContext(const Decl *D) {
+static const Decl *getOutermostLocalDeclContext(const Decl *D) {
   const Decl *Ret = nullptr;
   const DeclContext *DC = D->getDeclContext();
   while (DC->getDeclKind() != Decl::TranslationUnit) {
-    if (isa<FunctionDecl>(DC) || isa<BlockDecl>(DC))
+    if (isa<FunctionDecl, BlockDecl, MatchScopeDecl, MatchTemplateRegionDecl>(
+            DC))
       Ret = cast<Decl>(DC);
     DC = DC->getParent();
   }
@@ -1413,12 +1414,17 @@ LinkageInfo LinkageComputer::getLVForLocalDecl(const NamedDecl *D,
   if (!Context.getLangOpts().CPlusPlus)
     return LinkageInfo::none();
 
-  const Decl *OuterD = getOutermostFuncOrBlockContext(D);
+  const Decl *OuterD = getOutermostLocalDeclContext(D);
   if (!OuterD || OuterD->isInvalidDecl())
     return LinkageInfo::none();
 
   LinkageInfo LV;
-  if (const auto *BD = dyn_cast<BlockDecl>(OuterD)) {
+  if (const auto *MSD = dyn_cast<MatchScopeDecl>(OuterD)) {
+    if (!MSD->getManglingContextDecl())
+      return LinkageInfo::none();
+    LV = getLVForClosure(MSD->getParent(), MSD->getManglingContextDecl(),
+                         computation);
+  } else if (const auto *BD = dyn_cast<BlockDecl>(OuterD)) {
     if (!BD->getBlockManglingNumber())
       return LinkageInfo::none();
 
@@ -1568,7 +1574,7 @@ LinkageInfo LinkageComputer::computeLVForDecl(const NamedDecl *D,
   //   one such matching entity, the program is ill-formed. Otherwise,
   //   if no matching entity is found, the block scope entity receives
   //   external linkage.
-  if (D->getDeclContext()->isFunctionOrMethod())
+  if (D->getDeclContext()->isLocalContext())
     return getLVForLocalDecl(D, computation);
 
   // C++ [basic.link]p6:

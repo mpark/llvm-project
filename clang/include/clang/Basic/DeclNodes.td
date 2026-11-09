@@ -115,6 +115,7 @@ def OMPAllocate : DeclNode<Decl>;
 def OMPRequires : DeclNode<Decl>;
 def Empty : DeclNode<Decl>;
 def RequiresExprBody : DeclNode<Decl>, DeclContext;
+def MatchScope : DeclNode<Decl>, DeclContext;
 def MatchTemplateRegion : DeclNode<Decl>, DeclContext;
 def LifetimeExtendedTemporary : DeclNode<Decl>;
 def HLSLBuffer : DeclNode<Named, "HLSLBuffer">, DeclContext;

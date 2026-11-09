@@ -21664,17 +21664,19 @@ public:
   }
 
   void VisitDeclRefExpr(DeclRefExpr *E) {
-    // If we were asked not to visit local variables, don't. A variable
-    // declared in a do-expression body is an exception: the caller skips
-    // local variables because they belong to a scope it is not entering, but
-    // a do-expression body is part of the expression being visited, so
-    // nothing else will ever mark its declarations used and CodeGen asserts
-    // when it reaches one that was not.
-    if (SkipLocalVariables) {
-      if (VarDecl *VD = dyn_cast<VarDecl>(E->getDecl()))
-        if (VD->hasLocalStorage() && !isDoExprBodyContext(VD->getDeclContext()))
-          return;
-    }
+    // Expression-local declarations belong to the expression being visited,
+    // unlike local variables in an enclosing function scope.
+    DeclContext *DC = E->getDecl()->getDeclContext();
+    auto *VD = dyn_cast<VarDecl>(E->getDecl());
+    if (SkipLocalVariables && VD && VD->hasLocalStorage() &&
+        !isDoExprBodyContext(DC) && !DC->isMatchScope())
+      return;
+
+    // Default initializers are revisited from their use site. Match locals
+    // still belong to the expression's own declaration context.
+    std::optional<Sema::ContextRAII> MatchContext;
+    if (DC->isMatchScope())
+      MatchContext.emplace(S, DC, /*NewThisContext=*/false);
 
     // FIXME: This can trigger the instantiation of the initializer of a
     // variable, which can cause the expression to become value-dependent

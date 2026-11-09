@@ -2548,6 +2548,8 @@ DEF_TRAVERSE_DECL(ParmVarDecl, {
 })
 
 DEF_TRAVERSE_DECL(RequiresExprBodyDecl, {})
+
+DEF_TRAVERSE_DECL(MatchScopeDecl, {})
 DEF_TRAVERSE_DECL(MatchTemplateRegionDecl, {})
 
 DEF_TRAVERSE_DECL(ImplicitConceptSpecializationDecl, {

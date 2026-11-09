@@ -25,6 +25,87 @@
 static_assert(!match(std::variant<bool, int>{42}, case { false }));
 static_assert(match(std::variant<bool, int>{42}, case { 42 }));
 static_assert(match(std::optional<int>{42}, case { 42 }));
+static_assert(match(std::variant<bool, int>{42}, case { int value } if (value == 42)));
+static_assert(match(std::variant<bool, int>{42}, case { const int& value } if (value == 42)));
+static_assert(match(std::variant<int>{42}, case { int value } if (value == 42)));
+static_assert(match(std::variant<bool, int>{42}) {
+  case { bool value } => !value;
+  case { int value } => value == 42;
+});
+
+namespace namespace_scope {
+int source() { return 42; }
+
+bool direct = match(source(), case int value if ([value] { return value == 42; }()));
+int projected = match (std::variant<bool, int>{source()}) {
+  case { bool value } => int(value);
+  case { int value } => value;
+};
+
+constexpr int decomposed_default(int result = match (std::pair{20, 22}) {
+  case auto [first, second] => first + second;
+}) {
+  return result;
+}
+static_assert(decomposed_default() == 42);
+
+struct DecomposedMember {
+  int source = 42;
+  int value = match (std::pair{source, 1}) {
+    case auto [first, second] => first + second;
+  };
+  bool matched = match(std::pair{source, 1}, case auto [first, second] if (first + second == 43));
+};
+constexpr DecomposedMember decomposed_member;
+static_assert(decomposed_member.value == 43 && decomposed_member.matched);
+} // namespace namespace_scope
+
+namespace static_locals {
+int initialization_calls = 0;
+int source() { return ++initialization_calls; }
+
+int first = match (static int state = source(); state) {
+  case int value => value;
+};
+int second = match (static int state = source(); state) {
+  case int value => value;
+};
+bool test = match(3, case int value if (static int state = source(); value == state));
+
+struct Member {
+  int first = match (static int state = source(); state) {
+    case int& value => ++value;
+  };
+  int second = match (static int state = source(); state) {
+    case int& value => ++value;
+  };
+  bool tested = match(42, case int current if (static int state = source(); state > 0 && current == 42));
+  int nested = match (static int state = 30; state) {
+    case int => match (static int nested_state = 40; nested_state) {
+      case int& current => ++current;
+    };
+  };
+};
+
+template<int N> struct TemplatedMember {
+  int value = match (static int state = N; state) {
+    case int& current => ++current;
+  };
+};
+
+void check() {
+  assert(first == 1 && second == 2 && test);
+  assert(initialization_calls == 3);
+  Member a;
+  Member b;
+  assert(initialization_calls == 6 && a.tested && b.tested);
+  assert(a.first == 5 && a.second == 6 && a.nested == 41);
+  assert(b.first == 6 && b.second == 7 && b.nested == 42);
+  assert(TemplatedMember<10>{}.value == 11);
+  assert(TemplatedMember<20>{}.value == 21);
+  assert(TemplatedMember<10>{}.value == 12);
+}
+} // namespace static_locals
 
 int match_pointer(int* pointer) {
   return match (pointer) {
@@ -492,6 +573,11 @@ void test_prvalue_projection_initialization() {
 }
 
 int main(int, char**) {
+  assert(namespace_scope::direct && namespace_scope::projected == 42);
+  assert(namespace_scope::decomposed_default() == 42);
+  namespace_scope::DecomposedMember decomposed_member;
+  assert(decomposed_member.value == 43 && decomposed_member.matched);
+  static_locals::check();
   assert(match_any(std::any{}) == -2);
   assert(match_any(std::any{42}) == 42);
   assert(match_any(std::any{std::string("hello")}) == 5);

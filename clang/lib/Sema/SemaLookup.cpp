@@ -1411,10 +1411,9 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
         if (Ctx->isTransparentContext())
           continue;
 
-        // We do not look directly into function or method contexts,
-        // since all of the local variables and parameters of the
-        // function/method are present within the Scope.
-        if (Ctx->isFunctionOrMethod()) {
+        // Local variables and parameters are present within the Scope rather
+        // than found by looking directly into their declaration context.
+        if (Ctx->isLocalContext()) {
           // If we have an Objective-C instance method, look for ivars
           // in the corresponding interface.
           if (ObjCMethodDecl *Method = dyn_cast<ObjCMethodDecl>(Ctx)) {

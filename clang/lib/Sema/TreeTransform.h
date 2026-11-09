@@ -19733,6 +19733,7 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
     Expr *ConstexprPrefix) -> CaseConditionTransformResult {
   assert((!SelectConstexprHandler || !Increment) &&
          "constexpr condition selection has no increment");
+  Sema::MatchDeclContextRAII MatchContext(getSema(), E->getMatchLoc());
   CaseConditionTransformResult Result;
   VarDecl *HoldingVar = nullptr;
   ExprResult LHS = getDerived().TransformMatchSubject(
@@ -19895,6 +19896,7 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
+  Sema::MatchDeclContextRAII MatchContext(getSema(), E->getMatchLoc());
   LocalInstantiationScope MatchScope(getSema(),
                                      /*CombineWithOuterScope=*/true);
   StmtResult Init = getDerived().TransformStmt(E->getInitStmt());

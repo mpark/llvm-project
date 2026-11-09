@@ -103,6 +103,58 @@ public:
     Inherited::VisitCXXDefaultInitExpr(E);
   }
 
+  void VisitMatchPattern(const MatchPattern *Pattern,
+                         const MatchPatternInstantiation *Instantiation) {
+    visitMatchPatternEvaluation(
+        Pattern, Instantiation, [](const Decl *) {},
+        [&](const Stmt *Node) { this->Visit(const_cast<Stmt *>(Node)); });
+  }
+
+  void VisitMatchGuard(const MatchGuard &Guard) {
+    if (Guard.Init)
+      this->Visit(Guard.Init);
+    if (Guard.ConditionVariable && Guard.ConditionVariable->getInit())
+      asImpl().Visit(Guard.ConditionVariable->getInit());
+    if (Guard.Condition)
+      asImpl().Visit(Guard.Condition);
+  }
+
+  void VisitMatchTestExpr(MatchTestExpr *E) {
+    asImpl().Visit(E->getHoldingVar() && E->getHoldingVar()->getInit()
+                       ? E->getHoldingVar()->getInit()
+                       : E->getSubject());
+    MatchTestInstantiation DirectInstantiation = E->getDirectInstantiation();
+    ArrayRef<MatchTestInstantiation> Instantiations = E->getInstantiations();
+    if (!E->hasSemanticInstantiations())
+      Instantiations = DirectInstantiation;
+    for (const MatchTestInstantiation &Case : Instantiations) {
+      VisitMatchPattern(Case.Pattern, Case.PatternInstantiation);
+      VisitMatchGuard(Case.Guard);
+      if (Case.Condition)
+        asImpl().Visit(Case.Condition);
+      if (Case.Handler)
+        this->Visit(Case.Handler);
+      if (Case.Increment)
+        asImpl().Visit(Case.Increment);
+    }
+  }
+
+  void VisitMatchSelectExpr(MatchSelectExpr *E) {
+    if (E->getInitStmt())
+      this->Visit(E->getInitStmt());
+    asImpl().Visit(E->getHoldingVar() && E->getHoldingVar()->getInit()
+                       ? E->getHoldingVar()->getInit()
+                       : E->getSubject());
+    for (Stmt *Node : E->getPreamble())
+      this->Visit(Node);
+    for (const MatchCaseInstantiation &Case : E->getCaseInstantiations()) {
+      VisitMatchPattern(Case.Pattern, Case.PatternInstantiation);
+      VisitMatchGuard(Case.Guard);
+      if (Case.Handler)
+        this->Visit(Case.Handler);
+    }
+  }
+
   void VisitInitListExpr(InitListExpr *ILE) {
     if (ILE->hasArrayFiller())
       asImpl().Visit(ILE->getArrayFiller());

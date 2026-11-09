@@ -48,7 +48,7 @@ namespace {
 
 static bool isLocalContainerContext(const DeclContext *DC) {
   return isa<FunctionDecl, ObjCMethodDecl, BlockDecl, CXXExpansionStmtDecl,
-             TopLevelStmtDecl>(DC);
+             TopLevelStmtDecl, MatchScopeDecl>(DC);
 }
 
 static const FunctionDecl *getStructor(const FunctionDecl *fn) {
@@ -515,6 +515,7 @@ private:
   void mangleOCLDeviceStubName(const IdentifierInfo *II);
   void mangleSourceNameWithAbiTags(const NamedDecl *ND,
                                    ArrayRef<StringRef> AdditionalAbiTags = {});
+  void mangleDefaultArgumentPrefix(const ParmVarDecl *Parm);
   void mangleLocalName(GlobalDecl GD,
                        ArrayRef<StringRef> AdditionalAbiTags = {});
   void mangleBlockForPrefix(const BlockDecl *Block);
@@ -1893,6 +1894,17 @@ static GlobalDecl getParentOfLocalEntity(const DeclContext *DC) {
   return GD;
 }
 
+void CXXNameMangler::mangleDefaultArgumentPrefix(const ParmVarDecl *Parm) {
+  const auto *Func = dyn_cast<FunctionDecl>(Parm->getDeclContext());
+  if (!Func)
+    return;
+  Out << 'd';
+  unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
+  if (Num > 1)
+    mangleNumber(Num - 2);
+  Out << '_';
+}
+
 void CXXNameMangler::mangleLocalName(GlobalDecl GD,
                                      ArrayRef<StringRef> AdditionalAbiTags) {
   const Decl *D = GD.getDecl();
@@ -1917,6 +1929,10 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
       mangleBlockForPrefix(BD);
     } else if (const auto *TLSD = dyn_cast<TopLevelStmtDecl>(DC)) {
       mangleTopLevelStmtEncoding(TLSD);
+    } else if (const auto *MSD = dyn_cast<MatchScopeDecl>(DC)) {
+      Out << 'N';
+      manglePrefix(MSD);
+      Out << "Ev";
     } else {
       mangleFunctionEncoding(getParentOfLocalEntity(DC));
     }
@@ -1941,14 +1957,7 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
     if (CXXRD && CXXRD->isLambda()) {
       if (const ParmVarDecl *Parm
               = dyn_cast_or_null<ParmVarDecl>(CXXRD->getLambdaContextDecl())) {
-        if (const FunctionDecl *Func
-              = dyn_cast<FunctionDecl>(Parm->getDeclContext())) {
-          Out << 'd';
-          unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
-          if (Num > 1)
-            mangleNumber(Num - 2);
-          Out << '_';
-        }
+        mangleDefaultArgumentPrefix(Parm);
       }
     }
 
@@ -1979,14 +1988,7 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
     // lambdas.
     if (const ParmVarDecl *Parm
             = dyn_cast_or_null<ParmVarDecl>(BD->getBlockManglingContextDecl())) {
-      if (const FunctionDecl *Func
-            = dyn_cast<FunctionDecl>(Parm->getDeclContext())) {
-        Out << 'd';
-        unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
-        if (Num > 1)
-          mangleNumber(Num - 2);
-        Out << '_';
-      }
+      mangleDefaultArgumentPrefix(Parm);
     }
 
     assert(AdditionalAbiTags.empty() &&
@@ -2266,6 +2268,23 @@ void CXXNameMangler::manglePrefix(const DeclContext *DC, bool NoFunction) {
 
   if (DC->isTemplateRegion())
     return;
+
+  if (const auto *MSD = dyn_cast<MatchScopeDecl>(DC)) {
+    if (const auto *Parm =
+            dyn_cast_or_null<ParmVarDecl>(MSD->getManglingContextDecl())) {
+      const auto *FD = cast<FunctionDecl>(Parm->getDeclContext());
+      Out << 'Z';
+      mangleFunctionEncoding(getParentOfLocalEntity(FD));
+      Out << 'E';
+      mangleDefaultArgumentPrefix(Parm);
+    } else if (const auto *ContextDecl = MSD->getManglingContextDecl()) {
+      mangleClosurePrefix(ContextDecl, NoFunction);
+    } else {
+      manglePrefix(Context.getEffectiveDeclContext(MSD), NoFunction);
+    }
+    Out << "Um" << MSD->getManglingNumber() << '_';
+    return;
+  }
 
   const NamedDecl *ND = cast<NamedDecl>(DC);
   if (mangleSubstitution(ND))

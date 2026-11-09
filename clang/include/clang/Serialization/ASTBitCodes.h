@@ -1568,6 +1568,9 @@ enum DeclCode {
   /// An ExplicitInstantiationDecl record.
   DECL_EXPLICIT_INSTANTIATION,
 
+  /// A MatchScopeDecl record.
+  DECL_MATCH_SCOPE,
+
   /// A MatchTemplateRegionDecl record.
   DECL_MATCH_TEMPLATE_REGION,
 

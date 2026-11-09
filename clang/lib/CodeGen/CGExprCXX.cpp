@@ -3228,9 +3228,12 @@ void CodeGenFunction::EmitMatchTestDispatch(
 RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
   assert(!S.getType()->isVoidType() && "match test must produce bool");
   bool IsTestExpression = !isa<CaseConditionExpr>(S);
+  std::optional<llvm::SaveAndRestore<DeclMapTy>> SavedLocalDeclMap;
   std::optional<LifetimeExtendedCleanupScope> TestScope;
-  if (IsTestExpression)
+  if (IsTestExpression) {
+    SavedLocalDeclMap.emplace(LocalDeclMap);
     TestScope.emplace(*this);
+  }
 
   if (S.getInstantiations().empty()) {
     std::optional<RunCleanupsScope> MatchScope;
@@ -3357,6 +3360,10 @@ getBatchableMatchCast(const MatchDecisionTree::Node &Node) {
 
 RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                                             AggValueSlot Dest) {
+  // A default argument or member initializer can emit the same match AST more
+  // than once. Its local declarations belong to this emission only.
+  llvm::SaveAndRestore SavedLocalDeclMap(LocalDeclMap);
+
   // FIXME: check if we can constant fold to simple integer,
   // just like switch does. Is this already handled in Sema?
   llvm::ArrayRef<MatchCaseInstantiation> Cases = S.getCaseInstantiations();

@@ -124,6 +124,7 @@ namespace clang {
     void VisitImplicitConceptSpecializationDecl(
         ImplicitConceptSpecializationDecl *D);
     void VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D);
+    void VisitMatchScopeDecl(MatchScopeDecl *D);
     void VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D);
     void VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D);
     void VisitClassTemplateDecl(ClassTemplateDecl *D);
@@ -1915,6 +1916,12 @@ void ASTDeclWriter::VisitImplicitConceptSpecializationDecl(
 
 void ASTDeclWriter::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
   Code = serialization::DECL_REQUIRES_EXPR_BODY;
+}
+
+void ASTDeclWriter::VisitMatchScopeDecl(MatchScopeDecl *D) {
+  Record.AddDeclRef(D->getManglingContextDecl());
+  Record.push_back(D->getManglingNumber());
+  Code = serialization::DECL_MATCH_SCOPE;
 }
 
 void ASTDeclWriter::VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D) {

@@ -181,6 +181,24 @@ int tuple_like_decomposition_pattern(const Pair &tup) {
     case _ => throw 0;
   };
 }
+
+struct TupleMember {
+  int source = 20;
+  int value = match (Pair{source, 22}) {
+    case auto [first, second] => first + second;
+  };
+  bool matched = match(Pair{source, 22}, case auto [first, second] if (first + second == 42));
+};
+
+TupleMember tuple_member;
+
+int tuple_default_argument(int value = match (Pair{20, 22}) {
+  case auto [first, second] => first + second;
+}) {
+  return value;
+}
+
+int use_tuple_default_argument() { return tuple_default_argument(); }
 //.
 // CHECK: [[META1]] = !{}
 // CHECK: [[META2]] = !{i64 4}

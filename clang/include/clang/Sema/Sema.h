@@ -3699,6 +3699,14 @@ public:
     ContextRAII &operator=(const ContextRAII &) = delete;
   };
 
+  class MatchDeclContextRAII {
+    std::optional<ContextRAII> SavedContext;
+
+  public:
+    MatchDeclContextRAII(Sema &S, SourceLocation Loc,
+                         Scope *ParsingScope = nullptr);
+  };
+
   class MatchTemplateRegionRAII {
     Sema &S;
     MatchTemplateRegionDecl *Region = nullptr;

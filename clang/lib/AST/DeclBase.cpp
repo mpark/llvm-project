@@ -1034,6 +1034,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case Empty:
     case LifetimeExtendedTemporary:
     case RequiresExprBody:
+    case MatchScope:
     case MatchTemplateRegion:
     case ImplicitConceptSpecialization:
     case OpenACCDeclare:
@@ -1517,6 +1518,7 @@ DeclContext *DeclContext::getPrimaryContext() {
   case Decl::OMPDeclareReduction:
   case Decl::OMPDeclareMapper:
   case Decl::RequiresExprBody:
+  case Decl::MatchScope:
   case Decl::MatchTemplateRegion:
   case Decl::CXXExpansionStmt:
     // There is only one DeclContext for these entities.

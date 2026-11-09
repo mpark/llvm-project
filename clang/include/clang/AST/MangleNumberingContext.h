@@ -29,6 +29,7 @@ class VarDecl;
 class MangleNumberingContext {
   // The index of the next lambda we encounter in this context.
   unsigned LambdaIndex = 0;
+  unsigned MatchIndex = 0;
 
 public:
   virtual ~MangleNumberingContext() {}
@@ -63,6 +64,9 @@ public:
   // used for deduplicating lambdas across modules. Note that this is a simple
   // sequence number and is not ABI-dependent.
   unsigned getNextLambdaIndex() { return LambdaIndex++; }
+
+  /// Retrieve the source-order number of a match scope in this context.
+  unsigned getNextMatchIndex() { return ++MatchIndex; }
 };
 
 } // end namespace clang

@@ -1290,7 +1290,7 @@ public:
 
   /// Returns true for local variable declarations other than parameters.
   /// Note that this includes static variables inside of functions. It also
-  /// includes variables inside blocks and expansion statements.
+  /// includes variables inside blocks, expansion statements, and match scopes.
   ///
   ///   void foo() { int x; static int y; extern int z; }
   bool isLocalVarDecl() const {
@@ -1299,7 +1299,7 @@ public:
     if (const DeclContext *DC = getLexicalDeclContext())
       return DC->getEnclosingNonTemplateRegionContext()
           ->getRedeclContext()
-          ->isFunctionOrMethod();
+          ->isLocalContext();
     return false;
   }
 

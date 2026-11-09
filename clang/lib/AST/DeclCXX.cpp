@@ -2412,6 +2412,20 @@ RequiresExprBodyDecl::CreateDeserialized(ASTContext &C, GlobalDeclID ID) {
   return new (C, ID) RequiresExprBodyDecl(C, nullptr, SourceLocation());
 }
 
+MatchScopeDecl *MatchScopeDecl::Create(ASTContext &C, DeclContext *DC,
+                                       SourceLocation StartLoc,
+                                       NamedDecl *ManglingContextDecl,
+                                       unsigned ManglingNumber) {
+  auto *D = new (C, DC) MatchScopeDecl(C, DC, StartLoc);
+  D->setManglingNumber(ManglingNumber, ManglingContextDecl);
+  return D;
+}
+
+MatchScopeDecl *MatchScopeDecl::CreateDeserialized(ASTContext &C,
+                                                   GlobalDeclID ID) {
+  return new (C, ID) MatchScopeDecl(C, nullptr, SourceLocation());
+}
+
 MatchTemplateRegionDecl *MatchTemplateRegionDecl::Create(ASTContext &C,
                                                          DeclContext *DC,
                                                          SourceLocation Loc) {

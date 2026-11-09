@@ -1759,8 +1759,9 @@ DeclContext *Sema::getFunctionLevelDeclContext(bool AllowLambda) const {
   DeclContext *DC = CurContext;
 
   while (true) {
-    if (DC->isTemplateRegion() ||
-        isa<BlockDecl, EnumDecl, CapturedDecl, RequiresExprBodyDecl>(DC) ||
+    if (isa<BlockDecl, EnumDecl, CapturedDecl, RequiresExprBodyDecl,
+            CXXExpansionStmtDecl, MatchScopeDecl, MatchTemplateRegionDecl>(
+            DC) ||
         isDoExprBodyContext(DC)) {
       DC = DC->getParent();
     } else if (!AllowLambda && isa<CXXMethodDecl>(DC) &&

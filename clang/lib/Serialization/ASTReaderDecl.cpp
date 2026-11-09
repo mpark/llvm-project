@@ -385,6 +385,7 @@ public:
   void
   VisitImplicitConceptSpecializationDecl(ImplicitConceptSpecializationDecl *D);
   void VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D);
+  void VisitMatchScopeDecl(MatchScopeDecl *D);
   void VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D);
   RedeclarableResult VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D);
   void VisitClassTemplateDecl(ClassTemplateDecl *D);
@@ -2507,6 +2508,11 @@ void ASTDeclReader::VisitImplicitConceptSpecializationDecl(
 void ASTDeclReader::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
 }
 
+void ASTDeclReader::VisitMatchScopeDecl(MatchScopeDecl *D) {
+  auto *ContextDecl = readDeclAs<NamedDecl>();
+  D->setManglingNumber(Record.readInt(), ContextDecl);
+}
+
 void ASTDeclReader::VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D) {
   D->setEndLoc(readSourceLocation());
 }
@@ -4225,6 +4231,9 @@ Decl *ASTReader::ReadDeclRecord(GlobalDeclID ID) {
     break;
   case DECL_REQUIRES_EXPR_BODY:
     D = RequiresExprBodyDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_MATCH_SCOPE:
+    D = MatchScopeDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_MATCH_TEMPLATE_REGION:
     D = MatchTemplateRegionDecl::CreateDeserialized(Context, ID);

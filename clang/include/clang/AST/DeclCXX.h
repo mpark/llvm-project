@@ -2154,6 +2154,40 @@ public:
   }
 };
 
+/// Holds expression-local match declarations outside a function context.
+class MatchScopeDecl : public Decl, public DeclContext {
+  NamedDecl *ManglingContextDecl = nullptr;
+  unsigned ManglingNumber = 0;
+
+  MatchScopeDecl(ASTContext &C, DeclContext *DC, SourceLocation StartLoc)
+      : Decl(MatchScope, DC, StartLoc), DeclContext(MatchScope) {}
+
+public:
+  static MatchScopeDecl *Create(ASTContext &C, DeclContext *DC,
+                                SourceLocation StartLoc,
+                                NamedDecl *ManglingContextDecl,
+                                unsigned ManglingNumber);
+  static MatchScopeDecl *CreateDeserialized(ASTContext &C, GlobalDeclID ID);
+
+  NamedDecl *getManglingContextDecl() const { return ManglingContextDecl; }
+  unsigned getManglingNumber() const { return ManglingNumber; }
+  void setManglingNumber(unsigned Number, NamedDecl *ContextDecl) {
+    ManglingNumber = Number;
+    ManglingContextDecl = ContextDecl;
+  }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == MatchScope; }
+
+  static DeclContext *castToDeclContext(const MatchScopeDecl *D) {
+    return static_cast<DeclContext *>(const_cast<MatchScopeDecl *>(D));
+  }
+
+  static MatchScopeDecl *castFromDeclContext(const DeclContext *DC) {
+    return static_cast<MatchScopeDecl *>(const_cast<DeclContext *>(DC));
+  }
+};
+
 /// The dependent declaration context of a generic match pattern and its
 /// continuation. The owning match stores the source and instantiations.
 class MatchTemplateRegionDecl : public Decl, public DeclContext {

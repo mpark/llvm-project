@@ -96,11 +96,9 @@ IdentifierResolver::~IdentifierResolver() {
   delete IdDeclInfos;
 }
 
-/// isDeclInScope - If 'Ctx' is a function/method, isDeclInScope returns true
+/// isDeclInScope - If 'Ctx' is a local context, isDeclInScope returns true
 /// if 'D' is in Scope 'S', otherwise 'S' is ignored and isDeclInScope returns
 /// true if 'D' belongs to the given declaration context.
-///
-/// Template regions use the enclosing context for function-scope lookup.
 bool IdentifierResolver::isDeclInScope(Decl *D, DeclContext *Ctx, Scope *S,
                                        bool AllowInlineNamespace) const {
   Ctx = Ctx->getRedeclContext();
@@ -109,10 +107,7 @@ bool IdentifierResolver::isDeclInScope(Decl *D, DeclContext *Ctx, Scope *S,
   // conflict with other Decls.
   if (LangOpt.HLSL && isa<HLSLBufferDecl>(D))
     return false;
-  if (Ctx->getEnclosingNonTemplateRegionContext()
-          ->getRedeclContext()
-          ->isFunctionOrMethod() ||
-      (S && S->isFunctionPrototypeScope())) {
+  if (Ctx->isLocalContext() || (S && S->isFunctionPrototypeScope())) {
     // Ignore the scopes associated within transparent declaration contexts.
     while (S->getEntity() &&
            (S->getEntity()->isTransparentContext() ||

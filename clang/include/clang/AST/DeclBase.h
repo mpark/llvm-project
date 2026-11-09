@@ -2187,6 +2187,8 @@ public:
     }
   }
 
+  bool isMatchScope() const { return getDeclKind() == Decl::MatchScope; }
+
   bool isMatchTemplateRegion() const {
     return getDeclKind() == Decl::MatchTemplateRegion;
   }
@@ -2197,7 +2199,7 @@ public:
 
   /// Whether declarations in this context use block-scope name lookup.
   bool isLocalContext() const {
-    return isFunctionOrMethod() || isMatchTemplateRegion();
+    return isFunctionOrMethod() || isMatchScope() || isMatchTemplateRegion();
   }
 
   /// Cast this to a FunctionDecl if it is one, ignoring any intervening
@@ -2218,7 +2220,7 @@ public:
 
   /// Test whether the context supports looking up names.
   bool isLookupContext() const {
-    return !isFunctionOrMethod() && getDeclKind() != Decl::LinkageSpec &&
+    return !isLocalContext() && getDeclKind() != Decl::LinkageSpec &&
            getDeclKind() != Decl::Export;
   }
 

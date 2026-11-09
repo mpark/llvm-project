@@ -795,6 +795,8 @@ Address CIRGenModule::createUnnamedGlobalFrom(const VarDecl &d,
       name = getMangledName(&d).str() + ".const";
     else if (const DeclContext *dc = d.getParentFunctionOrMethod())
       name = ("__const." + functionName(dc) + "." + d.getName()).str();
+    else if (d.getDeclContext()->isMatchScope())
+      name = ("__const.<match>." + d.getName()).str();
     else
       llvm_unreachable("local variable has no parent function or method");
 
@@ -1101,6 +1103,7 @@ void CIRGenFunction::emitDecl(const Decl &d, bool evaluateConditionDecl) {
   case Decl::Concept:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
+  case Decl::MatchScope:
   case Decl::MatchTemplateRegion:
   case Decl::UnnamedGlobalConstant:
     // None of these decls require codegen support.

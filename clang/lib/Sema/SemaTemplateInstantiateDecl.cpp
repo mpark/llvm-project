@@ -5157,6 +5157,18 @@ TemplateDeclInstantiator::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
                                       D->getBeginLoc());
 }
 
+Decl *TemplateDeclInstantiator::VisitMatchScopeDecl(MatchScopeDecl *D) {
+  NamedDecl *ContextDecl = D->getManglingContextDecl();
+  if (ContextDecl) {
+    ContextDecl = SemaRef.FindInstantiatedDecl(D->getLocation(), ContextDecl,
+                                               TemplateArgs);
+    if (!ContextDecl)
+      return nullptr;
+  }
+  return MatchScopeDecl::Create(SemaRef.Context, Owner, D->getBeginLoc(),
+                                ContextDecl, D->getManglingNumber());
+}
+
 Decl *TemplateDeclInstantiator::VisitMatchTemplateRegionDecl(
     MatchTemplateRegionDecl *D) {
   auto *Region =
@@ -7400,11 +7412,11 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
         TTPT && TTPT->getDepth() < TemplateArgs.getNumRetainedOuterLevels())
       return D;
   }
-  if (isa<ParmVarDecl>(D) || isa<NonTypeTemplateParmDecl>(D) ||
-      isa<TemplateTypeParmDecl>(D) || isa<TemplateTemplateParmDecl>(D) ||
-      (ParentDependsOnArgs && (ParentDC->isLocalContext() ||
-                               isa<OMPDeclareReductionDecl>(ParentDC) ||
-                               isa<OMPDeclareMapperDecl>(ParentDC))) ||
+  if (isa<ParmVarDecl, NonTypeTemplateParmDecl, TemplateTypeParmDecl,
+          TemplateTemplateParmDecl>(D) ||
+      (ParentDependsOnArgs &&
+       (ParentDC->isLocalContext() || isa<OMPDeclareReductionDecl>(ParentDC) ||
+        isa<OMPDeclareMapperDecl>(ParentDC))) ||
       (isa<CXXRecordDecl>(D) && cast<CXXRecordDecl>(D)->isLambda() &&
        cast<CXXRecordDecl>(D)->getTemplateDepth() >
            TemplateArgs.getNumRetainedOuterLevels())) {

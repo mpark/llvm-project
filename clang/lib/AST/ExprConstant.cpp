@@ -5872,9 +5872,8 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
       (!VD->hasLocalStorage() && Info.EvaluatingSyntheticDoExprFrame &&
        Info.CurrentCall && !Info.CurrentCall->Callee &&
        isSyntheticDoExprDeclContext(VD->getDeclContext()));
-  bool TreatAsMatchExprLocal = Info.MatchExprLocalVarDecls.contains(VD);
   // We don't need to evaluate the initializer for a static local.
-  if (!VD->hasLocalStorage() && !TreatAsDoExprLocal && !TreatAsMatchExprLocal)
+  if (!VD->hasLocalStorage() && !TreatAsDoExprLocal)
     return true;
 
   LValue Result;
@@ -5883,6 +5882,8 @@ static bool EvaluateVarDecl(EvalInfo &Info, const VarDecl *VD) {
   // Note: DoExprLocalVarDecls may have already been set by caller
   if (TreatAsDoExprLocal)
     Info.DoExprLocalVarDecls.insert(VD);
+  if (VD->getDeclContext()->isMatchScope())
+    Info.MatchExprLocalVarDecls.insert(VD);
 
   const Expr *InitE = VD->getInit();
   if (!InitE) {
@@ -10598,7 +10599,7 @@ bool LValueExprEvaluator::VisitVarDecl(const Expr *E, const VarDecl *VD) {
        Info.CurrentCall && !Info.CurrentCall->Callee &&
        isSyntheticDoExprDeclContext(VD->getDeclContext()));
   bool IsMatchExprLocal = Info.MatchExprLocalVarDecls.contains(VD);
-  if (VD->hasLocalStorage() || IsDoExprLocal || IsMatchExprLocal) {
+  if (VD->hasLocalStorage() || IsDoExprLocal) {
     // Only if a local variable was declared in the function currently being
     // evaluated, do we expect to be able to find its value in the current
     // frame. (Otherwise it was likely declared in an enclosing context and
@@ -10699,15 +10700,11 @@ bool LValueExprEvaluator::VisitMaterializeTemporaryExpr(
     if (!EvaluateIgnoredValue(Info, E))
       return false;
 
-  const auto *VD = dyn_cast_or_null<VarDecl>(E->getExtendingDecl());
-  bool IsMatchExprLocal = VD && Info.MatchExprLocalVarDecls.contains(VD);
-
   // A materialized temporary with static storage duration can appear within the
   // result of a constant expression evaluation, so we need to preserve its
-  // value for use outside this evaluation. Namespace-scope match declarations
-  // and their lifetime-extended temporaries use local evaluator storage instead.
+  // value for use outside this evaluation.
   APValue *Value;
-  if (E->getStorageDuration() == SD_Static && !IsMatchExprLocal) {
+  if (E->getStorageDuration() == SD_Static) {
     if (Info.EvalMode == EvaluationMode::ConstantFold)
       return false;
     // FIXME: What about SD_Thread?
@@ -21498,25 +21495,29 @@ bool IntExprEvaluator::VisitRequiresExpr(const RequiresExpr *E) {
 }
 
 static bool
+EvaluateMatchDecl(EvalInfo &Info, const VarDecl *D,
+                  MatchProjectionEvaluationCache *ProjectionCache = nullptr,
+                  bool EvaluateConditionDecl = false) {
+  if (!D ||
+      (ProjectionCache && !ProjectionCache->Declarations.insert(D).second))
+    return true;
+  Info.MatchExprLocalVarDecls.insert(D);
+  return EvaluateDecl(Info, D, EvaluateConditionDecl);
+}
+
+static bool
 EvaluateProjectionCondition(const MatchProjection *Projection, EvalInfo &Info,
                             MatchProjectionEvaluationCache *ProjectionCache) {
   if (!Projection)
     return false;
   if (ProjectionCache && !ProjectionCache->Conditions.insert(Projection).second)
     return true;
-  auto EvaluateOnce = [&](const VarDecl *D) {
-    if (D)
-      Info.MatchExprLocalVarDecls.insert(D);
-    return !D ||
-           (ProjectionCache &&
-            !ProjectionCache->Declarations.insert(D).second) ||
-           EvaluateDecl(Info, D);
-  };
-  if (!EvaluateOnce(Projection->getHoldingVar()) ||
-      !EvaluateOnce(Projection->getIntermediateVar()) ||
-      !EvaluateOnce(Projection->getConditionVar()))
-    return false;
-  return true;
+  return EvaluateMatchDecl(Info, Projection->getHoldingVar(),
+                           ProjectionCache) &&
+         EvaluateMatchDecl(Info, Projection->getIntermediateVar(),
+                           ProjectionCache) &&
+         EvaluateMatchDecl(Info, Projection->getConditionVar(),
+                           ProjectionCache);
 }
 
 static bool
@@ -21524,23 +21525,15 @@ EvaluateProjectionValue(const MatchProjection *Projection, EvalInfo &Info,
                         MatchProjectionEvaluationCache *ProjectionCache) {
   if (ProjectionCache && !ProjectionCache->Values.insert(Projection).second)
     return true;
-  if (const VarDecl *D = Projection->getProjectedVar();
-      D &&
-      (!ProjectionCache || ProjectionCache->Declarations.insert(D).second)) {
-    Info.MatchExprLocalVarDecls.insert(D);
-    if (!EvaluateDecl(Info, D))
-      return false;
-  }
+  if (!EvaluateMatchDecl(Info, Projection->getProjectedVar(), ProjectionCache))
+    return false;
   if (!Projection->getProjectedVar() && Projection->getProjectedExpr() &&
       Projection->getProjectedExpr()->getType()->isVoidType() &&
       !EvaluateIgnoredValue(Info, Projection->getProjectedExpr()))
     return false;
-  if (const DecompositionDecl *D = Projection->getDecomposedDecl(); D) {
-    Info.MatchExprLocalVarDecls.insert(D);
-    if (!EvaluateDecl(Info, D, /*EvaluateConditionDecl=*/true))
-      return false;
-  }
-  return true;
+  return EvaluateMatchDecl(Info, Projection->getDecomposedDecl(),
+                           /*ProjectionCache=*/nullptr,
+                           /*EvaluateConditionDecl=*/true);
 }
 
 static bool
@@ -21727,15 +21720,13 @@ static bool EvaluatePatternDeclarations(
     const VarDecl *Declaration = P->getDeclaration();
     if (!ProjectionCache.Declarations.insert(Declaration).second)
       return true;
-    Info.MatchExprLocalVarDecls.insert(Declaration);
-    if (!EvaluateDecl(Info, Declaration))
+    if (!EvaluateMatchDecl(Info, Declaration))
       return false;
     if (const auto *Decomposition = dyn_cast<DecompositionDecl>(Declaration))
       for (const BindingDecl *Binding : Decomposition->all_bindings())
-        if (const VarDecl *HoldingVar = Binding->getHoldingVar())
-          if (ProjectionCache.Declarations.insert(HoldingVar).second &&
-              !EvaluateDecl(Info, HoldingVar))
-            return false;
+        if (!EvaluateMatchDecl(Info, Binding->getHoldingVar(),
+                               &ProjectionCache))
+          return false;
     return true;
   }
   if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
@@ -21809,8 +21800,7 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
 
   ArrayRef<MatchTestInstantiation> Instantiations = E->getInstantiations();
   if (const VarDecl *VD = E->getHoldingVar()) {
-    Info.MatchExprLocalVarDecls.insert(VD);
-    if (!EvaluateDecl(Info, VD))
+    if (!EvaluateMatchDecl(Info, VD))
       return false;
   } else if (E->getSubject()->getType()->isVoidType() &&
              !EvaluateIgnoredValue(Info, E->getSubject())) {
