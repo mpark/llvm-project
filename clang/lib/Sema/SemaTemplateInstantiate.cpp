@@ -574,6 +574,7 @@ bool Sema::CodeSynthesisContext::isInstantiationRecord() const {
   case ConstraintsCheck:
   case NestedRequirementConstraintsCheck:
   case ExpansionStmtInstantiation:
+  case MatchTemplateRegionInstantiation:
     return true;
 
   case RequirementInstantiation:
@@ -595,7 +596,6 @@ bool Sema::CodeSynthesisContext::isInstantiationRecord() const {
   case PartialOrderingTTP:
   case SYCLKernelLaunchLookup:
   case SYCLKernelLaunchOverloadResolution:
-  case PatternMatchingExpansion:
     return false;
 
   // This function should never be called when Kind's value is Memoization.
@@ -768,6 +768,25 @@ Sema::InstantiatingTemplate::InstantiatingTemplate(
           SemaRef, CodeSynthesisContext::ExpansionStmtInstantiation,
           PointOfInstantiation, InstantiationRange, /*Entity=*/nullptr,
           /*Template=*/nullptr, /*TemplateArgs=*/TArgs) {}
+
+Sema::InstantiatingTemplate::InstantiatingTemplate(
+    Sema &SemaRef, SourceLocation PointOfInstantiation,
+    MatchTemplateRegionDecl *Region)
+    : InstantiatingTemplate(
+          SemaRef, CodeSynthesisContext::MatchTemplateRegionInstantiation,
+          PointOfInstantiation, Region->getSourceRange(), Region) {}
+
+MatchCandidateInstantiationScope::MatchCandidateInstantiationScope(
+    Sema &S, MatchTemplateRegionDecl *Region)
+    : LocalScope(S, /*CombineWithOuterScope=*/true),
+      Synthesis(S, Region || S.isSynthesizingTemplateRegion()) {
+  if (!Region)
+    return;
+  if (!S.CurrentInstantiationScope->getInstantiationOfIfExists(Region))
+    S.CurrentInstantiationScope->InstantiatedLocal(Region,
+                                                   cast<Decl>(S.CurContext));
+  Instantiation.emplace(S, Region->getLocation(), Region);
+}
 
 Sema::InstantiatingTemplate::InstantiatingTemplate(
     Sema &SemaRef, SourceLocation PointOfInstantiation,
@@ -1285,6 +1304,10 @@ void Sema::PrintInstantiationStack(InstantiationContextDiagFuncRef DiagFunc) {
       Diags.Report(Active->PointOfInstantiation,
                    diag::note_expansion_stmt_instantiation_here);
       break;
+    case CodeSynthesisContext::MatchTemplateRegionInstantiation:
+      DiagFunc(Active->PointOfInstantiation,
+               PDiag(diag::note_match_region_instantiation_here));
+      break;
     case CodeSynthesisContext::SYCLKernelLaunchLookup: {
       const auto *SKEPAttr =
           Active->Entity->getAttr<SYCLKernelEntryPointAttr>();
@@ -1312,8 +1335,6 @@ void Sema::PrintInstantiationStack(InstantiationContextDiagFuncRef DiagFunc) {
                                                 Active->NumCallArgs)));
       break;
     }
-    case CodeSynthesisContext::PatternMatchingExpansion:
-      break;
     }
   }
 }
@@ -1357,9 +1378,12 @@ namespace {
                          bool BailOutOnIncomplete = false)
         : inherited(SemaRef), TemplateArgs(TemplateArgs), Loc(Loc),
           Entity(Entity), BailOutOnIncomplete(BailOutOnIncomplete) {
-      assert((!SemaRef.CodeSynthesisContexts.empty() ||
+      // Argument-free rebuilding may enter an instantiation context later,
+      // when it reaches a dependent region of the source tree.
+      assert((!TemplateArgs.getNumLevels() ||
+              !SemaRef.CodeSynthesisContexts.empty() ||
               SemaRef.isSFINAEContext()) &&
-             "Cannot perform an instantiation without some context on the "
+             "Cannot substitute template arguments without some context on the "
              "instantiation stack");
     }
 
@@ -2011,7 +2035,7 @@ Decl *TemplateInstantiator::TransformDecl(SourceLocation Loc, Decl *D) {
   if (instantiateMissingDeclsToScopeForConcepts(D))
     return nullptr;
 
-  if (isa<CXXExpansionStmtDecl>(D)) {
+  if (isa<CXXExpansionStmtDecl, MatchTemplateRegionDecl>(D)) {
     assert(SemaRef.CurrentInstantiationScope);
     return cast<Decl *>(
         *SemaRef.CurrentInstantiationScope->findInstantiationOf(D));
@@ -4578,11 +4602,6 @@ Sema::SubstStmt(Stmt *S, const MultiLevelTemplateArgumentList &TemplateArgs) {
 ExprResult Sema::ExpandDeferredMatchExpr(Expr *E) {
   assert((isa<MatchSelectExpr, MatchTestExpr>(E)) &&
          "expected a match expression");
-  CodeSynthesisContext Ctx;
-  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
-  Ctx.PointOfInstantiation = E->getBeginLoc();
-  Ctx.Entity = cast<Decl>(CurContext);
-  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
   LocalInstantiationScope Scope(*this);
   MultiLevelTemplateArgumentList TemplateArgs;
   TemplateInstantiator Instantiator(*this, TemplateArgs, E->getBeginLoc(),
@@ -4592,11 +4611,6 @@ ExprResult Sema::ExpandDeferredMatchExpr(Expr *E) {
 
 StmtResult Sema::ExpandDeferredMatchConditionStmt(Stmt *S,
                                                   SourceLocation MatchLoc) {
-  CodeSynthesisContext Ctx;
-  Ctx.Kind = CodeSynthesisContext::PatternMatchingExpansion;
-  Ctx.PointOfInstantiation = MatchLoc;
-  Ctx.Entity = cast<Decl>(CurContext);
-  ScopedCodeSynthesisContext SynthesisContext(*this, Ctx);
   LocalInstantiationScope Scope(*this);
   MultiLevelTemplateArgumentList TemplateArgs;
   TemplateInstantiator Instantiator(*this, TemplateArgs, MatchLoc,

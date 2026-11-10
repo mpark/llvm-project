@@ -625,7 +625,7 @@ StmtResult Sema::FinishCXXExpansionStmt(Stmt *Exp, Stmt *Body) {
   unsigned PtrDiffTWidth = Context.getIntWidth(PtrDiffT);
   bool PtrDiffTIsUnsigned = PtrDiffT->isUnsignedIntegerType();
   for (uint64_t I = 0; I < *NumInstantiations; ++I) {
-    ExpansionStmtSynthesisRAII ExpansionGuard(
+    TemplateRegionSynthesisRAII ExpansionGuard(
         *this, !CurContext->isDependentContext());
     llvm::APInt IVal{PtrDiffTWidth, I};
     TemplateArgument Arg{

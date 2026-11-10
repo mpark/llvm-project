@@ -4528,9 +4528,8 @@ LabelDecl *Sema::LookupExistingLabel(IdentifierInfo *II, SourceLocation Loc) {
                                     RedeclarationKind::NotForRedeclaration);
   // If we found a label, check to see if it is in the same context as us.
   // When in a Block, we don't want to reuse a label in an enclosing function.
-  if (!Res ||
-      Res->getDeclContext()->getEnclosingNonExpansionStatementContext() !=
-          CurContext->getEnclosingNonExpansionStatementContext())
+  if (!Res || Res->getDeclContext()->getEnclosingNonTemplateRegionContext() !=
+                  CurContext->getEnclosingNonTemplateRegionContext())
     return nullptr;
   return cast<LabelDecl>(Res);
 }
@@ -4570,13 +4569,24 @@ LabelDecl *Sema::LookupOrCreateLabel(IdentifierInfo *II, SourceLocation Loc,
     return nullptr;
   }
 
-  if (Existing)
+  if (Existing) {
+    if (IsLabelStmt && CurContext->isMatchTemplateRegion() &&
+        !Existing->getStmt() && !Existing->isGnuLocal()) {
+      Existing->getDeclContext()->removeDecl(Existing);
+      Existing->setDeclContext(CurContext);
+      Existing->setLexicalDeclContext(CurContext);
+      CurContext->addDecl(Existing);
+    }
     return Existing;
+  }
 
-  // Declare non-local labels outside any expansion statements; this is required
-  // to support jumping out of an expansion statement.
-  ContextRAII Ctx{*this, CurContext->getEnclosingNonExpansionStatementContext(),
-                  /*NewThisContext=*/false};
+  // Labels defined in a match region are instantiated with each case. Forward
+  // references belong to the enclosing function so jumps out remain valid.
+  DeclContext *LabelContext =
+      IsLabelStmt && CurContext->isMatchTemplateRegion()
+          ? CurContext
+          : CurContext->getEnclosingNonTemplateRegionContext();
+  ContextRAII Ctx{*this, LabelContext, /*NewThisContext=*/false};
 
   // Not a GNU local label. Create the backing decl.
   auto *Res = LabelDecl::Create(Context, CurContext, Loc, II);

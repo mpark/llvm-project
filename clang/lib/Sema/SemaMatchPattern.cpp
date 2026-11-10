@@ -25,6 +25,43 @@
 using namespace clang;
 using namespace sema;
 
+void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
+                                          MatchPattern *Pattern,
+                                          bool RequiresTemplateRegion) {
+  if (Region) {
+    reenter();
+    return;
+  }
+  if (!RequiresTemplateRegion || S.CurContext->isDependentContext())
+    return;
+  Region = MatchTemplateRegionDecl::Create(S.Context, S.CurContext, Loc);
+  S.CurContext->addDecl(Region);
+
+  auto MoveDeclaration = [&](Decl *D) {
+    DeclContext *OldContext = D->getDeclContext();
+    if (OldContext == Region)
+      return;
+    if (OldContext->containsDecl(D))
+      OldContext->removeDecl(D);
+    D->setDeclContext(Region);
+    D->setLexicalDeclContext(Region);
+    Region->addDecl(D);
+  };
+  auto MovePatternDeclarations = [&](auto &&Self, MatchPattern *P) -> void {
+    if (auto *Declaration = dyn_cast<DeclarationPattern>(P)) {
+      VarDecl *D = Declaration->getDeclaration();
+      MoveDeclaration(D);
+      if (auto *Decomposition = dyn_cast<DecompositionDecl>(D))
+        for (BindingDecl *Binding : Decomposition->bindings())
+          MoveDeclaration(Binding);
+    }
+    for (MatchPattern *Child : P->children())
+      Self(Self, Child);
+  };
+  MovePatternDeclarations(MovePatternDeclarations, Pattern);
+  reenter();
+}
+
 static VarDecl *BuildVarDecl(Sema &SemaRef, SourceLocation Loc, QualType Type,
                              Expr *Init, bool IsConstexpr = false) {
   DeclContext *DC = SemaRef.CurContext;
@@ -770,12 +807,7 @@ StmtResult Sema::ActOnMatchExprHandler(TypeLoc OrigResultType, QualType &RetTy,
   }
   Expr *E = ER.get();
   SourceLocation Loc = E->getBeginLoc();
-  const AutoType *HandlerAuto = E->getType()->getContainedAutoType();
-  bool HasDependentAuto =
-      HandlerAuto &&
-      (!HandlerAuto->isDeduced() || HandlerAuto->getDeducedType().isNull() ||
-       HandlerAuto->getDeducedType()->isDependentType());
-  if (E->isTypeDependent() || HasDependentAuto || RetTy->isDependentType()) {
+  if (E->isTypeDependent() || RetTy->isDependentType()) {
     if (OrigResultType.getType()->getContainedAutoType())
       RetTy = Context.DependentTy;
     return E;
@@ -1253,6 +1285,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
     unsigned Chosen = Selected.front();
     if (ProjectionCache->DeferAlternativeChoices) {
+      ProjectionCache->RequiresTemplateRegion = true;
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
       ProjectionCache->HasDeferredAlternativeChoices = true;
       return S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(),

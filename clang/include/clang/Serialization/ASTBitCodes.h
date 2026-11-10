@@ -1568,7 +1568,10 @@ enum DeclCode {
   /// An ExplicitInstantiationDecl record.
   DECL_EXPLICIT_INSTANTIATION,
 
-  DECL_LAST = DECL_EXPLICIT_INSTANTIATION
+  /// A MatchTemplateRegionDecl record.
+  DECL_MATCH_TEMPLATE_REGION,
+
+  DECL_LAST = DECL_MATCH_TEMPLATE_REGION
 };
 
 /// Record codes for each kind of statement or expression.

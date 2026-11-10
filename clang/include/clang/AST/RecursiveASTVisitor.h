@@ -2543,6 +2543,7 @@ DEF_TRAVERSE_DECL(ParmVarDecl, {
 })
 
 DEF_TRAVERSE_DECL(RequiresExprBodyDecl, {})
+DEF_TRAVERSE_DECL(MatchTemplateRegionDecl, {})
 
 DEF_TRAVERSE_DECL(ImplicitConceptSpecializationDecl, {
   TRY_TO(TraverseTemplateArguments(D->getTemplateArguments()));

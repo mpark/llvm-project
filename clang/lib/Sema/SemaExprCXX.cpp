@@ -7103,7 +7103,7 @@ ExprResult Sema::ActOnStartCXXMemberReference(Scope *S, Expr *Base,
     QualType StartingType = BaseType;
     bool NoArrowOperatorFound = false;
     bool FirstIteration = true;
-    FunctionDecl *CurFD = dyn_cast<FunctionDecl>(CurContext);
+    FunctionDecl *CurFD = CurContext->getEnclosingFunction();
     // The set of types we've considered so far.
     llvm::SmallPtrSet<CanQualType,8> CTypes;
     SmallVector<FunctionDecl*, 8> OperatorArrows;
@@ -7784,8 +7784,7 @@ static void CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(
   assert(!S.isUnevaluatedContext());
 #ifndef NDEBUG
   DeclContext *DC = S.CurContext;
-  while (isa_and_nonnull<CapturedDecl>(DC) ||
-         (DC && DC->isExpansionStmt()))
+  while (isa_and_nonnull<CapturedDecl>(DC) || (DC && DC->isTemplateRegion()))
     DC = DC->getParent();
   assert(
       (CurrentLSI->CallOperator == DC || !CurrentLSI->AfterParameterList) &&
@@ -7949,13 +7948,12 @@ ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
   //  - Teach the handful of places that iterate over FunctionScopes to
   //    stop at the outermost enclosing lexical scope."
   DeclContext *DC = CurContext;
-  while (isa_and_nonnull<CapturedDecl>(DC) ||
-         isa_and_nonnull<CXXExpansionStmtDecl>(DC))
+  while (isa_and_nonnull<CapturedDecl>(DC) || (DC && DC->isTemplateRegion()))
     DC = DC->getParent();
   const bool IsInLambdaDeclContext = isLambdaCallOperator(DC);
   if (IsInLambdaDeclContext && CurrentLSI &&
       CurrentLSI->hasPotentialCaptures() && !FullExpr.isInvalid() &&
-      !IsSynthesizingExpansionStmt)
+      !IsSynthesizingTemplateRegion)
     CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(FE, CurrentLSI,
                                                               *this);
   return MaybeCreateExprWithCleanups(FullExpr);

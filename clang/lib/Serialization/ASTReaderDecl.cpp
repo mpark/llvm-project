@@ -385,6 +385,7 @@ public:
   void
   VisitImplicitConceptSpecializationDecl(ImplicitConceptSpecializationDecl *D);
   void VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D);
+  void VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D);
   RedeclarableResult VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D);
   void VisitClassTemplateDecl(ClassTemplateDecl *D);
   void VisitBuiltinTemplateDecl(BuiltinTemplateDecl *D);
@@ -2505,6 +2506,10 @@ void ASTDeclReader::VisitImplicitConceptSpecializationDecl(
 void ASTDeclReader::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
 }
 
+void ASTDeclReader::VisitMatchTemplateRegionDecl(MatchTemplateRegionDecl *D) {
+  D->setEndLoc(readSourceLocation());
+}
+
 void ASTDeclReader::ReadSpecializations(ModuleFile &M, Decl *D,
                                         llvm::BitstreamCursor &DeclsCursor,
                                         bool IsPartial) {
@@ -4219,6 +4224,9 @@ Decl *ASTReader::ReadDeclRecord(GlobalDeclID ID) {
     break;
   case DECL_REQUIRES_EXPR_BODY:
     D = RequiresExprBodyDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_MATCH_TEMPLATE_REGION:
+    D = MatchTemplateRegionDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_STATIC_ASSERT:
     D = StaticAssertDecl::CreateDeserialized(Context, ID);

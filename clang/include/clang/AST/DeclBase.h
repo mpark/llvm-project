@@ -2172,24 +2172,39 @@ public:
   /// or block, or a DeclContext that can only occur in or is conceptually
   /// treated like a function.
   bool isFunctionOrMethod() const {
-    switch (getDeclKind()) {
+    Decl::Kind DK = getDeclKind();
+    switch (DK) {
     case Decl::Block:
     case Decl::Captured:
     case Decl::ObjCMethod:
     case Decl::TopLevelStmt:
-    case Decl::CXXExpansionStmt:
       return true;
+    case Decl::CXXExpansionStmt:
+    case Decl::MatchTemplateRegion:
+      return getEnclosingNonTemplateRegionContext()->isFunctionOrMethod();
     default:
-      return getDeclKind() >= Decl::firstFunction &&
-             getDeclKind() <= Decl::lastFunction;
+      return DK >= Decl::firstFunction && DK <= Decl::lastFunction;
     }
   }
 
+  bool isMatchTemplateRegion() const {
+    return getDeclKind() == Decl::MatchTemplateRegion;
+  }
+
+  bool isTemplateRegion() const {
+    return isExpansionStmt() || isMatchTemplateRegion();
+  }
+
+  /// Whether declarations in this context use block-scope name lookup.
+  bool isLocalContext() const {
+    return isFunctionOrMethod() || isMatchTemplateRegion();
+  }
+
   /// Cast this to a FunctionDecl if it is one, ignoring any intervening
-  /// expansion statements. Returns nullptr if this is not a function.
+  /// template regions. Returns nullptr if this is not a function.
   ///
   /// In particular, this will return nullptr if the *nearest* enclosing
-  /// DeclContext that is not an expansion statement is something other
+  /// DeclContext that is not a template region is something other
   /// than a function (e.g. a CXXRecordDecl, even if it is a local class).
   FunctionDecl *getEnclosingFunction();
   const FunctionDecl *getEnclosingFunction() const {
@@ -2326,13 +2341,12 @@ public:
     return const_cast<DeclContext *>(this)->getOuterLexicalRecordContext();
   }
 
-  /// Retrieve the innermost enclosing context that doesn't belong to an
-  /// expansion statement. Returns 'this' if this context is not an expansion
-  /// statement.
-  DeclContext *getEnclosingNonExpansionStatementContext();
-  const DeclContext *getEnclosingNonExpansionStatementContext() const {
+  /// Retrieve the innermost context outside expansion statements and dependent
+  /// match regions. Other context boundaries, including local classes, remain.
+  DeclContext *getEnclosingNonTemplateRegionContext();
+  const DeclContext *getEnclosingNonTemplateRegionContext() const {
     return const_cast<DeclContext *>(this)
-        ->getEnclosingNonExpansionStatementContext();
+        ->getEnclosingNonTemplateRegionContext();
   }
 
   /// Test if this context is part of the enclosing namespace set of

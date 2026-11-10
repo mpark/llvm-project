@@ -101,7 +101,7 @@ static inline UnsignedOrNone getStackIndexOfNearestEnclosingCaptureReadyLambda(
     // arrived here) - so we don't yet have a lambda that can capture the
     // variable.
     if (IsCapturingVariable && VarToCapture->getDeclContext()
-                                   ->getEnclosingNonExpansionStatementContext()
+                                   ->getEnclosingNonTemplateRegionContext()
                                    ->Equals(EnclosingDC))
       return NoLambdaIsCaptureReady;
 
@@ -128,7 +128,7 @@ static inline UnsignedOrNone getStackIndexOfNearestEnclosingCaptureReadyLambda(
         return NoLambdaIsCaptureReady;
     }
     EnclosingDC = getLambdaAwareParentOfDeclContext(EnclosingDC)
-                      ->getEnclosingNonExpansionStatementContext();
+                      ->getEnclosingNonTemplateRegionContext();
 
     assert(CurScopeIndex);
     --CurScopeIndex;
@@ -245,7 +245,9 @@ CXXRecordDecl *
 Sema::createLambdaClosureType(SourceRange IntroducerRange, TypeSourceInfo *Info,
                               unsigned LambdaDependencyKind,
                               LambdaCaptureDefault CaptureDefault) {
-  DeclContext *DC = CurContext->getEnclosingNonExpansionStatementContext();
+  DeclContext *DC = CurContext;
+  while (DC->isExpansionStmt())
+    DC = DC->getParent();
 
   bool IsGenericLambda =
       Info && getGenericLambdaTemplateParameterList(getCurLambda(), *this);
@@ -1434,9 +1436,7 @@ void Sema::ActOnLambdaClosureQualifiers(LambdaIntroducer &Intro,
   // odr-use 'this' (in particular, in a default initializer for a non-static
   // data member).
   if (Intro.Default != LCD_None &&
-      !LSI->Lambda->getParent()
-           ->getEnclosingNonExpansionStatementContext()
-           ->isFunctionOrMethod() &&
+      !LSI->Lambda->getParent()->isFunctionOrMethod() &&
       (getCurrentThisType().isNull() ||
        CheckCXXThisCapture(SourceLocation(), /*Explicit=*/true,
                            /*BuildAndDiagnose=*/false)))
@@ -2616,12 +2616,9 @@ Sema::LambdaScopeForCallOperatorInstantiationRAII::
   while (FDPattern && FD) {
     InstantiationAndPatterns.emplace_back(FDPattern, FD);
 
-    FDPattern = dyn_cast<FunctionDecl>(
-        getLambdaAwareParentOfDeclContext(FDPattern)
-            ->getEnclosingNonExpansionStatementContext());
-    FD = dyn_cast<FunctionDecl>(
-        getLambdaAwareParentOfDeclContext(FD)
-            ->getEnclosingNonExpansionStatementContext());
+    FDPattern =
+        getLambdaAwareParentOfDeclContext(FDPattern)->getEnclosingFunction();
+    FD = getLambdaAwareParentOfDeclContext(FD)->getEnclosingFunction();
   }
 
   // Add instantiated parameters and local vars to scopes, starting from the

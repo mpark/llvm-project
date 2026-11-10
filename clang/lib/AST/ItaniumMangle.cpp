@@ -1886,8 +1886,8 @@ static GlobalDecl getParentOfLocalEntity(const DeclContext *DC) {
     GD = GlobalDecl(CD, Ctor_Complete);
   else if (auto *DD = dyn_cast<CXXDestructorDecl>(DC))
     GD = GlobalDecl(DD, Dtor_Complete);
-  else if (DC->isExpansionStmt())
-    GD = getParentOfLocalEntity(DC->getEnclosingNonExpansionStatementContext());
+  else if (DC->isTemplateRegion())
+    GD = getParentOfLocalEntity(DC->getEnclosingNonTemplateRegionContext());
   else
     GD = GlobalDecl(cast<FunctionDecl>(DC));
   return GD;
@@ -2264,7 +2264,7 @@ void CXXNameMangler::manglePrefix(const DeclContext *DC, bool NoFunction) {
   if (NoFunction && isLocalContainerContext(DC))
     return;
 
-  if (DC->isExpansionStmt())
+  if (DC->isTemplateRegion())
     return;
 
   const NamedDecl *ND = cast<NamedDecl>(DC);

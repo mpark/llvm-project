@@ -1297,7 +1297,7 @@ public:
     if (getKind() != Decl::Var && getKind() != Decl::Decomposition)
       return false;
     if (const DeclContext *DC = getLexicalDeclContext())
-      return DC->getEnclosingNonExpansionStatementContext()
+      return DC->getEnclosingNonTemplateRegionContext()
           ->getRedeclContext()
           ->isFunctionOrMethod();
     return false;

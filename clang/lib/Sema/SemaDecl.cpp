@@ -6455,7 +6455,7 @@ bool Sema::diagnoseQualifiedDeclaration(CXXScopeSpec &SS, DeclContext *DC,
   // declaration. For a template-id, we perform the checks in
   // CheckTemplateSpecializationScope.
   if (!Cur->Encloses(DC) && !(TemplateId || IsMemberSpecialization)) {
-    Cur = Cur->getEnclosingNonExpansionStatementContext();
+    Cur = Cur->getEnclosingNonTemplateRegionContext();
     if (Cur->isRecord())
       Diag(Loc, diag::err_member_qualification)
         << Name << SS.getRange();
@@ -9339,24 +9339,21 @@ void Sema::CheckVariableDeclarationType(VarDecl *NewVD) {
     return;
   }
 
-  // Check that SVE types are only used in functions with SVE available.
-  if (T->isSVESizelessBuiltinType() && isa<FunctionDecl>(CurContext)) {
-    const FunctionDecl *FD = cast<FunctionDecl>(CurContext);
+  // Check scalable vector types against the enclosing function's features.
+  if (FunctionDecl *FD = CurContext->getEnclosingFunction();
+      FD && (T->isSVESizelessBuiltinType() || T->isRVVSizelessBuiltinType())) {
     llvm::StringMap<bool> CallerFeatureMap;
     Context.getFunctionFeatureMap(CallerFeatureMap, FD);
-    if (ARM().checkSVETypeSupport(T, NewVD->getLocation(), FD,
-                                  CallerFeatureMap)) {
-      NewVD->setInvalidDecl();
-      return;
+    if (T->isSVESizelessBuiltinType()) {
+      if (ARM().checkSVETypeSupport(T, NewVD->getLocation(), FD,
+                                    CallerFeatureMap)) {
+        NewVD->setInvalidDecl();
+        return;
+      }
+    } else {
+      RISCV().checkRVVTypeSupport(T, NewVD->getLocation(), FD,
+                                  CallerFeatureMap);
     }
-  }
-
-  if (T->isRVVSizelessBuiltinType() && isa<FunctionDecl>(CurContext)) {
-    const FunctionDecl *FD = cast<FunctionDecl>(CurContext);
-    llvm::StringMap<bool> CallerFeatureMap;
-    Context.getFunctionFeatureMap(CallerFeatureMap, FD);
-    RISCV().checkRVVTypeSupport(T, NewVD->getLocation(), cast<Decl>(CurContext),
-                                CallerFeatureMap);
   }
 
   // Global, static or variable sized objects of HLX types are not allowed.

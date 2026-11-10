@@ -1032,6 +1032,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case Empty:
     case LifetimeExtendedTemporary:
     case RequiresExprBody:
+    case MatchTemplateRegion:
     case ImplicitConceptSpecialization:
     case OpenACCDeclare:
     case OpenACCRoutine:
@@ -1405,7 +1406,7 @@ bool DeclContext::isDependentContext() const {
   if (isFileContext())
     return false;
 
-  if (isa<ClassTemplatePartialSpecializationDecl, CXXExpansionStmtDecl>(this))
+  if (isTemplateRegion() || isa<ClassTemplatePartialSpecializationDecl>(this))
     return true;
 
   if (const auto *Record = dyn_cast<CXXRecordDecl>(this)) {
@@ -1514,6 +1515,7 @@ DeclContext *DeclContext::getPrimaryContext() {
   case Decl::OMPDeclareReduction:
   case Decl::OMPDeclareMapper:
   case Decl::RequiresExprBody:
+  case Decl::MatchTemplateRegion:
   case Decl::CXXExpansionStmt:
     // There is only one DeclContext for these entities.
     return this;
@@ -2119,19 +2121,19 @@ RecordDecl *DeclContext::getOuterLexicalRecordContext() {
   return OutermostRD;
 }
 
-DeclContext *DeclContext::getEnclosingNonExpansionStatementContext() {
+DeclContext *DeclContext::getEnclosingNonTemplateRegionContext() {
   DeclContext *DC = this;
-  while (isa<CXXExpansionStmtDecl>(DC))
+  while (DC->isTemplateRegion())
     DC = DC->getParent();
   return DC;
 }
 
 FunctionDecl *DeclContext::getEnclosingFunction() {
-  return dyn_cast<FunctionDecl>(getEnclosingNonExpansionStatementContext());
+  return dyn_cast<FunctionDecl>(getEnclosingNonTemplateRegionContext());
 }
 
 FunctionDecl *DeclContext::castEnclosingFunction() {
-  return cast<FunctionDecl>(getEnclosingNonExpansionStatementContext());
+  return cast<FunctionDecl>(getEnclosingNonTemplateRegionContext());
 }
 
 bool DeclContext::InEnclosingNamespaceSetOf(const DeclContext *O) const {

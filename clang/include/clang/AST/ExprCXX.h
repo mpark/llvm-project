@@ -5586,6 +5586,7 @@ class MatchTestExpr final : public Expr {
   ArrayRef<MatchTestInstantiation> Instantiations;
   bool PatternIsIrrefutable;
   bool NeedsCaseInstantiation;
+  MatchTemplateRegionDecl *Region = nullptr;
 
 public:
   explicit MatchTestExpr(const ASTContext &Ctx, VarDecl *HoldingVar,
@@ -5627,6 +5628,8 @@ public:
   }
 
   const MatchPattern* getPattern() const { return Pattern; }
+  MatchTemplateRegionDecl *getRegion() const { return Region; }
+  void setRegion(MatchTemplateRegionDecl *D) { Region = D; }
   MatchPattern* getPattern() { return Pattern; }
 
   const MatchPatternInstantiation *getPatternInstantiation() const {
@@ -5686,6 +5689,7 @@ struct MatchCase {
   Stmt *Handler;
   bool MaybeUseful = false;
   MatchPatternInstantiation *PatternInstantiation = nullptr;
+  MatchTemplateRegionDecl *Region = nullptr;
 };
 
 /// A semantically checked form of a source match case. A source case can have

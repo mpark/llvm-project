@@ -95,6 +95,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include <cassert>
 #include <climits>
 #include <cstddef>
@@ -3696,6 +3697,43 @@ public:
     ~ContextRAII() { pop(); }
     ContextRAII(const ContextRAII &) = delete;
     ContextRAII &operator=(const ContextRAII &) = delete;
+  };
+
+  class MatchTemplateRegionRAII {
+    Sema &S;
+    MatchTemplateRegionDecl *Region = nullptr;
+    std::optional<ContextRAII> SavedContext;
+
+  public:
+    explicit MatchTemplateRegionRAII(Sema &S) : S(S) {}
+    void enter(SourceLocation Loc, MatchPattern *Pattern,
+               bool RequiresTemplateRegion);
+    void reenter() {
+      if (Region && !SavedContext)
+        SavedContext.emplace(S, Region, /*NewThisContext=*/false);
+    }
+    void exit(SourceLocation EndLoc = {}) {
+      if (Region && EndLoc.isValid())
+        Region->setEndLoc(EndLoc);
+      SavedContext.reset();
+    }
+    MatchTemplateRegionDecl *getRegion() const { return Region; }
+  };
+
+private:
+  bool IsSynthesizingTemplateRegion = false;
+
+public:
+  bool isSynthesizingTemplateRegion() const {
+    return IsSynthesizingTemplateRegion;
+  }
+
+  class TemplateRegionSynthesisRAII {
+    llvm::SaveAndRestore<bool> SavedState;
+
+  public:
+    explicit TemplateRegionSynthesisRAII(Sema &S, bool Enable = true)
+        : SavedState(S.IsSynthesizingTemplateRegion, Enable) {}
   };
 
   void DiagnoseInvalidJumps(Stmt *Body);
@@ -11412,6 +11450,7 @@ public:
     unsigned NextForcedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
     bool HasDeferredAlternativeChoices = false;
+    bool RequiresTemplateRegion = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
   };
   struct MatchPatternState {
@@ -13797,6 +13836,9 @@ public:
       /// We are instantiating an expansion statement.
       ExpansionStmtInstantiation,
 
+      /// We are instantiating an implicit pattern-matching region.
+      MatchTemplateRegionInstantiation,
+
       /// We are performing name lookup for a function template or variable
       /// template named 'sycl_kernel_launch'.
       SYCLKernelLaunchLookup,
@@ -13804,9 +13846,6 @@ public:
       /// We are performing overload resolution for a call to a function
       /// template or variable template named 'sycl_kernel_launch'.
       SYCLKernelLaunchOverloadResolution,
-
-      /// We are expanding dependent pattern-matching alternatives.
-      PatternMatchingExpansion,
     } Kind;
 
     /// Whether we're substituting into constraints.
@@ -14001,6 +14040,9 @@ public:
                           CXXExpansionStmtPattern *ExpansionStmt,
                           ArrayRef<TemplateArgument> TArgs,
                           SourceRange InstantiationRange);
+
+    InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
+                          MatchTemplateRegionDecl *Region);
 
     /// \brief Note that we are checking the satisfaction of the constraint
     /// expression inside of a nested requirement.
@@ -16572,26 +16614,6 @@ public:
   std::optional<uint64_t>
   ComputeExpansionSize(CXXExpansionStmtPattern *Expansion);
 
-private:
-  bool IsSynthesizingExpansionStmt = false;
-
-public:
-  bool isSynthesizingExpansionStmt() const {
-    return IsSynthesizingExpansionStmt;
-  }
-
-  class ExpansionStmtSynthesisRAII {
-    Sema &S;
-    bool OldValue;
-
-  public:
-    explicit ExpansionStmtSynthesisRAII(Sema &S, bool Enable = true)
-        : S(S), OldValue(S.IsSynthesizingExpansionStmt) {
-      S.IsSynthesizingExpansionStmt = Enable;
-    }
-
-    ~ExpansionStmtSynthesisRAII() { S.IsSynthesizingExpansionStmt = OldValue; }
-  };
   ///@}
 };
 

@@ -4162,6 +4162,10 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   if (ProjectionCache.HasDeferredAlternativeChoices &&
       OrigResultType.getType()->getContainedAutoType())
     RetTy = Actions.Context.DependentTy;
+  Sema::MatchTemplateRegionRAII Region(Actions);
+  if (Pattern.isUsable())
+    Region.enter(Pattern.get()->getBeginLoc(), Pattern.get(),
+                 ProjectionCache.RequiresTemplateRegion);
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard =
@@ -4184,6 +4188,8 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
           /*PatternInstantiation=*/nullptr};
   Case.PatternInstantiation = MatchPatternInstantiation::Create(
       Actions.Context, Pattern.get(), PatternState.Infos);
+  Case.Region = Region.getRegion();
+  Region.exit(Handler.get()->getEndLoc());
   return false;
 }
 

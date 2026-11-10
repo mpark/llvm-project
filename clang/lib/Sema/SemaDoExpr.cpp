@@ -58,13 +58,6 @@ static bool namesDoExprBodyLocal(const Expr *E,
                                       SM.getExpansionLoc(VD->getLocation()));
 }
 
-static bool isParsingExpansionStmtPattern(Sema &S) {
-  for (DeclContext *DC = S.CurContext; DC; DC = DC->getParent())
-    if (isa<CXXExpansionStmtDecl>(DC))
-      return true;
-  return false;
-}
-
 static VarDecl *findFirstVarDecl(Stmt *S) {
   if (!S)
     return nullptr;
@@ -94,7 +87,7 @@ static ConstevalIfKind getConstevalIfKind(Sema &S) {
       S.currentEvaluationContext().isImmediateFunctionContext())
     return ConstevalIfKind::AlwaysConstantEvaluated;
 
-  if (const auto *FD = dyn_cast<FunctionDecl>(S.CurContext)) {
+  if (const auto *FD = S.CurContext->getEnclosingFunction()) {
     if (FD->isConsteval())
       return ConstevalIfKind::AlwaysConstantEvaluated;
     if (FD->isConstexpr())
@@ -544,7 +537,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   // Match function return type deduction: in a dependent context, do not
   // deduce the result type yet, even from non-dependent operands. Instantiation
   // will rebuild the live do_return statements and deduce from those.
-  if ((Entry.TemplateDepth > 0 || isParsingExpansionStmtPattern(*this)) &&
+  if ((Entry.TemplateDepth > 0 || CurContext->isDependentContext()) &&
       doExprHasDeducedResultType(Entry)) {
     Entry.HasDependentDoReturn = true;
     return new (Context) DoReturnStmt(DoReturnLoc, Operand);

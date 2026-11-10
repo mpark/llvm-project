@@ -122,7 +122,7 @@ isOperandMentioned(unsigned OpNo,
 }
 
 static bool CheckNakedParmReference(Expr *E, Sema &S) {
-  FunctionDecl *Func = dyn_cast<FunctionDecl>(S.CurContext);
+  FunctionDecl *Func = S.CurContext->getEnclosingFunction();
   if (!Func)
     return false;
   if (!Func->hasAttr<NakedAttr>())

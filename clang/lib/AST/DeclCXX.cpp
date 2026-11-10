@@ -2412,6 +2412,17 @@ RequiresExprBodyDecl::CreateDeserialized(ASTContext &C, GlobalDeclID ID) {
   return new (C, ID) RequiresExprBodyDecl(C, nullptr, SourceLocation());
 }
 
+MatchTemplateRegionDecl *MatchTemplateRegionDecl::Create(ASTContext &C,
+                                                         DeclContext *DC,
+                                                         SourceLocation Loc) {
+  return new (C, DC) MatchTemplateRegionDecl(DC, Loc);
+}
+
+MatchTemplateRegionDecl *
+MatchTemplateRegionDecl::CreateDeserialized(ASTContext &C, GlobalDeclID ID) {
+  return new (C, ID) MatchTemplateRegionDecl(nullptr, SourceLocation());
+}
+
 void CXXMethodDecl::anchor() {}
 
 bool CXXMethodDecl::isStatic() const {

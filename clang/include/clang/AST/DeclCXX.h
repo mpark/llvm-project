@@ -1581,9 +1581,8 @@ public:
   /// If the class is a local class [class.local], returns
   /// the enclosing function declaration.
   const FunctionDecl *isLocalClass() const {
-    const DeclContext *DC = getDeclContext();
-    while (DC->isExpansionStmt())
-      DC = DC->getParent();
+    const DeclContext *DC =
+        getDeclContext()->getEnclosingNonTemplateRegionContext();
     if (const auto *RD = dyn_cast<CXXRecordDecl>(DC))
       return RD->isLocalClass();
 
@@ -2151,6 +2150,41 @@ public:
 
   static RequiresExprBodyDecl *castFromDeclContext(const DeclContext *DC) {
     return static_cast<RequiresExprBodyDecl *>(const_cast<DeclContext *>(DC));
+  }
+};
+
+/// The dependent declaration context of a generic match pattern and its
+/// continuation. The owning match stores the source and instantiations.
+class MatchTemplateRegionDecl : public Decl, public DeclContext {
+  SourceLocation EndLoc;
+
+  MatchTemplateRegionDecl(DeclContext *DC, SourceLocation Loc)
+      : Decl(MatchTemplateRegion, DC, Loc), DeclContext(MatchTemplateRegion),
+        EndLoc(Loc) {
+    setImplicit();
+  }
+
+public:
+  static MatchTemplateRegionDecl *Create(ASTContext &C, DeclContext *DC,
+                                         SourceLocation Loc);
+  static MatchTemplateRegionDecl *CreateDeserialized(ASTContext &C,
+                                                     GlobalDeclID ID);
+
+  SourceRange getSourceRange() const override {
+    return {getLocation(), EndLoc};
+  }
+  void setEndLoc(SourceLocation Loc) { EndLoc = Loc; }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == MatchTemplateRegion; }
+
+  static DeclContext *castToDeclContext(const MatchTemplateRegionDecl *D) {
+    return static_cast<DeclContext *>(const_cast<MatchTemplateRegionDecl *>(D));
+  }
+
+  static MatchTemplateRegionDecl *castFromDeclContext(const DeclContext *DC) {
+    return static_cast<MatchTemplateRegionDecl *>(
+        const_cast<DeclContext *>(DC));
   }
 };
 

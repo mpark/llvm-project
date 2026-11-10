@@ -817,7 +817,7 @@ bool Sema::checkMustTailAttr(const Stmt *St, const Attr &MTA) {
     return true;
   };
 
-  const auto *CallerDecl = dyn_cast<FunctionDecl>(CurContext);
+  const auto *CallerDecl = CurContext->getEnclosingFunction();
 
   // Find caller function signature.
   if (!CallerDecl) {

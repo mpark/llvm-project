@@ -644,7 +644,7 @@ bool Sema::MergeCXXFunctionDecl(FunctionDecl *New, FunctionDecl *Old,
           << New->getDeclName()
           << NewParam->getDefaultArgRange();
       } else if (New->getDeclContext()
-                     ->getEnclosingNonExpansionStatementContext()
+                     ->getEnclosingNonTemplateRegionContext()
                      ->isDependentContext()) {
         // C++ [dcl.fct.default]p6 (DR217):
         //   Default arguments for a member function of a class template shall

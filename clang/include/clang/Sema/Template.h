@@ -584,6 +584,21 @@ enum class TemplateSubstitutionKind : char {
     bool isLambdaOrBlock() const { return InstantiatingLambdaOrBlock; }
   };
 
+  /// Local declaration mappings and template synthesis state for one checked
+  /// match candidate. A dependent source region is mapped to the current
+  /// instantiation context rather than becoming its parent.
+  class MatchCandidateInstantiationScope {
+    LocalInstantiationScope LocalScope;
+    Sema::TemplateRegionSynthesisRAII Synthesis;
+    std::optional<Sema::InstantiatingTemplate> Instantiation;
+
+  public:
+    MatchCandidateInstantiationScope(Sema &S, MatchTemplateRegionDecl *Region);
+    bool isInvalid() const {
+      return Instantiation && Instantiation->isInvalid();
+    }
+  };
+
   class TemplateDeclInstantiator
     : public DeclVisitor<TemplateDeclInstantiator, Decl *>
   {

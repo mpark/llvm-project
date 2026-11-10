@@ -3555,8 +3555,7 @@ static bool HandleLValueVectorElement(EvalInfo &Info, const Expr *E,
 }
 
 static bool isSyntheticDoExprDeclContext(const DeclContext *DC) {
-  return isDoExprBodyContext(
-      DC->getEnclosingNonExpansionStatementContext());
+  return isDoExprBodyContext(DC->getEnclosingNonTemplateRegionContext());
 }
 
 /// Try to evaluate the initializer for a variable declaration.

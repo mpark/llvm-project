@@ -2431,7 +2431,7 @@ Decl *TemplateDeclInstantiator::VisitCXXExpansionStmtDecl(
   // already expanded it, as in that case we no longer want to treat its
   // content as dependent.
   Sema::ContextRAII Context(SemaRef, NewESD, /*NewThis=*/false);
-  Sema::ExpansionStmtSynthesisRAII ExpansionGuard(SemaRef);
+  Sema::TemplateRegionSynthesisRAII ExpansionGuard(SemaRef);
 
   StmtResult Expansion =
       SemaRef.SubstStmt(OldESD->getExpansionPattern(), TemplateArgs);
@@ -5146,6 +5146,14 @@ TemplateDeclInstantiator::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
                                       D->getBeginLoc());
 }
 
+Decl *TemplateDeclInstantiator::VisitMatchTemplateRegionDecl(
+    MatchTemplateRegionDecl *D) {
+  auto *Region =
+      MatchTemplateRegionDecl::Create(SemaRef.Context, Owner, D->getLocation());
+  Region->setEndLoc(D->getEndLoc());
+  return Region;
+}
+
 Decl *TemplateDeclInstantiator::VisitDecl(Decl *D) {
   llvm_unreachable("Unexpected decl");
 }
@@ -7323,6 +7331,10 @@ static NamedDecl *findInstantiationOf(ASTContext &Ctx,
 
 DeclContext *Sema::FindInstantiatedContext(SourceLocation Loc, DeclContext* DC,
                           const MultiLevelTemplateArgumentList &TemplateArgs) {
+  if (DC->isMatchTemplateRegion() && CurrentInstantiationScope)
+    if (auto Found = CurrentInstantiationScope->getInstantiationOfIfExists(
+            cast<Decl>(DC)))
+      return cast<DeclContext>(cast<Decl *>(*Found));
   if (NamedDecl *D = dyn_cast<NamedDecl>(DC)) {
     Decl* ID = FindInstantiatedDecl(Loc, D, TemplateArgs, true);
     return cast_or_null<DeclContext>(ID);
@@ -7379,7 +7391,7 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
   }
   if (isa<ParmVarDecl>(D) || isa<NonTypeTemplateParmDecl>(D) ||
       isa<TemplateTypeParmDecl>(D) || isa<TemplateTemplateParmDecl>(D) ||
-      (ParentDependsOnArgs && (ParentDC->isFunctionOrMethod() ||
+      (ParentDependsOnArgs && (ParentDC->isLocalContext() ||
                                isa<OMPDeclareReductionDecl>(ParentDC) ||
                                isa<OMPDeclareMapperDecl>(ParentDC))) ||
       (isa<CXXRecordDecl>(D) && cast<CXXRecordDecl>(D)->isLambda() &&

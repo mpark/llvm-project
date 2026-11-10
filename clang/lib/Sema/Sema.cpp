@@ -648,7 +648,7 @@ void Sema::runWithSufficientStackSpace(SourceLocation Loc,
 bool Sema::makeUnavailableInSystemHeader(SourceLocation loc,
                                       UnavailableAttr::ImplicitReason reason) {
   // If we're not in a function, it's an error.
-  FunctionDecl *fn = dyn_cast<FunctionDecl>(CurContext);
+  FunctionDecl *fn = CurContext->getEnclosingFunction();
   if (!fn) return false;
 
   // If we're in template instantiation, it's an error.
@@ -1759,8 +1759,8 @@ DeclContext *Sema::getFunctionLevelDeclContext(bool AllowLambda) const {
   DeclContext *DC = CurContext;
 
   while (true) {
-    if (isa<BlockDecl, EnumDecl, CapturedDecl, RequiresExprBodyDecl,
-            CXXExpansionStmtDecl>(DC) ||
+    if (DC->isTemplateRegion() ||
+        isa<BlockDecl, EnumDecl, CapturedDecl, RequiresExprBodyDecl>(DC) ||
         isDoExprBodyContext(DC)) {
       DC = DC->getParent();
     } else if (!AllowLambda && isa<CXXMethodDecl>(DC) &&
@@ -1906,7 +1906,7 @@ void Sema::EmitDiagnostic(unsigned DiagID, const DiagnosticBuilder &DB) {
 bool Sema::hasUncompilableErrorOccurred() const {
   if (getDiagnostics().hasUncompilableErrorOccurred())
     return true;
-  auto *FD = dyn_cast<FunctionDecl>(CurContext);
+  auto *FD = CurContext->getEnclosingFunction();
   if (!FD)
     return false;
   auto Loc = DeviceDeferredDiags.find(FD);

@@ -19336,9 +19336,9 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
     ProjectionCache.CurrentProjectionPath.clear();
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
-    std::optional<LocalInstantiationScope> CandidateScope;
-    if (PatternHasAlternativeChoice)
-      CandidateScope.emplace(getSema(), /*CombineWithOuterScope=*/true);
+    MatchCandidateInstantiationScope CandidateScope(getSema(), E->getRegion());
+    if (CandidateScope.isInvalid())
+      return ExprError();
     MatchPattern *TransformedPattern = nullptr;
     Sema::MatchPatternState PatternState;
     auto TransformAndCheckPattern = [&] {
@@ -19441,11 +19441,14 @@ ExprResult TreeTransform<Derived>::TransformMatchTestExpr(MatchTestExpr *E,
 
   const MatchTestInstantiation &Representative = Instantiations.front();
   bool StillNeedsCaseInstantiation = LHS.get()->isTypeDependent();
-  return getSema().ActOnMatchTestExpr(
+  ExprResult Result = getSema().ActOnMatchTestExpr(
       HoldingVar, LHS.get(), E->getMatchLoc(), Representative.Pattern,
       Representative.PatternInstantiation, Representative.IfLoc,
       Representative.Guard, Representative.PatternIsIrrefutable,
       StillNeedsCaseInstantiation, Instantiations);
+  if (Result.isUsable())
+    cast<MatchTestExpr>(Result.get())->setRegion(E->getRegion());
+  return Result;
 }
 
 template <typename Derived>
@@ -19523,8 +19526,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   auto TransformCase =
       [&](const MatchCase &Case, unsigned CaseIndex,
           MatchCaseInstantiation &Transformed) -> TransformCaseResult {
-    LocalInstantiationScope Scope(getSema(),
-                                  /*CombineWithOuterScope=*/true);
+    MatchCandidateInstantiationScope CandidateScope(
+        getSema(), SourceCases[CaseIndex].Region);
+    if (CandidateScope.isInvalid())
+      return TransformCaseResult::Error;
     MatchPattern *TransformedPattern = nullptr;
     Sema::MatchPatternState PatternState;
     auto TransformAndCheckPattern = [&] {

@@ -452,7 +452,7 @@ void PreferredTypeBuilder::enterReturn(Sema &S, SourceLocation Tok) {
       Type = BSI->ReturnType;
       ExpectedLoc = Tok;
     }
-  } else if (const auto *Function = dyn_cast<FunctionDecl>(S.CurContext)) {
+  } else if (const auto *Function = S.CurContext->getEnclosingFunction()) {
     ComputeType = nullptr;
     Type = Function->getReturnType();
     ExpectedLoc = Tok;
@@ -2652,7 +2652,7 @@ AddOrdinaryNameResults(SemaCodeCompletion::ParserCompletionContext CCC,
 
     // "return expression ;" or "return ;", depending on the return type.
     QualType ReturnType;
-    if (const auto *Function = dyn_cast<FunctionDecl>(SemaRef.CurContext)) {
+    if (const auto *Function = SemaRef.CurContext->getEnclosingFunction()) {
       if (!Function->getType().isNull())
         ReturnType = Function->getReturnType();
     } else if (const auto *Method =

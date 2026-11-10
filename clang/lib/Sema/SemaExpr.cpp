@@ -4384,7 +4384,7 @@ static bool CheckVectorElementsTraitOperandType(Sema &S, QualType T,
            << ""
            << "__builtin_vectorelements" << T << ArgRange;
 
-  if (auto *FD = dyn_cast<FunctionDecl>(S.CurContext)) {
+  if (auto *FD = S.CurContext->getEnclosingFunction()) {
     if (T->isSVESizelessBuiltinType()) {
       llvm::StringMap<bool> CallerFeatureMap;
       S.Context.getFunctionFeatureMap(CallerFeatureMap, FD);
@@ -17639,7 +17639,7 @@ ExprResult Sema::BuildVAArgExpr(SourceLocation BuiltinLoc,
 
   // CUDA device global function does not support varargs.
   if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice) {
-    if (const FunctionDecl *F = dyn_cast<FunctionDecl>(CurContext)) {
+    if (const FunctionDecl *F = CurContext->getEnclosingFunction()) {
       CUDAFunctionTarget T = CUDA().IdentifyTarget(F);
       if (T == CUDAFunctionTarget::Global)
         return ExprError(Diag(E->getBeginLoc(), diag::err_va_arg_in_device));
@@ -19782,7 +19782,7 @@ static void diagnoseUncapturableValueReferenceOrBinding(Sema &S,
                                                         SourceLocation loc,
                                                         ValueDecl *var) {
   DeclContext *VarDC =
-      var->getDeclContext()->getEnclosingNonExpansionStatementContext();
+      var->getDeclContext()->getEnclosingNonTemplateRegionContext();
 
   //  If the parameter still belongs to the translation unit, then
   //  we're actually just using one parameter in the declaration of
@@ -19866,7 +19866,7 @@ static DeclContext *getParentOfCapturingContextOrNull(DeclContext *DC,
   if (isa<BlockDecl>(DC) || isa<CapturedDecl>(DC) || isLambdaCallOperator(DC))
     return getLambdaAwareParentOfDeclContext(DC);
 
-  if (isa<CXXExpansionStmtDecl>(DC))
+  if (DC->isTemplateRegion())
     return DC->getParent();
 
   VarDecl *Underlying = Var->getPotentiallyDecomposedVarDecl();
@@ -20333,14 +20333,14 @@ bool Sema::tryCaptureVariable(
   // An init-capture is notionally from the context surrounding its
   // declaration, but its parent DC is the lambda class.
   bool IsExpansionVariable = Var->getDeclContext()->isExpansionStmt();
-  DeclContext *VarDC =
-      Var->getDeclContext()->getEnclosingNonExpansionStatementContext();
+  DeclContext *VarDC = Var->getDeclContext();
   DeclContext *DC = CurContext;
 
-  // Skip past RequiresExprBodys because they don't constitute function scopes.
-  while (VarDC->isRequiresExprBody() || VarDC->isExpansionStmt())
+  // Requires-expression bodies and template regions do not introduce function
+  // scopes.
+  while (VarDC->isRequiresExprBody() || VarDC->isTemplateRegion())
     VarDC = VarDC->getParent();
-  while (DC->isRequiresExprBody() || DC->isExpansionStmt())
+  while (DC->isRequiresExprBody() || DC->isTemplateRegion())
     DC = DC->getParent();
 
   // A variable declared in a do-expression body is never captured: the body
@@ -20375,7 +20375,7 @@ bool Sema::tryCaptureVariable(
     if (VD->isConstexpr() &&
         (VD->getType()->isDependentType() ||
          VD->isUsableInConstantExpressions(Context)) &&
-        (IsSynthesizingExpansionStmt || IsExpansionVariable))
+        (IsSynthesizingTemplateRegion || IsExpansionVariable))
       return true;
   } else {
     VD = Var->getPotentiallyDecomposedVarDecl();
@@ -20400,7 +20400,7 @@ bool Sema::tryCaptureVariable(
            "FunctionScopes.");
     while (FSIndex != MaxFunctionScopesIndex) {
       DC = getLambdaAwareParentOfDeclContext(DC);
-      while (isa<CXXExpansionStmtDecl>(DC))
+      while (DC->isTemplateRegion())
         DC = DC->getParent();
       --FSIndex;
     }
@@ -20430,7 +20430,7 @@ bool Sema::tryCaptureVariable(
   bool Nested = false;
   bool Explicit = (Kind != TryCaptureKind::Implicit);
   unsigned FunctionScopesIndex = MaxFunctionScopesIndex;
-  bool TraversedExpansionStmt = false;
+  bool TraversedTemplateRegion = false;
   do {
 
     LambdaScopeInfo *LSI = nullptr;
@@ -20473,10 +20473,10 @@ bool Sema::tryCaptureVariable(
       return true;
     }
 
-    // Expansion statements are declaration contexts but do not have matching
+    // Template regions are declaration contexts but do not have matching
     // FunctionScopeInfo entries.
-    if (isa<CXXExpansionStmtDecl>(DC)) {
-      TraversedExpansionStmt = true;
+    if (DC->isTemplateRegion()) {
+      TraversedTemplateRegion = true;
       DC = ParentDC;
       continue;
     }
@@ -20503,7 +20503,7 @@ bool Sema::tryCaptureVariable(
     // during either a lambdas transformation or initial parsing
     // should be used.
     if (isGenericLambdaCallOperatorSpecialization(DC) &&
-        !IsSynthesizingExpansionStmt) {
+        !IsSynthesizingTemplateRegion) {
       CXXRecordDecl *LambdaClass = cast<CXXMethodDecl>(DC)->getParent();
       for (const LambdaCapture &Cap : LambdaClass->captures())
         if (Cap.capturesVariable() && Cap.getCapturedVar() == Var)
@@ -20597,11 +20597,11 @@ bool Sema::tryCaptureVariable(
         FunctionScopesIndex = MaxFunctionScopesIndex - 1;
         break;
       }
-      bool InExpansionStmt =
-          IsSynthesizingExpansionStmt || TraversedExpansionStmt;
+      bool InTemplateRegion =
+          IsSynthesizingTemplateRegion || TraversedTemplateRegion;
       if (VD && VD->isConstexpr() &&
           VD->isUsableInConstantExpressions(Context)) {
-        bool AllowSkipCapture = InExpansionStmt ||
+        bool AllowSkipCapture = InTemplateRegion ||
                                 Var->getType()->isScalarType() ||
                                 Var->getType()->isConstevalOnly();
         if (AllowSkipCapture) {
@@ -21186,9 +21186,9 @@ static void DoMarkPotentialCapture(Sema &SemaRef, SourceLocation Loc,
   }
 }
 
-static bool isDeclaredInExpansionStmtDecl(const Decl *D) {
+static bool isDeclaredInTemplateRegion(const Decl *D) {
   for (const DeclContext *DC = D->getDeclContext(); DC; DC = DC->getParent())
-    if (isa<CXXExpansionStmtDecl>(DC))
+    if (DC->isTemplateRegion())
       return true;
   return false;
 }
@@ -21360,31 +21360,28 @@ static void DoMarkVarDeclReferenced(
     // behavior.
     break;
 
-  case OdrUseContext::Used:
-    // If we might later find that this expression isn't actually an odr-use,
-    // delay the marking.
-    if (E && Var->isUsableInConstantExpressions(SemaRef.Context) &&
-        !SemaRef.isSynthesizingExpansionStmt())
-      SemaRef.MaybeODRUseExprs.insert(E);
-    else if (SemaRef.isSynthesizingExpansionStmt() &&
-             isDeclaredInExpansionStmtDecl(Var))
-      Var->markUsed(SemaRef.Context);
-    else
-      MarkVarDeclODRUsed(Var, Loc, SemaRef);
-    break;
-
   case OdrUseContext::Dependent:
     // If this is a dependent context, we don't need to mark variables as
     // odr-used, but we may still need to track them for lambda capture.
     // FIXME: Do we also need to do this inside dependent typeid expressions
     // (which are modeled as unevaluated at this point)?
-    if (SemaRef.isSynthesizingExpansionStmt() &&
-        isDeclaredInExpansionStmtDecl(Var))
-      Var->markUsed(SemaRef.Context);
-    else if (SemaRef.isSynthesizingExpansionStmt())
-      MarkVarDeclODRUsed(Var, Loc, SemaRef);
-    else
+    if (!SemaRef.isSynthesizingTemplateRegion()) {
       DoMarkPotentialCapture(SemaRef, Loc, Var, E);
+      break;
+    }
+    [[fallthrough]];
+
+  case OdrUseContext::Used:
+    // If we might later find that this expression isn't actually an odr-use,
+    // delay the marking.
+    if (E && Var->isUsableInConstantExpressions(SemaRef.Context) &&
+        !SemaRef.isSynthesizingTemplateRegion())
+      SemaRef.MaybeODRUseExprs.insert(E);
+    else if (SemaRef.isSynthesizingTemplateRegion() &&
+             isDeclaredInTemplateRegion(Var))
+      Var->markUsed(SemaRef.Context);
+    else
+      MarkVarDeclODRUsed(Var, Loc, SemaRef);
     break;
   }
 }

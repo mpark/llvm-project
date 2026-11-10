@@ -4839,9 +4839,9 @@ bool SemaHLSL::CheckBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
 
     // Reject array types
     if (ElementTy->isArrayType())
-      return SemaRef.Diag(
-          cast<FunctionDecl>(SemaRef.CurContext)->getPointOfInstantiation(),
-          diag::err_invalid_use_of_array_type);
+      return SemaRef.Diag(SemaRef.CurContext->castEnclosingFunction()
+                              ->getPointOfInstantiation(),
+                          diag::err_invalid_use_of_array_type);
 
     auto *ResourceTy =
         TheCall->getArg(0)->getType()->castAs<HLSLAttributedResourceType>();
@@ -4897,9 +4897,9 @@ bool SemaHLSL::CheckBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
 
     // Reject array types
     if (ReturnType->isArrayType())
-      return SemaRef.Diag(
-          cast<FunctionDecl>(SemaRef.CurContext)->getPointOfInstantiation(),
-          diag::err_invalid_use_of_array_type);
+      return SemaRef.Diag(SemaRef.CurContext->castEnclosingFunction()
+                              ->getPointOfInstantiation(),
+                          diag::err_invalid_use_of_array_type);
 
     TheCall->setType(ReturnType);
 

@@ -4742,7 +4742,7 @@ void Sema::checkCall(NamedDecl *FDecl, const FunctionProtoType *Proto,
     // __arm_streaming function, then the caller requires SME to be available.
     FunctionProtoType::ExtProtoInfo ExtInfo = Proto->getExtProtoInfo();
     if (ExtInfo.AArch64SMEAttributes & FunctionType::SME_PStateSMEnabledMask) {
-      if (auto *CallerFD = dyn_cast<FunctionDecl>(CurContext)) {
+      if (auto *CallerFD = CurContext->getEnclosingFunction()) {
         llvm::StringMap<bool> CallerFeatureMap;
         Context.getFunctionFeatureMap(CallerFeatureMap, CallerFD);
         if (!CallerFeatureMap.contains("sme"))
@@ -4757,7 +4757,7 @@ void Sema::checkCall(NamedDecl *FDecl, const FunctionProtoType *Proto,
     // non-streaming vector lengths may be different.
     // When both streaming and non-streaming vector lengths are defined and
     // mismatched, produce an error.
-    const auto *CallerFD = dyn_cast<FunctionDecl>(CurContext);
+    const auto *CallerFD = CurContext->getEnclosingFunction();
     if (CallerFD && (!FD || !FD->getBuiltinID()) &&
         (IsScalableArg || IsScalableRet)) {
       bool IsCalleeStreaming =
@@ -6323,8 +6323,7 @@ static bool checkVAStartIsInVariadicFunction(Sema &S, Expr *Fn,
   // and get its parameter list.
   bool IsVariadic = false;
   ArrayRef<ParmVarDecl *> Params;
-  DeclContext *Caller =
-      S.CurContext->getEnclosingNonExpansionStatementContext();
+  DeclContext *Caller = S.CurContext->getEnclosingNonTemplateRegionContext();
   if (auto *Block = dyn_cast<BlockDecl>(Caller)) {
     IsVariadic = Block->isVariadic();
     Params = Block->parameters();
@@ -8002,7 +8001,7 @@ static bool CheckMissingFormatAttribute(
   if (S->getDiagnostics().isIgnored(diag::warn_missing_format_attribute, Loc))
     return false;
 
-  DeclContext *DC = S->CurContext->getEnclosingNonExpansionStatementContext();
+  DeclContext *DC = S->CurContext->getEnclosingNonTemplateRegionContext();
   if (!isa<ObjCMethodDecl>(DC) && !isa<FunctionDecl>(DC) && !isa<BlockDecl>(DC))
     return false;
   Decl *Caller = cast<Decl>(DC)->getCanonicalDecl();
