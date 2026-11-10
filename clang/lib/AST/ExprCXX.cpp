@@ -2312,6 +2312,18 @@ MatchSelectExpr *MatchSelectExpr::Create(
       Instantiations, Braces);
 }
 
+void MatchTestExpr::setSourceForm(const ASTContext &Ctx,
+                                  MatchTestExpr *Expression,
+                                  ArrayRef<Expr *> Continuation, Stmt *Handler,
+                                  Expr *Increment) {
+  RParenLoc = Expression->getRParenLoc();
+  Region = Expression->getRegion();
+  if (!Continuation.empty())
+    Continuation = Continuation.copy(Ctx);
+  Source = new (Ctx)
+      SourceForm{Expression->getSourceExpr(), Continuation, Handler, Increment};
+}
+
 static ArrayRef<Expr *> getMatchSubjectProductElements(bool HasSubjectProduct,
                                                        VarDecl *HoldingVar) {
   if (!HasSubjectProduct || !HoldingVar || !HoldingVar->hasInit())

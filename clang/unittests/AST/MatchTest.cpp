@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTNodeTraverser.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Tooling/Tooling.h"
@@ -15,6 +16,7 @@
 #include "gtest/gtest.h"
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace clang;
 
@@ -102,6 +104,58 @@ public:
       Test = E;
     return true;
   }
+};
+
+struct VisitCounts {
+  unsigned Payloads = 0;
+  unsigned DependentPayloads = 0;
+  unsigned Markers = 0;
+  unsigned Guards = 0;
+  unsigned Regions = 0;
+
+  void record(const Decl *D) {
+    if (isa_and_nonnull<MatchTemplateRegionDecl>(D))
+      ++Regions;
+    if (const auto *Variable = dyn_cast_or_null<VarDecl>(D)) {
+      if (Variable->getName() == "payload") {
+        ++Payloads;
+        DependentPayloads += Variable->getType()->isDependentType();
+      } else if (Variable->getName() == "marker") {
+        ++Markers;
+      } else if (Variable->getName() == "guard") {
+        ++Guards;
+      }
+    }
+  }
+};
+
+class MatchVisitor : public RecursiveASTVisitor<MatchVisitor> {
+  bool VisitInstantiations;
+
+public:
+  VisitCounts Counts;
+  explicit MatchVisitor(bool VisitInstantiations)
+      : VisitInstantiations(VisitInstantiations) {}
+  bool shouldVisitTemplateInstantiations() const { return VisitInstantiations; }
+  bool shouldVisitImplicitCode() const { return true; }
+  bool VisitDecl(Decl *D) {
+    Counts.record(D);
+    return true;
+  }
+};
+
+struct NodeRecorder {
+  VisitCounts Counts;
+  template <class F> void AddChild(F Fn) { Fn(); }
+  template <class F> void AddChild(llvm::StringRef, F Fn) { Fn(); }
+  void Visit(const Decl *D) { Counts.record(D); }
+  template <class... T> void Visit(T...) {}
+};
+
+class MatchTraverser : public ASTNodeTraverser<MatchTraverser, NodeRecorder> {
+public:
+  NodeRecorder Recorder;
+  NodeRecorder &doGetNodeDelegate() { return Recorder; }
 };
 
 TEST(MatchAST, InstantiationsBySourceCase) {
@@ -327,6 +381,373 @@ TEST(MatchAST, EmptyInstantiationTable) {
       AST->getASTContext(), /*NumPreambleStatements=*/0, /*NumCases=*/1,
       /*NumCaseInstantiations=*/0);
   EXPECT_TRUE(Selection->getCaseInstantiations().empty());
+}
+
+TEST(MatchAST, SelectionSourceAndInstantiationTraversal) {
+  auto AST = buildMatchAST(R"cpp(
+void test(Choice<int, double> value) {
+  match (value) {
+    case { auto payload } => {
+      int marker = 0;
+      use(payload + marker);
+    }
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchVisitor SourceVisitor(false);
+  ASSERT_TRUE(SourceVisitor.TraverseDecl(Function));
+  EXPECT_EQ(SourceVisitor.Counts.Payloads, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.DependentPayloads, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.Markers, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.Regions, 1u);
+
+  MatchVisitor InstantiationVisitor(true);
+  ASSERT_TRUE(InstantiationVisitor.TraverseDecl(Function));
+  EXPECT_EQ(InstantiationVisitor.Counts.Payloads, 3u);
+  EXPECT_EQ(InstantiationVisitor.Counts.DependentPayloads, 1u);
+  EXPECT_EQ(InstantiationVisitor.Counts.Markers, 3u);
+  EXPECT_EQ(InstantiationVisitor.Counts.Regions, 1u);
+}
+
+TEST(MatchAST, DirectCaseIsNotVisitedTwice) {
+  auto AST = buildMatchAST(R"cpp(
+int test(int value) {
+  return match (value) {
+    case int payload => payload;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchVisitor Visitor(true);
+  ASSERT_TRUE(Visitor.TraverseDecl(Function));
+  EXPECT_EQ(Visitor.Counts.Payloads, 1u);
+  EXPECT_EQ(Visitor.Counts.Regions, 0u);
+}
+
+TEST(MatchAST, CompoundPatternsTraverseEachChild) {
+  auto AST = buildMatchAST(R"cpp(
+int test(int (&value)[2]) {
+  return match (value) {
+    case [(0 or 1), int payload] and _ => payload;
+    case _ => 0;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  ASSERT_NE(Finder.Selection, nullptr);
+
+  class PatternVisitor : public RecursiveASTVisitor<PatternVisitor> {
+  public:
+    std::vector<MatchPattern::MatchPatternClass> Classes;
+    bool TraverseMatchPattern(MatchPattern *Pattern) {
+      if (Pattern)
+        Classes.push_back(Pattern->getMatchPatternClass());
+      return RecursiveASTVisitor::TraverseMatchPattern(Pattern);
+    }
+  } Visitor;
+  ASSERT_TRUE(
+      Visitor.TraverseMatchPattern(Finder.Selection->getCases()[0].Pattern));
+  EXPECT_EQ(Visitor.Classes,
+            (std::vector<MatchPattern::MatchPatternClass>{
+                MatchPattern::AndPatternClass,
+                MatchPattern::DecompositionPatternClass,
+                MatchPattern::ParenPatternClass, MatchPattern::OrPatternClass,
+                MatchPattern::ExpressionPatternClass,
+                MatchPattern::ExpressionPatternClass,
+                MatchPattern::DeclarationPatternClass,
+                MatchPattern::WildcardPatternClass}));
+}
+
+TEST(MatchAST, TestPreservesSourcePattern) {
+  auto AST = buildMatchAST(R"cpp(
+bool test(Choice<int, double> value) {
+  return match(value, case { auto payload } if (keep(payload)));
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  ASSERT_NE(Finder.Test, nullptr);
+  EXPECT_NE(Finder.Test->getSourceExpr(), Finder.Test);
+  EXPECT_EQ(Finder.Test->getInstantiations().size(), 2u);
+  EXPECT_EQ(Finder.Test->getRParenLoc(),
+            Finder.Test->getSourceExpr()->getRParenLoc());
+  EXPECT_EQ(Finder.Test->getRegion(),
+            Finder.Test->getSourceExpr()->getRegion());
+
+  MatchVisitor SourceVisitor(false);
+  ASSERT_TRUE(SourceVisitor.TraverseDecl(Function));
+  EXPECT_EQ(SourceVisitor.Counts.Payloads, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.DependentPayloads, 1u);
+  MatchVisitor InstantiationVisitor(true);
+  ASSERT_TRUE(InstantiationVisitor.TraverseDecl(Function));
+  EXPECT_EQ(InstantiationVisitor.Counts.Payloads, 3u);
+  EXPECT_EQ(InstantiationVisitor.Counts.DependentPayloads, 1u);
+
+  std::string Printed;
+  llvm::raw_string_ostream OS(Printed);
+  Finder.Test->printPretty(OS, nullptr,
+                           AST->getASTContext().getPrintingPolicy());
+  EXPECT_NE(Printed.find("auto payload"), std::string::npos);
+}
+
+TEST(MatchAST, ConditionPreservesSourceContinuation) {
+  auto AST = buildMatchAST(R"cpp(
+void test(Choice<int, double> value) {
+  if (case { auto payload } = value && keep(payload)) {
+    int marker = 0;
+    use(payload + marker);
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  ASSERT_NE(Finder.Test, nullptr);
+  ASSERT_EQ(Finder.Test->getSourceContinuation().size(), 1u);
+  EXPECT_NE(Finder.Test->getSourceHandler(), nullptr);
+  MatchVisitor SourceVisitor(false);
+  ASSERT_TRUE(SourceVisitor.TraverseDecl(Function));
+  EXPECT_EQ(SourceVisitor.Counts.Payloads, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.DependentPayloads, 1u);
+  EXPECT_EQ(SourceVisitor.Counts.Markers, 1u);
+  MatchVisitor InstantiationVisitor(true);
+  ASSERT_TRUE(InstantiationVisitor.TraverseDecl(Function));
+  EXPECT_EQ(InstantiationVisitor.Counts.Payloads, 3u);
+  EXPECT_EQ(InstantiationVisitor.Counts.DependentPayloads, 1u);
+  EXPECT_EQ(InstantiationVisitor.Counts.Markers, 3u);
+
+  Expr *Condition = Finder.Test->getSourceContinuation().front();
+  Expr *Continuation[] = {Condition};
+  Finder.Test->setSourceForm(AST->getASTContext(), Finder.Test->getSourceExpr(),
+                             Continuation, Finder.Test->getSourceHandler(),
+                             Finder.Test->getSourceIncrement());
+  EXPECT_NE(Finder.Test->getSourceContinuation().data(), Continuation);
+  Continuation[0] = nullptr;
+  EXPECT_EQ(Finder.Test->getSourceContinuation().front(), Condition);
+}
+
+TEST(MatchAST, GuardComponentsAreVisitedOncePerForm) {
+  auto AST = buildMatchAST(R"cpp(
+bool test(Choice<int, double> value) {
+  return match (value, case { auto payload }
+      if (int marker = 0; auto guard = keep(payload + marker)));
+}
+void selection(Choice<int, double> value) {
+  match (value) {
+    case { auto payload }
+        if (int marker = 0; auto guard = keep(payload + marker)) => use(payload);
+    case _ => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  auto CheckCounts = [](const VisitCounts &Counts, unsigned Forms) {
+    EXPECT_EQ(Counts.Payloads, Forms);
+    EXPECT_EQ(Counts.Markers, Forms);
+    EXPECT_EQ(Counts.Guards, Forms);
+  };
+  for (llvm::StringRef Name : {"test", "selection"}) {
+    SCOPED_TRACE(Name.str());
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchVisitor SourceVisitor(false);
+    ASSERT_TRUE(SourceVisitor.TraverseDecl(Function));
+    CheckCounts(SourceVisitor.Counts, 1);
+    MatchVisitor InstantiationVisitor(true);
+    ASSERT_TRUE(InstantiationVisitor.TraverseDecl(Function));
+    CheckCounts(InstantiationVisitor.Counts, 3);
+    MatchTraverser SourceTraverser;
+    SourceTraverser.SetTraversalKind(TK_IgnoreUnlessSpelledInSource);
+    SourceTraverser.Visit(Function);
+    CheckCounts(SourceTraverser.Recorder.Counts, 1);
+    MatchTraverser CheckedTraverser;
+    CheckedTraverser.Visit(Function);
+    CheckCounts(CheckedTraverser.Recorder.Counts, 2);
+  }
+}
+
+TEST(MatchAST, DirectConditionVisitsItsHandlerOnce) {
+  auto AST = buildMatchAST(R"cpp(
+void test(int value) {
+  if (case int payload = value) {
+    int marker = 0;
+    use(payload + marker);
+  }
+}
+
+void for_condition(int value) {
+  for (; case int payload = value; ++payload) {
+    int marker = 0;
+    use(payload + marker);
+    break;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name : {"test", "for_condition"}) {
+    SCOPED_TRACE(Name.str());
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    ASSERT_NE(Finder.Test, nullptr);
+    ASSERT_EQ(Finder.Test->getInstantiations().size(), 1u);
+    const MatchTestInstantiation &Instantiation =
+        Finder.Test->getInstantiations().front();
+    EXPECT_TRUE(Finder.Test->isDirectInstantiation(Instantiation));
+    EXPECT_NE(Instantiation.Handler, nullptr);
+    if (Name == "for_condition") {
+      auto *Loop =
+          cast<ForStmt>(cast<CompoundStmt>(Function->getBody())->body_front());
+      EXPECT_EQ(Instantiation.Handler, Loop->getBody());
+      EXPECT_EQ(Instantiation.Increment, Loop->getInc());
+      EXPECT_NE(Instantiation.Increment, nullptr);
+    } else {
+      EXPECT_EQ(Instantiation.Increment, nullptr);
+    }
+    MatchVisitor Visitor(true);
+    ASSERT_TRUE(Visitor.TraverseDecl(Function));
+    EXPECT_EQ(Visitor.Counts.Payloads, 1u);
+    EXPECT_EQ(Visitor.Counts.Markers, 1u);
+    MatchTraverser Traverser;
+    Traverser.Visit(Function);
+    EXPECT_EQ(Traverser.Recorder.Counts.Payloads, 1u);
+    EXPECT_EQ(Traverser.Recorder.Counts.Markers, 1u);
+  }
+}
+
+TEST(MatchAST, ResolvedTestsHaveCheckedCandidates) {
+  auto AST = buildMatchAST(R"cpp(
+bool concrete(int value) { return match(value, case int payload); }
+bool wildcard(int value) { return match(value, case _); }
+bool optional(MaybeInt value) { return match(value, case { int payload }); }
+template <class T> bool dependent(T value) {
+  return match(value, case int payload);
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name :
+       {"concrete", "wildcard", "optional", "dependent"}) {
+    SCOPED_TRACE(Name.str());
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(getFunction(*AST, Name)));
+    ASSERT_NE(Finder.Test, nullptr);
+    if (Name == "dependent") {
+      EXPECT_TRUE(Finder.Test->getSubject()->isTypeDependent());
+      EXPECT_TRUE(Finder.Test->getInstantiations().empty());
+    } else {
+      EXPECT_FALSE(Finder.Test->needsCaseInstantiation());
+      ASSERT_EQ(Finder.Test->getInstantiations().size(), 1u);
+      EXPECT_TRUE(Finder.Test->isDirectInstantiation(
+          Finder.Test->getInstantiations().front()));
+      EXPECT_EQ(Finder.Test->getRegion(), nullptr);
+    }
+  }
+}
+
+TEST(MatchAST, NodeTraverserSourceAndCheckedForms) {
+  auto AST = buildMatchAST(R"cpp(
+void test(Choice<int, double> value) {
+  match (value) {
+    case { auto payload } => {
+      int marker = 0;
+      use(payload + marker);
+    }
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchTraverser SourceTraverser;
+  SourceTraverser.SetTraversalKind(TK_IgnoreUnlessSpelledInSource);
+  SourceTraverser.Visit(Function);
+  EXPECT_EQ(SourceTraverser.Recorder.Counts.Payloads, 1u);
+  EXPECT_EQ(SourceTraverser.Recorder.Counts.DependentPayloads, 1u);
+  EXPECT_EQ(SourceTraverser.Recorder.Counts.Markers, 1u);
+  EXPECT_EQ(SourceTraverser.Recorder.Counts.Regions, 0u);
+  MatchTraverser CheckedTraverser;
+  CheckedTraverser.Visit(Function);
+  EXPECT_EQ(CheckedTraverser.Recorder.Counts.Payloads, 2u);
+  EXPECT_EQ(CheckedTraverser.Recorder.Counts.DependentPayloads, 0u);
+  EXPECT_EQ(CheckedTraverser.Recorder.Counts.Markers, 2u);
+  EXPECT_EQ(CheckedTraverser.Recorder.Counts.Regions, 1u);
+}
+
+TEST(MatchAST, NodeTraverserTestSourceAndCheckedForms) {
+  auto AST = buildMatchAST(R"cpp(
+bool test(Choice<int, double> value) {
+  return match(value, case { auto payload } if (keep(payload)));
+}
+void condition(Choice<int, double> value) {
+  if (case { auto payload } = value && keep(payload)) {
+    int marker = 0;
+    use(payload + marker);
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name : {"test", "condition"}) {
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchTraverser SourceTraverser;
+    SourceTraverser.SetTraversalKind(TK_IgnoreUnlessSpelledInSource);
+    SourceTraverser.Visit(Function);
+    EXPECT_EQ(SourceTraverser.Recorder.Counts.Payloads, 1u);
+    EXPECT_EQ(SourceTraverser.Recorder.Counts.DependentPayloads, 1u);
+    EXPECT_EQ(SourceTraverser.Recorder.Counts.Regions, 0u);
+    MatchTraverser CheckedTraverser;
+    CheckedTraverser.Visit(Function);
+    EXPECT_EQ(CheckedTraverser.Recorder.Counts.Payloads, 2u);
+    EXPECT_EQ(CheckedTraverser.Recorder.Counts.DependentPayloads, 0u);
+    EXPECT_EQ(CheckedTraverser.Recorder.Counts.Regions, 1u);
+    if (Name == "condition") {
+      EXPECT_EQ(SourceTraverser.Recorder.Counts.Markers, 1u);
+      EXPECT_EQ(CheckedTraverser.Recorder.Counts.Markers, 2u);
+    }
+  }
+}
+
+TEST(MatchAST, DeferredDumperKeepsMatchState) {
+  auto AST = buildMatchAST(R"cpp(
+bool singleton(MaybeInt value) {
+  return match (value, case { int payload } if (keep(payload)));
+}
+bool multiple(Choice<int, double> value) {
+  return match (value, case { auto payload } if (keep(payload)));
+}
+void selection(Choice<int, double> value) {
+  match (value) {
+    case { auto payload } => use(payload);
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name : {"singleton", "multiple", "selection"}) {
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    std::string Dump;
+    llvm::raw_string_ostream OS(Dump);
+    Function->dump(OS);
+    EXPECT_NE(
+        Dump.find(Name == "selection" ? "MatchSelectExpr" : "MatchTestExpr"),
+        std::string::npos);
+    EXPECT_NE(Dump.find("payload"), std::string::npos);
+  }
 }
 
 } // namespace

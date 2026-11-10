@@ -120,7 +120,8 @@ public:
         Visit(Comment, Comment);
 
       // Decls within functions are visited by the body.
-      if (!isa<FunctionDecl, ObjCMethodDecl, BlockDecl>(*D)) {
+      if (!isa<FunctionDecl, ObjCMethodDecl, BlockDecl,
+               MatchTemplateRegionDecl>(*D)) {
         if (Traversal != TK_AsIs) {
           if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
             auto SK = CTSD->getSpecializationKind();
@@ -1040,37 +1041,48 @@ public:
     Visit(Node->getExpr());
   }
 
+  void VisitMatchGuard(const MatchGuard &Guard) {
+    if (!Guard.hasGuard())
+      return;
+    if (Guard.Init)
+      Visit(Guard.Init);
+    Visit(Guard.ConditionVariable);
+    Visit(Guard.Condition);
+  }
+
   void VisitMatchTestExpr(const MatchTestExpr *Node) {
     if (const VarDecl *HoldingVar = Node->getHoldingVar())
       Visit(HoldingVar);
     Visit(Node->getSubject());
-    if (!Node->getInstantiations().empty()) {
+    if (Node->getRegion())
+      Visit(Node->getRegion());
+    if (GetTraversalKind() == TK_AsIs && !Node->getInstantiations().empty() &&
+        !Node->isDirectInstantiation(Node->getInstantiations().front())) {
       for (const MatchTestInstantiation &Instantiation :
            Node->getInstantiations()) {
-        getNodeDelegate().AddChild([&] {
+        getNodeDelegate().AddChild([=] {
           VisitMatchPattern(Instantiation.Pattern);
-          if (Instantiation.Guard.hasGuard()) {
-            if (Instantiation.Guard.Init)
-              Visit(Instantiation.Guard.Init);
-            Visit(Instantiation.Guard.ConditionVariable);
-            Visit(Instantiation.Guard.Condition);
+          VisitMatchGuard(Instantiation.Guard);
+          if (!Node->isDirectInstantiation(Instantiation)) {
+            if (Instantiation.Condition)
+              Visit(Instantiation.Condition);
+            if (Instantiation.Handler)
+              Visit(Instantiation.Handler);
+            if (Instantiation.Increment)
+              Visit(Instantiation.Increment);
           }
-          if (Instantiation.Handler)
-            Visit(Instantiation.Handler);
-          if (Instantiation.Increment)
-            Visit(Instantiation.Increment);
         });
       }
       return;
     }
-    VisitMatchPattern(Node->getPattern());
-    const MatchGuard &Guard = Node->getGuard();
-    if (Guard.hasGuard()) {
-      if (Guard.Init)
-        Visit(Guard.Init);
-      Visit(Guard.ConditionVariable);
-      Visit(Guard.Condition);
-    }
+    VisitMatchPattern(Node->getSourceExpr()->getPattern());
+    VisitMatchGuard(Node->getSourceExpr()->getGuard());
+    for (const Expr *Condition : Node->getSourceContinuation())
+      Visit(Condition);
+    if (Node->getSourceHandler())
+      Visit(Node->getSourceHandler());
+    if (Node->getSourceIncrement())
+      Visit(Node->getSourceIncrement());
   }
 
   void VisitMatchSelectExpr(const MatchSelectExpr *Node) {
@@ -1081,22 +1093,29 @@ public:
     Visit(Node->getSubject());
     for (const Stmt *Statement : Node->getPreamble())
       Visit(Statement);
-    for (const MatchCaseInstantiation &Case : Node->getCaseInstantiations()) {
+    auto VisitCase = [&](const auto &Case) {
       StringRef Label;
       if (Case.isNonReturning())
         Label = "not return";
-      getNodeDelegate().AddChild(Label, [&] {
+      getNodeDelegate().AddChild(Label, [=] {
         for (const Attr *Attribute : Case.Attributes)
           Visit(Attribute);
         VisitMatchPattern(Case.Pattern);
-        if (Case.Guard.hasGuard()) {
-          if (Case.Guard.Init)
-            Visit(Case.Guard.Init);
-          Visit(Case.Guard.ConditionVariable);
-          Visit(Case.Guard.Condition);
-        }
+        VisitMatchGuard(Case.Guard);
         Visit(Case.Handler);
       });
+    };
+    for (const MatchCase &Source : Node->getCases()) {
+      if (Source.Region)
+        Visit(Source.Region);
+      if (GetTraversalKind() == TK_IgnoreUnlessSpelledInSource ||
+          Node->getCaseInstantiations().empty()) {
+        VisitCase(Source);
+        continue;
+      }
+      for (const MatchCaseInstantiation &Instantiation :
+           Source.getInstantiations())
+        VisitCase(Instantiation);
     }
   }
 

@@ -1578,24 +1578,22 @@ ExprResult Sema::BuildCaseConditionAnd(SourceLocation AndLoc, Expr *LHS,
 
 ExprResult Sema::AttachMatchTestCondition(CaseConditionExpr *E, Stmt *Handler,
                                           Expr *Increment) {
-  assert(E->getInstantiations().empty() &&
-         "condition already has semantic instantiations");
+  assert(E->getInstantiations().size() == 1 &&
+         E->isDirectInstantiation(E->getInstantiations().front()) &&
+         !E->hasConditionInstantiations() &&
+         "expected an unattached direct condition");
 
-  MatchTestInstantiation Instantiation{
-      E->getPattern(),
-      E->getIfLoc(),
-      E->getGuard(),
-      E->getPatternInstantiation(),
-      E->isPatternIrrefutable(),
-      nullptr,
-      Handler,
-      Increment,
-  };
-  return ActOnCaseConditionExpr(
+  MatchTestInstantiation Instantiation = E->getInstantiations().front();
+  Instantiation.Handler = Handler;
+  Instantiation.Increment = Increment;
+  ExprResult Result = ActOnCaseConditionExpr(
       E->getHoldingVar(), E->getSubject(), E->getMatchLoc(), E->getPattern(),
       E->getPatternInstantiation(), E->isPatternIrrefutable(),
       /*NeedsCaseInstantiation=*/false, ArrayRef(Instantiation),
       E->isPatternDeclaration());
+  if (Result.isUsable())
+    cast<MatchTestExpr>(Result.get())->setSourceForm(Context, E);
+  return Result;
 }
 
 bool Sema::CheckPatternDeclarationScope(Scope *S,
@@ -1706,19 +1704,14 @@ Sema::GetPatternDeclarationExhaustiveness(CaseConditionExpr *Condition) {
                        /*Attributes=*/{},
                        /*NotReturnLoc=*/{}};
   SmallVector<MatchCaseInstantiation, 4> Instantiations;
-  if (Condition->getInstantiations().empty()) {
+  for (const MatchTestInstantiation &Instantiation :
+       Condition->getInstantiations())
     Instantiations.push_back(
-        SourceCase.getDirectInstantiation(/*CaseIndex=*/0));
-  } else {
-    for (const MatchTestInstantiation &Instantiation :
-         Condition->getInstantiations())
-      Instantiations.push_back(
-          {Instantiation.Pattern, Instantiation.IfLoc, Instantiation.Guard,
-           /*Handler=*/nullptr,
-           /*CaseIndex=*/0, Instantiation.PatternInstantiation,
-           /*Attributes=*/{},
-           /*NotReturnLoc=*/{}});
-  }
+        {Instantiation.Pattern, Instantiation.IfLoc, Instantiation.Guard,
+         /*Handler=*/nullptr,
+         /*CaseIndex=*/0, Instantiation.PatternInstantiation,
+         /*Attributes=*/{},
+         /*NotReturnLoc=*/{}});
   return CheckMatchExhaustiveness(
       Condition->getSubject(), ArrayRef(SourceCase), Instantiations,
       /*DiagnoseExhaustiveness=*/false,

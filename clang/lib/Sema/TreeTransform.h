@@ -19887,8 +19887,14 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
         StillNeedsCaseInstantiation, Instantiations);
   if (Result.Condition.isUsable()) {
     auto *Test = cast<MatchTestExpr>(Result.Condition.get());
-    Test->setRParenLoc(E->getRParenLoc());
-    Test->setRegion(E->getRegion());
+    SmallVector<Expr *, 4> SourceContinuation;
+    for (const CaseConditionElement &Element : Continuation)
+      SourceContinuation.push_back(Element.Condition);
+    Test->setSourceForm(getSema().Context, E,
+                        Continuation.empty() ? E->getSourceContinuation()
+                                             : ArrayRef(SourceContinuation),
+                        Handler ? Handler : E->getSourceHandler(),
+                        Increment ? Increment : E->getSourceIncrement());
   }
   return Result;
 }

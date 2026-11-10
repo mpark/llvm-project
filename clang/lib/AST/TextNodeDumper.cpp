@@ -3446,7 +3446,8 @@ void TextNodeDumper::VisitConvertVectorExpr(const ConvertVectorExpr *S) {
 }
 
 void TextNodeDumper::VisitMatchTestExpr(const MatchTestExpr *Node) {
-  if (Node->hasSemanticInstantiations())
+  if (Node->hasSemanticInstantiations() &&
+      !Node->isDirectInstantiation(Node->getInstantiations().front()))
     OS << " instantiated";
 }
 

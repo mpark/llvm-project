@@ -6136,11 +6136,12 @@ static EvalStmtResult EvaluateCaseConditionChain(
   }
 
   MatchProjectionEvaluationCache ProjectionCache;
-  auto EvaluateCandidate =
-      [&](const MatchPattern *Pattern,
-          const MatchPatternInstantiation *PatternInstantiation,
-          const MatchGuard &Guard, const MatchTestInstantiation *Instantiation)
+  auto EvaluateCandidate = [&](const MatchTestInstantiation &Instantiation)
       -> std::optional<EvalStmtResult> {
+    const MatchPattern *Pattern = Instantiation.Pattern;
+    const MatchPatternInstantiation *PatternInstantiation =
+        Instantiation.PatternInstantiation;
+    const MatchGuard &Guard = Instantiation.Guard;
     std::optional<BlockScopeRAII> CaseScope;
     bool PatternMatched;
     if (!EvaluateMatchPattern(Pattern, PatternInstantiation, PatternMatched,
@@ -6171,17 +6172,19 @@ static EvalStmtResult EvaluateCaseConditionChain(
 
     EvalStmtResult ESR = ESR_Succeeded;
     bool CandidateMatched = false;
-    if (PatternMatched && Instantiation && Instantiation->Condition) {
+    if (PatternMatched && Instantiation.Condition) {
       ESR = EvaluateCaseConditionChain(
-          Info, Instantiation->Condition,
+          Info, Instantiation.Condition,
           [&](const MatchTestInstantiation *NestedInstantiation) {
             return OnSuccess(NestedInstantiation ? NestedInstantiation
-                                                 : Instantiation);
+                                                 : &Instantiation);
           },
           CandidateMatched);
-    } else if (PatternMatched && !(Instantiation && !Instantiation->Handler)) {
+    } else if (PatternMatched &&
+               (Instantiation.Handler ||
+                Match->isDirectInstantiation(Instantiation))) {
       CandidateMatched = true;
-      ESR = OnSuccess(Instantiation);
+      ESR = OnSuccess(&Instantiation);
     }
 
     if (ESR != ESR_Failed && CaseScope && !CaseScope->destroy())
@@ -6194,19 +6197,9 @@ static EvalStmtResult EvaluateCaseConditionChain(
     return std::nullopt;
   };
 
-  if (!Match->getInstantiations().empty()) {
-    for (const MatchTestInstantiation &Instantiation :
-         Match->getInstantiations()) {
-      std::optional<EvalStmtResult> ESR = EvaluateCandidate(
-          Instantiation.Pattern, Instantiation.PatternInstantiation,
-          Instantiation.Guard, &Instantiation);
-      if (ESR)
-        return *ESR;
-    }
-  } else {
-    std::optional<EvalStmtResult> ESR =
-        EvaluateCandidate(Match->getPattern(), Match->getPatternInstantiation(),
-                          Match->getGuard(), nullptr);
+  for (const MatchTestInstantiation &Instantiation :
+       Match->getInstantiations()) {
+    std::optional<EvalStmtResult> ESR = EvaluateCandidate(Instantiation);
     if (ESR)
       return *ESR;
   }
@@ -21806,10 +21799,6 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
              !EvaluateIgnoredValue(Info, E->getSubject())) {
     return false;
   }
-  MatchTestInstantiation DirectInstantiation = E->getDirectInstantiation();
-  if (Instantiations.empty())
-    Instantiations = DirectInstantiation;
-
   MatchProjectionEvaluationCache ProjectionCache;
   for (const MatchTestInstantiation &Instantiation : Instantiations) {
     std::optional<BlockScopeRAII> Scope;

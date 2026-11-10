@@ -3349,8 +3349,8 @@ void StmtPrinter::VisitMatchTestExpr(MatchTestExpr *Node) {
     PrintExpr(Subject);
   }
   OS << ", case ";
-  PrintMatchPattern(Node->getPattern());
-  PrintMatchGuard(Node->getGuard());
+  PrintMatchPattern(Node->getSourceExpr()->getPattern());
+  PrintMatchGuard(Node->getSourceExpr()->getGuard());
   OS << ")";
 }
 
@@ -3359,7 +3359,7 @@ void StmtPrinter::VisitCaseConditionExpr(CaseConditionExpr *Node) {
                       ? Node->getHoldingVar()->getInit()
                       : Node->getSubject();
   OS << "case ";
-  PrintMatchPattern(Node->getPattern());
+  PrintMatchPattern(Node->getSourceExpr()->getPattern());
   OS << " = ";
   PrintExpr(Subject);
 }

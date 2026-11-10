@@ -328,6 +328,8 @@ public:
 
   /// Recursively visit the source components of a match pattern.
   bool TraverseMatchPattern(MatchPattern *P);
+  bool TraverseMatchGuard(const MatchGuard &Guard, DataRecursionQueue *Queue);
+  bool TraverseMatchTestComponents(MatchTestExpr *S, DataRecursionQueue *Queue);
 
   // Visit concept reference.
   bool VisitConceptReference(ConceptReference *CR) { return true; }
@@ -1671,8 +1673,9 @@ template <typename Derived>
 bool RecursiveASTVisitor<Derived>::canIgnoreChildDeclWhileTraversingDeclContext(
     const Decl *Child) {
   // BlockDecls are traversed through BlockExprs,
-  // CapturedDecls are traversed through CapturedStmts.
-  if (isa<BlockDecl>(Child) || isa<CapturedDecl>(Child))
+  // CapturedDecls are traversed through CapturedStmts, and match template
+  // regions are traversed through the owning match.
+  if (isa<BlockDecl, CapturedDecl, MatchTemplateRegionDecl>(Child))
     return true;
   // Lambda classes are traversed through LambdaExprs.
   if (const CXXRecordDecl* Cls = dyn_cast<CXXRecordDecl>(Child))
@@ -2550,7 +2553,11 @@ DEF_TRAVERSE_DECL(ParmVarDecl, {
 DEF_TRAVERSE_DECL(RequiresExprBodyDecl, {})
 
 DEF_TRAVERSE_DECL(MatchScopeDecl, {})
-DEF_TRAVERSE_DECL(MatchTemplateRegionDecl, {})
+DEF_TRAVERSE_DECL(MatchTemplateRegionDecl, {
+  // The owning match traverses the declarations through its source pattern,
+  // guard, and handler.
+  ShouldVisitChildren = false;
+})
 
 DEF_TRAVERSE_DECL(ImplicitConceptSpecializationDecl, {
   TRY_TO(TraverseTemplateArguments(D->getTemplateArguments()));
@@ -3313,54 +3320,74 @@ bool RecursiveASTVisitor<Derived>::TraverseMatchPattern(MatchPattern *P) {
     return getDerived().TraverseTypeLoc(
         static_cast<TypePattern *>(P)->getTypeSourceInfo()->getTypeLoc());
   case MatchPattern::AndPatternClass:
-    for (MatchPattern *Child : P->children())
-      TRY_TO(getDerived().TraverseMatchPattern(Child));
-    return true;
+  case MatchPattern::DecompositionPatternClass:
+    break;
   case MatchPattern::OrPatternClass:
     for (VarDecl *Binding : static_cast<OrPattern *>(P)->bindings())
-      TRY_TO(getDerived().TraverseDecl(Binding));
-    for (MatchPattern *Child : P->children())
-      TRY_TO(getDerived().TraverseMatchPattern(Child));
-    return true;
+      TRY_TO(TraverseDecl(Binding));
+    break;
   case MatchPattern::AlternativePatternClass: {
     auto *Alternative = static_cast<AlternativePattern *>(P);
     if (Alternative->getTypeConstraintSelector())
-      TRY_TO(getDerived().TraverseConceptReference(
-          Alternative->getTypeConstraintSelector()));
+      TRY_TO(
+          TraverseConceptReference(Alternative->getTypeConstraintSelector()));
     else if (Alternative->getSelector())
-      TRY_TO(getDerived().TraverseMatchPattern(Alternative->getSelector()));
-    for (MatchPattern *Child : P->children())
-      TRY_TO(getDerived().TraverseMatchPattern(Child));
-    return true;
+      TRY_TO(TraverseMatchPattern(Alternative->getSelector()));
+    break;
   }
-  case MatchPattern::DecompositionPatternClass:
-    for (MatchPattern *Child : P->children())
-      TRY_TO(getDerived().TraverseMatchPattern(Child));
-    return true;
   }
-  llvm_unreachable("unknown match pattern kind");
+  for (MatchPattern *Child : P->children())
+    TRY_TO(TraverseMatchPattern(Child));
+  return true;
 }
 
-DEF_TRAVERSE_STMT(MatchTestExpr, {
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::TraverseMatchGuard(
+    const MatchGuard &Guard, DataRecursionQueue *Queue) {
+  if (!Guard.hasGuard())
+    return true;
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Init);
+  TRY_TO(TraverseDecl(Guard.ConditionVariable));
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Condition);
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::TraverseMatchTestComponents(
+    MatchTestExpr *S, DataRecursionQueue *Queue) {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
                                           S->getHoldingVar()->getInit()
                                       ? S->getHoldingVar()->getInit()
                                       : S->getSubject());
-  TRY_TO(TraverseMatchPattern(S->getPattern()));
-  const MatchGuard &Guard = S->getGuard();
-  if (Guard.hasGuard()) {
-    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Init);
-    TRY_TO(TraverseDecl(Guard.ConditionVariable));
-    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Guard.Condition);
+  MatchTestExpr *Source = S->getSourceExpr();
+  TRY_TO(TraverseDecl(S->getRegion()));
+  TRY_TO(TraverseMatchPattern(Source->getPattern()));
+  TRY_TO(TraverseMatchGuard(Source->getGuard(), Queue));
+  for (Expr *Condition : S->getSourceContinuation())
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Condition);
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSourceHandler());
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getSourceIncrement());
+
+  if (getDerived().shouldVisitTemplateInstantiations()) {
+    for (const MatchTestInstantiation &Instantiation : S->getInstantiations()) {
+      // A directly attached control statement still owns its handler and
+      // increment. Its source pattern was already traversed above.
+      if (S->isDirectInstantiation(Instantiation))
+        continue;
+      TRY_TO(TraverseMatchPattern(Instantiation.Pattern));
+      TRY_TO(TraverseMatchGuard(Instantiation.Guard, Queue));
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Instantiation.Condition);
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Instantiation.Handler);
+      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Instantiation.Increment);
+    }
   }
-})
-DEF_TRAVERSE_STMT(CaseConditionExpr, {
-  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
-                                          S->getHoldingVar()->getInit()
-                                      ? S->getHoldingVar()->getInit()
-                                      : S->getSubject());
-  TRY_TO(TraverseMatchPattern(S->getPattern()));
-})
+  return true;
+}
+
+DEF_TRAVERSE_STMT(MatchTestExpr,
+                  { TRY_TO(TraverseMatchTestComponents(S, Queue)); })
+DEF_TRAVERSE_STMT(CaseConditionExpr,
+                  { TRY_TO(TraverseMatchTestComponents(S, Queue)); })
 DEF_TRAVERSE_STMT(MatchSelectExpr, {
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getInitStmt());
   TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getHoldingVar() &&
@@ -3369,16 +3396,25 @@ DEF_TRAVERSE_STMT(MatchSelectExpr, {
                                       : S->getSubject());
   for (Stmt *Statement : S->getPreamble())
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Statement);
-  for (const MatchCase &Case : S->getCases()) {
+  auto TraverseCase = [&](const auto &Case) {
     for (const Attr *Attribute : Case.Attributes)
-      TRY_TO(getDerived().TraverseAttr(const_cast<Attr *>(Attribute)));
+      TRY_TO(TraverseAttr(const_cast<Attr *>(Attribute)));
     TRY_TO(TraverseMatchPattern(Case.Pattern));
-    if (Case.Guard.hasGuard()) {
-      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Init);
-      TRY_TO(TraverseDecl(Case.Guard.ConditionVariable));
-      TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Guard.Condition);
-    }
+    TRY_TO(TraverseMatchGuard(Case.Guard, Queue));
     TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(Case.Handler);
+    return true;
+  };
+  for (const MatchCase &Case : S->getCases()) {
+    TRY_TO(TraverseDecl(Case.Region));
+    if (!TraverseCase(Case))
+      return false;
+    if (!getDerived().shouldVisitTemplateInstantiations())
+      continue;
+    for (const MatchCaseInstantiation &Instantiation :
+         Case.getInstantiations()) {
+      if (!Instantiation.sharesSyntaxWith(Case) && !TraverseCase(Instantiation))
+        return false;
+    }
   }
 })
 

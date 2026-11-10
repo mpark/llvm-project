@@ -5590,6 +5590,13 @@ class MatchTestExpr : public Expr {
   bool NeedsCaseInstantiation;
   bool HasSubjectProduct;
   MatchTemplateRegionDecl *Region = nullptr;
+  struct SourceForm {
+    MatchTestExpr *Expression;
+    ArrayRef<Expr *> Continuation;
+    Stmt *Handler;
+    Expr *Increment;
+  };
+  SourceForm *Source = nullptr;
 
 protected:
   explicit MatchTestExpr(StmtClass SC, const ASTContext &Ctx,
@@ -5606,12 +5613,12 @@ protected:
         PatternIsIrrefutable(PatternIsIrrefutable),
         NeedsCaseInstantiation(NeedsCaseInstantiation),
         HasSubjectProduct(HasSubjectProduct) {
-    if (!Instantiations.empty()) {
-      auto *Storage =
-          Ctx.Allocate<MatchTestInstantiation>(Instantiations.size());
-      std::uninitialized_copy(Instantiations.begin(), Instantiations.end(),
-                              Storage);
-      this->Instantiations = ArrayRef(Storage, Instantiations.size());
+    if (!Instantiations.empty())
+      this->Instantiations = Instantiations.copy(Ctx);
+    else if (!NeedsCaseInstantiation && !Subject->isTypeDependent()) {
+      MatchTestInstantiation Direct{Pattern, IfLoc, Guard, PatternInstantiation,
+                                    PatternIsIrrefutable};
+      this->Instantiations = ArrayRef(Direct).copy(Ctx);
     }
     setDependence(computeDependence(this));
   }
@@ -5654,6 +5661,22 @@ public:
   MatchTemplateRegionDecl *getRegion() const { return Region; }
   void setRegion(MatchTemplateRegionDecl *D) { Region = D; }
 
+  /// The source form can differ from the representative checked pattern.
+  const MatchTestExpr *getSourceExpr() const {
+    return Source ? Source->Expression : this;
+  }
+  MatchTestExpr *getSourceExpr() { return Source ? Source->Expression : this; }
+  ArrayRef<Expr *> getSourceContinuation() const {
+    return Source ? Source->Continuation : ArrayRef<Expr *>();
+  }
+  Stmt *getSourceHandler() const { return Source ? Source->Handler : nullptr; }
+  Expr *getSourceIncrement() const {
+    return Source ? Source->Increment : nullptr;
+  }
+  void setSourceForm(const ASTContext &Ctx, MatchTestExpr *Expression,
+                     ArrayRef<Expr *> Continuation = {},
+                     Stmt *Handler = nullptr, Expr *Increment = nullptr);
+
   bool hasSubjectProduct() const { return HasSubjectProduct; }
 
   ArrayRef<Expr *> getSubjectProductElements() const;
@@ -5679,6 +5702,11 @@ public:
     return Instantiations;
   }
 
+  /// A direct checked form shares its pattern descriptor with the source test.
+  bool isDirectInstantiation(const MatchTestInstantiation &I) const {
+    return I.PatternInstantiation == getSourceExpr()->getPatternInstantiation();
+  }
+
   MatchTestInstantiation getDirectInstantiation() const {
     return {Pattern, IfLoc, Guard, PatternInstantiation, PatternIsIrrefutable};
   }
@@ -5689,6 +5717,10 @@ public:
     return llvm::any_of(Instantiations, [](const auto &Instantiation) {
       return Instantiation.Handler != nullptr;
     });
+  }
+
+  bool hasConditionBody() const {
+    return getSourceHandler() || hasConditionInstantiations();
   }
 
   bool hasConditionContinuations() const {

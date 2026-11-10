@@ -3235,7 +3235,7 @@ RValue CodeGenFunction::EmitMatchTestExpr(const MatchTestExpr &S) {
     TestScope.emplace(*this);
   }
 
-  if (S.getInstantiations().empty()) {
+  if (!S.needsCaseInstantiation() && !S.hasConditionBody()) {
     std::optional<RunCleanupsScope> MatchScope;
     if (!IsTestExpression && !S.getHoldingVar())
       MatchScope.emplace(*this);

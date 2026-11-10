@@ -123,11 +123,7 @@ public:
     asImpl().Visit(E->getHoldingVar() && E->getHoldingVar()->getInit()
                        ? E->getHoldingVar()->getInit()
                        : E->getSubject());
-    MatchTestInstantiation DirectInstantiation = E->getDirectInstantiation();
-    ArrayRef<MatchTestInstantiation> Instantiations = E->getInstantiations();
-    if (!E->hasSemanticInstantiations())
-      Instantiations = DirectInstantiation;
-    for (const MatchTestInstantiation &Case : Instantiations) {
+    for (const MatchTestInstantiation &Case : E->getInstantiations()) {
       VisitMatchPattern(Case.Pattern, Case.PatternInstantiation);
       VisitMatchGuard(Case.Guard);
       if (Case.Condition)
@@ -136,6 +132,10 @@ public:
         this->Visit(Case.Handler);
       if (Case.Increment)
         asImpl().Visit(Case.Increment);
+    }
+    if (E->getInstantiations().empty()) {
+      VisitMatchPattern(E->getPattern(), E->getPatternInstantiation());
+      VisitMatchGuard(E->getGuard());
     }
   }
 

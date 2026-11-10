@@ -3182,7 +3182,7 @@ static bool forEachCaseConditionInstantiation(
            forEachCaseConditionInstantiation(And->getRHS(), Visit);
 
   auto *Match = dyn_cast<CaseConditionExpr>(Condition);
-  if (!Match || !Match->hasSemanticInstantiations())
+  if (!Match || !Match->hasConditionBody())
     return false;
 
   for (const MatchTestInstantiation &Instantiation :
@@ -3259,7 +3259,7 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitCaseConditionChain(
         if (auto It = SuccessBlocks.find(&Instantiation);
             It != SuccessBlocks.end())
           CandidateDefault = It->second;
-        else
+        else if (!Match->isDirectInstantiation(Instantiation))
           CandidateDefault = MatchFalseBlock;
 
         if (Instantiation.Condition) {
@@ -3351,39 +3351,31 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
 
   CFGBlock *PatternBlock = nullptr;
   CFGBlock *CandidateEntry = FalseBlock;
-  if (!E->getInstantiations().empty()) {
-    if (SelectedInstantiation) {
-      assert(*SelectedInstantiation < E->getInstantiations().size());
-      assert(TrueBlocks.size() == 1);
-      const MatchTestInstantiation &Instantiation =
-          E->getInstantiations()[*SelectedInstantiation];
+  if (SelectedInstantiation) {
+    assert(*SelectedInstantiation < E->getInstantiations().size());
+    assert(TrueBlocks.size() == 1);
+    const MatchTestInstantiation &Instantiation =
+        E->getInstantiations()[*SelectedInstantiation];
+    CandidateEntry = PatternBlock = BuildCandidate(
+        Instantiation.Pattern, Instantiation.PatternInstantiation,
+        Instantiation.Guard, Instantiation.PatternIsIrrefutable,
+        TrueBlocks.front(), FalseBlock,
+        /*IsFinalCandidate=*/true);
+  } else {
+    assert((TrueBlocks.size() == 1 ||
+            TrueBlocks.size() == E->getInstantiations().size()) &&
+           "expected either a shared or per-instantiation successor");
+    for (unsigned I = E->getInstantiations().size(); I-- > 0;) {
+      const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
+      CFGBlock *TrueBlock =
+          TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
       CandidateEntry = PatternBlock = BuildCandidate(
           Instantiation.Pattern, Instantiation.PatternInstantiation,
-          Instantiation.Guard, Instantiation.PatternIsIrrefutable,
-          TrueBlocks.front(), FalseBlock,
-          /*IsFinalCandidate=*/true);
-    } else {
-      assert((TrueBlocks.size() == 1 ||
-              TrueBlocks.size() == E->getInstantiations().size()) &&
-             "expected either a shared or per-instantiation successor");
-      for (unsigned I = E->getInstantiations().size(); I-- > 0;) {
-        const MatchTestInstantiation &Instantiation = E->getInstantiations()[I];
-        CFGBlock *TrueBlock =
-            TrueBlocks.size() == 1 ? TrueBlocks.front() : TrueBlocks[I];
-        CandidateEntry = PatternBlock = BuildCandidate(
-            Instantiation.Pattern, Instantiation.PatternInstantiation,
-            Instantiation.Guard, Instantiation.PatternIsIrrefutable, TrueBlock,
-            CandidateEntry,
-            /* IsFinalCandidate = */
-            I == E->getInstantiations().size() - 1);
-      }
+          Instantiation.Guard, Instantiation.PatternIsIrrefutable, TrueBlock,
+          CandidateEntry,
+          /* IsFinalCandidate = */
+          I == E->getInstantiations().size() - 1);
     }
-  } else {
-    assert(TrueBlocks.size() == 1);
-    CandidateEntry = PatternBlock = BuildCandidate(
-        E->getPattern(), E->getPatternInstantiation(), E->getGuard(),
-        E->isPatternIrrefutable(), TrueBlocks.front(), FalseBlock,
-        /* IsFinalCandidate = */ true);
   }
 
   Succ = CandidateEntry;
