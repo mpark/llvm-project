@@ -1707,14 +1707,8 @@ Sema::GetPatternDeclarationExhaustiveness(CaseConditionExpr *Condition) {
                        /*NotReturnLoc=*/{}};
   SmallVector<MatchCaseInstantiation, 4> Instantiations;
   if (Condition->getInstantiations().empty()) {
-    Instantiations.push_back({Condition->getPattern(),
-                              /*IfLoc=*/{},
-                              /*Guard=*/{},
-                              /*Handler=*/nullptr,
-                              /*CaseIndex=*/0,
-                              Condition->getPatternInstantiation(),
-                              /*Attributes=*/{},
-                              /*NotReturnLoc=*/{}});
+    Instantiations.push_back(
+        SourceCase.getDirectInstantiation(/*CaseIndex=*/0));
   } else {
     for (const MatchTestInstantiation &Instantiation :
          Condition->getInstantiations())
@@ -1749,16 +1743,12 @@ ExprResult Sema::ActOnMatchSelectExpr(
     return ExpandDeferredMatchExpr(E);
   }
 
-  SmallVector<MatchCaseInstantiation, 32> CaseInstantiations;
-  if (Instantiations) {
-    CaseInstantiations.append(Instantiations->begin(), Instantiations->end());
-  } else {
-    CaseInstantiations.reserve(SourceCases.size());
+  SmallVector<MatchCaseInstantiation, 32> DirectInstantiations;
+  if (!Instantiations) {
+    DirectInstantiations.reserve(SourceCases.size());
     for (auto [Index, Case] : llvm::enumerate(SourceCases))
-      CaseInstantiations.push_back({Case.Pattern, Case.IfLoc, Case.Guard,
-                                    Case.Handler, static_cast<unsigned>(Index),
-                                    Case.PatternInstantiation, Case.Attributes,
-                                    Case.NotReturnLoc});
+      DirectInstantiations.push_back(Case.getDirectInstantiation(Index));
+    Instantiations = ArrayRef(DirectInstantiations);
   }
 
   if (const AutoType *AT = RetTy->getContainedAutoType();
@@ -1769,14 +1759,14 @@ ExprResult Sema::ActOnMatchSelectExpr(
   std::optional<MatchExhaustivenessResult> Exhaustiveness =
       UsefulnessContext
           ? FinalizeMatchUsefulness(*UsefulnessContext, Subject, SourceCases)
-          : CheckMatchExhaustiveness(Subject, SourceCases, CaseInstantiations);
+          : CheckMatchExhaustiveness(Subject, SourceCases, *Instantiations);
   if (Exhaustiveness)
     IsFullyCovered = Exhaustiveness->IsFullyCovered;
   return MatchSelectExpr::Create(
-      Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr, IsStatement,
-      isMatchSubjectProductType(Subject->getType()),
+      Context, InitStmt, HoldingVar, Subject, MatchLoc, IsConstexpr,
+      IsStatement, isMatchSubjectProductType(Subject->getType()),
       IsFullyCovered, OrigResultType, RetTy, Preamble, SourceCases,
-      CaseInstantiations, Braces);
+      *Instantiations, Braces);
 }
 
 ArrayRef<const Attr *> Sema::ActOnMatchCaseAttributes(

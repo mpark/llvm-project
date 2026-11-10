@@ -19927,31 +19927,15 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   else
     RetTy = E->getType();
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
-  SmallVector<std::pair<unsigned, MatchCase>, 32> CasesToTransform;
-  if (E->getCaseInstantiations().empty()) {
-    for (auto [I, Case] : llvm::enumerate(E->getCases()))
-      CasesToTransform.emplace_back(I, Case);
-  } else {
-    CasesToTransform.reserve(E->getNumCaseInstantiations());
-    for (const MatchCaseInstantiation &Instantiation :
-         E->getCaseInstantiations()) {
-      const MatchCase &Source = E->getCases()[Instantiation.CaseIndex];
-      CasesToTransform.emplace_back(
-          Instantiation.CaseIndex,
-          MatchCase{Instantiation.Pattern, Instantiation.IfLoc,
-                    Instantiation.Guard, Instantiation.Handler,
-                    Source.MaybeUseful, Instantiation.PatternInstantiation,
-                    Instantiation.Attributes, Instantiation.NotReturnLoc});
-    }
-  }
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchUsefulnessContext UsefulnessContext(LHS.get()->getType());
   Sema::MatchProjectionCache ProjectionCache;
   enum class TransformCaseResult { Success, NotUseful, NoMatch, Error };
-  auto TransformCase = [&](const MatchCase &Case, unsigned CaseIndex,
+  auto TransformCase = [&](const MatchCaseInstantiation &Case,
                            MatchCaseInstantiation &Transformed,
                            std::optional<bool> &ConstexprConditionValue,
                            bool DiscardedByConstexpr) -> TransformCaseResult {
+    unsigned CaseIndex = Case.CaseIndex;
     MatchCandidateInstantiationScope CandidateScope(
         getSema(), SourceCases[CaseIndex].Region);
     if (CandidateScope.isInvalid())
@@ -20120,47 +20104,52 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   };
 
   bool ConstexprSelectionComplete = false;
-  for (const auto &[CaseIndex, Case] : CasesToTransform) {
-    Sema::MatchAlternativeSelectionPlan SelectionPlan;
-    bool PatternHasAlternativeChoice =
-        Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
-    bool SawViableCandidate = false;
-    while (true) {
-      SelectionPlan.beginCandidate(ProjectionCache,
-                                   PatternHasAlternativeChoice);
-      size_t SavedProjectionCount = ProjectionCache.Entries.size();
-      MatchCaseInstantiation ExpandedCase;
-      std::optional<bool> ConstexprConditionValue;
-      bool DiscardedByConstexpr = ConstexprSelectionComplete;
-      TransformCaseResult Result =
-          TransformCase(Case, CaseIndex, ExpandedCase, ConstexprConditionValue,
-                        DiscardedByConstexpr);
-      if (Result == TransformCaseResult::Error)
-        return ExprError();
-      if (Result == TransformCaseResult::NoMatch)
-        ProjectionCache.Entries.resize(SavedProjectionCount);
-      else if (Result == TransformCaseResult::Success) {
-        SawViableCandidate = true;
-        if (!DiscardedByConstexpr &&
-            (!E->isConstexpr() || !ConstexprConditionValue ||
-             *ConstexprConditionValue))
-          Instantiations.push_back(ExpandedCase);
-        ConstexprSelectionComplete |=
-            E->isConstexpr() && ConstexprConditionValue &&
-            *ConstexprConditionValue;
-      } else {
-        assert(Result == TransformCaseResult::NotUseful);
-        SawViableCandidate = true;
+  bool TransformSourceCases = E->getCaseInstantiations().empty();
+  for (auto [CaseIndex, Source] : llvm::enumerate(E->getCases())) {
+    MatchCaseInstantiation Direct = Source.getDirectInstantiation(CaseIndex);
+    ArrayRef<MatchCaseInstantiation> Cases =
+        TransformSourceCases ? ArrayRef(Direct) : Source.getInstantiations();
+    for (const MatchCaseInstantiation &Case : Cases) {
+      Sema::MatchAlternativeSelectionPlan SelectionPlan;
+      bool PatternHasAlternativeChoice =
+          Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
+      bool SawViableCandidate = false;
+      while (true) {
+        SelectionPlan.beginCandidate(ProjectionCache,
+                                     PatternHasAlternativeChoice);
+        size_t SavedProjectionCount = ProjectionCache.Entries.size();
+        MatchCaseInstantiation ExpandedCase;
+        std::optional<bool> ConstexprConditionValue;
+        bool DiscardedByConstexpr = ConstexprSelectionComplete;
+        TransformCaseResult Result = TransformCase(
+            Case, ExpandedCase, ConstexprConditionValue, DiscardedByConstexpr);
+        if (Result == TransformCaseResult::Error)
+          return ExprError();
+        if (Result == TransformCaseResult::NoMatch)
+          ProjectionCache.Entries.resize(SavedProjectionCount);
+        else if (Result == TransformCaseResult::Success) {
+          SawViableCandidate = true;
+          if (!DiscardedByConstexpr &&
+              (!E->isConstexpr() || !ConstexprConditionValue ||
+               *ConstexprConditionValue))
+            Instantiations.push_back(ExpandedCase);
+          ConstexprSelectionComplete |= E->isConstexpr() &&
+                                        ConstexprConditionValue &&
+                                        *ConstexprConditionValue;
+        } else {
+          assert(Result == TransformCaseResult::NotUseful);
+          SawViableCandidate = true;
+        }
+        if (!SelectionPlan.advance(ProjectionCache))
+          break;
       }
-      if (!SelectionPlan.advance(ProjectionCache))
-        break;
-    }
-    if (!SawViableCandidate && SelectionPlan.SawAlternativeChoice &&
-        !E->getSubject()->isTypeDependent()) {
-      getSema().Diag(Case.Pattern->getBeginLoc(),
-                     diag::err_braced_alternative_no_viable_state)
-          << LHS.get()->getType();
-      return ExprError();
+      if (!SawViableCandidate && SelectionPlan.SawAlternativeChoice &&
+          !E->getSubject()->isTypeDependent()) {
+        getSema().Diag(Case.Pattern->getBeginLoc(),
+                       diag::err_braced_alternative_no_viable_state)
+            << LHS.get()->getType();
+        return ExprError();
+      }
     }
   }
 

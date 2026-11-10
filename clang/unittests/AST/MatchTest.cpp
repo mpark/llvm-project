@@ -104,6 +104,144 @@ public:
   }
 };
 
+TEST(MatchAST, InstantiationsBySourceCase) {
+  auto AST = buildMatchAST(R"cpp(
+int test(Choice<int, double> value) {
+  return match (value) {
+    case { int payload } if (keep(payload)) => payload;
+    case { auto payload } => static_cast<int>(payload);
+    case _ => 0;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  MatchSelectExpr *Selection = Finder.Selection;
+  ASSERT_NE(Selection, nullptr);
+  ASSERT_EQ(Selection->getNumCases(), 3u);
+  ASSERT_EQ(Selection->getNumCaseInstantiations(), 3u);
+  auto All = Selection->getCaseInstantiations();
+  auto First = Selection->getCases()[0].getInstantiations();
+  auto Second = Selection->getCases()[1].getInstantiations();
+  EXPECT_EQ(First.size(), 1u);
+  EXPECT_EQ(First.data(), All.data());
+  EXPECT_EQ(Second.size(), 2u);
+  EXPECT_EQ(Second.data(), All.data() + 1);
+  EXPECT_TRUE(Selection->getCases()[2].getInstantiations().empty());
+  for (auto [CaseIndex, Case] : llvm::enumerate(Selection->getCases())) {
+    MatchCaseInstantiation Direct = Case.getDirectInstantiation(CaseIndex);
+    EXPECT_EQ(Direct.CaseIndex, CaseIndex);
+    EXPECT_EQ(Direct.PatternInstantiation, Case.PatternInstantiation);
+    EXPECT_TRUE(Direct.sharesSyntaxWith(Case));
+    for (const MatchCaseInstantiation &Instantiation : Case.getInstantiations())
+      EXPECT_EQ(Instantiation.CaseIndex, CaseIndex);
+  }
+}
+
+TEST(MatchAST, InstantiationsSkipCoveredSourceCases) {
+  auto AST = buildMatchAST(R"cpp(
+int test(Choice<int, double> value) {
+  return match (value) {
+    case { int payload } => payload;
+    case { int payload } => payload;
+    case { double payload } if (keep(payload)) => static_cast<int>(payload);
+    case { auto payload } => static_cast<int>(payload);
+    case _ => 0;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  MatchSelectExpr *Selection = Finder.Selection;
+  ASSERT_NE(Selection, nullptr);
+  ASSERT_EQ(Selection->getNumCases(), 5u);
+  ASSERT_EQ(Selection->getNumCaseInstantiations(), 3u);
+  auto All = Selection->getCaseInstantiations();
+  auto Cases = Selection->getCases();
+  EXPECT_EQ(Cases[0].getInstantiations().size(), 1u);
+  EXPECT_EQ(Cases[0].getInstantiations().data(), All.data());
+  EXPECT_TRUE(Cases[1].getInstantiations().empty());
+  EXPECT_EQ(Cases[2].getInstantiations().size(), 1u);
+  EXPECT_EQ(Cases[2].getInstantiations().data(), All.data() + 1);
+  EXPECT_EQ(Cases[3].getInstantiations().size(), 1u);
+  EXPECT_EQ(Cases[3].getInstantiations().data(), All.data() + 2);
+  EXPECT_TRUE(Cases[4].getInstantiations().empty());
+}
+
+TEST(MatchAST, InstantiationsSkipDiscardedConstexprCases) {
+  auto AST = buildMatchAST(R"cpp(
+int test() {
+  return match constexpr (1) {
+    case 0 => 0;
+    case 1 => 1;
+    case _ => 2;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  MatchSelectExpr *Selection = Finder.Selection;
+  ASSERT_NE(Selection, nullptr);
+  ASSERT_EQ(Selection->getNumCases(), 3u);
+  ASSERT_EQ(Selection->getNumCaseInstantiations(), 1u);
+  auto Cases = Selection->getCases();
+  EXPECT_TRUE(Cases[0].getInstantiations().empty());
+  EXPECT_EQ(Cases[1].getInstantiations().size(), 1u);
+  EXPECT_EQ(Cases[1].getInstantiations().data(),
+            Selection->getCaseInstantiations().data());
+  EXPECT_TRUE(Cases[2].getInstantiations().empty());
+}
+
+TEST(MatchAST, CaseRangesAreReboundWhenRebuilding) {
+  auto AST = buildMatchAST(R"cpp(
+int test(Choice<int, double> value) {
+  return match (value) {
+    case { auto payload } => static_cast<int>(payload);
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  MatchSelectExpr *Selection = Finder.Selection;
+  ASSERT_NE(Selection, nullptr);
+  auto Rebuild = [&](ArrayRef<MatchCaseInstantiation> Instantiations) {
+    return MatchSelectExpr::Create(
+        AST->getASTContext(), Selection->getInitStmt(),
+        Selection->getHoldingVar(), Selection->getSubject(),
+        Selection->getMatchLoc(), Selection->isConstexpr(),
+        Selection->isStatement(), Selection->hasSubjectProduct(),
+        Selection->isFullyCovered(), Selection->getOrigResultType(),
+        Selection->getType(), Selection->getPreamble(), Selection->getCases(),
+        Instantiations, Selection->getBraces());
+  };
+  auto Original = Selection->getCases()[0].getInstantiations();
+  ASSERT_EQ(Original.size(), 2u);
+  MatchSelectExpr *Copy = Rebuild(Selection->getCaseInstantiations());
+  auto Copied = Copy->getCases()[0].getInstantiations();
+  EXPECT_EQ(Copied.size(), Original.size());
+  EXPECT_EQ(Copied.data(), Copy->getCaseInstantiations().data());
+  EXPECT_NE(Copied.data(), Original.data());
+  EXPECT_EQ(Selection->getCases()[0].getInstantiations().data(),
+            Original.data());
+
+  MatchSelectExpr *Uninstantiated = Rebuild({});
+  EXPECT_TRUE(Uninstantiated->getCases()[0].getInstantiations().empty());
+  EXPECT_EQ(Selection->getCases()[0].getInstantiations().data(),
+            Original.data());
+}
+
 TEST(MatchAST, IrrefutabilityUsesCompletePattern) {
   auto AST = buildMatchAST(R"cpp(
 struct Product {
@@ -143,6 +281,52 @@ bool nested_or_wildcard(Product value) {
     ASSERT_NE(Finder.Test, nullptr);
     EXPECT_EQ(Finder.Test->isPatternIrrefutable(), Irrefutable);
   }
+}
+
+TEST(MatchAST, TemplateRegionsCountProjectableStates) {
+  auto AST = buildMatchAST(R"cpp(
+void singleton(MaybeInt value) {
+  match (value) {
+    case { auto payload } => use(payload);
+    case {} => ;
+  }
+}
+void multiple(Choice<int, double> value) {
+  match (value) {
+    case { auto payload } => use(payload);
+  }
+}
+void repeated(Choice<int, int> value) {
+  match (value) {
+    case { auto payload } => use(payload);
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name : {"singleton", "multiple", "repeated"}) {
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    ASSERT_NE(Finder.Selection, nullptr);
+    MatchTemplateRegionDecl *Region = Finder.Selection->getCases()[0].Region;
+    if (Name == "singleton") {
+      EXPECT_EQ(Region, nullptr);
+    } else {
+      ASSERT_NE(Region, nullptr);
+      EXPECT_TRUE(Region->isDependentContext());
+      EXPECT_EQ(Region->getEnclosingFunction(), Function);
+    }
+  }
+}
+
+TEST(MatchAST, EmptyInstantiationTable) {
+  auto AST = buildMatchAST("int value;");
+  ASSERT_TRUE(AST);
+  auto *Selection = MatchSelectExpr::CreateEmpty(
+      AST->getASTContext(), /*NumPreambleStatements=*/0, /*NumCases=*/1,
+      /*NumCaseInstantiations=*/0);
+  EXPECT_TRUE(Selection->getCaseInstantiations().empty());
 }
 
 } // namespace

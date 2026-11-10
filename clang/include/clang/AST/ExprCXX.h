@@ -5832,6 +5832,8 @@ public:
   }
 };
 
+struct MatchCaseInstantiation;
+
 struct MatchCase {
   MatchPattern *Pattern;
   SourceLocation IfLoc;
@@ -5842,8 +5844,14 @@ struct MatchCase {
   ArrayRef<const Attr *> Attributes;
   SourceLocation NotReturnLoc;
   MatchTemplateRegionDecl *Region = nullptr;
+  /// Checked forms of this case, backed by the owning match's storage.
+  ArrayRef<MatchCaseInstantiation> Instantiations = {};
 
   bool isNonReturning() const { return NotReturnLoc.isValid(); }
+  ArrayRef<MatchCaseInstantiation> getInstantiations() const {
+    return Instantiations;
+  }
+  MatchCaseInstantiation getDirectInstantiation(unsigned CaseIndex) const;
 };
 
 /// A semantically checked form of a source match case. A source case can have
@@ -5859,7 +5867,22 @@ struct MatchCaseInstantiation {
   SourceLocation NotReturnLoc;
 
   bool isNonReturning() const { return NotReturnLoc.isValid(); }
+  bool sharesSyntaxWith(const MatchCase &Source) const {
+    return Pattern == Source.Pattern && IfLoc == Source.IfLoc &&
+           Guard.Init == Source.Guard.Init &&
+           Guard.ConditionVariable == Source.Guard.ConditionVariable &&
+           Guard.Condition == Source.Guard.Condition &&
+           Handler == Source.Handler && Attributes == Source.Attributes &&
+           NotReturnLoc == Source.NotReturnLoc;
+  }
 };
+
+inline MatchCaseInstantiation
+MatchCase::getDirectInstantiation(unsigned CaseIndex) const {
+  return {Pattern,    IfLoc,       Guard,
+          Handler,    CaseIndex,   PatternInstantiation,
+          Attributes, NotReturnLoc};
+}
 
 class MatchSelectExpr final
     : public Expr,

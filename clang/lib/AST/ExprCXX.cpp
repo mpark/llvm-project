@@ -35,6 +35,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
 #include <cstddef>
@@ -2281,6 +2282,17 @@ MatchSelectExpr::MatchSelectExpr(
                           getTrailingObjects<MatchCase>());
   std::uninitialized_copy(Instantiations.begin(), Instantiations.end(),
                           getTrailingObjects<MatchCaseInstantiation>());
+  ArrayRef<MatchCaseInstantiation> Remaining = getCaseInstantiations();
+  for (auto [CaseIndex, Case] : llvm::enumerate(
+           MutableArrayRef(getTrailingObjects<MatchCase>(), NumCases))) {
+    auto End = llvm::find_if_not(Remaining, [&](const auto &Instantiation) {
+      return Instantiation.CaseIndex == CaseIndex;
+    });
+    Case.Instantiations = Remaining.take_front(End - Remaining.begin());
+    Remaining = Remaining.drop_front(Case.Instantiations.size());
+  }
+  assert(Remaining.empty() &&
+         "match instantiations must be grouped in source-case order");
   setDependence(computeDependence(this));
 }
 
