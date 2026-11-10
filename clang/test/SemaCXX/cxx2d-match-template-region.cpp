@@ -303,6 +303,64 @@ constexpr bool failing_test_guard(Choice value) {
 static_assert(!failing_test_guard({0, 42, 0.0}));
 static_assert(!failing_test_guard({1, 0, 2.0}));
 
+constexpr int enclosing_parameter_and_nested_lambda(Choice value, int extra) {
+  return match (value) {
+    case { auto payload } => [&]<class T>(T argument) {
+      return static_cast<int>(argument) + extra;
+    }(payload);
+  };
+}
+
+static_assert(enclosing_parameter_and_nested_lambda({0, 42, 0.0}, 3) == 45);
+static_assert(enclosing_parameter_and_nested_lambda({1, 0, 2.0}, 3) == 5);
+
+constexpr int nested_generic_match(Choice value) {
+  return match (value) {
+    case { auto payload } => [payload]<class T>(T extra) {
+      return match (payload) -> int {
+        case 0 => extra;
+        case auto copy => static_cast<int>(copy) + extra;
+      };
+    }(3);
+  };
+}
+
+static_assert(nested_generic_match({0, 42, 0.0}) == 45);
+static_assert(nested_generic_match({1, 0, 2.0}) == 5);
+static_assert(nested_generic_match({0, 0, 0.0}) == 3);
+
+struct EnclosingObject {
+  int extra;
+
+  constexpr int classify(Choice value) const {
+    return match (value) {
+      case { auto payload } => [this](auto argument) {
+        return static_cast<int>(argument) + extra;
+      }(payload);
+    };
+  }
+};
+
+static_assert(EnclosingObject{3}.classify({0, 42, 0.0}) == 45);
+static_assert(EnclosingObject{3}.classify({1, 0, 2.0}) == 5);
+
+constexpr int enclosing_lambda(Choice value, int extra) {
+  return [=] {
+    return match (value) {
+      case { auto payload } => static_cast<int>(payload) + extra;
+    };
+  }();
+}
+
+static_assert(enclosing_lambda({0, 42, 0.0}, 3) == 45);
+static_assert(enclosing_lambda({1, 0, 2.0}, 3) == 5);
+
+void failed_case_instantiation(Choice value) {
+  match (value) {
+    case { auto payload } => static_assert(__is_same(decltype(payload), int), "requires int"); // expected-error {{static assertion failed}} expected-note {{while instantiating this pattern match}}
+  }
+}
+
 void condition_region(Choice value) {
   if (case { auto payload } = value) {
     if constexpr (sizeof(payload) > 0)
@@ -351,24 +409,245 @@ static_assert(condition_chain({0, 42, 0.0}, {0, 1, 2}, 3) == 46);
 static_assert(condition_chain({1, 0, 2.0}, {1, 1, 2}, 3) == 7);
 static_assert(condition_chain({1, 0, 2.0}, {1, 1, 0}, 3) == -1);
 
-int deferred_assertion(Choice value) {
-  return match (value) {
-    case { auto payload } => // expected-note 2{{while instantiating this pattern match}}
-      [] { static_assert(false); return 0; }(); // expected-error 2{{static assertion failed}} expected-note 2{{while substituting into a lambda expression here}}
+constexpr bool guarded_test(Choice value) {
+  return match(value, case { auto payload } if ([] {
+    if constexpr (true)
+      return true;
+    else
+      static_assert(false, "discarded in each guard instantiation");
+  }()));
+}
+
+static_assert(guarded_test({0, 42, 0.0}));
+static_assert(guarded_test({1, 0, 2.0}));
+
+constexpr int condition_loop(RepeatedChoice value) {
+  int result = 0;
+  for (; case { auto &payload } = value; ++payload) {
+    if constexpr (sizeof(payload) > 0) {
+      if (payload == 3)
+        break;
+      if (payload == 0)
+        continue;
+      result += payload;
+    } else {
+      static_assert(false, "discarded in the loop region");
+    }
+  }
+  return result;
+}
+
+static_assert(condition_loop({0, 0, 0}) == 3);
+static_assert(condition_loop({1, 0, 1}) == 3);
+
+struct Pair {
+  int first;
+  int second;
+};
+
+struct Triple {
+  int first;
+  int second;
+  int third;
+};
+
+constexpr int direct_declaration_pack(Pair value) {
+  match (value) {
+    case [auto&& ...elements] => {
+      if constexpr (sizeof...(elements) == 2)
+        return (... + elements);
+      else
+        static_assert(false, "a declaration pack introduces a region");
+    }
+  }
+}
+
+static_assert(direct_declaration_pack({1, 2}) == 3);
+
+constexpr int direct_structured_binding_pack(Pair value) {
+  match (value) {
+    case auto &[...elements] => {
+      if constexpr (sizeof...(elements) == 2)
+        return (... + elements);
+      else
+        static_assert(false, "a structured binding pack introduces a region");
+    }
+  }
+}
+
+static_assert(direct_structured_binding_pack({1, 2}) == 3);
+
+constexpr int namespace_declaration_pack = match (Pair{20, 22}) {
+  case [auto&& ...elements] => (... + elements);
+};
+static_assert(namespace_declaration_pack == 42);
+
+constexpr int namespace_structured_binding_pack = match (Pair{20, 22}) {
+  case auto [...elements] => (... + elements);
+};
+static_assert(namespace_structured_binding_pack == 42);
+
+constexpr bool direct_pack_guard(Pair value) {
+  return match (value, case [auto&& ...elements] if ((... + elements) == 3));
+}
+
+static_assert(direct_pack_guard({1, 2}));
+static_assert(!direct_pack_guard({3, 4}));
+
+void region_does_not_extend_to_next_case(Pair value) {
+  match (value) {
+    case [0, auto&& ...elements] => {
+      if constexpr (sizeof...(elements) == 1)
+        (void)(... + elements);
+      else
+        static_assert(false, "discarded in the pack's region");
+    }
+    case [auto first, auto second] => {
+      if constexpr (true)
+        (void)(first + second);
+      else
+        static_assert(false, "the next case is not dependent"); // expected-error {{static assertion failed: the next case is not dependent}}
+    }
+  }
+}
+
+struct NestedProduct {
+  Pair pair;
+  int last;
+};
+
+constexpr int nested_decomposition_in_region(Choice value,
+                                             NestedProduct product) {
+  return match (value, product) {
+    case [{ auto payload }, const auto &[[first, second], last]] =>
+      static_cast<int>(payload) + first + second + last;
   };
 }
 
-int nondependent_lookup(Choice value) {
+static_assert(nested_decomposition_in_region({0, 10, 0.0}, {{1, 2}, 3}) == 16);
+static_assert(nested_decomposition_in_region({1, 0, 2.0}, {{1, 2}, 3}) == 8);
+
+struct ProductChoice {
+  unsigned active;
+  Pair pair;
+  Triple triple;
+};
+
+template <> struct std::alternative_traits<ProductChoice> {
+  static constexpr alternative_info alternatives[] = {^^Pair, ^^Triple};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const ProductChoice &value) noexcept {
+    return value.active;
+  }
+
+  template <unsigned I, class Self>
+  static constexpr decltype(auto) get(Self &&value) {
+    if constexpr (I == 0)
+      return (static_cast<Self &&>(value).pair);
+    else
+      return (static_cast<Self &&>(value).triple);
+  }
+};
+
+constexpr int structured_binding_pack_in_region(ProductChoice value) {
+  match (value) {
+    case { auto &payload } => {
+      auto &[...elements] = payload;
+      return (... + elements);
+    }
+  }
+}
+
+static_assert(structured_binding_pack_in_region({0, {1, 2}, {3, 4, 5}}) == 3);
+static_assert(structured_binding_pack_in_region({1, {1, 2}, {3, 4, 5}}) == 12);
+
+constexpr int or_structured_binding_pack(ProductChoice value) {
   return match (value) {
-    case { auto payload } => undeclared_name(); // expected-error {{use of undeclared identifier 'undeclared_name'}}
+    case { Pair: auto &[...elements] } or
+         { Triple: auto &[...elements] } => (... + elements);
   };
 }
 
-constexpr int project(Choice value) {
-  return match (value) {
-    case { auto payload } => static_cast<int>(payload);
+static_assert(or_structured_binding_pack({0, {1, 2}, {3, 4, 5}}) == 3);
+static_assert(or_structured_binding_pack({1, {1, 2}, {3, 4, 5}}) == 12);
+
+constexpr int declaration_pack_in_region(ProductChoice value) {
+  match (value) {
+    case { [auto&& ...elements] } => {
+      if constexpr (sizeof...(elements) > 0)
+        return (... + elements);
+      else
+        static_assert(false, "discarded after expanding the declaration pack");
+    }
+  }
+}
+
+static_assert(declaration_pack_in_region({0, {1, 2}, {3, 4, 5}}) == 3);
+static_assert(declaration_pack_in_region({1, {1, 2}, {3, 4, 5}}) == 12);
+
+constexpr long do_expression_in_region(Choice value) {
+  return match (value) -> long {
+    case { auto payload } => do {
+      if constexpr (__is_same(decltype(payload), int))
+        do_return 17;
+      else
+        do_return 29L;
+    };
   };
 }
 
-static_assert(project({0, 42, 0}) == 42);
-static_assert(project({1, 0, 24}) == 24);
+static_assert(do_expression_in_region({0, 0, 0.0}) == 17);
+static_assert(do_expression_in_region({1, 0, 0.0}) == 29);
+
+void variadic_function(Choice value, int last, ...) {
+  __builtin_va_list arguments;
+  match (value) {
+    case { auto payload } => {
+      __builtin_va_start(arguments, last);
+      (void)__builtin_va_arg(arguments, int);
+      __builtin_va_end(arguments);
+      (void)payload;
+    }
+  }
+}
+
+void jump_between_handlers(Choice value) {
+  match (value) {
+    case { int } => goto other; // expected-error {{cannot jump from this goto statement to its label}}
+    case { double } => { // expected-note {{jump enters a match handler}}
+    other:
+      ;
+    }
+  }
+}
+
+void jump_into_handler(Choice value) {
+  goto inside; // expected-error {{cannot jump from this goto statement to its label}}
+  match (value) {
+    case { auto payload } => { // expected-note {{jump enters a match handler}}
+    inside:
+      (void)payload;
+    }
+  }
+}
+
+struct Task {
+  struct promise_type {
+    Task get_return_object();
+    std::suspend_never initial_suspend() noexcept;
+    std::suspend_never final_suspend() noexcept;
+    void return_void();
+    void unhandled_exception();
+  };
+};
+
+Task coroutine_function(Choice value) {
+  match (value) {
+    case { auto payload } => {
+      co_await std::suspend_never{};
+      (void)payload;
+    }
+  }
+  co_return;
+}
