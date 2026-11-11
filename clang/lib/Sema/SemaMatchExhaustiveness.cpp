@@ -321,18 +321,12 @@ const EnumConstantDecl *findEnumerator(ASTContext &Ctx, QualType T,
   return nullptr;
 }
 
-std::optional<CoveragePatterns> constantPatternsFor(Sema &S, Expr *Condition,
-                                                    QualType SubjectType,
-                                                    SourceLocation Loc) {
-  auto *Comparison = dyn_cast_or_null<BinaryOperator>(Condition);
-  if (!Comparison || Comparison->getOpcode() != BO_EQ)
+std::optional<CoveragePatterns>
+constantPatternsFor(Sema &S, const MatchIntegralPatternTest *Test,
+                    QualType SubjectType, SourceLocation Loc) {
+  if (!Test)
     return std::nullopt;
-  if (Comparison->getRHS()->isValueDependent())
-    return std::nullopt;
-
-  Expr::EvalResult Result;
-  if (!Comparison->getRHS()->EvaluateAsInt(Result, S.Context))
-    return std::nullopt;
+  const BinaryOperator *Comparison = Test->Comparison;
 
   SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
   std::optional<IntegralValueDomain> Domain =
@@ -344,7 +338,7 @@ std::optional<CoveragePatterns> constantPatternsFor(Sema &S, Expr *Condition,
   // by converting it forward again. This distinguishes an unsigned subject
   // compared with -1 from an unsigned char subject compared with 256.
   llvm::APSInt Compared = convertToIntegerLikeType(
-      S.Context, Result.Val.getInt(), Comparison->getRHS()->getType());
+      S.Context, Test->Value, Comparison->getRHS()->getType());
   llvm::APSInt Value =
       convertToIntegerLikeType(S.Context, Compared, SubjectType);
   llvm::APSInt ConvertedSubject = convertToIntegerLikeType(
@@ -399,7 +393,8 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
   case MatchPattern::ExpressionPatternClass: {
     auto *P = static_cast<ExpressionPattern *>(Pattern);
     const MatchPatternInfo *Info = Instantiation->find(P);
-    if (Info && Info->IsAlternativeValuePattern) {
+    if (Info &&
+        Info->TestKind == MatchPatternTestKind::AlternativeDiscriminator) {
       CoveragePatterns Results;
       for (unsigned Index : Info->SelectedAlternatives)
         Results.push_back(CoveragePattern::ctor(
@@ -408,7 +403,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       return Results;
     }
     if (auto Constants = constantPatternsFor(
-            S, Info ? Info->Condition : nullptr, Type, P->getBeginLoc()))
+            S, Info ? Info->IntegralTest : nullptr, Type, P->getBeginLoc()))
       return std::move(*Constants);
     return {CoveragePattern::opaque(Pattern->getBeginLoc())};
   }

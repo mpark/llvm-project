@@ -1032,7 +1032,8 @@ static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
                                        bool IsAlternativeValuePattern = false) {
   PatternInfo.Alternatives = Traits.Projections;
   PatternInfo.SelectedAlternatives = Selected.copy(S.Context);
-  PatternInfo.IsAlternativeValuePattern = IsAlternativeValuePattern;
+  if (IsAlternativeValuePattern)
+    PatternInfo.TestKind = MatchPatternTestKind::AlternativeDiscriminator;
 }
 
 static bool tryLookupAlternativeTraitsForValuePattern(
@@ -1173,12 +1174,6 @@ static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
   return Pattern;
 }
 
-enum class ExpressionPatternConditionKind {
-  StructuralEquality,
-  Equality,
-  Invocation
-};
-
 static bool hasStructuralValuePatternOperands(Expr *Subject, Expr *Pattern) {
   QualType SubjectType = Subject->getType().getNonReferenceType();
   QualType PatternType = Pattern->getType().getNonReferenceType();
@@ -1200,21 +1195,24 @@ static ExprResult buildStructuralValuePatternCondition(
                               ConvertedPattern.get());
 }
 
-static ExprResult
-buildExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
-                                Expr *Subject, Expr *Pattern,
-                                ExpressionPatternConditionKind Kind) {
+static ExprResult buildExpressionPatternCondition(Sema &S, Scope *Scope,
+                                                  SourceLocation Loc,
+                                                  Expr *Subject, Expr *Pattern,
+                                                  MatchPatternTestKind Kind) {
   ExprResult Condition;
   switch (Kind) {
-  case ExpressionPatternConditionKind::StructuralEquality:
+  case MatchPatternTestKind::None:
+  case MatchPatternTestKind::AlternativeDiscriminator:
+    llvm_unreachable("not an expression comparison or predicate");
+  case MatchPatternTestKind::StructuralEquality:
     Condition =
         buildStructuralValuePatternCondition(S, Loc, Subject, Pattern);
     break;
-  case ExpressionPatternConditionKind::Equality:
+  case MatchPatternTestKind::Equality:
     Condition =
         S.ActOnBinOp(Scope, Loc, tok::TokenKind::equalequal, Pattern, Subject);
     break;
-  case ExpressionPatternConditionKind::Invocation: {
+  case MatchPatternTestKind::Invocation: {
     Expr *Callee = new (S.Context) ParenExpr(Loc, Loc, Pattern);
     Condition = S.BuildCallExpr(Scope, Callee, Loc, Subject, Loc);
     break;
@@ -1225,10 +1223,10 @@ buildExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
   return S.PerformContextuallyConvertToBool(Condition.get());
 }
 
-static ExprResult
-probeExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
-                                Expr *Subject, Expr *Pattern,
-                                ExpressionPatternConditionKind Kind) {
+static ExprResult probeExpressionPatternCondition(Sema &S, Scope *Scope,
+                                                  SourceLocation Loc,
+                                                  Expr *Subject, Expr *Pattern,
+                                                  MatchPatternTestKind Kind) {
   auto *SubjectProbe = new (S.Context)
       OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
                       Subject->getObjectKind(), Subject);
@@ -1247,10 +1245,10 @@ probeExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
   return Condition;
 }
 
-static bool
-isViableExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
-                                   Expr *Subject, Expr *Pattern,
-                                   ExpressionPatternConditionKind Kind) {
+static bool isViableExpressionPatternCondition(Sema &S, Scope *Scope,
+                                               SourceLocation Loc,
+                                               Expr *Subject, Expr *Pattern,
+                                               MatchPatternTestKind Kind) {
   return probeExpressionPatternCondition(S, Scope, Loc, Subject, Pattern, Kind)
       .isUsable();
 }
@@ -2621,7 +2619,8 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
       ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
       Loc);
   ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
-  Projection->setProjectedExpr(ProjectedRef);
+  Projection->setProjectedExpr(ProjectedRef,
+                               MatchProjection::ValueSource::Intermediate);
   return CastProjectionResult::Success;
 }
 
@@ -2801,7 +2800,8 @@ static MatchPatternCheckResult checkOpenAlternativePattern(
         ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
         Loc);
     ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
-    Projection->setProjectedExpr(ProjectedRef);
+    Projection->setProjectedExpr(ProjectedRef,
+                                 MatchProjection::ValueSource::Intermediate);
     return CheckSubPattern(ProjectedRef);
   };
 
@@ -3277,30 +3277,30 @@ Sema::MatchPatternCheckResult Sema::CheckCompleteMatchPatternImpl(
     if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo,
                                         CheckingContext))
       return MatchPatternCheckResult::Error;
-    if (PatternInfo.IsAlternativeValuePattern)
+    if (PatternInfo.TestKind == MatchPatternTestKind::AlternativeDiscriminator)
       break;
 
     ExprResult ConstantPattern =
         buildConstantPatternValue(*this, P->getExpr(), /*Diagnose=*/false);
     Expr *PatternValue =
         ConstantPattern.isUsable() ? ConstantPattern.get() : P->getExpr();
-    std::optional<ExpressionPatternConditionKind> Kind;
+    std::optional<MatchPatternTestKind> Kind;
     bool HasStructuralOperands =
         hasStructuralValuePatternOperands(Subject, PatternValue);
     if (HasStructuralOperands) {
       if (isViableExpressionPatternCondition(
               *this, S, Loc, Subject, PatternValue,
-              ExpressionPatternConditionKind::StructuralEquality))
-        Kind = ExpressionPatternConditionKind::StructuralEquality;
+              MatchPatternTestKind::StructuralEquality))
+        Kind = MatchPatternTestKind::StructuralEquality;
     } else {
-      if (isViableExpressionPatternCondition(
-              *this, S, Loc, Subject, PatternValue,
-              ExpressionPatternConditionKind::Equality))
-        Kind = ExpressionPatternConditionKind::Equality;
+      if (isViableExpressionPatternCondition(*this, S, Loc, Subject,
+                                             PatternValue,
+                                             MatchPatternTestKind::Equality))
+        Kind = MatchPatternTestKind::Equality;
       else if (isViableExpressionPatternCondition(
                    *this, S, Loc, Subject, PatternValue,
-                   ExpressionPatternConditionKind::Invocation))
-        Kind = ExpressionPatternConditionKind::Invocation;
+                   MatchPatternTestKind::Invocation))
+        Kind = MatchPatternTestKind::Invocation;
     }
 
     if (!Kind) {
@@ -3317,6 +3317,24 @@ Sema::MatchPatternCheckResult Sema::CheckCompleteMatchPatternImpl(
     if (Cond.isInvalid())
       return MatchPatternCheckResult::Error;
     PatternInfo.Condition = Cond.get();
+    PatternInfo.TestKind = *Kind;
+    if (*Kind == MatchPatternTestKind::StructuralEquality) {
+      const auto *Comparison = cast<BinaryOperator>(Cond.get());
+      Expr::EvalResult Value;
+      if (Comparison->getLHS()->getType()->isIntegralOrEnumerationType() &&
+          !Comparison->getRHS()->isValueDependent() &&
+          Comparison->getRHS()->EvaluateAsInt(Value, Context)) {
+        llvm::APSInt Compared = Value.Val.getInt().extOrTrunc(
+            Context.getIntWidth(Comparison->getRHS()->getType()));
+        Compared.setIsUnsigned(Comparison->getRHS()
+                                   ->getType()
+                                   ->isUnsignedIntegerOrEnumerationType());
+        auto *Test = new (Context)
+            MatchIntegralPatternTest{Comparison, std::move(Compared)};
+        Context.addDestruction(Test);
+        PatternInfo.IntegralTest = Test;
+      }
+    }
     break;
   }
   case MatchPattern::ParenPatternClass: {

@@ -88,7 +88,7 @@ FunctionDecl *getFunction(ASTUnit &AST, llvm::StringRef Name) {
     if (auto *Template = dyn_cast<FunctionTemplateDecl>(D))
       D = Template->getTemplatedDecl();
     if (auto *Function = dyn_cast<FunctionDecl>(D);
-        Function && Function->getName() == Name)
+        Function && Function->getIdentifier() && Function->getName() == Name)
       return Function;
   }
   return nullptr;
@@ -934,6 +934,98 @@ void test(Choice<int, double>& value, const Choice<int, double>& constant) {
   EXPECT_EQ(MutableSignature->Domain->States[0].Type,
             AST->getASTContext().IntTy);
   EXPECT_TRUE(MutableSignature->Domain->States[0].isProjectable());
+}
+
+TEST(MatchAST, CheckedPatternsRecordTheirTestKind) {
+  auto AST = buildMatchAST(R"cpp(
+bool positive(int);
+void test(int value) {
+  match (value) {
+    case 42 => ;
+    case positive => ;
+    case _ => ;
+  }
+}
+void pointer(int* value) {
+  match (value) {
+    case nullptr => ;
+    case { int& payload } => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(getFunction(*AST, "test")));
+  ASSERT_NE(Finder.Selection, nullptr);
+  auto Cases = Finder.Selection->getCases();
+  ASSERT_EQ(Cases.size(), 3u);
+  const MatchPatternInfo *Value =
+      Cases[0].PatternInstantiation->find(Cases[0].Pattern);
+  ASSERT_NE(Value, nullptr);
+  EXPECT_EQ(Value->TestKind, MatchPatternTestKind::StructuralEquality);
+  ASSERT_NE(Value->IntegralTest, nullptr);
+  EXPECT_EQ(Value->IntegralTest->Value, 42);
+  const MatchPatternInfo *Predicate =
+      Cases[1].PatternInstantiation->find(Cases[1].Pattern);
+  ASSERT_NE(Predicate, nullptr);
+  EXPECT_EQ(Predicate->TestKind, MatchPatternTestKind::Invocation);
+  EXPECT_EQ(Predicate->IntegralTest, nullptr);
+
+  MatchFinder PointerFinder;
+  ASSERT_TRUE(PointerFinder.TraverseDecl(getFunction(*AST, "pointer")));
+  ASSERT_NE(PointerFinder.Selection, nullptr);
+  const MatchCase &PointerCase = PointerFinder.Selection->getCases()[0];
+  const MatchPatternInfo *Null =
+      PointerCase.PatternInstantiation->find(PointerCase.Pattern);
+  ASSERT_NE(Null, nullptr);
+  EXPECT_EQ(Null->TestKind, MatchPatternTestKind::AlternativeDiscriminator);
+  EXPECT_EQ(Null->IntegralTest, nullptr);
+  ASSERT_NE(Null->Alternatives, nullptr);
+  EXPECT_TRUE(Null->Alternatives->Domain->States[0].IsEmpty);
+  EXPECT_FALSE(Null->Alternatives->Domain->States[0].isProjectable());
+}
+
+TEST(MatchAST, ProjectionValuesRecordTheirOperationDependency) {
+  auto AST = buildMatchAST(R"cpp(
+struct Shape { virtual ~Shape(); };
+struct Circle : Shape {};
+void test(const Shape& shape) {
+  match (shape) {
+    case const Circle& circle => ;
+    case _ => ;
+  }
+}
+void closed(Choice<int, double>& value) {
+  match (value) {
+    case { auto& payload } => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(getFunction(*AST, "test")));
+  ASSERT_NE(Finder.Selection, nullptr);
+  const MatchCase &Case = Finder.Selection->getCases()[0];
+  const MatchPatternInfo *Info = Case.PatternInstantiation->find(Case.Pattern);
+  ASSERT_NE(Info, nullptr);
+  ASSERT_NE(Info->Projection, nullptr);
+  EXPECT_EQ(Info->Projection->getValueSource(),
+            MatchProjection::ValueSource::Intermediate);
+  ASSERT_NE(Info->Projection->getIntermediateVar(), nullptr);
+
+  MatchFinder ClosedFinder;
+  ASSERT_TRUE(ClosedFinder.TraverseDecl(getFunction(*AST, "closed")));
+  ASSERT_NE(ClosedFinder.Selection, nullptr);
+  for (const MatchCaseInstantiation &Candidate :
+       ClosedFinder.Selection->getCaseInstantiations()) {
+    const MatchPatternInfo *ClosedInfo =
+        Candidate.PatternInstantiation->find(Candidate.Pattern);
+    ASSERT_NE(ClosedInfo, nullptr);
+    ASSERT_NE(ClosedInfo->Projection, nullptr);
+    EXPECT_EQ(ClosedInfo->Projection->getValueSource(),
+              MatchProjection::ValueSource::Subject);
+    ASSERT_NE(ClosedInfo->Projection->getIntermediateVar(), nullptr);
+  }
 }
 
 TEST(MatchAST, EmptyInstantiationTable) {

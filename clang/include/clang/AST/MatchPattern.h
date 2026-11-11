@@ -17,6 +17,7 @@
 #include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -32,6 +33,7 @@ class BindingDecl;
 class DecompositionDecl;
 class ValueDecl;
 class VarDecl;
+class BinaryOperator;
 
 class MatchProjection {
 public:
@@ -40,6 +42,7 @@ public:
     CastProjection,
     DecompositionProjection,
   };
+  enum class ValueSource { Subject, Intermediate };
 
 private:
   ProjectionKind Kind;
@@ -50,6 +53,7 @@ private:
   DecompositionDecl *DecomposedDecl = nullptr;
   Expr *ConditionExpr = nullptr;
   Expr *ProjectedExpr = nullptr;
+  ValueSource ProjectedValueSource = ValueSource::Subject;
 
 public:
   explicit MatchProjection(ProjectionKind Kind) : Kind(Kind) {}
@@ -79,7 +83,11 @@ public:
   void setConditionExpr(Expr *E) { ConditionExpr = E; }
 
   Expr *getProjectedExpr() const { return ProjectedExpr; }
-  void setProjectedExpr(Expr *E) { ProjectedExpr = E; }
+  ValueSource getValueSource() const { return ProjectedValueSource; }
+  void setProjectedExpr(Expr *E, ValueSource Source = ValueSource::Subject) {
+    ProjectedExpr = E;
+    ProjectedValueSource = Source;
+  }
 };
 
 class MatchPattern {
@@ -592,6 +600,19 @@ struct MatchAlternativeProjectionInfo {
   bool HasParameterizedIndexName = false;
 };
 
+enum class MatchPatternTestKind {
+  None,
+  StructuralEquality,
+  Equality,
+  Invocation,
+  AlternativeDiscriminator
+};
+
+struct MatchIntegralPatternTest {
+  const BinaryOperator *Comparison;
+  llvm::APSInt Value;
+};
+
 /// Semantic state produced while checking one instantiation of a pattern.
 ///
 /// MatchPattern nodes describe source syntax and can be shared by multiple
@@ -601,12 +622,13 @@ struct MatchPatternInfo {
   MatchPattern *Pattern = nullptr;
   Expr *Condition = nullptr;
   MatchProjection *Projection = nullptr;
+  MatchPatternTestKind TestKind = MatchPatternTestKind::None;
+  const MatchIntegralPatternTest *IntegralTest = nullptr;
   const MatchAlternativeProjectionInfo *Alternatives = nullptr;
   ArrayRef<unsigned> SelectedAlternatives;
   ArrayRef<unsigned char> ViableOrAlternatives;
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
-  bool IsAlternativeValuePattern = false;
   bool IsOpenAlternative = false;
   bool IsOpenAlternativeInitialization = false;
   bool TypePatternResolved = false;

@@ -54,7 +54,7 @@ public:
 
     const MatchCaseInstantiation *Case = nullptr;
     const MatchPattern *Pattern = nullptr;
-    const BinaryOperator *IntegralComparison = nullptr;
+    const MatchIntegralPatternTest *IntegralTest = nullptr;
     /// Ancestor projections needed to reach the pattern subject.
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };

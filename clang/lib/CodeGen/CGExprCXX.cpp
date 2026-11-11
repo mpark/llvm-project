@@ -2850,17 +2850,6 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
   }
 }
 
-static bool referencesDeclaration(const Stmt *S, const ValueDecl *D) {
-  if (!S)
-    return false;
-  if (const auto *Reference = dyn_cast<DeclRefExpr>(S);
-      Reference && Reference->getDecl() == D)
-    return true;
-  return llvm::any_of(S->children(), [&](const Stmt *Child) {
-    return referencesDeclaration(Child, D);
-  });
-}
-
 void CodeGenFunction::EmitSelectedMatchPatternProjections(
     const MatchPattern *Pattern,
     const MatchPatternInstantiation *Instantiation) {
@@ -2868,31 +2857,16 @@ void CodeGenFunction::EmitSelectedMatchPatternProjections(
   const MatchProjection *Projection = Info ? Info->Projection : nullptr;
   if (Projection) {
     const VarDecl *Intermediate = Projection->getIntermediateVar();
-    const VarDecl *Condition = Projection->getConditionVar();
-    const VarDecl *Projected = Projection->getProjectedVar();
-    const Expr *ProjectedExpr = Projection->getProjectedExpr();
     const DecompositionDecl *Decomposition = Projection->getDecomposedDecl();
-    auto ProjectionResultReferences = [&](const ValueDecl *D) {
-      return referencesDeclaration(Projected ? Projected->getInit() : nullptr,
-                                   D) ||
-             referencesDeclaration(ProjectedExpr, D) ||
-             referencesDeclaration(
-                 Decomposition ? Decomposition->getInit() : nullptr, D);
-    };
-    bool NeedsCondition = Condition && ProjectionResultReferences(Condition);
-    bool NeedsIntermediate =
-        Intermediate &&
-        (ProjectionResultReferences(Intermediate) ||
-         (NeedsCondition &&
-          referencesDeclaration(Condition->getInit(), Intermediate)));
-
     if (const VarDecl *Holding = Projection->getHoldingVar();
         Holding && !LocalDeclMap.count(Holding))
       EmitVarDecl(*Holding);
-    if (NeedsIntermediate && !LocalDeclMap.count(Intermediate))
+    if (Projection->getValueSource() ==
+            MatchProjection::ValueSource::Intermediate &&
+        !LocalDeclMap.count(Intermediate)) {
+      assert(Intermediate && "projection requires its operation result");
       EmitVarDecl(*Intermediate);
-    if (NeedsCondition && !LocalDeclMap.count(Condition))
-      EmitVarDecl(*Condition);
+    }
     EmitMatchProjectionValue(*Projection);
     if (Decomposition && !LocalDeclMap.count(Decomposition))
       EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
@@ -3727,17 +3701,17 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         do {
           const auto *Test = &Default->PatternMatch;
           if (Test->Kind != MatchDecisionTree::PatternTest::IntegralValue ||
-              Test->IntegralComparison->getLHS()->IgnoreParenImpCasts() !=
-                  First->IntegralComparison->getLHS()->IgnoreParenImpCasts() ||
+              Test->IntegralTest->Comparison->getLHS()->IgnoreParenImpCasts() !=
+                  First->IntegralTest->Comparison->getLHS()
+                      ->IgnoreParenImpCasts() ||
               !getContext().hasSameType(
-                  Test->IntegralComparison->getLHS()->getType(),
-                  First->IntegralComparison->getLHS()->getType()) ||
+                  Test->IntegralTest->Comparison->getLHS()->getType(),
+                  First->IntegralTest->Comparison->getLHS()->getType()) ||
               Default->PatternMatch.ProjectionPath !=
                   Node.PatternMatch.ProjectionPath)
             break;
-          auto *Value = dyn_cast<llvm::ConstantInt>(
-              EmitScalarExpr(Test->IntegralComparison->getRHS()));
-          assert(Value && "expected integral constant pattern value");
+          auto *Value = llvm::ConstantInt::get(CGM.getLLVMContext(),
+                                               Test->IntegralTest->Value);
           if (llvm::is_contained(Values, Value))
             break;
           Tests.push_back(Default);
@@ -3748,7 +3722,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
         if (Tests.size() > 1) {
           EmitProjectionPath(Node.PatternMatch.ProjectionPath);
           llvm::Value *Discriminator =
-              EmitScalarExpr(First->IntegralComparison->getLHS());
+              EmitScalarExpr(First->IntegralTest->Comparison->getLHS());
           Discriminator->setName("match.value");
           EmitSwitchDecision(Discriminator, Tests, Values, Default);
           return;

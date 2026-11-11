@@ -35,8 +35,7 @@ struct MatchColumn {
 
   const MatchPattern *Pattern = nullptr;
   const MatchProjection *Projection = nullptr;
-  const BinaryOperator *IntegralComparison = nullptr;
-  llvm::APSInt IntegralConstructor;
+  const MatchIntegralPatternTest *IntegralTest = nullptr;
   unsigned AlternativeIndex = 0;
   QualType ProjectionType;
   bool MaterializeProjection = false;
@@ -88,8 +87,9 @@ static bool hasSameTestSubject(const MatchColumn &LHS, const MatchColumn &RHS,
              Context.hasSameType(LHS.ProjectionType, RHS.ProjectionType);
     return LHS.Projection == RHS.Projection;
   case MatchColumn::IntegralValue:
-    return Context.hasSameType(LHS.IntegralComparison->getLHS()->getType(),
-                               RHS.IntegralComparison->getLHS()->getType());
+    return Context.hasSameType(
+        LHS.IntegralTest->Comparison->getLHS()->getType(),
+        RHS.IntegralTest->Comparison->getLHS()->getType());
   }
   llvm_unreachable("unknown match column kind");
 }
@@ -114,8 +114,8 @@ static bool hasSameConstructor(const MatchColumn &LHS, const MatchColumn &RHS) {
   case MatchColumn::OpenProjection:
     return true;
   case MatchColumn::IntegralValue:
-    return llvm::APSInt::isSameValue(LHS.IntegralConstructor,
-                                     RHS.IntegralConstructor);
+    return llvm::APSInt::isSameValue(LHS.IntegralTest->Value,
+                                     RHS.IntegralTest->Value);
   }
   llvm_unreachable("unknown match column kind");
 }
@@ -130,48 +130,21 @@ getProjectionPath(ArrayRef<MatchPathComponent> SubjectPath) {
   return Result;
 }
 
-struct IntegralPatternTest {
-  const BinaryOperator *Comparison;
-  llvm::APSInt Value;
-};
-
-static std::optional<IntegralPatternTest>
-getIntegralPatternTest(const MatchPattern *Pattern, const MatchRow &Row,
-                       const ASTContext &Context) {
+static const MatchIntegralPatternTest *
+getIntegralPatternTest(const MatchPattern *Pattern, const MatchRow &Row) {
   if (!isa<ExpressionPattern>(Pattern) ||
       Stmt::getLikelihood(Row.Case->Attributes) != Stmt::LH_None)
-    return std::nullopt;
+    return nullptr;
 
   const MatchPatternInfo *Info = Row.Case->PatternInstantiation->find(Pattern);
-  if (!Info || !Info->Condition)
-    return std::nullopt;
-  const auto *Comparison =
-      dyn_cast<BinaryOperator>(Info->Condition->IgnoreParenImpCasts());
-  if (!Comparison || Comparison->getOpcode() != BO_EQ ||
-      !Comparison->getLHS()->getType()->isIntegralOrEnumerationType())
-    return std::nullopt;
+  if (!Info || !Info->IntegralTest)
+    return nullptr;
+  const auto *Comparison = Info->IntegralTest->Comparison;
 
   const Expr *Subject = Comparison->getLHS()->IgnoreParenImpCasts();
   if (Subject->getType().isVolatileQualified())
-    return std::nullopt;
-  const Expr *ValueExpr = Comparison->getRHS();
-  while (true) {
-    if (const auto *Parens = dyn_cast<ParenExpr>(ValueExpr))
-      ValueExpr = Parens->getSubExpr();
-    else if (const auto *Cast = dyn_cast<ImplicitCastExpr>(ValueExpr))
-      ValueExpr = Cast->getSubExpr();
-    else
-      break;
-  }
-  const auto *Value = dyn_cast<ConstantExpr>(ValueExpr);
-  if (!Value || !Value->hasAPValueResult() ||
-      !Value->getAPValueResult().isInt())
-    return std::nullopt;
-  llvm::APSInt Converted = Value->getAPValueResult().getInt().extOrTrunc(
-      Context.getIntWidth(Comparison->getRHS()->getType()));
-  Converted.setIsUnsigned(
-      Comparison->getRHS()->getType()->isUnsignedIntegerOrEnumerationType());
-  return IntegralPatternTest{Comparison, Converted};
+    return nullptr;
+  return Info->IntegralTest;
 }
 
 static const MatchProjection *
@@ -356,11 +329,10 @@ expandPatternRows(MatchRow Row, const MatchPattern *Pattern,
         if (Column.ProjectionType.isNull() && Projection->getProjectedVar())
           Column.ProjectionType = Projection->getProjectedVar()->getType();
       }
-    } else if (std::optional<IntegralPatternTest> Test =
-                   getIntegralPatternTest(Pattern, Row, Context)) {
+    } else if (const MatchIntegralPatternTest *Test =
+                   getIntegralPatternTest(Pattern, Row)) {
       Column.Kind = MatchColumn::IntegralValue;
-      Column.IntegralComparison = Test->Comparison;
-      Column.IntegralConstructor = std::move(Test->Value);
+      Column.IntegralTest = Test;
     }
     return singleRow(std::move(Row));
   }
@@ -602,7 +574,7 @@ buildDecisionTree(ArrayRef<MatchRow> Rows, const ASTContext &Context) {
     Result->PatternMatch.Kind = MatchDecisionTree::PatternTest::IntegralValue;
     Result->PatternMatch.Case = First.Case;
     Result->PatternMatch.Pattern = Selected->Pattern;
-    Result->PatternMatch.IntegralComparison = Selected->IntegralComparison;
+    Result->PatternMatch.IntegralTest = Selected->IntegralTest;
     Result->PatternMatch.ProjectionPath =
         getProjectionPath(Selected->SubjectPath);
   } else {
