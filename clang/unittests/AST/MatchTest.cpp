@@ -1121,6 +1121,80 @@ int test(int (&value)[2]) {
                 MatchPattern::WildcardPatternClass}));
 }
 
+TEST(MatchAST, CheckedTraversalOmitsNonViableOrOperands) {
+  auto AST = buildMatchAST(R"cpp(
+int test(int value) {
+  return match (value) {
+    case 0 or "" => 0;
+    case _ => 1;
+  };
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  FunctionDecl *Function = getFunction(*AST, "test");
+  ASSERT_NE(Function, nullptr);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(Function));
+  ASSERT_NE(Finder.Selection, nullptr);
+  const MatchCase &Case = Finder.Selection->getCases().front();
+  ASSERT_TRUE(isa<OrPattern>(Case.Pattern));
+
+  auto CountChildren = [&](const MatchPatternInstantiation *Instantiation) {
+    unsigned Count = 0;
+    EXPECT_TRUE(traverseMatchPatternChildren(Case.Pattern, Instantiation,
+                                             [&](const MatchPattern *) {
+                                               ++Count;
+                                               return true;
+                                             }));
+    return Count;
+  };
+  EXPECT_EQ(CountChildren(nullptr), 2u);
+  EXPECT_EQ(CountChildren(Case.PatternInstantiation), 1u);
+  EXPECT_FALSE(anyMatchPattern(
+      Case.Pattern, Case.PatternInstantiation, [](const MatchPattern *P) {
+        const auto *Expression = dyn_cast<ExpressionPattern>(P);
+        return Expression && isa<StringLiteral>(Expression->getExpr());
+      }));
+
+  unsigned Count = 0;
+  EXPECT_FALSE(traverseMatchPatternChildren(Case.Pattern, nullptr,
+                                            [&](const MatchPattern *) {
+                                              ++Count;
+                                              return false;
+                                            }));
+  EXPECT_EQ(Count, 1u);
+}
+
+TEST(MatchAST, CheckedTraversalUsesExpandedDecompositionElements) {
+  auto AST = buildMatchAST(R"cpp(
+struct Empty {};
+bool nonempty(int (&value)[3]) { return match(value, case [...]); }
+bool empty(Empty value) { return match(value, case [...]); }
+)cpp");
+  ASSERT_TRUE(AST);
+  for (llvm::StringRef Name : {"nonempty", "empty"}) {
+    SCOPED_TRACE(Name.str());
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    ASSERT_NE(Finder.Test, nullptr);
+    const MatchPattern *Pattern = Finder.Test->getPattern();
+    ASSERT_TRUE(isa<DecompositionPattern>(Pattern));
+    unsigned Count = 0;
+    EXPECT_TRUE(traverseMatchPatternChildren(
+        Pattern, Finder.Test->getPatternInstantiation(),
+        [&](const MatchPattern *) {
+          ++Count;
+          return true;
+        }));
+    EXPECT_EQ(Count, Name == "empty" ? 0u : 3u);
+    EXPECT_EQ(
+        std::distance(Pattern->children().begin(), Pattern->children().end()),
+        1);
+  }
+}
+
 TEST(MatchAST, TestPreservesSourcePattern) {
   auto AST = buildMatchAST(R"cpp(
 bool test(Choice<int, double> value) {

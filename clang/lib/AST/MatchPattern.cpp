@@ -111,6 +111,34 @@ MatchPatternInstantiation::getBindingDeclaration(const ValueDecl *Value) const {
   return Value;
 }
 
+bool clang::traverseMatchPatternChildren(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<bool(const MatchPattern *)> VisitChild) {
+  if (Instantiation) {
+    if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+      for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+        if (Instantiation->isViableOrAlternative(Or, I) &&
+            !VisitChild(Alternative))
+          return false;
+      return true;
+    }
+    if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
+      return llvm::all_of(
+          Instantiation->getDecompositionPatterns(Decomposition), VisitChild);
+  }
+  return llvm::all_of(Pattern->children(), VisitChild);
+}
+
+bool clang::anyMatchPattern(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<bool(const MatchPattern *)> Predicate) {
+  return Predicate(Pattern) ||
+         !traverseMatchPatternChildren(
+             Pattern, Instantiation, [&](const MatchPattern *Child) {
+               return !anyMatchPattern(Child, Instantiation, Predicate);
+             });
+}
+
 void clang::visitMatchPatternBindings(
     MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
     llvm::function_ref<void(ValueDecl *)> VisitBinding) {
@@ -130,23 +158,15 @@ void clang::visitMatchPatternBindings(
     if (!Instantiation) {
       for (VarDecl *Binding : Or->bindings())
         VisitBinding(Binding);
-    } else {
-      for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-        if (Instantiation->isViableOrAlternative(Or, I))
-          visitMatchPatternBindings(Alternative, Instantiation, VisitBinding);
+      return;
     }
-    return;
   }
-
-  if (auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
-      Decomposition && Instantiation) {
-    for (MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      visitMatchPatternBindings(Child, Instantiation, VisitBinding);
-    return;
-  }
-  for (MatchPattern *Child : Pattern->children())
-    visitMatchPatternBindings(Child, Instantiation, VisitBinding);
+  traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        visitMatchPatternBindings(const_cast<MatchPattern *>(Child),
+                                  Instantiation, VisitBinding);
+        return true;
+      });
 }
 
 void clang::visitMatchPatternEvaluation(

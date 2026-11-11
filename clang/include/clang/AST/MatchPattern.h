@@ -679,6 +679,18 @@ public:
   const ValueDecl *getBindingDeclaration(const ValueDecl *Value) const;
 };
 
+/// Visit immediate children in source order, stopping if the visitor returns
+/// false. A checked pattern uses expanded decomposition elements and omits
+/// non-viable or-pattern operands. This does not prescribe runtime test order.
+bool traverseMatchPatternChildren(
+    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<bool(const MatchPattern *)> VisitChild);
+
+/// Whether a pattern or any of its children satisfies the predicate.
+bool anyMatchPattern(const MatchPattern *Pattern,
+                     const MatchPatternInstantiation *Instantiation,
+                     llvm::function_ref<bool(const MatchPattern *)> Predicate);
+
 /// Visit the named bindings in source order. Without an instantiation,
 /// or-patterns contribute their shared names rather than each operand's names.
 void visitMatchPatternBindings(

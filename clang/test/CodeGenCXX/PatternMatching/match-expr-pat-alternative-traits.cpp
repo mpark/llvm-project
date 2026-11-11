@@ -362,6 +362,21 @@ void match_shared_base(HierarchyChoice& value) {
   }
 }
 
+// Or-pattern operands with the same binding use the same shared-handler join.
+// CHECK-LABEL: define{{.*}} void @{{.*}}match_shared_or_base
+// CHECK: switch i64 %match.index
+// CHECK: match.select.shared_action:
+// CHECK: phi ptr
+// CHECK: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK-NOT: call{{.*}} @_Z12consume_baseRK10ChoiceBase
+// CHECK: ret void
+void match_shared_or_base(HierarchyChoice& value) {
+  match (value) {
+    case { ChoiceLeft: const ChoiceBase& base } or
+         { ChoiceRight: const ChoiceBase& base } => consume_base(base);
+  }
+}
+
 // Declaration-free patterns also converge on one copy of the source handler.
 // CHECK-LABEL: define{{.*}} void @_Z22match_shared_base_typeR15HierarchyChoice
 // CHECK: switch i64 %match.index

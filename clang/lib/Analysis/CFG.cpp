@@ -3157,18 +3157,11 @@ collectMatchPatternDecls(MatchPattern *Pattern,
   auto Collect = [&](MatchPattern *P, auto &Recurse) -> void {
     if (auto *Declaration = dyn_cast<DeclarationPattern>(P))
       Decls.push_back(Declaration->getDeclaration());
-    if (auto *Or = dyn_cast<OrPattern>(P)) {
-      for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-        if (Instantiation->isViableOrAlternative(Or, I))
-          Recurse(Alternative, Recurse);
-    } else if (auto *Decomposition = dyn_cast<DecompositionPattern>(P)) {
-      for (MatchPattern *Child :
-           Instantiation->getDecompositionPatterns(Decomposition))
-        Recurse(Child, Recurse);
-    } else {
-      for (MatchPattern *Child : P->children())
-        Recurse(Child, Recurse);
-    }
+    traverseMatchPatternChildren(
+        P, Instantiation, [&](const MatchPattern *Child) {
+          Recurse(const_cast<MatchPattern *>(Child), Recurse);
+          return true;
+        });
   };
   Collect(Pattern, Collect);
   return Decls;

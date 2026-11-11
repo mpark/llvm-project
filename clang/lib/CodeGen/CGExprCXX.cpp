@@ -2773,18 +2773,12 @@ void CodeGenFunction::EmitMatchPatternDeclarations(
       EmitVarDecl(*P->getDeclaration());
       MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     }
-  } else if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-      if (Instantiation->isViableOrAlternative(Or, I))
-        EmitMatchPatternDeclarations(Alternative, Instantiation);
-  } else if (const auto *Decomposition =
-                 dyn_cast<DecompositionPattern>(Pattern)) {
-    for (const MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      EmitMatchPatternDeclarations(Child, Instantiation);
   } else {
-    for (const MatchPattern *Child : Pattern->children())
-      EmitMatchPatternDeclarations(Child, Instantiation);
+    traverseMatchPatternChildren(
+        Pattern, Instantiation, [&](const MatchPattern *Child) {
+          EmitMatchPatternDeclarations(Child, Instantiation);
+          return true;
+        });
   }
 
   if (Pattern != Instantiation->getPattern())
@@ -2834,20 +2828,11 @@ void CodeGenFunction::EmitSharedDeclarationProjections(
   if (isa<TypePattern>(Pattern)) {
     return;
   }
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-      if (Instantiation->isViableOrAlternative(Or, I))
-        EmitSharedDeclarationProjections(Alternative, Instantiation);
-    return;
-  }
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
-    for (const MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      EmitSharedDeclarationProjections(Child, Instantiation);
-  } else {
-    for (const MatchPattern *Child : Pattern->children())
-      EmitSharedDeclarationProjections(Child, Instantiation);
-  }
+  traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        EmitSharedDeclarationProjections(Child, Instantiation);
+        return true;
+      });
 }
 
 void CodeGenFunction::EmitSelectedMatchPatternProjections(
@@ -2872,49 +2857,17 @@ void CodeGenFunction::EmitSelectedMatchPatternProjections(
       EmitDecl(*Decomposition, /*EvaluateConditionDecl=*/true);
   }
 
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-      if (Instantiation->isViableOrAlternative(Or, I))
-        EmitSelectedMatchPatternProjections(Alternative, Instantiation);
-  } else if (const auto *Decomposition =
-                 dyn_cast<DecompositionPattern>(Pattern)) {
-    for (const MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      EmitSelectedMatchPatternProjections(Child, Instantiation);
-  } else {
-    for (const MatchPattern *Child : Pattern->children())
-      EmitSelectedMatchPatternProjections(Child, Instantiation);
-  }
-}
-
-static bool anyInstantiatedPattern(
-    const MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
-    llvm::function_ref<bool(const MatchPattern *)> Predicate) {
-  if (Predicate(Pattern))
-    return true;
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
-    return llvm::any_of(
-        llvm::enumerate(Or->alternatives()), [&](auto IndexedAlternative) {
-          return Instantiation->isViableOrAlternative(
-                     Or, IndexedAlternative.index()) &&
-                 anyInstantiatedPattern(IndexedAlternative.value(),
-                                        Instantiation, Predicate);
-        });
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
-    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
-                        [&](const MatchPattern *Child) {
-                          return anyInstantiatedPattern(Child, Instantiation,
-                                                        Predicate);
-                        });
-  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
-    return anyInstantiatedPattern(Child, Instantiation, Predicate);
-  });
+  traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        EmitSelectedMatchPatternProjections(Child, Instantiation);
+        return true;
+      });
 }
 
 static bool hasStagedAndPatternDeclarations(
     const MatchPattern *Pattern,
     const MatchPatternInstantiation *Instantiation) {
-  return anyInstantiatedPattern(
+  return anyMatchPattern(
       Pattern, Instantiation, [&](const MatchPattern *Pattern) {
         const auto *And = dyn_cast<AndPattern>(Pattern);
         return And && llvm::any_of(And->conjuncts().drop_back(),
@@ -2931,12 +2884,6 @@ static bool collectSharedCaseReferenceDeclarations(
   if (isa<DecompositionPattern>(Pattern))
     return false;
 
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    // Or-pattern names are remapped between operands. Keep their existing
-    // specialized lowering until that mapping can be represented at the join.
-    return !hasMatchPatternDeclarations(Or, Instantiation);
-  }
-
   if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
     const auto *D = Declaration->getDeclaration();
     if (isa<DecompositionDecl>(D))
@@ -2949,10 +2896,11 @@ static bool collectSharedCaseReferenceDeclarations(
     return true;
   }
 
-  return llvm::all_of(Pattern->children(), [&](const MatchPattern *Child) {
-    return collectSharedCaseReferenceDeclarations(Child, Instantiation,
-                                                  Declarations);
-  });
+  return traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        return collectSharedCaseReferenceDeclarations(Child, Instantiation,
+                                                      Declarations);
+      });
 }
 
 using SharedCaseDeclarations = SmallVector<SmallVector<const VarDecl *, 2>, 4>;

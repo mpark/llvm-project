@@ -162,29 +162,6 @@ getDecisionProjection(const MatchPattern *Pattern,
   return nullptr;
 }
 
-static bool
-hasPatternDeclarationsImpl(const MatchPattern *Pattern,
-                           const MatchPatternInstantiation *Instantiation) {
-  if (isa<DeclarationPattern>(Pattern))
-    return true;
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
-    return llvm::any_of(
-        llvm::enumerate(Or->alternatives()), [&](auto Alternative) {
-          return Instantiation->isViableOrAlternative(Or,
-                                                      Alternative.index()) &&
-                 hasPatternDeclarationsImpl(Alternative.value(), Instantiation);
-        });
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
-    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
-                        [&](const MatchPattern *Child) {
-                          return hasPatternDeclarationsImpl(Child,
-                                                            Instantiation);
-                        });
-  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
-    return hasPatternDeclarationsImpl(Child, Instantiation);
-  });
-}
-
 static void
 collectAndConjuncts(const MatchPattern *Pattern,
                     SmallVectorImpl<const MatchPattern *> &Conjuncts) {
@@ -753,7 +730,9 @@ groupDecisionTests(std::unique_ptr<MatchDecisionTree::Node> Root,
 bool CodeGen::hasMatchPatternDeclarations(
     const MatchPattern *Pattern,
     const MatchPatternInstantiation *Instantiation) {
-  return hasPatternDeclarationsImpl(Pattern, Instantiation);
+  return anyMatchPattern(Pattern, Instantiation, [](const MatchPattern *P) {
+    return isa<DeclarationPattern>(P);
+  });
 }
 
 MatchDecisionTree

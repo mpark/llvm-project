@@ -21707,24 +21707,8 @@ EvaluateMatchPattern(const MatchPattern *Pattern,
 static bool
 hasMatchPatternDeclarations(const MatchPattern *Pattern,
                             const MatchPatternInstantiation *Instantiation) {
-  if (isa<DeclarationPattern>(Pattern))
-    return true;
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern))
-    return llvm::any_of(llvm::enumerate(Or->alternatives()),
-                        [&](auto IndexedAlternative) {
-                          return Instantiation->isViableOrAlternative(
-                                     Or, IndexedAlternative.index()) &&
-                                 hasMatchPatternDeclarations(
-                                     IndexedAlternative.value(), Instantiation);
-                        });
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern))
-    return llvm::any_of(Instantiation->getDecompositionPatterns(Decomposition),
-                        [&](const MatchPattern *Child) {
-                          return hasMatchPatternDeclarations(Child,
-                                                             Instantiation);
-                        });
-  return llvm::any_of(Pattern->children(), [&](const MatchPattern *Child) {
-    return hasMatchPatternDeclarations(Child, Instantiation);
+  return anyMatchPattern(Pattern, Instantiation, [](const MatchPattern *P) {
+    return isa<DeclarationPattern>(P);
   });
 }
 
@@ -21756,27 +21740,11 @@ static bool EvaluatePatternDeclarations(
           return false;
     return true;
   }
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-      if (Instantiation->isViableOrAlternative(Or, I) &&
-          !EvaluatePatternDeclarations(Alternative, Instantiation, Info,
-                                       ProjectionCache))
-        return false;
-    return true;
-  }
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
-    for (const MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      if (!EvaluatePatternDeclarations(Child, Instantiation, Info,
-                                       ProjectionCache))
-        return false;
-  } else {
-    for (const MatchPattern *Child : Pattern->children())
-      if (!EvaluatePatternDeclarations(Child, Instantiation, Info,
-                                       ProjectionCache))
-        return false;
-  }
-  return true;
+  return traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        return EvaluatePatternDeclarations(Child, Instantiation, Info,
+                                           ProjectionCache);
+      });
 }
 
 static bool EvaluateSharedDeclarationProjections(
@@ -21791,27 +21759,11 @@ static bool EvaluateSharedDeclarationProjections(
   }
   if (isa<TypePattern>(Pattern))
     return true;
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
-      if (Instantiation->isViableOrAlternative(Or, I) &&
-          !EvaluateSharedDeclarationProjections(Alternative, Instantiation,
-                                                Info, ProjectionCache))
-        return false;
-    return true;
-  }
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
-    for (const MatchPattern *Child :
-         Instantiation->getDecompositionPatterns(Decomposition))
-      if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
-                                                ProjectionCache))
-        return false;
-  } else {
-    for (const MatchPattern *Child : Pattern->children())
-      if (!EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
-                                                ProjectionCache))
-        return false;
-  }
-  return true;
+  return traverseMatchPatternChildren(
+      Pattern, Instantiation, [&](const MatchPattern *Child) {
+        return EvaluateSharedDeclarationProjections(Child, Instantiation, Info,
+                                                    ProjectionCache);
+      });
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
