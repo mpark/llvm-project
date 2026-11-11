@@ -3906,6 +3906,9 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       auto *FD = LambdaCaptureFields.lookup(BD);
       return EmitCapturedFieldLValue(*this, FD, CXXABIThisValue);
     }
+    if (auto It = LocalDeclMap.find(BD->getCanonicalDecl());
+        It != LocalDeclMap.end())
+      return MakeAddrLValue(It->second, E->getType(), AlignmentSource::Decl);
     // Suppress debug location updates when visiting the binding, since the
     // binding may emit instructions that would otherwise be associated with the
     // binding itself, rather than the expression referencing the binding. (this

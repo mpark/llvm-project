@@ -69,7 +69,7 @@ int runtime_refutable(int value) { // expected-note {{declared here}}
 
 int runtime_guard(int value) {
   return match constexpr (value) {
-    case auto&& selected if (selected == 0) => 1; // expected-error {{constexpr if condition is not a constant expression}} expected-note {{read of non-constexpr variable 'selected' is not allowed in a constant expression}} expected-note {{declared here}}
+    case auto&& selected if (selected == 0) => 1; // expected-error {{constexpr if condition is not a constant expression}} expected-note {{read of non-constexpr variable 'selected' is not allowed in a constant expression}} expected-note {{declared here}} expected-note {{while instantiating this pattern match}}
     case _ => 0;
   };
 }

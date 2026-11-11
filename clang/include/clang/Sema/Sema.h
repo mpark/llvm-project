@@ -3714,8 +3714,7 @@ public:
 
   public:
     explicit MatchTemplateRegionRAII(Sema &S) : S(S) {}
-    void enter(SourceLocation Loc, MatchPattern *Pattern,
-               bool RequiresTemplateRegion);
+    void enter(SourceLocation Loc, MatchPattern *Pattern);
     void reenter() {
       if (Region && !SavedContext)
         SavedContext.emplace(S, Region, /*NewThisContext=*/false);
@@ -11569,7 +11568,6 @@ public:
     ArrayRef<unsigned> PlannedAlternativeSelections;
     unsigned NextPlannedAlternativeSelection = 0;
     bool DeferAlternativeChoices = false;
-    bool RequiresTemplateRegion = false;
     bool IsExpandingCandidate = false;
     bool CandidateIsNotViable = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
@@ -11581,13 +11579,13 @@ public:
       bool IsNotUseful = false;
     } CandidateUsefulness;
 
-    bool hasDeferredAlternativeChoices() const {
-      return DeferAlternativeChoices && !AlternativeChoices.empty();
+    bool hasDeferredPatterns(const MatchPattern *Pattern) const {
+      return DeferAlternativeChoices &&
+             (!AlternativeChoices.empty() || Pattern->requiresTemplateRegion());
     }
 
-    bool hasDeferredPatterns() const {
-      return hasDeferredAlternativeChoices() || RequiresTemplateRegion;
-    }
+    bool needsCaseInstantiation(const Expr *Subject,
+                                const MatchPattern *Pattern) const;
   };
   /// Enumerates the semantic candidates produced by generic alternative and
   /// declaration-bearing or-pattern choices. Each completed check records the
@@ -11651,6 +11649,11 @@ public:
   UpdateMatchUsefulness(MatchUsefulnessContext &Context, MatchPattern *Pattern,
                         const MatchPatternInstantiation *PatternInstantiation,
                         unsigned CaseIndex, bool ContributesCoverage);
+
+  /// Record an omitted candidate when preceding cases cover the entire subject,
+  /// before specializing its pattern or evaluating its constraints.
+  bool TryPruneCoveredMatchSubject(MatchUsefulnessContext &Context,
+                                   SourceLocation Loc, unsigned CaseIndex);
 
   /// Classify an alternative candidate using its enclosing structural domain,
   /// before checking the candidate's selector and payload pattern.

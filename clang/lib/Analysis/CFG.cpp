@@ -3149,12 +3149,19 @@ CFGBlock *CFGBuilder::VisitConditionalOperator(AbstractConditionalOperator *C,
 
 static SmallVector<VarDecl *, 4>
 collectMatchPatternDecls(MatchPattern *Pattern,
-                         MatchPatternInstantiation *Instantiation) {
+                         MatchPatternInstantiation *Instantiation, CFG &Cfg) {
+  for (const MatchBindingAlias &Alias : Instantiation->bindingAliases())
+    if (auto *Value = dyn_cast<VarDecl>(Alias.Value))
+      Cfg.addMatchBindingAlias(Value, cast<VarDecl>(Alias.Declaration));
   SmallVector<VarDecl *, 4> Decls;
   auto Collect = [&](MatchPattern *P, auto &Recurse) -> void {
     if (auto *Declaration = dyn_cast<DeclarationPattern>(P))
       Decls.push_back(Declaration->getDeclaration());
-    if (auto *Decomposition = dyn_cast<DecompositionPattern>(P)) {
+    if (auto *Or = dyn_cast<OrPattern>(P)) {
+      for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+        if (Instantiation->isViableOrAlternative(Or, I))
+          Recurse(Alternative, Recurse);
+    } else if (auto *Decomposition = dyn_cast<DecompositionPattern>(P)) {
       for (MatchPattern *Child :
            Instantiation->getDecompositionPatterns(Decomposition))
         Recurse(Child, Recurse);
@@ -3328,7 +3335,7 @@ std::pair<CFGBlock *, CFGBlock *> CFGBuilder::VisitMatchTestExpr(
     Succ = SuccessBlock;
     CFGBlock *PatternBodyBlock = SuccessBlock;
     SmallVector<VarDecl *, 4> PatternDecls =
-        collectMatchPatternDecls(Pattern, PatternInstantiation);
+        collectMatchPatternDecls(Pattern, PatternInstantiation, *cfg);
     for (VarDecl *D : llvm::reverse(PatternDecls)) {
       DeclStmt *DS = new (Context)
           DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());
@@ -3457,7 +3464,7 @@ CFGBlock *CFGBuilder::VisitMatchSelectExpr(MatchSelectExpr *E,
     Succ = CaseBodyBlock;
     CFGBlock *PatternBodyBlock = CaseBodyBlock;
     SmallVector<VarDecl *, 4> PatternDecls =
-        collectMatchPatternDecls(Case.Pattern, Case.PatternInstantiation);
+        collectMatchPatternDecls(Case.Pattern, Case.PatternInstantiation, *cfg);
     for (VarDecl *D : llvm::reverse(PatternDecls)) {
       DeclStmt *DS = new (Context)
           DeclStmt(DeclGroupRef(D), D->getBeginLoc(), D->getEndLoc());

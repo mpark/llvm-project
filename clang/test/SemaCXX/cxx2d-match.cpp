@@ -801,21 +801,21 @@ int guarded_scalar_move(int &&value) {
 
 int guarded_structured_binding_move(MovePair &&value) {
   return match (static_cast<MovePair &&>(value)) {
-    case auto [first, second] if (true) => first.value + second.value; // expected-error {{guarded declaration pattern of type 'MovePair' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
+    case auto [first, second] if (true) => first.value + second.value; // expected-error {{guarded declaration pattern of type 'MovePair' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}} expected-note {{while instantiating this pattern match}}
     case _ => 0;
   };
 }
 
 int guarded_array_structured_binding_move(Movable (&&value)[1]) {
   return match (static_cast<Movable (&&)[1]>(value)) {
-    case auto [element] if (true) => element.value; // expected-error {{guarded declaration pattern of type 'Movable[1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
+    case auto [element] if (true) => element.value; // expected-error {{guarded declaration pattern of type 'Movable[1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}} expected-note {{while instantiating this pattern match}}
     case _ => 0;
   };
 }
 
 int guarded_nested_array_structured_binding_move(Movable (&&value)[1][1]) {
   return match (static_cast<Movable (&&)[1][1]>(value)) {
-    case auto [row] if (true) => row[0].value; // expected-error {{guarded declaration pattern of type 'Movable[1][1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}}
+    case auto [row] if (true) => row[0].value; // expected-error {{guarded declaration pattern of type 'Movable[1][1]' invokes a non-trivial move constructor before its guard; bind a reference and move in the handler instead}} expected-note {{while instantiating this pattern match}}
     case _ => 0;
   };
 }

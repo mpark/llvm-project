@@ -82,10 +82,13 @@ std::unique_ptr<ASTUnit> buildMatchAST(llvm::StringRef Code) {
 }
 
 FunctionDecl *getFunction(ASTUnit &AST, llvm::StringRef Name) {
-  for (Decl *D : AST.getASTContext().getTranslationUnitDecl()->decls())
+  for (Decl *D : AST.getASTContext().getTranslationUnitDecl()->decls()) {
+    if (auto *Template = dyn_cast<FunctionTemplateDecl>(D))
+      D = Template->getTemplatedDecl();
     if (auto *Function = dyn_cast<FunctionDecl>(D);
         Function && Function->getName() == Name)
       return Function;
+  }
   return nullptr;
 }
 
@@ -255,6 +258,59 @@ int test() {
   EXPECT_TRUE(Cases[2].getInstantiations().empty());
 }
 
+TEST(MatchAST, DirectPlaceholderInstantiationsRespectCoverage) {
+  auto AST = buildMatchAST(R"cpp(
+void covered(int value) {
+  match (value) {
+    case int => ;
+    case auto payload => payload.size();
+  }
+}
+void guarded(int value) {
+  match (value) {
+    case int if (value == 0) => ;
+    case auto payload => use(payload);
+  }
+}
+struct Product {
+  int first;
+  int second;
+};
+void decomposed(Product value) {
+  match (value) {
+    case [int first, int second] => ;
+    case [auto first, auto second] => first.size();
+  }
+}
+void structured(Product value) {
+  match (value) {
+    case [int first, int second] => ;
+    case auto [first, second] => first.size();
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  const struct {
+    const char *Name;
+    unsigned InstantiationCount;
+  } Cases[] = {
+      {"covered", 0}, {"guarded", 1}, {"decomposed", 0}, {"structured", 0}};
+  for (auto [Name, InstantiationCount] : Cases) {
+    SCOPED_TRACE(Name);
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    MatchSelectExpr *Selection = Finder.Selection;
+    ASSERT_NE(Selection, nullptr);
+    ASSERT_EQ(Selection->getNumCases(), 2u);
+    EXPECT_EQ(Selection->getCases()[0].Region, nullptr);
+    EXPECT_NE(Selection->getCases()[1].Region, nullptr);
+    EXPECT_EQ(Selection->getCases()[1].getInstantiations().size(),
+              InstantiationCount);
+  }
+}
+
 TEST(MatchAST, CaseRangesAreReboundWhenRebuilding) {
   auto AST = buildMatchAST(R"cpp(
 int test(Choice<int, double> value) {
@@ -337,7 +393,7 @@ bool nested_or_wildcard(Product value) {
   }
 }
 
-TEST(MatchAST, TemplateRegionsCountProjectableStates) {
+TEST(MatchAST, TemplateRegionsFollowPlaceholders) {
   auto AST = buildMatchAST(R"cpp(
 void singleton(MaybeInt value) {
   match (value) {
@@ -355,21 +411,96 @@ void repeated(Choice<int, int> value) {
     case { auto payload } => use(payload);
   }
 }
+void selected(MaybeInt value) {
+  match (value) {
+    case { int: auto payload } => use(payload);
+    case {} => ;
+  }
+}
+void omitted(MaybeInt value) {
+  match (value) {
+    case { auto } => ;
+    case {} => ;
+  }
+}
+template <int N>
+void already_dependent(MaybeInt value) {
+  match (value) {
+    case { auto payload } => use(payload);
+    case {} => ;
+  }
+}
+template <class T>
+void dependent_whole(T value) {
+  match (value) {
+    case auto whole => (void)whole;
+  }
+}
+void value_or(MaybeInt value) {
+  match (value) {
+    case { 42 } or { 43 } => ;
+    case _ => ;
+  }
+}
+void bound_or(Choice<int, double> value) {
+  match (value) {
+    case { int payload } or { double payload } => use(payload);
+  }
+}
+void concrete(Choice<int, double> value) {
+  match (value) {
+    case { int payload } => use(payload);
+    case _ => ;
+  }
+}
+void whole(MaybeInt value) {
+  match (value) {
+    case auto whole => (void)whole;
+  }
+}
+struct Product {
+  int first;
+  int second;
+};
+void structured(Product value) {
+  match (value) {
+    case auto [first, second] => use(first + second);
+  }
+}
+void decomposed(Product value) {
+  match (value) {
+    case [auto first, auto second] => use(first + second);
+  }
+}
 )cpp");
   ASSERT_TRUE(AST);
-  for (llvm::StringRef Name : {"singleton", "multiple", "repeated"}) {
+  const struct {
+    const char *Name;
+    bool RequiresRegion;
+  } Cases[] = {{"singleton", true},      {"multiple", true},
+               {"repeated", true},       {"selected", true},
+               {"omitted", true},        {"concrete", false},
+               {"whole", true},          {"structured", true},
+               {"decomposed", true},     {"value_or", false},
+               {"bound_or", true},       {"already_dependent", true},
+               {"dependent_whole", true}};
+  for (auto [Name, RequiresRegion] : Cases) {
+    SCOPED_TRACE(Name);
     FunctionDecl *Function = getFunction(*AST, Name);
     ASSERT_NE(Function, nullptr);
     MatchFinder Finder;
     ASSERT_TRUE(Finder.TraverseDecl(Function));
     ASSERT_NE(Finder.Selection, nullptr);
+    EXPECT_EQ(Finder.Selection->getCases()[0].Pattern->requiresTemplateRegion(),
+              RequiresRegion);
     MatchTemplateRegionDecl *Region = Finder.Selection->getCases()[0].Region;
-    if (Name == "singleton") {
-      EXPECT_EQ(Region, nullptr);
-    } else {
+    if (RequiresRegion) {
       ASSERT_NE(Region, nullptr);
       EXPECT_TRUE(Region->isDependentContext());
+      EXPECT_EQ(Region->getDeclContext(), Function);
       EXPECT_EQ(Region->getEnclosingFunction(), Function);
+    } else {
+      EXPECT_EQ(Region, nullptr);
     }
   }
 }

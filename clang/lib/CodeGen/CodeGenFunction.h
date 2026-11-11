@@ -5488,6 +5488,7 @@ public:
   void
   EmitMatchPatternDeclarations(const MatchPattern *Pattern,
                                const MatchPatternInstantiation *Instantiation);
+  void EmitMatchBindingAliases(const MatchPatternInstantiation *Instantiation);
   void EmitSelectedMatchPatternProjections(
       const MatchPattern *Pattern,
       const MatchPatternInstantiation *Instantiation);

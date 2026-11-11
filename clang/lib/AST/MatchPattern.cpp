@@ -14,6 +14,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include <algorithm>
 
@@ -28,6 +29,28 @@ MatchPattern *MatchPattern::IgnoreParens() {
 
 const MatchPattern *MatchPattern::IgnoreParens() const {
   return const_cast<MatchPattern *>(this)->IgnoreParens();
+}
+
+bool MatchPattern::requiresTemplateRegion() const {
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(this)) {
+    const VarDecl *VD = Declaration->getDeclaration();
+    if (VD->isParameterPack())
+      return true;
+    if (auto *DD = dyn_cast<DecompositionDecl>(VD))
+      if (llvm::any_of(DD->all_source_bindings(), [](BindingDecl *Binding) {
+            return Binding->isParameterPack();
+          }))
+        return true;
+    return VD->getTypeSourceInfo()->getType()->getContainedAutoType();
+  }
+  if (const auto *Type = dyn_cast<TypePattern>(this))
+    return Type->getType()->getContainedAutoType();
+  if (const auto *Or = dyn_cast<OrPattern>(this))
+    if (!Or->bindings().empty())
+      return true;
+  return llvm::any_of(children(), [](const MatchPattern *Child) {
+    return Child->requiresTemplateRegion();
+  });
 }
 
 void *MatchProjection::operator new(size_t Bytes, const ASTContext &C,
@@ -66,6 +89,49 @@ bool MatchPatternInstantiation::isViableOrAlternative(const OrPattern *P,
   const MatchPatternInfo *Info = find(P);
   return !Info || Info->ViableOrAlternatives.empty() ||
          Info->ViableOrAlternatives[Index];
+}
+
+void MatchPatternInstantiation::setBindingAliases(
+    const ASTContext &Ctx, ArrayRef<MatchBindingAlias> Aliases) {
+  BindingAliases = Aliases.copy(Ctx);
+}
+
+void clang::visitMatchPatternBindings(
+    MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<void(ValueDecl *)> VisitBinding) {
+  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
+    VarDecl *Variable = Declaration->getDeclaration();
+    if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
+      for (BindingDecl *Binding : Decomposition->leaf_bindings())
+        if (Binding->getDeclName())
+          VisitBinding(Binding);
+    } else if (Variable->getDeclName()) {
+      VisitBinding(Variable);
+    }
+    return;
+  }
+
+  if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
+    if (!Instantiation) {
+      for (VarDecl *Binding : Or->bindings())
+        VisitBinding(Binding);
+    } else {
+      for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
+        if (Instantiation->isViableOrAlternative(Or, I))
+          visitMatchPatternBindings(Alternative, Instantiation, VisitBinding);
+    }
+    return;
+  }
+
+  if (auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern);
+      Decomposition && Instantiation) {
+    for (MatchPattern *Child :
+         Instantiation->getDecompositionPatterns(Decomposition))
+      visitMatchPatternBindings(Child, Instantiation, VisitBinding);
+    return;
+  }
+  for (MatchPattern *Child : Pattern->children())
+    visitMatchPatternBindings(Child, Instantiation, VisitBinding);
 }
 
 void clang::visitMatchPatternEvaluation(

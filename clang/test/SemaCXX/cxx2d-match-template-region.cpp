@@ -103,6 +103,25 @@ template <class T> struct std::alternative_traits<Maybe<T>> {
   }
 };
 
+struct NamedInt {
+  int value;
+};
+
+template <> struct std::alternative_traits<NamedInt> {
+  static constexpr alternative_info alternatives[] = {^^int};
+  static constexpr bool has_residual_states = false;
+  enum class state { value };
+
+  static constexpr state index(const NamedInt &) noexcept {
+    return state::value;
+  }
+
+  template <state I, class Self>
+  static constexpr decltype(auto) get(Self &&source) {
+    return (static_cast<Self &&>(source).value);
+  }
+};
+
 struct EmptyChoice {};
 
 template <> struct std::alternative_traits<EmptyChoice> {
@@ -112,8 +131,8 @@ template <> struct std::alternative_traits<EmptyChoice> {
   static constexpr unsigned index(const EmptyChoice &) noexcept { return 0; }
 };
 
-// Dependence counts advertised projectable entries, not distinct types or
-// candidates remaining after viability and usefulness checks.
+// Placeholders introduce a template region regardless of projection or the
+// candidates remaining after earlier cases.
 void multiple_projectable_states(Choice value) {
   match (value) {
     case { auto payload } => {
@@ -143,11 +162,263 @@ void singleton_projectable_state(MaybeInt value) {
       if constexpr (sizeof(payload) > 0)
         (void)payload;
       else
-        static_assert(false, "a singleton projection is not dependent"); // expected-error {{static assertion failed: a singleton projection is not dependent}}
+        static_assert(false, "a singleton projection is still generic");
     }
     case {} => ;
   }
 }
+
+void singleton_omitted_name(MaybeInt value) {
+  match (value) {
+    case { auto } => {
+      if constexpr (true)
+        (void)value;
+      else
+        static_assert(false, "an omitted name is still generic");
+    }
+    case {} => ;
+  }
+}
+
+void singleton_type_selector(MaybeInt value) {
+  match (value) {
+    case { int: auto payload } => {
+      if constexpr (__is_same(decltype(payload), int))
+        (void)payload;
+      else
+        static_assert(false, "a type selector does not remove dependence");
+    }
+    case {} => ;
+  }
+}
+
+void direct_whole(MaybeInt value) {
+  match (value) {
+    case auto whole => {
+      static_assert(__is_same(decltype(whole), MaybeInt));
+      if constexpr (true)
+        (void)whole;
+      else
+        static_assert(false, "a direct placeholder is generic");
+    }
+  }
+}
+
+void direct_omitted_name(int value) {
+  match (value) {
+    case auto => {
+      if constexpr (true)
+        (void)value;
+      else
+        static_assert(false, "an unnamed direct placeholder is generic");
+    }
+  }
+}
+
+void direct_requires(int value) {
+  match (value) {
+    case auto whole => {
+      if constexpr (requires { whole.size(); })
+        (void)whole.size();
+      else
+        static_assert(__is_same(decltype(whole), int));
+    }
+  }
+}
+
+void covered_direct_handler(int value) {
+  match (value) {
+    case int => ;
+    case auto whole => whole.size(); // expected-warning {{match case is redundant}}
+  }
+}
+
+void covered_direct_bool(bool value) {
+  match (value) {
+    case true => ;
+    case false => ;
+    case auto whole => whole.size(); // expected-warning {{match case is redundant}}
+  }
+}
+
+void covered_unnamed_handler(int value) {
+  match (value) {
+    case int => ;
+    case auto => static_assert(false, "not instantiated"); // expected-warning {{match case is redundant}}
+  }
+}
+
+void guarded_direct_handler(int value) {
+  match (value) {
+    case int if (value == 0) => ;
+    case auto whole => {
+      static_assert(__is_same(decltype(whole), int));
+      if constexpr (true)
+        (void)whole;
+      else
+        static_assert(false, "a guarded case does not cover int");
+    }
+  }
+}
+
+void dependent_direct_handler() {
+  auto visitor = [](auto payload) {
+    match (payload) {
+      case int => ;
+      case auto whole => static_assert(__is_same(decltype(whole), double));
+    }
+  };
+  visitor(42);
+  visitor(4.2);
+}
+
+struct MemberTemplate {
+  template <class T> constexpr T get() const { return 42; }
+};
+
+constexpr int direct_member_template(MemberTemplate value) {
+  return match (value) {
+    case auto whole => whole.template get<int>();
+  };
+}
+
+constexpr int projected_member_template(Maybe<MemberTemplate> value) {
+  return match (value) {
+    case { auto payload } => payload.template get<int>();
+    case {} => -1;
+  };
+}
+
+static_assert(direct_member_template({}) == 42);
+static_assert(projected_member_template({true, {}}) == 42);
+
+struct Product {
+  int first;
+  int second;
+};
+
+void direct_structured_binding(Product value) {
+  match (value) {
+    case auto [first, second] => {
+      static_assert(__is_same(decltype(first), int));
+      static_assert(__is_same(decltype(second), int));
+      if constexpr (true)
+        (void)first;
+      else
+        static_assert(false, "a direct structured binding is generic");
+    }
+  }
+}
+
+void direct_decomposition(Product value) {
+  match (value) {
+    case [auto first, auto second] => {
+      static_assert(__is_same(decltype(first), int));
+      static_assert(__is_same(decltype(second), int));
+      if constexpr (true)
+        (void)first;
+      else
+        static_assert(false, "direct decomposition placeholders are generic");
+    }
+  }
+}
+
+void wrong_decomposition_arity(Product value) {
+  match (value) {
+    case [auto first, auto second, auto third] => ; // expected-error {{binds to 2 elements, but 3 names were provided}}
+    case _ => ;
+  }
+}
+
+template <class Unused>
+void non_dependent_arity_in_template(Product value) {
+  match (value) {
+    case [auto first, auto second, auto third] => ; // expected-error {{binds to 2 elements, but 3 names were provided}}
+    case _ => ;
+  }
+}
+
+void covered_wrong_decomposition_arity(Product value) {
+  match (value) {
+    case [int first, int second] => ;
+    case [auto first, auto second, auto third] => ; // expected-error {{binds to 2 elements, but 3 names were provided}}
+  }
+}
+
+void wrong_structured_binding_arity(Product value) {
+  match (value) {
+    case auto [first, second, third] => ; // expected-error {{binds to 2 elements, but 3 names were provided}}
+    case _ => ;
+  }
+}
+
+void covered_decomposition_handler(Product value) {
+  match (value) {
+    case [int first, int second] => ;
+    case [auto first, auto second] => first.size(); // expected-warning {{match case is redundant}}
+  }
+}
+
+void covered_structured_binding_handler(Product value) {
+  match (value) {
+    case [int first, int second] => ;
+    case auto [first, second] => first.size(); // expected-warning {{match case is redundant}}
+  }
+}
+
+struct NonCopyableProduct {
+  int value;
+  NonCopyableProduct(const NonCopyableProduct&) = delete; // expected-note {{'NonCopyableProduct' has been explicitly marked deleted here}}
+};
+
+void structured_binding_deleted_copy(NonCopyableProduct& value) {
+  match (value) {
+    case auto [payload] => ; // expected-error {{call to deleted constructor of 'NonCopyableProduct'}} expected-note {{while instantiating this pattern match}}
+    case _ => ;
+  }
+}
+
+void concrete_projection(Choice value) {
+  match (value) {
+    case { int payload } => {
+      if constexpr (true)
+        (void)payload;
+      else
+        static_assert(false, "a concrete projection is not generic"); // expected-error {{static assertion failed: a concrete projection is not generic}}
+    }
+    case { double } => ;
+  }
+}
+
+void projected_value_or(MaybeInt value) {
+  match (value) {
+    case { 42 } or { 43 } => {
+      if constexpr (true)
+        (void)value;
+      else
+        static_assert(false, "value patterns do not introduce a template region"); // expected-error {{static assertion failed: value patterns do not introduce a template region}}
+    }
+    case _ => ;
+  }
+}
+
+template <class T>
+constexpr bool direct_type_dependent_subject(T value) {
+  return match (value) {
+    case auto whole => __is_same(decltype(whole), T);
+  };
+}
+
+template <int N>
+constexpr bool direct_value_dependent_subject() {
+  return match (N) {
+    case auto whole => __is_same(decltype(whole), int);
+  };
+}
+
+static_assert(direct_type_dependent_subject(42));
+static_assert(direct_type_dependent_subject(4.2));
+static_assert(direct_value_dependent_subject<42>());
 
 constexpr bool singleton_projection_value(MaybeInt value) {
   return match (value, case { 42 });
@@ -177,6 +448,12 @@ constexpr bool singleton_projection_nested_choice(Maybe<Choice> value) {
   return match (value, case { { int payload } } if (payload == 42));
 }
 // SINGLETON-LABEL: Dumping singleton_projection_nested_choice:
+// SINGLETON: MatchTestExpr {{.*}} 'bool'{{$}}
+
+constexpr bool singleton_projection_placeholder(MaybeInt value) {
+  return match (value, case { auto payload } if (payload == 42));
+}
+// SINGLETON-LABEL: Dumping singleton_projection_placeholder:
 // SINGLETON: MatchTestExpr {{.*}} 'bool' instantiated{{$}}
 
 static_assert(singleton_projection_value({true, 42}));
@@ -194,6 +471,9 @@ static_assert(!singleton_projection_nested({false, {true, 42}}));
 static_assert(singleton_projection_nested_choice({true, {0, 42, 0.0}}));
 static_assert(!singleton_projection_nested_choice({true, {1, 0, 42.0}}));
 static_assert(!singleton_projection_nested_choice({false, {0, 42, 0.0}}));
+static_assert(singleton_projection_placeholder({true, 42}));
+static_assert(!singleton_projection_placeholder({true, 43}));
+static_assert(!singleton_projection_placeholder({false, 42}));
 
 constexpr bool nested_singleton_test(Maybe<MaybeInt> value) {
   return match (value, case { { auto payload } } if (payload == 42));
@@ -210,7 +490,7 @@ void nested_singleton_region(Maybe<MaybeInt> value) {
       if constexpr (sizeof(payload) > 0)
         (void)payload;
       else
-        static_assert(false, "nested singleton projections are not dependent"); // expected-error {{static assertion failed: nested singleton projections are not dependent}}
+        static_assert(false, "nested singleton projections are still generic");
     }
     case _ => ;
   }
@@ -267,6 +547,18 @@ void one_viable_projectable_state(Choice value) {
   }
 }
 
+void type_constraint_selector(Choice value) {
+  match (value) {
+    case { Integer: auto payload } => {
+      if constexpr (__is_same(decltype(payload), int))
+        (void)payload;
+      else
+        static_assert(false, "a constraint selector does not remove dependence");
+    }
+    case _ => ;
+  }
+}
+
 void covered_repeated_projectable_states(RepeatedChoice value) {
   match (value) {
     case { int } => ;
@@ -278,7 +570,7 @@ void covered_singleton_projectable_state(MaybeInt value) {
   match (value) {
     case { int } => ;
     case {} => ;
-    case { auto payload } => static_assert(false, "checked without instantiation"); // expected-error {{static assertion failed: checked without instantiation}} expected-warning {{match case is redundant}}
+    case { auto payload } => static_assert(false, "not instantiated"); // expected-warning {{match case is redundant}}
   }
 }
 
@@ -292,9 +584,76 @@ void no_projectable_states(EmptyChoice value) {
 template <class T>
 concept NoCandidate = false;
 
+template <class T> struct CoveredConstraint {
+  static_assert(false, "covered constraints must not be instantiated");
+};
+
+template <class T>
+concept InstantiateCoveredConstraint = sizeof(CoveredConstraint<T>) > 0;
+
+void covered_direct_constraint(int value) {
+  match (value) {
+    case int => ;
+    case InstantiateCoveredConstraint auto whole => ; // expected-warning {{match case is redundant}}
+  }
+}
+
+void no_viable_direct_pattern(int value) {
+  match (value) {
+    case NoCandidate auto whole => ; // expected-error {{pattern cannot match a subject of type 'int'}}
+    case _ => ;
+  }
+}
+
+bool no_viable_direct_test(int value) {
+  return match (value, case NoCandidate auto whole); // expected-error {{pattern cannot match a subject of type 'int'}}
+}
+
+void no_viable_direct_condition(int value) {
+  if (case NoCandidate auto whole = value) {} // expected-error {{pattern cannot match a subject of type 'int'}}
+}
+
+void covered_named_constraint(NamedInt value) {
+  match (value) {
+    case { .value: int } => ;
+    case { .value: InstantiateCoveredConstraint auto payload } => ; // expected-warning {{match case is redundant}}
+  }
+}
+
+void no_viable_named_projection(NamedInt value) {
+  match (value) {
+    case { .value: NoCandidate auto payload } => ; // expected-error {{braced alternative pattern does not match any projectable state of 'NamedInt'}}
+    case _ => ;
+  }
+}
+
 bool no_viable_test_candidate(Choice value) {
   return match (value, case { NoCandidate auto payload }); // expected-error {{braced alternative pattern does not match any projectable state of 'Choice'}}
 }
+
+bool no_viable_named_test(NamedInt value) {
+  return match (value, case { .value: NoCandidate auto payload }); // expected-error {{braced alternative pattern does not match any projectable state of 'NamedInt'}}
+}
+
+void no_viable_named_condition(NamedInt value) {
+  if (case { .value: NoCandidate auto payload } = value) {} // expected-error {{braced alternative pattern does not match any projectable state of 'NamedInt'}}
+}
+
+template <int N>
+bool no_viable_named_test_in_template(NamedInt value) {
+  return match (value, case { .value: NoCandidate auto payload }); // expected-error {{braced alternative pattern does not match any projectable state of 'NamedInt'}}
+}
+
+template <int N>
+void no_viable_named_selection_in_template(NamedInt value) {
+  match (value) {
+    case { .value: NoCandidate auto payload } => ; // expected-error {{braced alternative pattern does not match any projectable state of 'NamedInt'}}
+    case _ => ;
+  }
+}
+
+template bool no_viable_named_test_in_template<0>(NamedInt); // expected-note {{in instantiation of function template specialization 'no_viable_named_test_in_template<0>' requested here}}
+template void no_viable_named_selection_in_template<0>(NamedInt); // expected-note {{in instantiation of function template specialization 'no_viable_named_selection_in_template<0>' requested here}}
 
 constexpr bool failing_test_guard(Choice value) {
   return match (value, case { auto payload } if (false));
@@ -385,9 +744,45 @@ void singleton_condition(MaybeInt value) {
     if constexpr (sizeof(payload) > 0)
       (void)payload;
     else
-      static_assert(false, "a singleton condition is not dependent"); // expected-error {{static assertion failed: a singleton condition is not dependent}}
+      static_assert(false, "a singleton condition is still generic");
   }
 }
+
+constexpr int direct_condition(int value) {
+  if (case auto whole = value && whole > 0) {
+    if constexpr (__is_same(decltype(whole), int))
+      return whole;
+    else
+      static_assert(false, "a direct condition introduces a region");
+  }
+  return -1;
+}
+
+constexpr int direct_decomposition_condition(Product value) {
+  if (case [auto first, auto second] = value && first > 0) {
+    if constexpr (__is_same(decltype(first), int))
+      return first + second;
+    else
+      static_assert(false, "decomposition conditions introduce a region");
+  }
+  return -1;
+}
+
+constexpr bool direct_test(int value) {
+  return match (value, case auto whole if ([](auto copy) {
+    if constexpr (__is_same(decltype(copy), int))
+      return copy > 0;
+    else
+      static_assert(false, "direct test guards are instantiated");
+  }(whole)));
+}
+
+static_assert(direct_condition(42) == 42);
+static_assert(direct_condition(-1) == -1);
+static_assert(direct_decomposition_condition({20, 22}) == 42);
+static_assert(direct_decomposition_condition({-1, 22}) == -1);
+static_assert(direct_test(42));
+static_assert(!direct_test(-1));
 
 constexpr int condition_chain(Choice first, RepeatedChoice second, int extra) {
   if (extra > 0 && case { auto payload } = first &&
@@ -506,7 +901,7 @@ void region_does_not_extend_to_next_case(Pair value) {
       if constexpr (true)
         (void)(first + second);
       else
-        static_assert(false, "the next case is not dependent"); // expected-error {{static assertion failed: the next case is not dependent}}
+        static_assert(false, "each placeholder case has its own region");
     }
   }
 }

@@ -1456,6 +1456,17 @@ public:
     TryDispatchBlocks.push_back(block);
   }
 
+  void addMatchBindingAlias(const VarDecl *Value, const VarDecl *Declaration) {
+    MatchBindingDeclarations.insert_or_assign(Value, Declaration);
+  }
+
+  /// Checked candidates initialize different declarations for a shared name.
+  /// Dataflow analyses can track them as one logical binding.
+  const VarDecl *getMatchBindingDeclaration(const VarDecl *Value) const {
+    auto It = MatchBindingDeclarations.find(Value);
+    return It == MatchBindingDeclarations.end() ? Value : It->second;
+  }
+
   /// Records a synthetic DeclStmt and the DeclStmt it was constructed from.
   ///
   /// The CFG uses synthetic DeclStmts when a single AST DeclStmt contains
@@ -1563,6 +1574,7 @@ private:
   /// Collects DeclStmts synthesized for this CFG and maps each one back to its
   /// source DeclStmt.
   llvm::DenseMap<const DeclStmt *, const DeclStmt *> SyntheticDeclStmts;
+  llvm::DenseMap<const VarDecl *, const VarDecl *> MatchBindingDeclarations;
 };
 
 Expr *extractElementInitializerFromNestedAILE(const ArrayInitLoopExpr *AILE);

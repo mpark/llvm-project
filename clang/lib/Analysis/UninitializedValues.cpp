@@ -80,7 +80,7 @@ public:
   DeclToIndex() = default;
 
   /// Compute the actual mapping from declarations to bits.
-  void computeMap(const DeclContext &dc);
+  void computeMap(const DeclContext &dc, const CFG &cfg);
 
   /// Return the number of declarations in the map.
   unsigned size() const { return map.size(); }
@@ -91,14 +91,15 @@ public:
 
 } // namespace
 
-void DeclToIndex::computeMap(const DeclContext &dc) {
+void DeclToIndex::computeMap(const DeclContext &dc, const CFG &cfg) {
   unsigned count = 0;
   DeclContext::specific_decl_iterator<VarDecl> I(dc.decls_begin()),
                                                E(dc.decls_end());
   for ( ; I != E; ++I) {
     const VarDecl *vd = *I;
-    if (isTrackedVar(vd, &dc))
-      map[vd] = count++;
+    if (isTrackedVar(vd, &dc) &&
+        map.try_emplace(cfg.getMatchBindingDeclaration(vd), count).second)
+      ++count;
   }
 }
 
@@ -162,7 +163,8 @@ public:
   ValueVector::reference operator[](const VarDecl *vd);
 
   Value getValue(const CFGBlock *block, const VarDecl *vd) {
-    std::optional<unsigned> idx = declToIndex.getValueIndex(vd);
+    std::optional<unsigned> idx =
+        declToIndex.getValueIndex(cfg.getMatchBindingDeclaration(vd));
     return getValueVector(block)[*idx];
   }
 };
@@ -172,7 +174,7 @@ public:
 CFGBlockValues::CFGBlockValues(const CFG &c) : cfg(c), vals(0) {}
 
 void CFGBlockValues::computeSetOfDeclarations(const DeclContext &dc) {
-  declToIndex.computeMap(dc);
+  declToIndex.computeMap(dc, cfg);
   unsigned decls = declToIndex.size();
   scratch.resize(decls);
   unsigned n = cfg.getNumBlockIDs();
@@ -222,7 +224,8 @@ void CFGBlockValues::resetScratch() {
 }
 
 ValueVector::reference CFGBlockValues::operator[](const VarDecl *vd) {
-  return scratch[*declToIndex.getValueIndex(vd)];
+  return scratch[*declToIndex.getValueIndex(
+      cfg.getMatchBindingDeclaration(vd))];
 }
 
 //------------------------------------------------------------------------====//

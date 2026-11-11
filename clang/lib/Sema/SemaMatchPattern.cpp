@@ -53,14 +53,13 @@ Sema::MatchDeclContextRAII::MatchDeclContextRAII(Sema &S, SourceLocation Loc,
 }
 
 void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
-                                          MatchPattern *Pattern,
-                                          bool RequiresTemplateRegion) {
+                                          MatchPattern *Pattern) {
   if (Region) {
     // Later conditions already declare their bindings in this region.
     reenter();
     return;
   }
-  if (!RequiresTemplateRegion || S.CurContext->isDependentContext())
+  if (!Pattern->requiresTemplateRegion())
     return;
   Region = MatchTemplateRegionDecl::Create(S.Context, S.CurContext, Loc);
   S.CurContext->addDecl(Region);
@@ -123,6 +122,13 @@ bool Sema::MatchAlternativeSelectionPlan::isRequired(
   return llvm::any_of(Pattern->children(), [](const MatchPattern *Child) {
     return isRequired(Child);
   });
+}
+
+bool Sema::MatchProjectionCache::needsCaseInstantiation(
+    const Expr *Subject, const MatchPattern *Pattern) const {
+  return hasDeferredPatterns(Pattern) ||
+         (Subject->isTypeDependent() &&
+          MatchAlternativeSelectionPlan::isRequired(Pattern));
 }
 
 void Sema::MatchAlternativeSelectionPlan::beginCandidate(
@@ -1411,6 +1417,13 @@ static void forEachPatternDeclaration(
   }
   for (MatchPattern *Child : Pattern->children())
     forEachPatternDeclaration(Child, Callback);
+}
+
+static bool shouldDeferAlternativeProjection(
+    const AlternativePattern *Pattern,
+    const Sema::MatchProjectionCache *ProjectionCache) {
+  return ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+         Pattern->requiresTemplateRegion();
 }
 
 static bool isNonTriviallyMoveInitialized(const VarDecl *Declaration) {
@@ -2727,6 +2740,13 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   PatternInfo.IsOpenAlternativeInitialization = IsInitialization;
   PatternInfo.OpenAlternativeType = RequestedType;
 
+  auto CheckSubPattern = [&](Expr *ProjectedSubject) {
+    if (shouldDeferAlternativeProjection(Pattern, ProjectionCache))
+      ProjectedSubject = nullptr;
+    return S.CheckCompleteMatchPattern(
+        ProjectedSubject, Pattern->getSubPattern(), State, ProjectionCache);
+  };
+
   constexpr unsigned CastProjectionCacheKey = 1;
   constexpr unsigned InitializationProjectionCacheKey = 2;
   unsigned ProjectionCacheKey = IsInitialization
@@ -2736,9 +2756,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
           S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
           RequestedType, ProjectionCacheKey)) {
     PatternInfo.Projection = Projection;
-    return S.CheckCompleteMatchPattern(Projection->getProjectedExpr(),
-                                       Pattern->getSubPattern(), State,
-                                       ProjectionCache);
+    return CheckSubPattern(Projection->getProjectedExpr());
   }
 
   MatchProjection *Projection = createMatchProjection(
@@ -2771,8 +2789,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
         Loc);
     ProjectedRef = asValueKind(S, ProjectedRef, ProjectedValueKind);
     Projection->setProjectedExpr(ProjectedRef);
-    return S.CheckCompleteMatchPattern(ProjectedRef, Pattern->getSubPattern(),
-                                       State, ProjectionCache);
+    return CheckSubPattern(ProjectedRef);
   };
 
   StringRef Operation = IsInitialization ? "try_init" : "try_cast";
@@ -2984,16 +3001,12 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     return checkOpenAlternativePattern(S, Subject, Pattern, Traits, State,
                                        ProjectionCache);
 
-  unsigned NumProjectableStates = llvm::count(Traits.HasAlternativeType, true);
-  if (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
-      Pattern->getAlternativeKind() == AlternativePattern::Generic &&
-      NumProjectableStates > 1)
-    ProjectionCache->RequiresTemplateRegion = true;
-
   if (determineAlternativeProjections(S, Loc, Subject, Traits,
                                       ProjectionCache))
     return true;
 
+  bool DeferProjection =
+      shouldDeferAlternativeProjection(Pattern, ProjectionCache);
   llvm::SmallVector<unsigned, 4> Selected;
   if (Pattern->isNamed()) {
     std::optional<unsigned> Named =
@@ -3053,7 +3066,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
           .preselect(Selected);
 
     if (Selected.empty()) {
-      S.Diag(Loc, diag::err_braced_alternative_no_viable_state) << SubjectType;
+      S.Diag(Loc, diag::err_match_pattern_no_viable_candidate)
+          << /*BracedAlternative=*/true << SubjectType;
       return true;
     }
 
@@ -3062,11 +3076,9 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (!ProjectionCache)
       return true;
 
-    // A single projectable state can be checked against its actual projection
-    // before parsing the guard and handler.
     unsigned Chosen = Selected.front();
     if (ProjectionCache->DeferAlternativeChoices &&
-        NumProjectableStates > 1) {
+        (Selected.size() > 1 || DeferProjection)) {
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
       return checkClosedAlternativeSubPattern(S, nullptr, Pattern,
                                               Traits.AdvertisedTypes[Chosen],
@@ -3140,6 +3152,9 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         S, ProjectedSubject, Pattern, Traits.AdvertisedTypes[Selected.front()],
         State, ProjectionCache);
   };
+
+  if (DeferProjection)
+    return CheckSubPattern(nullptr);
 
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
   if (MatchProjection *Projection = findMatchProjection(
@@ -3301,8 +3316,18 @@ bool Sema::CheckCompleteMatchPatternImpl(
   }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
+    VarDecl *VD = P->getDeclaration();
+    if (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+        VD->getType()->getContainedAutoType()) {
+      if (auto *DD = dyn_cast<DecompositionDecl>(VD);
+          DD && Subject && !Subject->isTypeDependent() &&
+          !isDecompositionDeclarationPatternApplicable(*this, DD, Subject)) {
+        AddInitializerToDecl(DD, Subject, /*DirectInit=*/false);
+        return true;
+      }
+      Subject = nullptr;
+    }
     if (!Subject) {
-      VarDecl *VD = P->getDeclaration();
       ParsingInitForAutoVars.erase(VD);
       if (auto *DD = dyn_cast<DecompositionDecl>(VD))
         for (BindingDecl *Binding : DD->all_bindings())
@@ -3317,7 +3342,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
       return false;
     }
 
-    VarDecl *VD = P->getDeclaration();
     auto *Decomposition = dyn_cast<DecompositionDecl>(VD);
     if (isReusableDecompositionDeclaration(VD)) {
       unsigned Arity = llvm::range_size(Decomposition->flat_bindings());
@@ -3334,6 +3358,13 @@ bool Sema::CheckCompleteMatchPatternImpl(
         State.get(P).Projection = Projection;
         DecompositionDecl *Canonical = Projection->getDecomposedDecl();
         Decomposition->setType(Canonical->getType());
+        if (llvm::any_of(Decomposition->bindings(), [](BindingDecl *Binding) {
+              return Binding->isParameterPack() && !Binding->getBinding();
+            })) {
+          CheckCompleteDecompositionDeclaration(Decomposition);
+          if (Decomposition->isInvalidDecl())
+            return true;
+        }
         for (auto [Alias, Binding] :
              llvm::zip(Decomposition->bindings(), Canonical->bindings())) {
           if (Alias->isParameterPack()) {
@@ -3428,7 +3459,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
   }
   case MatchPattern::TypePatternClass: {
     auto *P = static_cast<TypePattern *>(Pattern);
-    if (!Subject || Subject->isTypeDependent())
+    if (!Subject || Subject->isTypeDependent() ||
+        (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+         P->getType()->getContainedAutoType()))
       return false;
 
     QualType PatternType = P->getType();
@@ -3526,7 +3559,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         }
         ProjectionCache->AlternativeChoices.push_back(
             {Alternatives, Alternatives.front()});
-        ProjectionCache->RequiresTemplateRegion |= Alternatives.size() > 1;
       } else {
         unsigned Chosen = Alternatives.front();
         if (ProjectionCache->NextPlannedAlternativeSelection <
@@ -3755,17 +3787,6 @@ bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
     State.CheckedBindingReferences = true;
     if (checkPatternBindingReferences(*this, Pattern))
       return true;
-    if (ProjectionCache && ProjectionCache->DeferAlternativeChoices) {
-      forEachPatternDeclaration(Pattern, [&](MatchPattern *, VarDecl *VD) {
-        bool HasBindingPack = VD->isParameterPack();
-        if (auto *DD = dyn_cast<DecompositionDecl>(VD))
-          HasBindingPack |=
-              llvm::any_of(DD->all_source_bindings(), [](BindingDecl *Binding) {
-                return Binding->isParameterPack();
-              });
-        ProjectionCache->RequiresTemplateRegion |= HasBindingPack;
-      });
-    }
   }
   bool CheckAndPatternMoves = !State.CheckedAndPatternMoves;
   State.CheckedAndPatternMoves = true;

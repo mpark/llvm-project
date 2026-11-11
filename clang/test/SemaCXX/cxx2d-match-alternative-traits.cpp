@@ -826,7 +826,7 @@ int advertised_void_projection(VoidProjection choice) {
 }
 
 int projected_deleted_copy_does_not_fall_back(const CopyChoice& choice) {
-  return match (choice) {
+  return match (choice) { // expected-note@+1 {{while instantiating this pattern match}}
     case { auto copy } => 1; // expected-error {{call to deleted constructor of 'ProjectedNonCopyable'}}
     case _ => 0;
   };
@@ -990,13 +990,13 @@ int direct_single_alternative(SingleChoice choice) {
   return 0;
 }
 
-void optional_like_payload_is_nondependent(MaybeInt choice) {
+void optional_like_payload_is_dependent(MaybeInt choice) {
   match (choice) {
     case { auto value } => {
       if constexpr (__is_same(decltype(value), int))
         (void)value;
       else
-        value.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
+        value.no_such_member();
     }
     case {} => ;
   }

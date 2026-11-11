@@ -2769,27 +2769,45 @@ void CodeGenFunction::EmitMatchPatternDeclarations(
         for (BindingDecl *Binding : Declaration->bindings())
           if (DecompositionDecl *Nested = Binding->getNestedDecomposition())
             MaybeEmitDeferredVarDeclInit(Nested);
-      return;
+    } else if (!LocalDeclMap.count(P->getDeclaration())) {
+      EmitVarDecl(*P->getDeclaration());
+      MaybeEmitDeferredVarDeclInit(P->getDeclaration());
     }
-    if (LocalDeclMap.count(P->getDeclaration()))
-      return;
-    EmitVarDecl(*P->getDeclaration());
-    MaybeEmitDeferredVarDeclInit(P->getDeclaration());
-    return;
-  }
-  if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
+  } else if (const auto *Or = dyn_cast<OrPattern>(Pattern)) {
     for (auto [I, Alternative] : llvm::enumerate(Or->alternatives()))
       if (Instantiation->isViableOrAlternative(Or, I))
         EmitMatchPatternDeclarations(Alternative, Instantiation);
-    return;
-  }
-  if (const auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
+  } else if (const auto *Decomposition =
+                 dyn_cast<DecompositionPattern>(Pattern)) {
     for (const MatchPattern *Child :
          Instantiation->getDecompositionPatterns(Decomposition))
       EmitMatchPatternDeclarations(Child, Instantiation);
   } else {
     for (const MatchPattern *Child : Pattern->children())
       EmitMatchPatternDeclarations(Child, Instantiation);
+  }
+
+  if (Pattern != Instantiation->getPattern())
+    return;
+  EmitMatchBindingAliases(Instantiation);
+}
+
+void CodeGenFunction::EmitMatchBindingAliases(
+    const MatchPatternInstantiation *Instantiation) {
+  for (const MatchBindingAlias &Alias : Instantiation->bindingAliases()) {
+    if (const auto *Variable = dyn_cast<VarDecl>(Alias.Value)) {
+      assert(isa<VarDecl>(Alias.Declaration) &&
+             "shared variable binding must select a variable");
+      auto It = LocalDeclMap.find(Variable);
+      assert(It != LocalDeclMap.end() && "selected binding is not initialized");
+      LocalDeclMap.insert_or_assign(Alias.Declaration, It->second);
+    } else {
+      const auto *Binding = cast<BindingDecl>(Alias.Value);
+      assert(isa<BindingDecl>(Alias.Declaration) &&
+             "shared structured binding must select a structured binding");
+      LocalDeclMap.insert_or_assign(
+          Alias.Declaration, EmitLValue(Binding->getBinding()).getAddress());
+    }
   }
 }
 
@@ -2975,7 +2993,7 @@ collectSharedCaseDeclarations(ArrayRef<MatchCaseInstantiation> Cases,
   SharedDeclarations.reserve(Cases.size());
   for (const MatchCaseInstantiation &Case : Cases) {
     SmallVector<const VarDecl *, 2> Declarations;
-    if (Case.Guard.hasGuard() ||
+    if (Case.Handler != Cases.front().Handler || Case.Guard.hasGuard() ||
         hasStagedAndPatternDeclarations(Case.Pattern,
                                         Case.PatternInstantiation) ||
         !collectSharedCaseReferenceDeclarations(
@@ -3122,6 +3140,7 @@ void CodeGenFunction::EmitMatchCandidate(
   else if (!IsTestExpression)
     OrdinaryCaseScope.emplace(*this);
   EmitMatchPatternDeclarations(Pattern, Instantiation);
+  llvm::SaveAndRestore SavedActionDeclarations(LocalDeclMap);
   if (HasStagedDeclarations) {
     StagedDeclarations.markInitialized(*this);
     Conditional.end(*this);
@@ -3523,6 +3542,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
                              /*isInit=*/true);
       EmitAutoVarCleanups(Emission);
     }
+    EmitMatchBindingAliases(Shared.Cases.front().PatternInstantiation);
     EmitCaseHandler(Shared.Cases.front());
     EmitBranch(SelectEndBB);
   };
@@ -3582,8 +3602,9 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
     if (llvm::is_contained(CompletedPatterns, Case.Pattern) &&
         !hasMatchPatternDeclarations(Case.Pattern, Case.PatternInstantiation) &&
         !Case.Guard.hasGuard()) {
-      if (ShareAction) {
-        CompletedCaseAction &Action = CompletedCaseActions[Case.CaseIndex];
+      CompletedCaseAction &Action = CompletedCaseActions[Case.CaseIndex];
+      if (ShareAction &&
+          (!Action.Case || Action.Case->Handler == Case.Handler)) {
         if (!Action.Block) {
           Action.Block = createBasicBlock("match.select.action");
           Action.Case = &Case;

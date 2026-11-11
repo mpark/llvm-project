@@ -1429,6 +1429,15 @@ namespace {
     /// transformed if it is NULL or if it is not dependent.
     bool AlreadyTransformed(QualType T);
 
+    bool usesSourceMatchBindings() {
+      return !TemplateArgs.getNumSubstitutedLevels() &&
+             !getSema().isSynthesizingTemplateRegion();
+    }
+
+    StmtResult
+    TransformMatchBody(Stmt *Body,
+                       StmtDiscardKind Kind = StmtDiscardKind::Discarded);
+
     /// Returns the location of the entity being instantiated, if known.
     SourceLocation getBaseLocation() { return Loc; }
 
@@ -1990,6 +1999,58 @@ namespace {
       return Ret;
     }
   };
+}
+
+namespace {
+
+// Non-generic bodies have already been checked. Expand nested matches without
+// creating new declarations for local variables, classes, or lambdas.
+class NonDependentMatchBodyTransform
+    : public TreeTransform<NonDependentMatchBodyTransform> {
+  using Base = TreeTransform<NonDependentMatchBodyTransform>;
+
+public:
+  explicit NonDependentMatchBodyTransform(Sema &S) : Base(S) {}
+
+  StmtResult TransformDeclStmt(DeclStmt *S) { return S; }
+  ExprResult TransformLambdaExpr(LambdaExpr *E) { return E; }
+
+  ExprResult TransformMatchSelectExpr(MatchSelectExpr *E) {
+    return E->getNumCaseInstantiations() ? ExprResult(E)
+                                         : getSema().ExpandDeferredMatchExpr(E);
+  }
+
+  ExprResult TransformMatchTestExpr(MatchTestExpr *E) {
+    return E->needsCaseInstantiation() ? getSema().ExpandDeferredMatchExpr(E)
+                                       : ExprResult(E);
+  }
+
+  ExprResult TransformCaseConditionExpr(CaseConditionExpr *E) {
+    return TransformMatchTestExpr(E);
+  }
+
+  using Base::TransformCaseConditionChain;
+  CaseConditionTransformResult
+  TransformCaseConditionChain(Expr *Condition, Stmt *Handler, Expr *Increment,
+                              bool SelectConstexprHandler = false) {
+    LocalInstantiationScope Scope(getSema(), /*CombineWithOuterScope=*/true);
+    MultiLevelTemplateArgumentList Arguments;
+    TemplateInstantiator Instantiator(
+        getSema(), Arguments, Condition->getBeginLoc(), DeclarationName());
+    auto Result = Instantiator.TransformCaseConditionChain(
+        Condition, Handler, Increment, SelectConstexprHandler);
+    return {Result.Condition, Result.Handler, Result.Increment};
+  }
+};
+
+} // namespace
+
+StmtResult TemplateInstantiator::TransformMatchBody(Stmt *Body,
+                                                    StmtDiscardKind Kind) {
+  if (!usesSourceMatchBindings())
+    return TransformStmt(Body, Kind);
+  return NonDependentMatchBodyTransform(getSema()).TransformStmt(
+      Body, static_cast<NonDependentMatchBodyTransform::StmtDiscardKind>(Kind));
 }
 
 bool TemplateInstantiator::AlreadyTransformed(QualType T) {

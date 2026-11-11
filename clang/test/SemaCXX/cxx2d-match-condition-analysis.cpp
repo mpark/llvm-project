@@ -346,7 +346,7 @@ static_assert(decomposition_arity(0) == 0);
 
 template <class T>
 void strict_dependent_case_condition(T value) {
-  if (case [auto&& first, auto&& second] = value) { // expected-error {{cannot bind non-class, non-array type 'int'}}
+  if (case [auto&& first, auto&& second] = value) { // expected-error {{pattern cannot match a subject of type 'int'}}
     use(first);
     use(second);
   }
@@ -386,7 +386,7 @@ void nonconstant_constexpr_condition(int value) { // expected-note {{declared he
 
 template <class T>
 void strict_dependent_constexpr_condition(T value) {
-  if constexpr (case [auto&& first, auto&& second] = value) { // expected-error {{cannot bind non-class, non-array type 'int'}}
+  if constexpr (case [auto&& first, auto&& second] = value) { // expected-error {{pattern cannot match a subject of type 'int'}}
     use(first);
     use(second);
   }

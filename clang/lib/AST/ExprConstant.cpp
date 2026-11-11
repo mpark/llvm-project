@@ -476,6 +476,8 @@ namespace {
     unsigned Version;
   };
 
+  class MatchBindingEvaluationScope;
+
   /// A stack frame in the constexpr call stack.
   class CallStackFrame : public interp::Frame {
   public:
@@ -508,6 +510,7 @@ namespace {
     typedef std::map<MapKeyTy, APValue> MapTy;
     /// Temporaries - Temporary lvalues materialized within this stack frame.
     MapTy Temporaries;
+    const MatchBindingEvaluationScope *MatchBindings = nullptr;
 
     /// CallRange - The source range of the call expression for this call.
     SourceRange CallRange;
@@ -605,6 +608,31 @@ namespace {
   private:
     APValue &createLocal(APValue::LValueBase Base, const void *Key, QualType T,
                          ScopeKind Scope);
+  };
+
+  class MatchBindingEvaluationScope {
+    CallStackFrame &Frame;
+    const MatchBindingEvaluationScope *Previous;
+    ArrayRef<MatchBindingAlias> Aliases;
+
+  public:
+    MatchBindingEvaluationScope(CallStackFrame &Frame,
+                                const MatchPatternInstantiation *Instantiation)
+        : Frame(Frame), Previous(Frame.MatchBindings),
+          Aliases(Instantiation->bindingAliases()) {
+      if (!Aliases.empty())
+        Frame.MatchBindings = this;
+    }
+    ~MatchBindingEvaluationScope() { Frame.MatchBindings = Previous; }
+
+    const ValueDecl *resolve(const ValueDecl *Declaration) const {
+      for (const MatchBindingAlias &Alias : Aliases)
+        if (Alias.Declaration == Declaration) {
+          Declaration = Alias.Value;
+          break;
+        }
+      return Previous ? Previous->resolve(Declaration) : Declaration;
+    }
   };
 
   /// Temporarily override 'this'.
@@ -6159,6 +6187,8 @@ static EvalStmtResult EvaluateCaseConditionChain(
         !EvaluatePatternDeclarations(Pattern, PatternInstantiation, Info,
                                      ProjectionCache))
       return ESR_Failed;
+    MatchBindingEvaluationScope Bindings(*Info.CurrentCall,
+                                         PatternInstantiation);
     if (PatternMatched && Guard.Init) {
       APValue InitValue;
       StmtResult InitResult = {InitValue, nullptr};
@@ -10101,6 +10131,8 @@ public:
           !EvaluatePatternDeclarations(Case.Pattern, Case.PatternInstantiation,
                                        Info, ProjectionCache))
         return false;
+      MatchBindingEvaluationScope Bindings(*Info.CurrentCall,
+                                           Case.PatternInstantiation);
       if (Result && Case.Guard.Init) {
         APValue InitValue;
         StmtResult InitResult = {InitValue, nullptr};
@@ -10576,6 +10608,8 @@ bool LValueExprEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
   if (isa<FunctionDecl, MSGuidDecl, TemplateParamObjectDecl,
           UnnamedGlobalConstantDecl>(D))
     return Success(cast<ValueDecl>(D));
+  if (Info.CurrentCall->MatchBindings)
+    D = Info.CurrentCall->MatchBindings->resolve(D);
   if (const VarDecl *VD = dyn_cast<VarDecl>(D))
     return VisitVarDecl(E, VD);
   if (const BindingDecl *BD = dyn_cast<BindingDecl>(D))
@@ -21781,6 +21815,8 @@ static bool EvaluateSharedDeclarationProjections(
 }
 
 bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
+  if (E->needsCaseInstantiation())
+    return Error(E);
   // Keep full-expression objects in the enclosing frame, even at namespace
   // scope, rather than in a frame that ends with the test.
   BlockScopeRAII MatchScope(Info);
@@ -21818,6 +21854,8 @@ bool IntExprEvaluator::VisitMatchTestExpr(const MatchTestExpr *E) {
                       Instantiation.Pattern, Instantiation.PatternInstantiation,
                       Info, ProjectionCache))
       return false;
+    MatchBindingEvaluationScope Bindings(*Info.CurrentCall,
+                                         Instantiation.PatternInstantiation);
     if (Result && Instantiation.Guard.Init) {
       APValue InitValue;
       StmtResult InitResult = {InitValue, nullptr};

@@ -3015,8 +3015,7 @@ void test_target_map_orig_use_binding() {
 // CHECK:    store i32 10, ptr [[I]], align 4
 // CHECK:    [[X5:%.*]] = getelementptr inbounds nuw [[STRUCT_POINT]], ptr [[TMP0]], i32 0, i32 0
 // CHECK:    [[TMP9:%.*]] = load i32, ptr [[A]], align 4
-// CHECK:    [[X6:%.*]] = getelementptr inbounds nuw [[STRUCT_POINT]], ptr [[TMP0]], i32 0, i32 0
-// CHECK:    store i32 [[TMP9]], ptr [[X6]], align 4
+// CHECK:    store i32 [[TMP9]], ptr [[X5]], align 4
 // CHECK:    ret void
 //
 //

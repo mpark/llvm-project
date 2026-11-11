@@ -10,12 +10,239 @@
 
 // ADDITIONAL_COMPILE_FLAGS: -fpattern-matching
 
+#include <any>
 #include <cassert>
+#include <expected>
 #include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
+
+constexpr int direct_placeholder(int source) {
+  match (source) {
+    case auto value => {
+      if constexpr (requires { value.size(); })
+        return static_cast<int>(value.size());
+      else
+        return value;
+    }
+  }
+}
+
+constexpr int direct_structured_binding(const std::pair<int, int>& source) {
+  match (source) {
+    case const auto& [first, second] => {
+      if constexpr (std::is_same_v<decltype(first), const int>)
+        return first + second;
+      else
+        static_assert(false);
+    }
+  }
+}
+
+constexpr int direct_decomposition(const std::pair<int, int>& source) {
+  match (source) {
+    case [const auto& first, const auto& second] => {
+      if constexpr (std::is_same_v<decltype(first), const int&>)
+        return first + second;
+      else
+        static_assert(false);
+    }
+  }
+}
+
+constexpr int direct_array_binding() {
+  int source[] = {20, 22};
+  return match (source) {
+    case auto [first, second] => first + second;
+  };
+}
+
+constexpr int direct_array_reference() {
+  int source[] = {20, 22};
+  match (source) {
+    case auto&& whole => {
+      static_assert(std::is_same_v<decltype(whole), int (&)[2]>);
+      return whole[0] + whole[1];
+    }
+  }
+}
+
+constexpr int direct_declaration(int source) {
+  case [auto value] = std::tuple{source};
+  if constexpr (std::is_same_v<decltype(value), int>)
+    return value;
+  else
+    static_assert(false);
+}
+
+constexpr int direct_reference(int& source) {
+  match (source) {
+    case decltype(auto) value => {
+      static_assert(std::is_same_v<decltype(value), int&>);
+      return ++value;
+    }
+  }
+}
+
+constexpr int direct_whole_variant(const std::variant<int, std::string>& source) {
+  return match (source) {
+    case const auto& whole => static_cast<int>(whole.index());
+  };
+}
+
+template <class Product>
+constexpr int generic_triple(Product source) {
+  return match (source) {
+    case [auto first, auto second, auto third] => first + second + third;
+    case _ => -1;
+  };
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wredundant-match-cases"
+constexpr int covered_direct_placeholder(int source) {
+  return match (source) {
+    case int => 42;
+    case auto value => static_cast<int>(value.size());
+  };
+}
+#pragma clang diagnostic pop
+
+constexpr int direct_condition(int source) {
+  if (case auto value = source && value > 0) {
+    if constexpr (std::is_same_v<decltype(value), int>)
+      return value;
+    else
+      static_assert(false);
+  }
+  return -1;
+}
+
+constexpr int singleton_projection(std::optional<int> source) {
+  match (source) {
+    case { auto payload } => {
+      if constexpr (std::is_same_v<decltype(payload), int>)
+        return payload;
+      else
+        static_assert(false);
+    }
+    case {} => return -1;
+  }
+}
+
+constexpr int named_projection(std::optional<int> source) {
+  match (source) {
+    case { .value: const auto& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), const int&>)
+        return payload;
+      else
+        static_assert(false);
+    }
+    case {} => return -1;
+  }
+}
+
+constexpr bool projected_requires(std::optional<int> source) {
+  return match (source) {
+    case { auto payload } if (requires { payload.no_such_member(); }) => true;
+    case { .value: auto payload } if (requires { payload.no_such_member(); }) => true;
+    case _ => false;
+  };
+}
+
+constexpr int named_expected_projection(const std::expected<int, int>& source) {
+  match (source) {
+    case { .value: const auto& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), const int&>)
+        return payload;
+      else
+        static_assert(false);
+    }
+    case { .error: const auto& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), const int&>)
+        return payload + 100;
+      else
+        static_assert(false);
+    }
+  }
+}
+
+constexpr int indexed_projection(const std::variant<int, int>& source) {
+  match (source) {
+    case { .index<0>: const auto& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), const int&>)
+        return payload;
+      else
+        static_assert(false);
+    }
+    case { .index<1>: const int& payload } => return payload + 100;
+    case _ => return -1;
+  }
+}
+
+int open_type_projection(const std::any& source) {
+  match (source) {
+    case { int: auto payload } => {
+      if constexpr (std::is_same_v<decltype(payload), int>)
+        return payload;
+      else
+        static_assert(false);
+    }
+    case _ => return -1;
+  }
+}
+
+struct QualifiedChoice {
+  unsigned active;
+  int first;
+  const int second;
+};
+
+template <>
+struct std::alternative_traits<QualifiedChoice> {
+  static constexpr alternative_info alternatives[] = {^^int, ^^int};
+  static constexpr bool has_residual_states = false;
+
+  static constexpr unsigned index(const QualifiedChoice& source) noexcept {
+    return source.active;
+  }
+
+  template <unsigned I>
+  static constexpr decltype(auto) get(QualifiedChoice& source) {
+    if constexpr (I == 0)
+      return (source.first);
+    else
+      return (source.second);
+  }
+};
+
+constexpr int qualified_type_selector(QualifiedChoice& source) {
+  match (source) {
+    case { int: auto&& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), int&>) {
+        return ++payload;
+      } else {
+        static_assert(std::is_same_v<decltype(payload), const int&>);
+        return payload + 100;
+      }
+    }
+  }
+}
+
+constexpr int qualified_constraint_selector(QualifiedChoice& source) {
+  match (source) {
+    case { std::integral: auto&& payload } => {
+      if constexpr (std::is_same_v<decltype(payload), int&>) {
+        return ++payload;
+      } else {
+        static_assert(std::is_same_v<decltype(payload), const int&>);
+        return payload + 100;
+      }
+    }
+  }
+}
 
 int namespace_declaration_pack = match (std::pair{20, 22}) {
   case [auto&& ...elements] => (... + elements);
@@ -28,6 +255,17 @@ int namespace_structured_binding_pack = match (std::pair{20, 22}) {
 int per_alternative_static(const std::variant<int, int>& value) {
   match (value) {
     case { auto payload } => {
+      static int calls = 0;
+      (void)payload;
+      return ++calls;
+    }
+    case _ => return -1;
+  }
+}
+
+int per_alternative_reference_static(const std::variant<int, int>& value) {
+  match (value) {
+    case { const auto& payload } => {
       static int calls = 0;
       (void)payload;
       return ++calls;
@@ -79,6 +317,27 @@ struct Pair {
   int first;
   int second;
 };
+
+int concrete_projection_static(const std::variant<int, int>& source) {
+  match (source) {
+    case { int payload } => {
+      static int calls = 0;
+      return 10 * ++calls + payload;
+    }
+    case _ => return -1;
+  }
+}
+
+int concrete_projection_after_coverage(const std::variant<int, int, int>& source) {
+  match (source) {
+    case { .index<0>: int } => return 0;
+    case { int payload } => {
+      static int calls = 0;
+      return 10 * ++calls + payload;
+    }
+    case _ => return -1;
+  }
+}
 
 struct Triple {
   int first;
@@ -143,6 +402,44 @@ constexpr int singleton_condition_scopes(std::optional<int> value) {
 }
 
 constexpr bool test() {
+  assert(direct_placeholder(42) == 42);
+  assert(direct_structured_binding({20, 22}) == 42);
+  assert(direct_decomposition({20, 22}) == 42);
+  assert(direct_array_binding() == 42);
+  assert(direct_array_reference() == 42);
+  assert(direct_declaration(42) == 42);
+  int direct_value = 41;
+  assert(direct_reference(direct_value) == 42);
+  assert(direct_value == 42);
+  assert(direct_whole_variant(42) == 0);
+  assert(direct_whole_variant(std::string("text")) == 1);
+  assert(generic_triple(std::pair{20, 22}) == -1);
+  assert(generic_triple(std::tuple{10, 20, 12}) == 42);
+  assert(covered_direct_placeholder(1) == 42);
+  assert(direct_condition(42) == 42);
+  assert(direct_condition(-1) == -1);
+  assert(singleton_projection(42) == 42);
+  assert(singleton_projection(std::nullopt) == -1);
+  assert(named_projection(42) == 42);
+  assert(named_projection(std::nullopt) == -1);
+  assert(!projected_requires(42));
+  assert(!projected_requires(std::nullopt));
+  assert(named_expected_projection(std::expected<int, int>(42)) == 42);
+  assert(named_expected_projection(
+             std::expected<int, int>(std::unexpected(42))) == 142);
+  assert(indexed_projection(
+             std::variant<int, int>(std::in_place_index<0>, 42)) == 42);
+  assert(indexed_projection(
+             std::variant<int, int>(std::in_place_index<1>, 42)) == 142);
+  QualifiedChoice source{0, 41, 42};
+  assert(qualified_type_selector(source) == 42);
+  source.active = 1;
+  assert(qualified_type_selector(source) == 142);
+  source.active = 0;
+  source.first = 41;
+  assert(qualified_constraint_selector(source) == 42);
+  source.active = 1;
+  assert(qualified_constraint_selector(source) == 142);
   assert(nested_generic_match(42) == 45);
   assert(nested_generic_match(2.0) == 5);
   assert(nested_generic_match(0) == 3);
@@ -161,6 +458,8 @@ constexpr bool test() {
 }
 
 int main(int, char**) {
+  assert(open_type_projection(42) == 42);
+  assert(open_type_projection(4.2) == -1);
   assert(namespace_declaration_pack == 42);
   assert(namespace_structured_binding_pack == 42);
 
@@ -170,7 +469,21 @@ int main(int, char**) {
   assert(per_alternative_static(second) == 1);
   assert(per_alternative_static(first) == 2);
   assert(per_alternative_static(second) == 2);
+  assert(per_alternative_reference_static(first) == 1);
+  assert(per_alternative_reference_static(second) == 1);
+  assert(per_alternative_reference_static(first) == 2);
+  assert(per_alternative_reference_static(second) == 2);
 
+  assert(concrete_projection_static(first) == 11);
+  assert(concrete_projection_static(second) == 22);
+  std::variant<int, int, int> partially_covered(std::in_place_index<0>, 42);
+  assert(concrete_projection_after_coverage(partially_covered) == 0);
+  partially_covered.emplace<1>(1);
+  assert(concrete_projection_after_coverage(partially_covered) == 11);
+  partially_covered.emplace<2>(2);
+  assert(concrete_projection_after_coverage(partially_covered) == 22);
+  partially_covered.emplace<1>(3);
+  assert(concrete_projection_after_coverage(partially_covered) == 33);
   assert(captured_lambda_value(std::variant<int, std::string>(42)) == 42);
   assert(captured_lambda_value(std::variant<int, std::string>("text")) == 4);
   assert(local_class_size(std::variant<int, std::string>(42)) == sizeof(int));

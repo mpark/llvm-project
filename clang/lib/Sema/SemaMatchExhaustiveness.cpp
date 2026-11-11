@@ -1365,6 +1365,27 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchUsefulness(
   return MatchPatternUsefulness::NotUseful;
 }
 
+bool Sema::TryPruneCoveredMatchSubject(MatchUsefulnessContext &Context,
+                                       SourceLocation Loc, unsigned CaseIndex) {
+  MatchUsefulnessContext::Impl &State = *Context.State;
+  if (State.CoverageMatrix.empty())
+    return false;
+
+  CoveragePattern Domain = CoveragePattern::wild(Loc);
+  PatternRow Row;
+  Row.push_back(Domain);
+  if (isUseful(*this, State.CoverageMatrix, Row, State.InitialTypes,
+               ConstructorDomain::RequiredAndResidual,
+               nullptr) != Usefulness::NotUseful)
+    return false;
+
+  State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
+                     /*ContributesCoverage=*/false,
+                     /*ClassifyContinuation=*/false,
+                     /*RecordOpaquePattern=*/false);
+  return true;
+}
+
 Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
     MatchUsefulnessContext &Context, MatchPattern *RootPattern,
     AlternativePattern *Candidate, const MatchPatternState &PatternState,

@@ -189,6 +189,8 @@ public:
   /// statement node appears at most once in its containing declaration.
   bool AlwaysRebuild() { return static_cast<bool>(SemaRef.ArgPackSubstIndex); }
 
+  bool usesSourceMatchBindings() { return false; }
+
   /// Whether the transformation is forming an expression or statement that
   /// replaces the original. In this case, we'll reuse mangling numbers from
   /// existing lambdas.
@@ -420,6 +422,38 @@ public:
   /// \returns the transformed statement.
   StmtResult TransformStmt(Stmt *S,
                            StmtDiscardKind SDK = StmtDiscardKind::Discarded);
+
+  StmtResult
+  TransformMatchBody(Stmt *Body,
+                     StmtDiscardKind Kind = StmtDiscardKind::Discarded) {
+    return getDerived().TransformStmt(Body, Kind);
+  }
+
+  ExprResult TransformMatchBodyExpr(Expr *Body) {
+    StmtResult Result =
+        getDerived().TransformMatchBody(Body, StmtDiscardKind::NotDiscarded);
+    return Result.isInvalid() ? ExprError()
+                              : ExprResult(Result.template getAs<Expr>());
+  }
+
+  Sema::ConditionResult TransformMatchGuardCondition(SourceLocation Loc,
+                                                     const MatchGuard &Guard,
+                                                     Sema::ConditionKind Kind) {
+    if (!getDerived().usesSourceMatchBindings())
+      return getDerived().TransformCondition(Loc, Guard.ConditionVariable,
+                                             Guard.Condition, Kind);
+    if (!Guard.hasGuard())
+      return Sema::ConditionResult();
+    if (Guard.ConditionVariable)
+      return getSema().ActOnConditionVariable(Guard.ConditionVariable, Loc,
+                                              Kind);
+
+    ExprResult Condition = getDerived().TransformMatchBodyExpr(Guard.Condition);
+    if (Condition.isInvalid())
+      return Sema::ConditionError();
+    return getSema().ActOnCondition(nullptr, Loc, Condition.get(), Kind,
+                                    /*MissingOK=*/false);
+  }
 
   /// Transform the given statement.
   ///
@@ -4459,67 +4493,44 @@ public:
                                                            LParenLoc, EndLoc);
   }
 
-  void
-  RemapSelectedOrPatternBindings(MatchPattern *Source,
-                                 MatchPattern *Transformed,
-                                 const Sema::MatchPatternState &PatternState) {
-    auto CollectSourceBindings = [&](MatchPattern *Pattern,
-                                     SmallVectorImpl<ValueDecl *> &Bindings,
-                                     auto &Recurse) -> void {
-      if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
-        llvm::append_range(Bindings, Or->bindings());
-        return;
-      }
-      for (MatchPattern *Child : Pattern->children())
-        Recurse(Child, Bindings, Recurse);
-    };
-    auto CollectSelectedBindings = [&](MatchPattern *Pattern,
-                                       SmallVectorImpl<ValueDecl *> &Bindings,
-                                       auto &Recurse) -> void {
-      if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
-        VarDecl *Variable = Declaration->getDeclaration();
-        if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
-          for (BindingDecl *Binding : Decomposition->leaf_bindings())
-            if (Binding->getDeclName())
-              Bindings.push_back(Binding);
-        } else if (Variable->getDeclName()) {
-          Bindings.push_back(Variable);
-        }
-        return;
-      }
-
-      if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
-        unsigned Selected = 0;
-        if (const MatchPatternInfo *Info = PatternState.find(Or))
-          for (auto [I, Viable] : llvm::enumerate(Info->ViableOrAlternatives))
-            if (Viable) {
-              Selected = I;
-              break;
-            }
-        Recurse(Or->alternatives()[Selected], Bindings, Recurse);
-        return;
-      }
-
-      if (auto *Decomposition = dyn_cast<DecompositionPattern>(Pattern)) {
-        if (const MatchPatternInfo *Info = PatternState.find(Decomposition);
-            Info && Info->HasExpandedPatterns) {
-          for (MatchPattern *Child : Info->ExpandedPatterns)
-            Recurse(Child, Bindings, Recurse);
-          return;
-        }
-      }
-
-      for (MatchPattern *Child : Pattern->children())
-        Recurse(Child, Bindings, Recurse);
-    };
-
+  void RemapMatchPatternBindings(
+      MatchPattern *Source, MatchPatternInstantiation *Instantiation,
+      const MatchPatternInstantiation *SharedInstantiation = nullptr) {
+    bool ReuseSourceBindings = getDerived().usesSourceMatchBindings();
     SmallVector<ValueDecl *, 4> SourceBindings;
     SmallVector<ValueDecl *, 4> SelectedBindings;
-    CollectSourceBindings(Source, SourceBindings, CollectSourceBindings);
-    if (SourceBindings.empty())
+    auto CollectOrBindings = [&](MatchPattern *Pattern, auto &Recurse) -> void {
+      if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
+        llvm::append_range(SourceBindings, Or->bindings());
+        return;
+      }
+      for (MatchPattern *Child : Pattern->children())
+        Recurse(Child, Recurse);
+    };
+    CollectOrBindings(Source, CollectOrBindings);
+    if (SourceBindings.empty() && !SharedInstantiation && !ReuseSourceBindings)
       return;
-    CollectSelectedBindings(Transformed, SelectedBindings,
-                            CollectSelectedBindings);
+    visitMatchPatternBindings(
+        Instantiation->getPattern(), Instantiation,
+        [&](ValueDecl *Binding) { SelectedBindings.push_back(Binding); });
+    if (ReuseSourceBindings || SharedInstantiation) {
+      SmallVector<ValueDecl *, 4> SharedBindings;
+      visitMatchPatternBindings(
+          ReuseSourceBindings ? Source : SharedInstantiation->getPattern(),
+          ReuseSourceBindings ? nullptr : SharedInstantiation,
+          [&](ValueDecl *Binding) { SharedBindings.push_back(Binding); });
+      SmallVector<MatchBindingAlias, 4> Aliases;
+      for (auto [Declaration, Value] :
+           llvm::zip_equal(SharedBindings, SelectedBindings)) {
+        assert(getSema().Context.hasSameType(Declaration->getType(),
+                                             Value->getType()) &&
+               "non-generic candidates must have the same binding types");
+        if (Declaration != Value)
+          Aliases.push_back({Declaration, Value});
+      }
+      Instantiation->setBindingAliases(getSema().Context, Aliases);
+      SelectedBindings = std::move(SharedBindings);
+    }
     for (ValueDecl *SourceBinding : SourceBindings) {
       if (SourceBinding->isParameterPack()) {
         SmallVector<ValueDecl *, 4> Elements;
@@ -4533,7 +4544,7 @@ public:
               return Binding->getDeclName() == SourceBinding->getDeclName();
             });
         assert(Selected != SelectedBindings.end() &&
-               "or-pattern binding missing after transformation");
+               "pattern binding missing after transformation");
         getDerived().remapTransformedLocalDecl(SourceBinding, *Selected);
       }
     }
@@ -19627,10 +19638,11 @@ auto TreeTransform<Derived>::TransformCaseConditionChain(
         return {};
     }
 
-    StmtResult TransformedHandler = getDerived().TransformStmt(Handler);
+    StmtResult TransformedHandler = getDerived().TransformMatchBody(Handler);
     if (TransformedHandler.isInvalid())
       return {ExprError()};
-    ExprResult TransformedIncrement = getDerived().TransformExpr(Increment);
+    ExprResult TransformedIncrement =
+        getDerived().TransformMatchBodyExpr(Increment);
     if (TransformedIncrement.isInvalid())
       return {ExprError()};
     return {ExprResult(), TransformedHandler.get(), TransformedIncrement.get()};
@@ -19744,12 +19756,14 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
   Sema::MatchProjectionCache ProjectionCache;
   SmallVector<MatchTestInstantiation, 4> Instantiations;
   Sema::MatchAlternativeSelectionPlan SelectionPlan;
+  bool ShareBody = !E->getRegion() && !SelectConstexprHandler;
 
-  bool PatternHasAlternativeChoice =
+  bool AllowsSubstitutionFailure =
+      E->getRegion() ||
       Sema::MatchAlternativeSelectionPlan::isRequired(E->getPattern());
 
-  while (true) {
-    SelectionPlan.beginCandidate(ProjectionCache, PatternHasAlternativeChoice);
+  do {
+    SelectionPlan.beginCandidate(ProjectionCache, AllowsSubstitutionFailure);
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
 
     MatchCandidateInstantiationScope CandidateScope(getSema(), E->getRegion());
@@ -19770,11 +19784,10 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
     };
 
     bool NoMatch = false;
-    if (PatternHasAlternativeChoice) {
+    if (AllowsSubstitutionFailure) {
       Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
       if (TransformAndCheckPattern()) {
-        if (!ProjectionCache.CandidateIsNotViable &&
-            !Trap.hasErrorOccurred())
+        if (!ProjectionCache.CandidateIsNotViable && !Trap.hasErrorOccurred())
           return {ExprError()};
         NoMatch = true;
       }
@@ -19784,89 +19797,89 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
 
     if (NoMatch) {
       ProjectionCache.Entries.resize(SavedProjectionCount);
-    } else {
-      getDerived().RemapSelectedOrPatternBindings(
-          E->getPattern(), TransformedPattern, PatternState);
-      bool PatternIsIrrefutable =
-          getSema().isMatchPatternIrrefutable(TransformedPattern, PatternState);
-      MatchPatternInstantiation *PatternInstantiation =
-          MatchPatternInstantiation::Create(
-              getSema().Context, TransformedPattern, PatternState.Infos);
+      continue;
+    }
+    bool PatternIsIrrefutable =
+        getSema().isMatchPatternIrrefutable(TransformedPattern, PatternState);
+    MatchPatternInstantiation *PatternInstantiation =
+        MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,
+                                          PatternState.Infos);
+    getDerived().RemapMatchPatternBindings(
+        E->getPattern(), PatternInstantiation,
+        ShareBody && !Instantiations.empty()
+            ? Instantiations.front().PatternInstantiation
+            : nullptr);
 
-      StmtResult GuardInit;
-      if (E->getGuard().Init) {
-        GuardInit = getDerived().TransformStmt(E->getGuard().Init);
-        if (GuardInit.isInvalid())
-          return {ExprError()};
-      }
-      Sema::ConditionResult Guard = getDerived().TransformCondition(
-          E->getIfLoc(), E->getGuard().ConditionVariable,
-          E->getGuard().Condition, Sema::ConditionKind::Boolean);
-      if (Guard.isInvalid())
-        return {ExprError()};
-
-      Expr *CandidatePrefix = ConstexprPrefix;
-      if (SelectConstexprHandler) {
-        MatchGuard CandidateGuard{GuardInit.get(), Guard.get().first,
-                                  Guard.get().second};
-        ExprResult CandidateExpr;
-        if (isa<CaseConditionExpr>(E))
-          CandidateExpr = getSema().ActOnCaseConditionExpr(
-              HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
-              PatternInstantiation, PatternIsIrrefutable,
-              /*NeedsCaseInstantiation=*/false,
-              /*Instantiations=*/{},
-              cast<CaseConditionExpr>(E)->isPatternDeclaration());
-        else
-          CandidateExpr = getSema().ActOnMatchTestExpr(
-              HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
-              PatternInstantiation, E->getIfLoc(), CandidateGuard,
-              PatternIsIrrefutable, /*NeedsCaseInstantiation=*/false);
-        if (CandidateExpr.isInvalid())
-          return {ExprError()};
-        if (!CandidatePrefix) {
-          CandidatePrefix = CandidateExpr.get();
-        } else {
-          ExprResult Combined = getSema().BuildCaseConditionAnd(
-              E->getMatchLoc(), CandidatePrefix, CandidateExpr.get());
-          if (Combined.isInvalid())
-            return {ExprError()};
-          CandidatePrefix = Combined.get();
-        }
-      }
-
-      CaseConditionTransformResult TransformedContinuation =
-          getDerived().TransformCaseConditionChain(
-              Continuation, Handler, Increment, SelectConstexprHandler,
-              CandidatePrefix);
-      if (TransformedContinuation.isInvalid())
-        return {ExprError()};
-
-      if (SelectConstexprHandler && TransformedContinuation.Handler) {
-        assert(!Result.Handler &&
-               "multiple constexpr case-condition handlers selected");
-        Result.Handler = TransformedContinuation.Handler;
-      }
-
-      Instantiations.push_back(
-          {TransformedPattern,
-           E->getIfLoc(),
-           {GuardInit.get(), Guard.get().first, Guard.get().second},
-           PatternInstantiation,
-           PatternIsIrrefutable,
-           TransformedContinuation.Condition.get(),
-           TransformedContinuation.Handler,
-           TransformedContinuation.Increment});
+    if (ShareBody && !Instantiations.empty()) {
+      MatchTestInstantiation Shared = Instantiations.front();
+      Shared.Pattern = TransformedPattern;
+      Shared.PatternInstantiation = PatternInstantiation;
+      Shared.PatternIsIrrefutable = PatternIsIrrefutable;
+      Instantiations.push_back(Shared);
+      continue;
     }
 
-    if (!SelectionPlan.advance(ProjectionCache))
-      break;
-  }
+    StmtResult GuardInit = getDerived().TransformMatchBody(E->getGuard().Init);
+    Sema::ConditionResult Guard = getDerived().TransformMatchGuardCondition(
+        E->getIfLoc(), E->getGuard(), Sema::ConditionKind::Boolean);
+    if (GuardInit.isInvalid() || Guard.isInvalid())
+      return {ExprError()};
+    MatchGuard CandidateGuard{GuardInit.get(), Guard.get().first,
+                              Guard.get().second};
+
+    Expr *CandidatePrefix = ConstexprPrefix;
+    if (SelectConstexprHandler) {
+      ExprResult CandidateExpr;
+      if (isa<CaseConditionExpr>(E))
+        CandidateExpr = getSema().ActOnCaseConditionExpr(
+            HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
+            PatternInstantiation, PatternIsIrrefutable,
+            /*NeedsCaseInstantiation=*/false,
+            /*Instantiations=*/{},
+            cast<CaseConditionExpr>(E)->isPatternDeclaration());
+      else
+        CandidateExpr = getSema().ActOnMatchTestExpr(
+            HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
+            PatternInstantiation, E->getIfLoc(), CandidateGuard,
+            PatternIsIrrefutable, /*NeedsCaseInstantiation=*/false);
+      if (CandidateExpr.isInvalid())
+        return {ExprError()};
+      if (!CandidatePrefix) {
+        CandidatePrefix = CandidateExpr.get();
+      } else {
+        ExprResult Combined = getSema().BuildCaseConditionAnd(
+            E->getMatchLoc(), CandidatePrefix, CandidateExpr.get());
+        if (Combined.isInvalid())
+          return {ExprError()};
+        CandidatePrefix = Combined.get();
+      }
+    }
+
+    CaseConditionTransformResult TransformedContinuation =
+        getDerived().TransformCaseConditionChain(
+            Continuation, Handler, Increment, SelectConstexprHandler,
+            CandidatePrefix);
+    if (TransformedContinuation.isInvalid())
+      return {ExprError()};
+
+    if (SelectConstexprHandler && TransformedContinuation.Handler) {
+      assert(!Result.Handler &&
+             "multiple constexpr case-condition handlers selected");
+      Result.Handler = TransformedContinuation.Handler;
+    }
+    Instantiations.push_back({TransformedPattern, E->getIfLoc(), CandidateGuard,
+                              PatternInstantiation, PatternIsIrrefutable,
+                              TransformedContinuation.Condition.get(),
+                              TransformedContinuation.Handler,
+                              TransformedContinuation.Increment});
+  } while (SelectionPlan.advance(ProjectionCache));
 
   if (Instantiations.empty()) {
-    if (SelectionPlan.SawAlternativeChoice)
+    if (AllowsSubstitutionFailure)
       getSema().Diag(E->getPattern()->getBeginLoc(),
-                     diag::err_braced_alternative_no_viable_state)
+                     diag::err_match_pattern_no_viable_candidate)
+          << (SelectionPlan.SawAlternativeChoice ||
+              isa<AlternativePattern>(E->getPattern()->IgnoreParens()))
           << LHS.get()->getType();
     return {ExprError()};
   }
@@ -19940,21 +19953,28 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   auto TransformCase = [&](const MatchCaseInstantiation &Case,
                            MatchCaseInstantiation &Transformed,
                            std::optional<bool> &ConstexprConditionValue,
-                           bool DiscardedByConstexpr) -> TransformCaseResult {
+                           bool DiscardedByConstexpr,
+                           ArrayRef<MatchCaseInstantiation> PreviousCandidates)
+      -> TransformCaseResult {
     unsigned CaseIndex = Case.CaseIndex;
-    MatchCandidateInstantiationScope CandidateScope(
-        getSema(), SourceCases[CaseIndex].Region);
-    if (CandidateScope.isInvalid())
-      return TransformCaseResult::Error;
-    MatchPattern *TransformedPattern = nullptr;
-    Sema::MatchPatternState PatternState;
+    MatchCase &Source = SourceCases[CaseIndex];
     bool IsSubstitutionDependent =
         E->getSubject()->isTypeDependent() ||
         static_cast<bool>(Case.Pattern->getDependence() &
                           ExprDependence::Instantiation);
-    SourceCases[CaseIndex].MaybeUseful |= IsSubstitutionDependent;
-    bool AllowsSubstitutionFailure =
-        IsSubstitutionDependent || ProjectionCache.IsExpandingCandidate;
+    Source.MaybeUseful |= IsSubstitutionDependent;
+    bool AllowsSubstitutionFailure = IsSubstitutionDependent || Source.Region ||
+                                     ProjectionCache.IsExpandingCandidate;
+    if (AllowsSubstitutionFailure && PreviousCandidates.empty() &&
+        ProjectionCache.PlannedAlternativeSelections.empty() &&
+        getSema().TryPruneCoveredMatchSubject(
+            UsefulnessContext, Case.Pattern->getBeginLoc(), CaseIndex))
+      return TransformCaseResult::NotUseful;
+    MatchCandidateInstantiationScope CandidateScope(getSema(), Source.Region);
+    if (CandidateScope.isInvalid())
+      return TransformCaseResult::Error;
+    MatchPattern *TransformedPattern = nullptr;
+    Sema::MatchPatternState PatternState;
     ProjectionCache.CandidateUsefulness.Context =
         AllowsSubstitutionFailure ? &UsefulnessContext : nullptr;
     ProjectionCache.CandidateUsefulness.CaseIndex = CaseIndex;
@@ -19986,9 +20006,6 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (getSema().CheckConstantExpressionPatterns(TransformedPattern))
       return TransformCaseResult::Error;
 
-    getDerived().RemapSelectedOrPatternBindings(
-        Case.Pattern, TransformedPattern, PatternState);
-
     MatchPatternInstantiation *PatternInstantiation =
         MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,
                                           PatternState.Infos);
@@ -20009,20 +20026,31 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     if (DiscardedByConstexpr)
       return TransformCaseResult::Success;
 
-    StmtResult GuardInit;
-    if (Case.Guard.Init) {
-      GuardInit = getDerived().TransformStmt(Case.Guard.Init);
-      if (GuardInit.isInvalid())
-        return TransformCaseResult::Error;
-    }
+    const MatchCaseInstantiation *SharedBody =
+        !Source.Region && !E->isConstexpr() && !PreviousCandidates.empty()
+            ? &PreviousCandidates.front()
+            : nullptr;
+    getDerived().RemapMatchPatternBindings(
+        Case.Pattern, PatternInstantiation,
+        SharedBody ? SharedBody->PatternInstantiation : nullptr);
     if (Case.Guard.hasGuard())
       getSema().CheckGuardedMatchPattern(TransformedPattern);
-    Sema::ConditionResult Guard = getDerived().TransformCondition(
-        Case.IfLoc, Case.Guard.ConditionVariable, Case.Guard.Condition,
+    if (SharedBody) {
+      Transformed = *SharedBody;
+      Transformed.Pattern = TransformedPattern;
+      Transformed.PatternInstantiation = PatternInstantiation;
+      return TransformCaseResult::Success;
+    }
+
+    StmtResult GuardInit = getDerived().TransformMatchBody(Case.Guard.Init);
+    Sema::ConditionResult Guard = getDerived().TransformMatchGuardCondition(
+        Case.IfLoc, Case.Guard,
         E->isConstexpr() ? Sema::ConditionKind::ConstexprIf
                          : Sema::ConditionKind::Boolean);
-    if (Guard.isInvalid())
+    if (GuardInit.isInvalid() || Guard.isInvalid())
       return TransformCaseResult::Error;
+    MatchGuard CandidateGuard{GuardInit.get(), Guard.get().first,
+                              Guard.get().second};
 
     if (E->isConstexpr()) {
       if (PatternIsIrrefutable) {
@@ -20031,8 +20059,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       } else {
         ExprResult Test = getSema().ActOnMatchTestExpr(
             HoldingVar, LHS.get(), E->getMatchLoc(), TransformedPattern,
-            PatternInstantiation, Case.IfLoc,
-            {GuardInit.get(), Guard.get().first, Guard.get().second},
+            PatternInstantiation, Case.IfLoc, CandidateGuard,
             /*PatternIsIrrefutable=*/false,
             /*NeedsCaseInstantiation=*/false);
         if (Test.isInvalid())
@@ -20050,8 +20077,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         return TransformCaseResult::Success;
     }
 
-    StmtResult Handler =
-        getDerived().TransformStmt(Case.Handler, StmtDiscardKind::NotDiscarded);
+    StmtResult Handler = getDerived().TransformMatchBody(
+        Case.Handler, StmtDiscardKind::NotDiscarded);
     if (Handler.isInvalid())
       return TransformCaseResult::Error;
 
@@ -20098,20 +20125,16 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       Attributes = {Storage, TransformedAttributes.size()};
     }
 
-    Transformed = {TransformedPattern,
-                   Case.IfLoc,
-                   {GuardInit.get(), Guard.get().first, Guard.get().second},
-                   Handler.get(),
-                   CaseIndex,
-                   PatternInstantiation,
-                   Attributes,
-                   Case.NotReturnLoc};
+    Transformed = {TransformedPattern, Case.IfLoc,       CandidateGuard,
+                   Handler.get(),      CaseIndex,        PatternInstantiation,
+                   Attributes,         Case.NotReturnLoc};
     return TransformCaseResult::Success;
   };
 
   bool ConstexprSelectionComplete = false;
   bool TransformSourceCases = E->getCaseInstantiations().empty();
-  for (auto [CaseIndex, Source] : llvm::enumerate(E->getCases())) {
+  for (auto [CaseIndex, Source] : llvm::enumerate(SourceCases)) {
+    size_t FirstInstantiation = Instantiations.size();
     MatchCaseInstantiation Direct = Source.getDirectInstantiation(CaseIndex);
     ArrayRef<MatchCaseInstantiation> Cases =
         TransformSourceCases ? ArrayRef(Direct) : Source.getInstantiations();
@@ -20120,7 +20143,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       bool PatternHasAlternativeChoice =
           Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
       bool SawViableCandidate = false;
-      while (true) {
+      do {
         SelectionPlan.beginCandidate(ProjectionCache,
                                      PatternHasAlternativeChoice);
         size_t SavedProjectionCount = ProjectionCache.Entries.size();
@@ -20128,7 +20151,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
         std::optional<bool> ConstexprConditionValue;
         bool DiscardedByConstexpr = ConstexprSelectionComplete;
         TransformCaseResult Result = TransformCase(
-            Case, ExpandedCase, ConstexprConditionValue, DiscardedByConstexpr);
+            Case, ExpandedCase, ConstexprConditionValue, DiscardedByConstexpr,
+            ArrayRef(Instantiations).drop_front(FirstInstantiation));
         if (Result == TransformCaseResult::Error)
           return ExprError();
         if (Result == TransformCaseResult::NoMatch)
@@ -20146,13 +20170,15 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           assert(Result == TransformCaseResult::NotUseful);
           SawViableCandidate = true;
         }
-        if (!SelectionPlan.advance(ProjectionCache))
-          break;
-      }
-      if (!SawViableCandidate && SelectionPlan.SawAlternativeChoice &&
+      } while (SelectionPlan.advance(ProjectionCache));
+      if (!SawViableCandidate &&
+          (SelectionPlan.SawAlternativeChoice ||
+           (Source.Region && !Source.MaybeUseful)) &&
           !E->getSubject()->isTypeDependent()) {
         getSema().Diag(Case.Pattern->getBeginLoc(),
-                       diag::err_braced_alternative_no_viable_state)
+                       diag::err_match_pattern_no_viable_candidate)
+            << (SelectionPlan.SawAlternativeChoice ||
+                isa<AlternativePattern>(Case.Pattern->IgnoreParens()))
             << LHS.get()->getType();
         return ExprError();
       }

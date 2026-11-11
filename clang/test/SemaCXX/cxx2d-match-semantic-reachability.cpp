@@ -107,7 +107,6 @@ struct std::alternative_traits<One> {
 int one_state(One one) {
   return match (one) {
     case { int i } => i;
-    // expected-error@+2 {{member reference base type 'int' is not a structure or union}}
     // expected-warning@+1 {{match case is redundant}}
     case { auto&& other } => other.no_such_member();
   };
@@ -117,7 +116,7 @@ template<class T>
 int guarded_arm_does_not_close(T value) {
   return match (value) {
     case int i if (i > 0) => i;
-    case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
+    case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}} expected-note {{while instantiating this pattern match}}
   };
 }
 
@@ -129,7 +128,7 @@ template<class T>
 int value_arm_does_not_close(T value) {
   return match (value) {
     case 0 => 0;
-    case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}}
+    case auto&& other => other.no_such_member(); // expected-error {{member reference base type 'int' is not a structure or union}} expected-note {{while instantiating this pattern match}}
   };
 }
 
@@ -315,7 +314,7 @@ template<class T>
 int dynamic_cast_arm_does_not_close(T& value) {
   return match (value) {
     case Derived& derived => 1;
-    case auto&& other => other.no_such_member(); // expected-error {{no member named 'no_such_member' in 'Base'}}
+    case auto&& other => other.no_such_member(); // expected-error {{no member named 'no_such_member' in 'Base'}} expected-note {{while instantiating this pattern match}}
   };
 }
 

@@ -4087,7 +4087,7 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
     return Sema::ConditionError();
 
   if (Region)
-    Region->enter(CaseLoc, Pattern, ProjectionCache.RequiresTemplateRegion);
+    Region->enter(CaseLoc, Pattern);
 
   if (Tok.is(tok::kw_if)) {
     Diag(Tok, diag::err_case_condition_guard);
@@ -4098,9 +4098,7 @@ Parser::ParseCaseCondition(StmtResult *InitStmt, SourceLocation Loc,
   }
 
   bool NeedsCaseInstantiation =
-      ProjectionCache.hasDeferredPatterns() ||
-      (Subject.get()->isTypeDependent() &&
-       Sema::MatchAlternativeSelectionPlan::isRequired(Pattern));
+      ProjectionCache.needsCaseInstantiation(Subject.get(), Pattern);
   bool PatternIsIrrefutable =
       Actions.isMatchPatternIrrefutable(Pattern, PatternState);
   ExprResult Result = Actions.ActOnCaseConditionExpr(
@@ -4270,13 +4268,10 @@ Parser::BuildCaseForRangeCondition(const ForRangeInfo &FRI,
   if (Actions.CheckCompleteMatchPattern(Subject.get(), FRI.Pattern,
                                         PatternState, &ProjectionCache))
     return ExprError();
-  Region.enter(FRI.PatternCaseLoc, FRI.Pattern,
-               ProjectionCache.RequiresTemplateRegion);
+  Region.enter(FRI.PatternCaseLoc, FRI.Pattern);
 
   bool NeedsCaseInstantiation =
-      ProjectionCache.hasDeferredPatterns() ||
-      (Subject.get()->isTypeDependent() &&
-       Sema::MatchAlternativeSelectionPlan::isRequired(FRI.Pattern));
+      ProjectionCache.needsCaseInstantiation(Subject.get(), FRI.Pattern);
   bool PatternIsIrrefutable =
       Actions.isMatchPatternIrrefutable(FRI.Pattern, PatternState);
   ExprResult Result = Actions.ActOnCaseConditionExpr(
@@ -4754,7 +4749,7 @@ ExprResult Parser::ParseMatchTestExpression() {
                                         PatternState, &ProjectionCache))
     return ExprError();
   Sema::MatchTemplateRegionRAII Region(Actions);
-  Region.enter(MatchLoc, Pattern.get(), ProjectionCache.RequiresTemplateRegion);
+  Region.enter(MatchLoc, Pattern.get());
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);
@@ -4767,9 +4762,7 @@ ExprResult Parser::ParseMatchTestExpression() {
   Region.exit(Parens.getCloseLocation());
 
   bool NeedsCaseInstantiation =
-      ProjectionCache.hasDeferredPatterns() ||
-      (Subject.get()->isTypeDependent() &&
-       Sema::MatchAlternativeSelectionPlan::isRequired(Pattern.get()));
+      ProjectionCache.needsCaseInstantiation(Subject.get(), Pattern.get());
   bool PatternIsIrrefutable =
       Actions.isMatchPatternIrrefutable(Pattern.get(), PatternState);
   ExprResult Result = Actions.ActOnMatchTestExpr(
@@ -4839,16 +4832,16 @@ bool Parser::ParseMatchBody(Expr *Subject, TypeLoc OrigResultType,
       continue;
     }
     ProjectionCache.AlternativeChoices.clear();
-    ProjectionCache.RequiresTemplateRegion = false;
     size_t SavedProjectionCount = ProjectionCache.Entries.size();
     MatchCase Case;
     bool Invalid =
         ParseMatchCase(Subject, OrigResultType, RetTy, Case, ProjectionCache,
                        IsStatement, DeferHandlerChecking);
-    if (ProjectionCache.hasDeferredPatterns()) {
+    bool HasDeferredPattern =
+        !Invalid && ProjectionCache.hasDeferredPatterns(Case.Pattern);
+    if (Invalid || HasDeferredPattern)
       ProjectionCache.Entries.resize(SavedProjectionCount);
-      HasDeferredCases = true;
-    }
+    HasDeferredCases |= HasDeferredPattern;
     ProjectionCache.AlternativeChoices.clear();
 
     if (Invalid) {
@@ -4906,13 +4899,13 @@ bool Parser::ParseMatchCase(Expr *Subject, TypeLoc OrigResultType,
   } else if (Actions.CheckCompleteMatchPattern(Subject, Pattern.get(),
                                                PatternState, &ProjectionCache))
     return true;
-  if (ProjectionCache.hasDeferredAlternativeChoices() &&
+  if (Pattern.isUsable() &&
+      ProjectionCache.hasDeferredPatterns(Pattern.get()) &&
       OrigResultType.getType()->getContainedAutoType())
     RetTy = Actions.Context.DependentTy;
   Sema::MatchTemplateRegionRAII Region(Actions);
   if (Pattern.isUsable())
-    Region.enter(IntroducerLoc, Pattern.get(),
-                 ProjectionCache.RequiresTemplateRegion);
+    Region.enter(IntroducerLoc, Pattern.get());
   SourceLocation IfLoc;
   StmtResult GuardInit;
   Sema::ConditionResult Guard = ParseMatchGuard(IfLoc, GuardInit);

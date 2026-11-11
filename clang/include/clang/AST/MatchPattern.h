@@ -30,6 +30,7 @@ class Expr;
 class Stmt;
 class BindingDecl;
 class DecompositionDecl;
+class ValueDecl;
 class VarDecl;
 
 class MatchProjection {
@@ -136,6 +137,9 @@ public:
   const char *getMatchPatternClassName() const;
   MatchPattern *IgnoreParens();
   const MatchPattern *IgnoreParens() const;
+
+  /// Whether this pattern's written form requires a template region.
+  bool requiresTemplateRegion() const;
 
   ExprDependence computeDependence() {
     ExprDependence Dependent = ExprDependence::None;
@@ -589,6 +593,13 @@ struct MatchPatternInfo {
   bool HasExpandedPatterns = false;
 };
 
+/// Map a shared guard or handler's declaration to the binding initialized by
+/// one checked candidate.
+struct MatchBindingAlias {
+  ValueDecl *Declaration;
+  ValueDecl *Value;
+};
+
 class MatchPatternInstantiation final
     : private llvm::TrailingObjects<MatchPatternInstantiation,
                                     MatchPatternInfo> {
@@ -597,6 +608,7 @@ class MatchPatternInstantiation final
 
   MatchPattern *Pattern;
   unsigned NumInfos;
+  ArrayRef<MatchBindingAlias> BindingAliases;
 
   MatchPatternInstantiation(MatchPattern *Pattern, unsigned NumInfos)
       : Pattern(Pattern), NumInfos(NumInfos) {}
@@ -618,7 +630,16 @@ public:
   ArrayRef<MatchPattern *>
   getDecompositionPatterns(const DecompositionPattern *P) const;
   bool isViableOrAlternative(const OrPattern *P, unsigned Index) const;
+  ArrayRef<MatchBindingAlias> bindingAliases() const { return BindingAliases; }
+  void setBindingAliases(const ASTContext &Ctx,
+                         ArrayRef<MatchBindingAlias> Aliases);
 };
+
+/// Visit the named bindings in source order. Without an instantiation,
+/// or-patterns contribute their shared names rather than each operand's names.
+void visitMatchPatternBindings(
+    MatchPattern *Pattern, const MatchPatternInstantiation *Instantiation,
+    llvm::function_ref<void(ValueDecl *)> VisitBinding);
 
 /// Visit the declarations and statements that implement one semantically
 /// checked pattern. Repeated pointers within the instantiation are reported
