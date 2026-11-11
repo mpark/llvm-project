@@ -794,6 +794,71 @@ TEST(MatchAST, SuccessfulPatternCheckingCommitsRecords) {
   EXPECT_EQ(State.Infos.size(), 1u);
 }
 
+TEST(MatchAST, CandidateDomainQueriesDoNotChangeCheckedRecords) {
+  auto AST = buildMatchAST(R"cpp(
+void f(MaybeInt value) {
+  match (value) {
+    case { int payload } => ;
+    case {} => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST && AST->hasSema());
+  MatchFinder Finder;
+  Finder.TraverseDecl(getFunction(*AST, "f"));
+  ASSERT_TRUE(Finder.Selection);
+  const MatchCaseInstantiation &Case =
+      Finder.Selection->getCaseInstantiations().front();
+  auto *Pattern = cast<AlternativePattern>(Case.Pattern);
+  const MatchPatternInfo *Info = Case.PatternInstantiation->find(Pattern);
+  ASSERT_TRUE(Info && Info->Alternatives);
+
+  Sema &S = AST->getSema();
+  Sema::MatchUsefulnessContext Usefulness(
+      Finder.Selection->getSubject()->getType());
+  S.UpdateMatchUsefulness(Usefulness, Pattern, Case.PatternInstantiation, 0,
+                          /*ContributesCoverage=*/true);
+  Sema::MatchPatternState State;
+  Sema::MatchCandidateDomain Domain{Pattern, Pattern, State, Info->Alternatives,
+                                    1};
+  EXPECT_EQ(S.ClassifyMatchCandidateDomain(Usefulness, Domain),
+            Sema::MatchPatternUsefulness::NotUseful);
+  EXPECT_TRUE(State.Infos.empty());
+
+  const unsigned Selected[] = {0};
+  State.get(Pattern).SelectedAlternatives = Selected;
+  EXPECT_EQ(S.ClassifyMatchCandidateDomain(Usefulness, Domain),
+            Sema::MatchPatternUsefulness::NotUseful);
+  ASSERT_EQ(State.Infos.size(), 1u);
+  EXPECT_EQ(State.find(Pattern)->SelectedAlternatives, (ArrayRef<unsigned>{0}));
+  Domain.Index = 0;
+  EXPECT_EQ(S.ClassifyMatchCandidateDomain(Usefulness, Domain),
+            Sema::MatchPatternUsefulness::Useful);
+}
+
+TEST(MatchAST, CandidateDomainPruningPreservesMultipleEmptyStates) {
+  auto AST = buildMatchAST(R"cpp(
+struct EmptyStates { unsigned active; };
+template <> struct std::alternative_traits<EmptyStates> {
+  enum class state : unsigned { first, second };
+  static constexpr alternative_info alternatives[] = {{{}, true}, {{}, true}};
+  static constexpr bool has_residual_states = false;
+  static constexpr state index(const EmptyStates &subject) noexcept {
+    return static_cast<state>(subject.active);
+  }
+};
+constexpr int test(const auto &subject) {
+  return match (subject) {
+    case { .first } => 0;
+    case {} => 1;
+  };
+}
+static_assert(test(EmptyStates{0}) == 0);
+static_assert(test(EmptyStates{1}) == 1);
+)cpp");
+  ASSERT_TRUE(AST);
+}
+
 TEST(MatchAST, SharedHandlersUseCheckedBindingCorrespondence) {
   auto AST = buildMatchAST(R"cpp(
 void test(Choice<int, int>& value) {
@@ -822,6 +887,53 @@ void test(Choice<int, int>& value) {
       HandlerBinding = Declaration;
     EXPECT_EQ(Declaration, HandlerBinding);
   }
+}
+
+TEST(MatchAST, AlternativeDomainsSeparateStatesFromProjectionSignatures) {
+  auto AST = buildMatchAST(R"cpp(
+void test(Choice<int, double>& value, const Choice<int, double>& constant) {
+  match (value, constant) {
+    case [{ auto& first }, { auto& second }] => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(getFunction(*AST, "test")));
+  ASSERT_NE(Finder.Selection, nullptr);
+  auto Candidates = Finder.Selection->getCaseInstantiations();
+  ASSERT_EQ(Candidates.size(), 4u);
+
+  const MatchAlternativeProjectionInfo *MutableSignature = nullptr;
+  const MatchAlternativeProjectionInfo *ConstSignature = nullptr;
+  for (const MatchCaseInstantiation &Candidate : Candidates) {
+    auto *Pattern = cast<DecompositionPattern>(Candidate.Pattern);
+    ASSERT_EQ(Pattern->getNumPatterns(), 2u);
+    const MatchPatternInfo *First =
+        Candidate.PatternInstantiation->find(Pattern->patterns()[0]);
+    const MatchPatternInfo *Second =
+        Candidate.PatternInstantiation->find(Pattern->patterns()[1]);
+    ASSERT_NE(First, nullptr);
+    ASSERT_NE(Second, nullptr);
+    ASSERT_NE(First->Alternatives, nullptr);
+    ASSERT_NE(Second->Alternatives, nullptr);
+    EXPECT_EQ(First->Alternatives->Domain, Second->Alternatives->Domain);
+    EXPECT_NE(First->Alternatives, Second->Alternatives);
+    EXPECT_FALSE(First->Alternatives->Types[0].isConstQualified());
+    EXPECT_TRUE(Second->Alternatives->Types[0].isConstQualified());
+    EXPECT_EQ(First->Alternatives->ValueKinds[0], VK_LValue);
+    EXPECT_EQ(Second->Alternatives->ValueKinds[0], VK_LValue);
+    if (!MutableSignature) {
+      MutableSignature = First->Alternatives;
+      ConstSignature = Second->Alternatives;
+    }
+    EXPECT_EQ(First->Alternatives, MutableSignature);
+    EXPECT_EQ(Second->Alternatives, ConstSignature);
+  }
+  ASSERT_EQ(MutableSignature->Domain->States.size(), 2u);
+  EXPECT_EQ(MutableSignature->Domain->States[0].Type,
+            AST->getASTContext().IntTy);
+  EXPECT_TRUE(MutableSignature->Domain->States[0].isProjectable());
 }
 
 TEST(MatchAST, EmptyInstantiationTable) {

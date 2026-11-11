@@ -566,6 +566,32 @@ public:
   }
 };
 
+/// One state advertised by a closed alternative protocol. Only typed states
+/// are projectable; an untyped state can advertise a value or be empty.
+struct MatchAlternativeState {
+  QualType Type;
+  Expr *Value = nullptr;
+  bool IsEmpty = false;
+
+  bool isProjectable() const { return !Type.isNull(); }
+};
+
+/// The advertised states do not depend on the subject's cv/ref category.
+struct MatchAlternativeDomain {
+  QualType TraitsType;
+  ArrayRef<MatchAlternativeState> States;
+  bool IsExhaustive = true;
+};
+
+/// Checked index/get signatures for one subject type and value category.
+struct MatchAlternativeProjectionInfo {
+  const MatchAlternativeDomain *Domain;
+  QualType IndexType;
+  ArrayRef<QualType> Types;
+  ArrayRef<ExprValueKind> ValueKinds;
+  bool HasParameterizedIndexName = false;
+};
+
 /// Semantic state produced while checking one instantiation of a pattern.
 ///
 /// MatchPattern nodes describe source syntax and can be shared by multiple
@@ -575,17 +601,11 @@ struct MatchPatternInfo {
   MatchPattern *Pattern = nullptr;
   Expr *Condition = nullptr;
   MatchProjection *Projection = nullptr;
-  QualType AlternativeTraitsType;
-  ArrayRef<QualType> AlternativeTypes;
-  ArrayRef<unsigned char> ProjectableAlternatives;
-  ArrayRef<unsigned char> EmptyAlternatives;
-  ArrayRef<Expr *> AlternativeValues;
+  const MatchAlternativeProjectionInfo *Alternatives = nullptr;
   ArrayRef<unsigned> SelectedAlternatives;
   ArrayRef<unsigned char> ViableOrAlternatives;
   ArrayRef<MatchPattern *> ExpandedPatterns;
   QualType OpenAlternativeType;
-  bool IsExhaustive = true;
-  bool HasParameterizedIndexName = false;
   bool IsAlternativeValuePattern = false;
   bool IsOpenAlternative = false;
   bool IsOpenAlternativeInitialization = false;

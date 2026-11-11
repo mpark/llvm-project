@@ -48,12 +48,7 @@ struct CtorKey {
   SmallVector<QualType, 4> FieldTypes;
   QualType AlternativeOwnerType;
   unsigned AlternativeIndex = 0;
-  SmallVector<QualType, 4> AlternativeTypes;
-  SmallVector<unsigned char, 4> ProjectableAlternatives;
-  SmallVector<unsigned char, 4> EmptyAlternatives;
-  SmallVector<Expr *, 4> AlternativeValues;
-  bool IsExhaustive = true;
-  bool HasParameterizedIndexName = false;
+  const MatchAlternativeProjectionInfo *Alternatives = nullptr;
   QualType OpenAlternativeType;
   bool IsOpenAlternativeInitialization = false;
 
@@ -108,22 +103,13 @@ struct CtorKey {
     return C;
   }
 
-  static CtorKey alternativeCtor(QualType OwnerType, unsigned Index,
-                                 ArrayRef<QualType> Types,
-                                 ArrayRef<unsigned char> Projectable,
-                                 ArrayRef<unsigned char> Empty,
-                                 ArrayRef<Expr *> Values, bool IsExhaustive,
-                                 bool HasParameterizedIndexName) {
+  static CtorKey alternativeCtor(const MatchAlternativeProjectionInfo *Info,
+                                 unsigned Index) {
     CtorKey C;
     C.K = Alternative;
-    C.AlternativeOwnerType = OwnerType;
+    C.AlternativeOwnerType = Info->Domain->TraitsType;
     C.AlternativeIndex = Index;
-    C.AlternativeTypes.append(Types.begin(), Types.end());
-    C.ProjectableAlternatives.append(Projectable.begin(), Projectable.end());
-    C.EmptyAlternatives.append(Empty.begin(), Empty.end());
-    C.AlternativeValues.append(Values.begin(), Values.end());
-    C.IsExhaustive = IsExhaustive;
-    C.HasParameterizedIndexName = HasParameterizedIndexName;
+    C.Alternatives = Info;
     return C;
   }
 
@@ -417,11 +403,7 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
       CoveragePatterns Results;
       for (unsigned Index : Info->SelectedAlternatives)
         Results.push_back(CoveragePattern::ctor(
-            CtorKey::alternativeCtor(
-                Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
-                Info->ProjectableAlternatives, Info->EmptyAlternatives,
-                Info->AlternativeValues, Info->IsExhaustive,
-                Info->HasParameterizedIndexName),
+            CtorKey::alternativeCtor(Info->Alternatives, Index),
             P->getBeginLoc()));
       return Results;
     }
@@ -590,19 +572,16 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
 
     CoveragePatterns Results;
     for (unsigned Index : Info->SelectedAlternatives) {
-      CtorKey C = CtorKey::alternativeCtor(
-          Info->AlternativeTraitsType, Index, Info->AlternativeTypes,
-          Info->ProjectableAlternatives, Info->EmptyAlternatives,
-          Info->AlternativeValues, Info->IsExhaustive,
-          Info->HasParameterizedIndexName);
+      CtorKey C = CtorKey::alternativeCtor(Info->Alternatives, Index);
       CoveragePattern Result =
           CoveragePattern::ctor(std::move(C), P->getBeginLoc());
-      if (!Info->ProjectableAlternatives[Index] || !P->getSubPattern()) {
+      if (!Info->Alternatives->Domain->States[Index].isProjectable() ||
+          !P->getSubPattern()) {
         Results.push_back(std::move(Result));
         continue;
       }
 
-      QualType FieldType = Info->AlternativeTypes[Index];
+      QualType FieldType = Info->Alternatives->Types[Index];
       if (Info->Projection && Info->Projection->getProjectedExpr())
         FieldType = Info->Projection->getProjectedExpr()->getType();
       CoveragePatterns Children;
@@ -632,16 +611,12 @@ CoveragePatterns makePatterns(Sema &S, MatchPattern *Pattern,
 }
 
 CoveragePattern makeAlternativeDomainPattern(
-    const MatchPatternInfo &Info, unsigned Index,
+    const MatchAlternativeProjectionInfo *Alternatives, unsigned Index,
     std::optional<CoveragePattern> Field, SourceLocation Loc) {
-  CtorKey C = CtorKey::alternativeCtor(
-      Info.AlternativeTraitsType, Index, Info.AlternativeTypes,
-      Info.ProjectableAlternatives, Info.EmptyAlternatives,
-      Info.AlternativeValues, Info.IsExhaustive,
-      Info.HasParameterizedIndexName);
+  CtorKey C = CtorKey::alternativeCtor(Alternatives, Index);
   CoveragePattern Result = CoveragePattern::ctor(std::move(C), Loc);
-  if (Field && Info.ProjectableAlternatives[Index]) {
-    Result.FieldTypes.push_back(Info.AlternativeTypes[Index]);
+  if (Field && Alternatives->Domain->States[Index].isProjectable()) {
+    Result.FieldTypes.push_back(Alternatives->Types[Index]);
     Result.Fields.push_back(
         std::make_shared<CoveragePattern>(std::move(*Field)));
   }
@@ -651,32 +626,31 @@ CoveragePattern makeAlternativeDomainPattern(
 // Build an upper bound on the candidate's structural domain. Constraints away
 // from the path to Candidate become wildcards, so an imprecise result can only
 // retain an unnecessary specialization.
-std::optional<CoveragePattern> makeCandidateDomainPattern(
-    MatchPattern *Pattern, const AlternativePattern *Candidate,
-    const Sema::MatchPatternState &State) {
+std::optional<CoveragePattern>
+makeCandidateDomainPattern(MatchPattern *Pattern,
+                           const Sema::MatchCandidateDomain &Domain) {
+  const AlternativePattern *Candidate = Domain.Candidate;
+  const Sema::MatchPatternState &State = Domain.PatternState;
   if (Pattern == Candidate) {
-    const MatchPatternInfo *Info = State.find(Pattern);
-    if (!Info || Info->SelectedAlternatives.size() != 1)
-      return std::nullopt;
     std::optional<CoveragePattern> Field;
     if (Candidate->getSubPattern())
       Field = CoveragePattern::wild(Candidate->getSubPattern()->getBeginLoc());
-    return makeAlternativeDomainPattern(
-        *Info, Info->SelectedAlternatives.front(), std::move(Field),
-        Pattern->getBeginLoc());
+    return makeAlternativeDomainPattern(Domain.Alternatives, Domain.Index,
+                                        std::move(Field),
+                                        Pattern->getBeginLoc());
   }
 
   switch (Pattern->getMatchPatternClass()) {
   case MatchPattern::ParenPatternClass:
     return makeCandidateDomainPattern(
-        static_cast<ParenPattern *>(Pattern)->getSubPattern(), Candidate, State);
+        static_cast<ParenPattern *>(Pattern)->getSubPattern(), Domain);
 
   case MatchPattern::AndPatternClass:
   case MatchPattern::OrPatternClass:
     for (MatchPattern *Child : Pattern->children())
-      if (std::optional<CoveragePattern> Domain =
-              makeCandidateDomainPattern(Child, Candidate, State))
-        return Domain;
+      if (std::optional<CoveragePattern> ChildDomain =
+              makeCandidateDomainPattern(Child, Domain))
+        return ChildDomain;
     break;
 
   case MatchPattern::AlternativePatternClass: {
@@ -685,13 +659,13 @@ std::optional<CoveragePattern> makeCandidateDomainPattern(
     if (!Info || Info->SelectedAlternatives.size() != 1 ||
         !Alternative->getSubPattern())
       break;
-    std::optional<CoveragePattern> Field = makeCandidateDomainPattern(
-        Alternative->getSubPattern(), Candidate, State);
+    std::optional<CoveragePattern> Field =
+        makeCandidateDomainPattern(Alternative->getSubPattern(), Domain);
     if (!Field)
       break;
     return makeAlternativeDomainPattern(
-        *Info, Info->SelectedAlternatives.front(), std::move(*Field),
-        Pattern->getBeginLoc());
+        Info->Alternatives, Info->SelectedAlternatives.front(),
+        std::move(*Field), Pattern->getBeginLoc());
   }
 
   case MatchPattern::DecompositionPatternClass: {
@@ -713,7 +687,7 @@ std::optional<CoveragePattern> makeCandidateDomainPattern(
     std::optional<unsigned> CandidateField;
     std::optional<CoveragePattern> CandidateDomain;
     for (auto [I, Child] : llvm::enumerate(Patterns)) {
-      CandidateDomain = makeCandidateDomainPattern(Child, Candidate, State);
+      CandidateDomain = makeCandidateDomainPattern(Child, Domain);
       if (CandidateDomain) {
         CandidateField = I;
         break;
@@ -772,14 +746,14 @@ void appendCtorFields(const CoveragePattern &P, const CtorKey &C,
     }
     return;
   case CtorKey::Alternative:
-    if (!C.ProjectableAlternatives[C.AlternativeIndex])
+    if (!C.Alternatives->Domain->States[C.AlternativeIndex].isProjectable())
       return;
     if (P.K == CoveragePattern::Ctor && P.C == C && !P.Fields.empty()) {
       OutPatterns.push_back(*P.Fields.front());
       OutTypes.push_back(P.FieldTypes.front());
     } else {
       OutPatterns.push_back(CoveragePattern::wild(P.Loc));
-      OutTypes.push_back(C.AlternativeTypes[C.AlternativeIndex]);
+      OutTypes.push_back(C.Alternatives->Types[C.AlternativeIndex]);
     }
     return;
   case CtorKey::AlternativeRest:
@@ -983,15 +957,12 @@ constructorsForType(Sema &S, QualType Type, ArrayRef<PatternRow> Matrix,
   auto AddAlternatives = [&](const CoveragePattern &P) -> bool {
     if (P.K != CoveragePattern::Ctor || P.C.K != CtorKey::Alternative)
       return false;
-    for (unsigned I = 0; I < P.C.AlternativeTypes.size(); ++I)
-      Ctors.push_back(CtorKey::alternativeCtor(
-          P.C.AlternativeOwnerType, I, P.C.AlternativeTypes,
-          P.C.ProjectableAlternatives, P.C.EmptyAlternatives,
-          P.C.AlternativeValues, P.C.IsExhaustive,
-          P.C.HasParameterizedIndexName));
+    for (unsigned I = 0; I < P.C.Alternatives->Domain->States.size(); ++I)
+      Ctors.push_back(CtorKey::alternativeCtor(P.C.Alternatives, I));
     // A protocol can advertise an out-of-range state, such as a valueless
     // variant, without making that state required for exhaustiveness.
-    if (Domain == ConstructorDomain::RequiredAndResidual && !P.C.IsExhaustive)
+    if (Domain == ConstructorDomain::RequiredAndResidual &&
+        !P.C.Alternatives->Domain->IsExhaustive)
       Ctors.push_back(CtorKey::alternativeRestCtor(P.C.AlternativeOwnerType));
     return true;
   };
@@ -1089,7 +1060,7 @@ Usefulness isUseful(Sema &S, ArrayRef<PatternRow> Matrix, PatternRow Candidate,
       SmallVector<CtorKey, 4> SubWitness;
       Usefulness Result;
       if (C.K == CtorKey::Alternative &&
-          C.ProjectableAlternatives[C.AlternativeIndex] &&
+          C.Alternatives->Domain->States[C.AlternativeIndex].isProjectable() &&
           SpecializedMatrix.empty()) {
         assert(!SpecializedCandidate.empty() && !SpecializedTypes.empty());
         SpecializedCandidate.erase(SpecializedCandidate.begin());
@@ -1209,23 +1180,23 @@ std::string printWitnessPattern(ASTContext &Context, ArrayRef<CtorKey> Witness,
 
   const CtorKey &C = Witness[Offset++];
   if (C.K == CtorKey::Alternative) {
-    if (C.EmptyAlternatives[C.AlternativeIndex])
+    if (C.Alternatives->Domain->States[C.AlternativeIndex].IsEmpty)
       return "{}";
-    if (C.AlternativeIndex < C.AlternativeValues.size() &&
-        C.AlternativeValues[C.AlternativeIndex])
-      return printExpressionPattern(Context,
-                                    C.AlternativeValues[C.AlternativeIndex]);
-    if (C.ProjectableAlternatives[C.AlternativeIndex]) {
+    if (C.AlternativeIndex < C.Alternatives->Domain->States.size() &&
+        C.Alternatives->Domain->States[C.AlternativeIndex].Value)
+      return printExpressionPattern(
+          Context, C.Alternatives->Domain->States[C.AlternativeIndex].Value);
+    if (C.Alternatives->Domain->States[C.AlternativeIndex].isProjectable()) {
       if (Offset < Witness.size() && Witness[Offset].K == CtorKey::Wildcard) {
         ++Offset;
         return "{ " +
                printTypePattern(Context,
-                                C.AlternativeTypes[C.AlternativeIndex]) +
+                                C.Alternatives->Types[C.AlternativeIndex]) +
                " }";
       }
       return "{ " + printWitnessPattern(Context, Witness, Offset) + " }";
     }
-    if (C.HasParameterizedIndexName)
+    if (C.Alternatives->HasParameterizedIndexName)
       return "{ .index<" + llvm::utostr(C.AlternativeIndex) + "> }";
     return "_";
   }
@@ -1386,17 +1357,17 @@ bool Sema::TryPruneCoveredMatchSubject(MatchUsefulnessContext &Context,
   return true;
 }
 
-Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
-    MatchUsefulnessContext &Context, MatchPattern *RootPattern,
-    AlternativePattern *Candidate, const MatchPatternState &PatternState,
-    unsigned CaseIndex, bool RecordNotUseful) {
-  MatchUsefulnessContext::Impl &State = *Context.State;
+Sema::MatchPatternUsefulness
+Sema::ClassifyMatchCandidateDomain(const MatchUsefulnessContext &Context,
+                                   const MatchCandidateDomain &Candidate) {
+  const MatchUsefulnessContext::Impl &State = *Context.State;
   if (State.CoverageMatrix.empty())
     return MatchPatternUsefulness::Useful;
 
   CoveragePattern Domain =
-      makeCandidateDomainPattern(RootPattern, Candidate, PatternState)
-          .value_or(CoveragePattern::wild(RootPattern->getBeginLoc()));
+      makeCandidateDomainPattern(Candidate.RootPattern, Candidate)
+          .value_or(
+              CoveragePattern::wild(Candidate.RootPattern->getBeginLoc()));
   PatternRow Row;
   Row.push_back(Domain);
   Usefulness Result =
@@ -1407,12 +1378,21 @@ Sema::MatchPatternUsefulness Sema::UpdateMatchCandidateDomainUsefulness(
   if (Result == Usefulness::MaybeUseful)
     return MatchPatternUsefulness::MaybeUseful;
 
-  if (RecordNotUseful)
-    State.addCandidate(*this, CaseIndex, CoveragePatterns{std::move(Domain)},
-                       /*ContributesCoverage=*/false,
-                       /*ClassifyContinuation=*/false,
-                       /*RecordOpaquePattern=*/false);
   return MatchPatternUsefulness::NotUseful;
+}
+
+void Sema::RecordCoveredMatchCandidateDomain(
+    MatchUsefulnessContext &Context, const MatchCandidateDomain &Candidate,
+    unsigned CaseIndex) {
+  CoveragePattern Domain =
+      makeCandidateDomainPattern(Candidate.RootPattern, Candidate)
+          .value_or(
+              CoveragePattern::wild(Candidate.RootPattern->getBeginLoc()));
+  Context.State->addCandidate(*this, CaseIndex,
+                              CoveragePatterns{std::move(Domain)},
+                              /*ContributesCoverage=*/false,
+                              /*ClassifyContinuation=*/false,
+                              /*RecordOpaquePattern=*/false);
 }
 
 std::optional<Sema::MatchExhaustivenessResult>

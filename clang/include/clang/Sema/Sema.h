@@ -11533,14 +11533,10 @@ public:
 
   struct MatchProjectionCache {
     struct AlternativeProjectionInfo {
-      QualType TraitsType;
+      const MatchAlternativeProjectionInfo *Signature;
       QualType SubjectType;
-      QualType IndexType;
       ExprValueKind SubjectValueKind;
       ExprObjectKind SubjectObjectKind;
-      bool HasParameterizedIndexName;
-      SmallVector<QualType, 4> ProjectionTypes;
-      SmallVector<ExprValueKind, 4> ProjectionValueKinds;
     };
 
     struct Entry {
@@ -11556,6 +11552,7 @@ public:
     };
 
     SmallVector<Entry, 8> Entries;
+    SmallVector<const MatchAlternativeDomain *, 2> AlternativeDomains;
     SmallVector<AlternativeProjectionInfo, 2> AlternativeProjections;
   };
 
@@ -11700,12 +11697,22 @@ public:
   bool TryPruneCoveredMatchSubject(MatchUsefulnessContext &Context,
                                    SourceLocation Loc, unsigned CaseIndex);
 
-  /// Classify an alternative candidate using its enclosing structural domain,
-  /// before checking the candidate's selector and payload pattern.
-  MatchPatternUsefulness UpdateMatchCandidateDomainUsefulness(
-      MatchUsefulnessContext &Context, MatchPattern *RootPattern,
-      AlternativePattern *Candidate, const MatchPatternState &State,
-      unsigned CaseIndex, bool RecordNotUseful = true);
+  struct MatchCandidateDomain {
+    MatchPattern *RootPattern;
+    AlternativePattern *Candidate;
+    const MatchPatternState &PatternState;
+    const MatchAlternativeProjectionInfo *Alternatives;
+    unsigned Index;
+  };
+
+  /// Classify the enclosing structural domain before checking the candidate's
+  /// selector and payload. This does not create or change checked records.
+  MatchPatternUsefulness
+  ClassifyMatchCandidateDomain(const MatchUsefulnessContext &Context,
+                               const MatchCandidateDomain &Domain);
+  void RecordCoveredMatchCandidateDomain(MatchUsefulnessContext &Context,
+                                         const MatchCandidateDomain &Domain,
+                                         unsigned CaseIndex);
 
   /// Diagnose source-level usefulness and compute final coverage from the
   /// candidates accumulated in Context.

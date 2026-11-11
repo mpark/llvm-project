@@ -421,18 +421,12 @@ struct AlternativeTraitsInfo {
   QualType Type;
   QualType IndexType;
   CXXRecordDecl *Record = nullptr;
-  unsigned Size = 0;
-  bool IsExhaustive = true;
+  const MatchAlternativeDomain *Domain = nullptr;
+  const MatchAlternativeProjectionInfo *Projections = nullptr;
   bool HasParameterizedIndexName = false;
   bool IsBuiltinPointer = false;
   bool IsOpen = false;
   bool OpenHasValue = false;
-  llvm::SmallVector<QualType, 4> AdvertisedTypes;
-  llvm::SmallVector<bool, 4> HasAlternativeType;
-  llvm::SmallVector<QualType, 4> ProjectionTypes;
-  llvm::SmallVector<ExprValueKind, 4> ProjectionValueKinds;
-  llvm::SmallVector<bool, 4> Empty;
-  llvm::SmallVector<Expr *, 4> Values;
 };
 
 } // namespace
@@ -459,10 +453,10 @@ static const APValue &getAlternativeDescriptor(const APValue &Array,
   return Array.getArrayFiller();
 }
 
-static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
-                                       QualType SubjectType,
-                                       Expr *AlternativesExpr,
-                                       AlternativeTraitsInfo &Info) {
+static bool
+readAlternativeDescriptors(Sema &S, SourceLocation Loc, QualType SubjectType,
+                           Expr *AlternativesExpr,
+                           SmallVectorImpl<MatchAlternativeState> &States) {
   QualType AlternativesType = S.getCompletedType(AlternativesExpr);
   const auto *ArrayType = S.Context.getAsConstantArrayType(AlternativesType);
   if (!ArrayType || ArrayType->getSize().getActiveBits() > 32) {
@@ -505,12 +499,9 @@ static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
     return true;
   }
 
-  Info.Size = ArrayType->getSize().getLimitedValue(UINT_MAX);
-  Info.AdvertisedTypes.reserve(Info.Size);
-  Info.HasAlternativeType.reserve(Info.Size);
-  Info.Values.reserve(Info.Size);
-  Info.Empty.reserve(Info.Size);
-  for (unsigned I = 0; I < Info.Size; ++I) {
+  unsigned Size = ArrayType->getSize().getLimitedValue(UINT_MAX);
+  States.reserve(Size);
+  for (unsigned I = 0; I < Size; ++I) {
     const APValue &Element = getAlternativeDescriptor(*Array, I);
     if (!Element.isStruct() ||
         Element.getStructNumFields() <= std::max(InfoField, EmptyField)) {
@@ -521,9 +512,7 @@ static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
 
     const APValue &ReflectedInfo = Element.getStructField(InfoField);
     bool HasType = ReflectedInfo.isReflectedType();
-    Info.AdvertisedTypes.push_back(HasType ? ReflectedInfo.getReflectedType()
-                                           : S.Context.VoidTy);
-    Info.HasAlternativeType.push_back(HasType);
+    QualType Type = HasType ? ReflectedInfo.getReflectedType() : QualType();
 
     Expr *ValueExpr = nullptr;
     if (!ReflectedInfo.isNullReflection() && !HasType) {
@@ -543,7 +532,6 @@ static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
       }
       ValueExpr = Result.get();
     }
-    Info.Values.push_back(ValueExpr);
 
     const APValue &Empty = Element.getStructField(EmptyField);
     if (!Empty.isInt()) {
@@ -552,17 +540,15 @@ static bool readAlternativeDescriptors(Sema &S, SourceLocation Loc,
       return true;
     }
     bool IsEmpty = Empty.getInt().getBoolValue();
-    Info.Empty.push_back(IsEmpty);
+    States.push_back({Type, ValueExpr, IsEmpty});
   }
   return false;
 }
 
-static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
-                                            QualType SubjectType,
-                                            QualType TraitType,
-                                            LookupResult &AlternativesLookup,
-                                            bool AllowOpen,
-                                            AlternativeTraitsInfo &Info) {
+static bool initializeAlternativeTraitsInfo(
+    Sema &S, SourceLocation Loc, QualType SubjectType, QualType TraitType,
+    LookupResult &AlternativesLookup, bool AllowOpen,
+    AlternativeTraitsInfo &Info, Sema::MatchProjectionCache *Cache) {
   Info.Type = TraitType;
   Info.Record = TraitType->getAsCXXRecordDecl();
   if (!Info.Record)
@@ -580,13 +566,19 @@ static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
       return true;
     }
     Info.IsOpen = true;
-    Info.IsExhaustive = false;
     LookupResult HasValueLookup(S, S.PP.getIdentifierInfo("has_value"), Loc,
                                 Sema::LookupOrdinaryName);
     S.LookupQualifiedName(HasValueLookup, Info.Record);
     Info.OpenHasValue = !HasValueLookup.empty();
     return false;
   }
+
+  if (Cache)
+    for (const MatchAlternativeDomain *Domain : Cache->AlternativeDomains)
+      if (S.Context.hasSameType(Domain->TraitsType, TraitType)) {
+        Info.Domain = Domain;
+        return false;
+      }
 
   EnterExpressionEvaluationContext ConstantEvaluated(
       S, Sema::ExpressionEvaluationContext::ConstantEvaluated);
@@ -596,8 +588,9 @@ static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
       !isa<DeclRefExpr>(AlternativesExpr.get()->IgnoreParenImpCasts()))
     return true;
   AlternativesExpr = AlternativesExpr.get()->IgnoreParenImpCasts();
+  SmallVector<MatchAlternativeState, 4> States;
   if (readAlternativeDescriptors(S, Loc, SubjectType, AlternativesExpr.get(),
-                                 Info))
+                                 States))
     return true;
 
   LookupResult ResidualLookup(S, S.PP.getIdentifierInfo("has_residual_states"),
@@ -616,25 +609,45 @@ static bool initializeAlternativeTraitsInfo(Sema &S, SourceLocation Loc,
   if (S.VerifyIntegerConstantExpression(ResidualExpr.get(), &ResidualValue)
           .isInvalid())
     return true;
-  Info.IsExhaustive = ResidualValue.isZero();
+  Info.Domain = new (S.Context) MatchAlternativeDomain{
+      TraitType, ArrayRef(States).copy(S.Context), ResidualValue.isZero()};
+  if (Cache)
+    Cache->AlternativeDomains.push_back(Info.Domain);
   return false;
 }
 
 static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
                                     QualType SubjectType,
-                                    AlternativeTraitsInfo &Info) {
+                                    AlternativeTraitsInfo &Info,
+                                    Sema::MatchProjectionCache *Cache) {
   SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
   if (const auto *Pointer = SubjectType->getAs<PointerType>()) {
     Info.Type = SubjectType;
     Info.IndexType = S.Context.BoolTy;
-    Info.Size = 2;
     Info.IsBuiltinPointer = true;
-    Info.AdvertisedTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
-    Info.HasAlternativeType = {false, true};
-    Info.ProjectionTypes = {S.Context.VoidTy, Pointer->getPointeeType()};
-    Info.ProjectionValueKinds = {VK_PRValue, VK_LValue};
-    Info.Empty = {true, false};
-    Info.Values = {nullptr, nullptr};
+    if (Cache)
+      for (const auto &Cached : Cache->AlternativeProjections)
+        if (S.Context.hasSameType(Cached.Signature->Domain->TraitsType,
+                                  SubjectType)) {
+          Info.Domain = Cached.Signature->Domain;
+          Info.Projections = Cached.Signature;
+          return false;
+        }
+    const MatchAlternativeState States[] = {
+        {QualType(), nullptr, true},
+        {Pointer->getPointeeType(), nullptr, false}};
+    Info.Domain = new (S.Context)
+        MatchAlternativeDomain{SubjectType, ArrayRef(States).copy(S.Context)};
+    const QualType Types[] = {S.Context.VoidTy, Pointer->getPointeeType()};
+    const ExprValueKind ValueKinds[] = {VK_PRValue, VK_LValue};
+    Info.Projections = new (S.Context) MatchAlternativeProjectionInfo{
+        Info.Domain, Info.IndexType, ArrayRef(Types).copy(S.Context),
+        ArrayRef(ValueKinds).copy(S.Context)};
+    if (Cache) {
+      Cache->AlternativeDomains.push_back(Info.Domain);
+      Cache->AlternativeProjections.push_back(
+          {Info.Projections, SubjectType, VK_PRValue, OK_Ordinary});
+    }
     return false;
   }
 
@@ -649,7 +662,7 @@ static bool lookupAlternativeTraits(Sema &S, SourceLocation Loc,
     return true;
   return initializeAlternativeTraitsInfo(S, Loc, SubjectType, Info.Type,
                                          AlternativesLookup,
-                                         /*AllowOpen=*/true, Info);
+                                         /*AllowOpen=*/true, Info, Cache);
 }
 
 static Expr *buildAlternativeDiscriminatorObject(Sema &S, SourceLocation Loc,
@@ -735,7 +748,7 @@ lookupAlternativeName(Sema &S, SourceLocation Loc, QualType SubjectType,
     return std::nullopt;
   }
   uint64_t Index = Value.getLimitedValue(UINT_MAX);
-  if (Index >= Info.Size) {
+  if (Index >= Info.Domain->States.size()) {
     S.Diag(Loc, diag::err_alternative_name_not_found) << Name << SubjectType;
     return std::nullopt;
   }
@@ -762,9 +775,10 @@ lookupParameterizedAlternativeName(Sema &S, QualType SubjectType,
     llvm::APSInt ArgumentValue(32);
     if (S.VerifyIntegerConstantExpression(Argument, &ArgumentValue).isInvalid())
       return std::nullopt;
-    if (ArgumentValue.isNegative() || ArgumentValue.uge(Info.Size)) {
+    if (ArgumentValue.isNegative() ||
+        ArgumentValue.uge(Info.Domain->States.size())) {
       S.Diag(Argument->getExprLoc(), diag::err_alternative_index_out_of_range)
-          << toString(ArgumentValue, 10) << Info.Size;
+          << toString(ArgumentValue, 10) << Info.Domain->States.size();
       return std::nullopt;
     }
   }
@@ -796,9 +810,9 @@ lookupParameterizedAlternativeName(Sema &S, QualType SubjectType,
   llvm::APSInt IndexValue(32);
   if (S.VerifyIntegerConstantExpression(Name.get(), &IndexValue).isInvalid())
     return std::nullopt;
-  if (IndexValue.isNegative() || IndexValue.uge(Info.Size)) {
+  if (IndexValue.isNegative() || IndexValue.uge(Info.Domain->States.size())) {
     S.Diag(Argument->getExprLoc(), diag::err_alternative_index_out_of_range)
-        << toString(IndexValue, 10) << Info.Size;
+        << toString(IndexValue, 10) << Info.Domain->States.size();
     return std::nullopt;
   }
   return static_cast<unsigned>(IndexValue.getZExtValue());
@@ -891,26 +905,27 @@ static QualType getAlternativeProjectionBindingType(Sema &S, SourceLocation Loc,
                               DeclarationName());
 }
 
-static bool determineAlternativeProjections(
-    Sema &S, SourceLocation Loc, Expr *Subject, AlternativeTraitsInfo &Info,
-    Sema::MatchPatternCheckingContext *CheckingContext) {
+static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
+                                            Expr *Subject,
+                                            AlternativeTraitsInfo &Info,
+                                            Sema::MatchProjectionCache *Cache) {
   if (Info.IsBuiltinPointer)
     return false;
 
-  if (CheckingContext) {
+  if (Cache) {
     auto Cached = llvm::find_if(
-        CheckingContext->Projections.AlternativeProjections,
+        Cache->AlternativeProjections,
         [&](const Sema::MatchProjectionCache::AlternativeProjectionInfo &P) {
-          return S.Context.hasSameType(P.TraitsType, Info.Type) &&
+          return P.Signature->Domain == Info.Domain &&
                  S.Context.hasSameType(P.SubjectType, Subject->getType()) &&
                  P.SubjectValueKind == Subject->getValueKind() &&
                  P.SubjectObjectKind == Subject->getObjectKind();
         });
-    if (Cached != CheckingContext->Projections.AlternativeProjections.end()) {
-      Info.ProjectionTypes = Cached->ProjectionTypes;
-      Info.ProjectionValueKinds = Cached->ProjectionValueKinds;
-      Info.IndexType = Cached->IndexType;
-      Info.HasParameterizedIndexName = Cached->HasParameterizedIndexName;
+    if (Cached != Cache->AlternativeProjections.end()) {
+      Info.Projections = Cached->Signature;
+      Info.IndexType = Info.Projections->IndexType;
+      Info.HasParameterizedIndexName =
+          Info.Projections->HasParameterizedIndexName;
       return false;
     }
   }
@@ -946,20 +961,21 @@ static bool determineAlternativeProjections(
     }
   }
 
-  Info.ProjectionTypes.clear();
-  Info.ProjectionTypes.reserve(Info.Size);
-  Info.ProjectionValueKinds.clear();
-  Info.ProjectionValueKinds.reserve(Info.Size);
-  for (unsigned I = 0; I < Info.Size; ++I) {
-    if (Info.Empty[I] && Info.HasAlternativeType[I]) {
+  SmallVector<QualType, 4> ProjectionTypes;
+  SmallVector<ExprValueKind, 4> ProjectionValueKinds;
+  ProjectionTypes.reserve(Info.Domain->States.size());
+  ProjectionValueKinds.reserve(Info.Domain->States.size());
+  for (unsigned I = 0; I < Info.Domain->States.size(); ++I) {
+    if (Info.Domain->States[I].IsEmpty &&
+        Info.Domain->States[I].isProjectable()) {
       S.Diag(Loc, diag::err_alternative_info_empty_and_typed)
           << Subject->getType().getNonReferenceType().getUnqualifiedType() << I;
       return true;
     }
 
-    if (!Info.HasAlternativeType[I]) {
-      Info.ProjectionTypes.push_back(S.Context.VoidTy);
-      Info.ProjectionValueKinds.push_back(VK_PRValue);
+    if (!Info.Domain->States[I].isProjectable()) {
+      ProjectionTypes.push_back(S.Context.VoidTy);
+      ProjectionValueKinds.push_back(VK_PRValue);
       continue;
     }
 
@@ -975,7 +991,7 @@ static bool determineAlternativeProjections(
       if (GetCall.isUsable() && !Trap.hasErrorOccurred()) {
         ProjectionType = GetCall.get()->getType();
         ProjectionValueKind = GetCall.get()->getValueKind();
-        QualType AdvertisedType = Info.AdvertisedTypes[I];
+        QualType AdvertisedType = Info.Domain->States[I].Type;
         if (AdvertisedType->isVoidType()) {
           IsCompatible = ProjectionType->isVoidType();
         } else if (!ProjectionType->isVoidType()) {
@@ -991,26 +1007,22 @@ static bool determineAlternativeProjections(
     if (!IsCompatible) {
       S.Diag(Loc, diag::err_alternative_type_without_projection)
           << Subject->getType().getNonReferenceType().getUnqualifiedType() << I
-          << Info.AdvertisedTypes[I];
+          << Info.Domain->States[I].Type;
       return true;
     }
 
-    Info.ProjectionTypes.push_back(ProjectionType);
-    Info.ProjectionValueKinds.push_back(ProjectionValueKind);
+    ProjectionTypes.push_back(ProjectionType);
+    ProjectionValueKinds.push_back(ProjectionValueKind);
   }
 
-  if (CheckingContext) {
-    auto &Cached =
-        CheckingContext->Projections.AlternativeProjections.emplace_back();
-    Cached.TraitsType = Info.Type;
-    Cached.SubjectType = Subject->getType();
-    Cached.IndexType = Info.IndexType;
-    Cached.SubjectValueKind = Subject->getValueKind();
-    Cached.SubjectObjectKind = Subject->getObjectKind();
-    Cached.HasParameterizedIndexName = Info.HasParameterizedIndexName;
-    Cached.ProjectionTypes = Info.ProjectionTypes;
-    Cached.ProjectionValueKinds = Info.ProjectionValueKinds;
-  }
+  Info.Projections = new (S.Context) MatchAlternativeProjectionInfo{
+      Info.Domain, Info.IndexType, ArrayRef(ProjectionTypes).copy(S.Context),
+      ArrayRef(ProjectionValueKinds).copy(S.Context),
+      Info.HasParameterizedIndexName};
+  if (Cache)
+    Cache->AlternativeProjections.push_back(
+        {Info.Projections, Subject->getType(), Subject->getValueKind(),
+         Subject->getObjectKind()});
   return false;
 }
 
@@ -1018,29 +1030,14 @@ static void storeAlternativeTraitsInfo(Sema &S, MatchPatternInfo &PatternInfo,
                                        const AlternativeTraitsInfo &Traits,
                                        ArrayRef<unsigned> Selected,
                                        bool IsAlternativeValuePattern = false) {
-  auto CopyFlags = [&](ArrayRef<bool> Flags) {
-    auto *Storage = S.Context.Allocate<unsigned char>(Flags.size());
-    llvm::transform(Flags, Storage, [](bool Value) {
-      return static_cast<unsigned char>(Value);
-    });
-    return ArrayRef<unsigned char>(Storage, Flags.size());
-  };
-  PatternInfo.AlternativeTraitsType = Traits.Type;
-  PatternInfo.AlternativeTypes =
-      ArrayRef(Traits.ProjectionTypes).copy(S.Context);
-  PatternInfo.ProjectableAlternatives = CopyFlags(Traits.HasAlternativeType);
-  PatternInfo.EmptyAlternatives = CopyFlags(Traits.Empty);
-  PatternInfo.AlternativeValues = ArrayRef(Traits.Values).copy(S.Context);
+  PatternInfo.Alternatives = Traits.Projections;
   PatternInfo.SelectedAlternatives = Selected.copy(S.Context);
-  PatternInfo.IsExhaustive = Traits.IsExhaustive;
-  PatternInfo.HasParameterizedIndexName = Traits.HasParameterizedIndexName;
   PatternInfo.IsAlternativeValuePattern = IsAlternativeValuePattern;
 }
 
-static bool
-tryLookupAlternativeTraitsForValuePattern(Sema &S, SourceLocation Loc,
-                                          QualType SubjectType,
-                                          AlternativeTraitsInfo &Info) {
+static bool tryLookupAlternativeTraitsForValuePattern(
+    Sema &S, SourceLocation Loc, QualType SubjectType,
+    AlternativeTraitsInfo &Info, Sema::MatchProjectionCache *Cache) {
   SubjectType = SubjectType.getNonReferenceType().getUnqualifiedType();
   if (!SubjectType->isRecordType())
     return false;
@@ -1058,7 +1055,7 @@ tryLookupAlternativeTraitsForValuePattern(Sema &S, SourceLocation Loc,
   return !Trap.hasErrorOccurred() &&
          !initializeAlternativeTraitsInfo(S, Loc, SubjectType, Info.Type,
                                           AlternativesLookup,
-                                          /*AllowOpen=*/false, Info);
+                                          /*AllowOpen=*/false, Info, Cache);
 }
 
 static bool alternativeValueMatchesPattern(Sema &S, Expr *Pattern,
@@ -1099,26 +1096,29 @@ static bool classifyAlternativeValuePattern(
 
   AlternativeTraitsInfo Traits;
   SmallVector<unsigned, 1> Selected;
+  Sema::MatchProjectionCache *Cache =
+      CheckingContext ? &CheckingContext->Projections : nullptr;
   QualType SubjectType =
       Subject->getType().getNonReferenceType().getUnqualifiedType();
   if (SubjectType->isPointerType()) {
     if (Pattern->getExpr()->isNullPointerConstant(
             S.Context, Expr::NPC_ValueDependentIsNotNull) == Expr::NPCK_NotNull)
       return false;
-    if (lookupAlternativeTraits(S, Pattern->getBeginLoc(), SubjectType, Traits))
+    if (lookupAlternativeTraits(S, Pattern->getBeginLoc(), SubjectType, Traits,
+                                Cache))
       return true;
-    Traits.Values[0] = Pattern->getExpr();
     Selected.push_back(0);
   } else {
     if (!tryLookupAlternativeTraitsForValuePattern(S, Pattern->getBeginLoc(),
-                                                   SubjectType, Traits))
+                                                   SubjectType, Traits, Cache))
       return false;
     if (determineAlternativeProjections(S, Pattern->getBeginLoc(), Subject,
-                                        Traits, CheckingContext))
+                                        Traits, Cache))
       return true;
-    for (unsigned I = 0; I < Traits.Size; ++I)
-      if (Traits.Values[I] && alternativeValueMatchesPattern(
-                                  S, Pattern->getExpr(), Traits.Values[I]))
+    for (unsigned I = 0; I < Traits.Domain->States.size(); ++I)
+      if (Traits.Domain->States[I].Value &&
+          alternativeValueMatchesPattern(S, Pattern->getExpr(),
+                                         Traits.Domain->States[I].Value))
         Selected.push_back(I);
     if (Selected.empty())
       return false;
@@ -1200,9 +1200,10 @@ static ExprResult buildStructuralValuePatternCondition(
                               ConvertedPattern.get());
 }
 
-static ExprResult buildExpressionPatternCondition(
-    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
-    ExpressionPatternConditionKind Kind) {
+static ExprResult
+buildExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
+                                Expr *Subject, Expr *Pattern,
+                                ExpressionPatternConditionKind Kind) {
   ExprResult Condition;
   switch (Kind) {
   case ExpressionPatternConditionKind::StructuralEquality:
@@ -1224,9 +1225,10 @@ static ExprResult buildExpressionPatternCondition(
   return S.PerformContextuallyConvertToBool(Condition.get());
 }
 
-static ExprResult probeExpressionPatternCondition(
-    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
-    ExpressionPatternConditionKind Kind) {
+static ExprResult
+probeExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
+                                Expr *Subject, Expr *Pattern,
+                                ExpressionPatternConditionKind Kind) {
   auto *SubjectProbe = new (S.Context)
       OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
                       Subject->getObjectKind(), Subject);
@@ -1245,9 +1247,10 @@ static ExprResult probeExpressionPatternCondition(
   return Condition;
 }
 
-static bool isViableExpressionPatternCondition(
-    Sema &S, Scope *Scope, SourceLocation Loc, Expr *Subject, Expr *Pattern,
-    ExpressionPatternConditionKind Kind) {
+static bool
+isViableExpressionPatternCondition(Sema &S, Scope *Scope, SourceLocation Loc,
+                                   Expr *Subject, Expr *Pattern,
+                                   ExpressionPatternConditionKind Kind) {
   return probeExpressionPatternCondition(S, Scope, Loc, Subject, Pattern, Kind)
       .isUsable();
 }
@@ -2932,13 +2935,11 @@ class MatchCandidatePlanner {
     }
   }
 
-  bool isCovered(MatchPatternInfo &Info, unsigned Index) {
-    Info.SelectedAlternatives = ArrayRef<unsigned>(&Index, 1);
-    return S.UpdateMatchCandidateDomainUsefulness(
+  bool isCovered(unsigned Index) {
+    return S.ClassifyMatchCandidateDomain(
                *CheckingContext.CandidateUsefulness.Context,
-               CheckingContext.CandidateUsefulness.RootPattern, Candidate,
-               State, CheckingContext.CandidateUsefulness.CaseIndex,
-               /*RecordNotUseful=*/false) ==
+               {CheckingContext.CandidateUsefulness.RootPattern, Candidate,
+                State, Traits.Projections, Index}) ==
            Sema::MatchPatternUsefulness::NotUseful;
   }
 
@@ -2958,16 +2959,11 @@ public:
         !Candidate->getSubPattern())
       return;
 
-    MatchPatternInfo &Info = State.get(Candidate);
-    storeAlternativeTraitsInfo(S, Info, Traits, {});
-    llvm::scope_exit ClearSelection(
-        [&] { Info.SelectedAlternatives = ArrayRef<unsigned>(); });
-
     SmallVector<unsigned, 4> Retained;
     bool NeedsApplicabilityCheck =
         getDirectConcreteDeclarationType(Candidate).isNull();
     for (unsigned Index : Selected) {
-      if (isCovered(Info, Index))
+      if (isCovered(Index))
         continue;
 
       if (!NeedsApplicabilityCheck) {
@@ -2975,8 +2971,8 @@ public:
         continue;
       }
       OpaqueValueExpr Projected(
-          Candidate->getBeginLoc(), Traits.ProjectionTypes[Index],
-          Traits.ProjectionValueKinds[Index], OK_Ordinary);
+          Candidate->getBeginLoc(), Traits.Projections->Types[Index],
+          Traits.Projections->ValueKinds[Index], OK_Ordinary);
       if (canMatch(Candidate->getSubPattern(), &Projected))
         Retained.push_back(Index);
     }
@@ -3009,13 +3005,15 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
                                        CheckingContext);
   }
   AlternativeTraitsInfo Traits;
-  if (lookupAlternativeTraits(S, Loc, SubjectType, Traits))
+  Sema::MatchProjectionCache *Cache =
+      CheckingContext ? &CheckingContext->Projections : nullptr;
+  if (lookupAlternativeTraits(S, Loc, SubjectType, Traits, Cache))
     return MatchPatternCheckResult::Error;
   if (Traits.IsOpen)
     return checkOpenAlternativePattern(S, Subject, Pattern, Traits, State,
                                        CheckingContext);
 
-  if (determineAlternativeProjections(S, Loc, Subject, Traits, CheckingContext))
+  if (determineAlternativeProjections(S, Loc, Subject, Traits, Cache))
     return MatchPatternCheckResult::Error;
 
   bool DeferProjection =
@@ -3045,20 +3043,21 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
                           : getDirectConcreteDeclarationType(Pattern);
 
   if (Pattern->isEmpty()) {
-    for (unsigned I = 0; I < Traits.Size; ++I)
-      if (Traits.Empty[I])
+    for (unsigned I = 0; I < Traits.Domain->States.size(); ++I)
+      if (Traits.Domain->States[I].IsEmpty)
         Selected.push_back(I);
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
       return MatchPatternCheckResult::Error;
     }
   } else if (!Pattern->isNamed() && !Pattern->isParameterizedNamed()) {
-    for (unsigned I = 0; I < Traits.Size; ++I) {
-      if (!Traits.HasAlternativeType[I])
+    for (unsigned I = 0; I < Traits.Domain->States.size(); ++I) {
+      if (!Traits.Domain->States[I].isProjectable())
         continue;
       if (!DirectDeclarationType.isNull()) {
-        OpaqueValueExpr Projection(Loc, Traits.ProjectionTypes[I],
-                                   Traits.ProjectionValueKinds[I], OK_Ordinary);
+        OpaqueValueExpr Projection(Loc, Traits.Projections->Types[I],
+                                   Traits.Projections->ValueKinds[I],
+                                   OK_Ordinary);
         if (!canDeclarationMatchProjection(S, Loc, DirectDeclarationType,
                                            &Projection))
           continue;
@@ -3067,7 +3066,7 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
       // whether the projection could initialize an object of that type.
       if (Pattern->isTypeSelected() &&
           !S.Context.hasSameType(Pattern->getTypeSelector()->getType(),
-                                 Traits.AdvertisedTypes[I]))
+                                 Traits.Domain->States[I].Type))
         continue;
       Selected.push_back(I);
     }
@@ -3105,21 +3104,26 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
     }
   }
 
+  if (Selected.size() == 1 && CheckingContext &&
+      CheckingContext->CandidateUsefulness.Context &&
+      CheckingContext->CandidateUsefulness.RootPattern) {
+    Sema::MatchCandidateDomain Domain{
+        CheckingContext->CandidateUsefulness.RootPattern, Pattern, State,
+        Traits.Projections, Selected.front()};
+    auto &Usefulness = *CheckingContext->CandidateUsefulness.Context;
+    if (S.ClassifyMatchCandidateDomain(Usefulness, Domain) ==
+        Sema::MatchPatternUsefulness::NotUseful) {
+      S.RecordCoveredMatchCandidateDomain(
+          Usefulness, Domain, CheckingContext->CandidateUsefulness.CaseIndex);
+      return MatchPatternCheckResult::Covered;
+    }
+  }
+
   MatchPatternInfo &PatternInfo = State.get(Pattern);
   storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
 
-  if (CheckingContext && CheckingContext->CandidateUsefulness.Context &&
-      CheckingContext->CandidateUsefulness.RootPattern &&
-      S.UpdateMatchCandidateDomainUsefulness(
-          *CheckingContext->CandidateUsefulness.Context,
-          CheckingContext->CandidateUsefulness.RootPattern, Pattern, State,
-          CheckingContext->CandidateUsefulness.CaseIndex) ==
-          Sema::MatchPatternUsefulness::NotUseful) {
-    return MatchPatternCheckResult::Covered;
-  }
-
   if (Pattern->getSubPattern() &&
-      !Traits.HasAlternativeType[Selected.front()]) {
+      !Traits.Domain->States[Selected.front()].isProjectable()) {
     S.Diag(Loc, diag::err_alternative_state_not_projectable)
         << SubjectType << Selected.front();
     return MatchPatternCheckResult::Error;
@@ -3143,7 +3147,7 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
     }
     if (const ConceptReference *Constraint =
             Pattern->getTypeConstraintSelector()) {
-      QualType DeclaredType = Traits.AdvertisedTypes[Selected.front()];
+      QualType DeclaredType = Traits.Domain->States[Selected.front()].Type;
       std::optional<bool> Satisfied =
           satisfiesTypeConstraint(S, Constraint, DeclaredType);
       if (!Satisfied)
@@ -3210,7 +3214,7 @@ static MatchPatternCheckResult checkBracedAlternativePattern(
   QualType ProjectedType;
   if (UsesAdvertisedTypes) {
     ProjectedType = getAlternativeProjectionBindingType(
-        S, Loc, Traits.AdvertisedTypes[Index], GetCall.get());
+        S, Loc, Traits.Domain->States[Index].Type, GetCall.get());
     if (ProjectedValueKind == VK_PRValue)
       ProjectedValueKind = VK_XValue;
   } else {
@@ -3846,7 +3850,7 @@ bool Sema::isMatchPatternIrrefutable(MatchPattern *Pattern,
   case MatchPattern::AlternativePatternClass: {
     auto *Alternative = cast<AlternativePattern>(Pattern);
     if (!Info || Info->IsOpenAlternative ||
-        (Info->Projection && !Info->AlternativeTraitsType.isNull()))
+        (Info->Projection && Info->Alternatives))
       return false;
     if (Alternative->isTypeSelected() &&
         !isMatchPatternIrrefutable(Alternative->getSelector(), State))
