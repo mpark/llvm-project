@@ -593,6 +593,161 @@ buildDecisionTree(ArrayRef<MatchRow> Rows, const ASTContext &Context) {
   return Result;
 }
 
+static const CXXDynamicCastExpr *
+getBatchableMatchCast(const MatchDecisionTree::Node &Node) {
+  // A successful cast must select the case without further matching or guard
+  // tests. Otherwise the first successful target need not select the first
+  // case.
+  if (Node.Kind != MatchDecisionTree::Node::NK_Test ||
+      Node.MatchTest.Kind != MatchDecisionTree::Test::OpenProjection ||
+      !Node.MatchTest.ProjectionPath.empty() ||
+      Node.MatchTest.Projection->getKind() != MatchProjection::CastProjection ||
+      Node.MatchTest.Case->Guard.hasGuard() ||
+      Node.Success->Kind != MatchDecisionTree::Node::NK_Candidate ||
+      Node.Success->MatchCandidate.Case != Node.MatchTest.Case)
+    return nullptr;
+
+  const MatchPattern *Pattern = Node.MatchTest.Case->Pattern->IgnoreParens();
+  QualType PatternType;
+  if (const auto *Declaration = dyn_cast<DeclarationPattern>(Pattern))
+    PatternType = Declaration->getDeclaration()->getType();
+  else if (const auto *Type = dyn_cast<TypePattern>(Pattern))
+    PatternType = Type->getType();
+  else
+    return nullptr;
+  if (!PatternType->isReferenceType())
+    return nullptr;
+
+  const auto *Cast = dyn_cast<CXXDynamicCastExpr>(
+      Node.MatchTest.Projection->getIntermediateVar()
+          ->getInit()
+          ->IgnoreParenImpCasts());
+  if (!Cast || Cast->getCastKind() != CK_Dynamic || Cast->isAlwaysNull())
+    return nullptr;
+  QualType Source = Cast->getSubExpr()->getType()->getPointeeType();
+  QualType Target = Cast->getType()->getPointeeType();
+  if (Source.isVolatileQualified() || Target.isNull() ||
+      !Target->isRecordType() || Source.getAddressSpace() != LangAS::Default ||
+      Target.getAddressSpace() != LangAS::Default ||
+      Target->getAsCXXRecordDecl()->isEffectivelyFinal())
+    return nullptr;
+  return Cast;
+}
+
+/// Instruction selection after binary specialization. Consecutive tests on one
+/// subject become switches or batched casts without changing column selection.
+static std::unique_ptr<MatchDecisionTree::Node>
+groupDecisionTests(std::unique_ptr<MatchDecisionTree::Node> Root,
+                   const ASTContext &Context, bool EnableBatchedDynamicCast) {
+  using Node = MatchDecisionTree::Node;
+  using Switch = MatchDecisionTree::Switch;
+  if (EnableBatchedDynamicCast) {
+    if (const CXXDynamicCastExpr *First = getBatchableMatchCast(*Root)) {
+      const VarDecl *HoldingVar = Root->MatchTest.Projection->getHoldingVar();
+      const Expr *Subject = HoldingVar->getInit()->IgnoreParenImpCasts();
+      SmallVector<QualType, 4> Targets;
+      const Node *Default = Root.get();
+      while (const CXXDynamicCastExpr *Cast = getBatchableMatchCast(*Default)) {
+        if (Default->MatchTest.Projection->getHoldingVar()
+                    ->getInit()
+                    ->IgnoreParenImpCasts() != Subject ||
+            !Context.hasSameType(Cast->getSubExpr()->getType(),
+                                 First->getSubExpr()->getType()))
+          break;
+        Targets.push_back(
+            Cast->getType()->getPointeeType().getUnqualifiedType());
+        Default = Default->Failure.get();
+      }
+      if (Targets.size() > 1) {
+        auto Result = std::make_unique<Node>(Node::NK_BatchedCast);
+        Result->MatchBatchedCast.SourceCast = First;
+        Result->MatchBatchedCast.HoldingVar = HoldingVar;
+        for (QualType Target : Targets) {
+          Result->MatchBatchedCast.Targets.push_back(
+              {Target, std::move(Root->Success)});
+          std::unique_ptr<Node> Next = std::move(Root->Failure);
+          Root = std::move(Next);
+        }
+        Result->Failure = groupDecisionTests(std::move(Root), Context,
+                                             EnableBatchedDynamicCast);
+        return Result;
+      }
+    }
+  }
+  auto GetValue = [&](const Node &Test) -> std::optional<llvm::APSInt> {
+    if (Root->Kind != Test.Kind)
+      return std::nullopt;
+    if (Root->Kind == Node::NK_PatternTest &&
+        Root->PatternMatch.Kind ==
+            MatchDecisionTree::PatternTest::IntegralValue &&
+        Test.PatternMatch.Kind ==
+            MatchDecisionTree::PatternTest::IntegralValue) {
+      const BinaryOperator *First = Root->PatternMatch.IntegralTest->Comparison;
+      const BinaryOperator *Comparison =
+          Test.PatternMatch.IntegralTest->Comparison;
+      if (First->getLHS()->IgnoreParenImpCasts() !=
+              Comparison->getLHS()->IgnoreParenImpCasts() ||
+          !Context.hasSameType(First->getLHS()->getType(),
+                               Comparison->getLHS()->getType()) ||
+          Root->PatternMatch.ProjectionPath != Test.PatternMatch.ProjectionPath)
+        return std::nullopt;
+      return Test.PatternMatch.IntegralTest->Value;
+    }
+    if (Root->Kind == Node::NK_Test &&
+        Root->MatchTest.Kind == MatchDecisionTree::Test::ClosedAlternative &&
+        Test.MatchTest.Kind == MatchDecisionTree::Test::ClosedAlternative) {
+      const VarDecl *Index = Root->MatchTest.Projection->getIntermediateVar();
+      if (!Index->getType()->isIntegralOrEnumerationType() ||
+          Test.MatchTest.Projection->getIntermediateVar() != Index)
+        return std::nullopt;
+      return llvm::APSInt(
+          llvm::APInt(Context.getIntWidth(Index->getType()),
+                      Test.MatchTest.AlternativeIndex),
+          Index->getType()->isUnsignedIntegerOrEnumerationType());
+    }
+    return std::nullopt;
+  };
+
+  SmallVector<llvm::APSInt, 4> Values;
+  const Node *Default = Root.get();
+  while (std::optional<llvm::APSInt> Value = GetValue(*Default)) {
+    if (llvm::is_contained(Values, *Value))
+      break;
+    Values.push_back(std::move(*Value));
+    Default = Default->Failure.get();
+  }
+  if (!Values.empty() && (Root->Kind == Node::NK_Test || Values.size() > 1)) {
+    auto Result = std::make_unique<Node>(Node::NK_Switch);
+    Result->MatchSwitch.Kind = Root->Kind == Node::NK_Test
+                                   ? Switch::ClosedAlternative
+                                   : Switch::IntegralValue;
+    Result->MatchTest = Root->MatchTest;
+    Result->PatternMatch = Root->PatternMatch;
+    for (llvm::APSInt &Value : Values) {
+      Result->MatchSwitch.Branches.push_back(
+          {std::move(Value),
+           groupDecisionTests(std::move(Root->Success), Context,
+                              EnableBatchedDynamicCast)});
+      std::unique_ptr<Node> Next = std::move(Root->Failure);
+      Root = std::move(Next);
+    }
+    Result->Failure =
+        groupDecisionTests(std::move(Root), Context, EnableBatchedDynamicCast);
+    return Result;
+  }
+
+  if (Root->Success)
+    Root->Success = groupDecisionTests(std::move(Root->Success), Context,
+                                       EnableBatchedDynamicCast);
+  if (Root->Failure)
+    Root->Failure = groupDecisionTests(std::move(Root->Failure), Context,
+                                       EnableBatchedDynamicCast);
+  if (Root->GuardFailure)
+    Root->GuardFailure = groupDecisionTests(std::move(Root->GuardFailure),
+                                            Context, EnableBatchedDynamicCast);
+  return Root;
+}
+
 } // namespace
 
 bool CodeGen::hasMatchPatternDeclarations(
@@ -603,7 +758,8 @@ bool CodeGen::hasMatchPatternDeclarations(
 
 MatchDecisionTree
 MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases,
-                         const ASTContext &Context) {
+                         const ASTContext &Context,
+                         bool EnableBatchedDynamicCast) {
   SmallVector<MatchRow, 8> Rows;
   Rows.reserve(Cases.size());
   for (const MatchCaseInstantiation &Case : Cases) {
@@ -630,5 +786,6 @@ MatchDecisionTree::build(ArrayRef<MatchCaseInstantiation> Cases,
     Rows.append(std::make_move_iterator(Expanded.begin()),
                 std::make_move_iterator(Expanded.end()));
   }
-  return MatchDecisionTree(buildDecisionTree(Rows, Context));
+  return MatchDecisionTree(groupDecisionTests(
+      buildDecisionTree(Rows, Context), Context, EnableBatchedDynamicCast));
 }

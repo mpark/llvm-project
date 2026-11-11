@@ -59,12 +59,42 @@ public:
     SmallVector<const MatchProjection *, 2> ProjectionPath;
   };
 
+  struct Node;
+
+  struct Switch {
+    enum DiscriminatorKind { ClosedAlternative, IntegralValue } Kind;
+    struct Branch {
+      llvm::APSInt Value;
+      std::unique_ptr<Node> Success;
+    };
+    SmallVector<Branch, 4> Branches;
+  };
+
+  struct BatchedCast {
+    const CXXDynamicCastExpr *SourceCast = nullptr;
+    const VarDecl *HoldingVar = nullptr;
+    struct Target {
+      QualType Type;
+      std::unique_ptr<Node> Success;
+    };
+    SmallVector<Target, 4> Targets;
+  };
+
   struct Node {
-    enum NodeKind { NK_Failure, NK_Candidate, NK_Test, NK_PatternTest } Kind;
+    enum NodeKind {
+      NK_Failure,
+      NK_Candidate,
+      NK_Test,
+      NK_PatternTest,
+      NK_Switch,
+      NK_BatchedCast
+    } Kind;
 
     Candidate MatchCandidate = {};
     Test MatchTest = {};
     PatternTest PatternMatch = {};
+    Switch MatchSwitch = {};
+    BatchedCast MatchBatchedCast = {};
     std::unique_ptr<Node> Success;
     std::unique_ptr<Node> Failure;
     std::unique_ptr<Node> GuardFailure;
@@ -80,7 +110,8 @@ private:
 
 public:
   static MatchDecisionTree build(ArrayRef<MatchCaseInstantiation> Cases,
-                                 const ASTContext &Context);
+                                 const ASTContext &Context,
+                                 bool EnableBatchedDynamicCast = false);
 
   const Node &getRoot() const { return *Root; }
 };
