@@ -120,6 +120,34 @@ bool failed_guard_does_not_initialize_unnamed_values() {
   return observed == 1 && alive == 1 && copies == 0;
 }
 
+bool selection_cleans_up_before_later_cases(bool first) {
+  int alive = 0;
+  Tracked subject(&alive, 7);
+  int observed = match (subject) {
+    case Tracked copy if (first) => alive;
+    case Tracked copy if (alive == 2) => alive + 10;
+    case _ => -1;
+  };
+  return observed == (first ? 2 : 12) && alive == 1;
+}
+
+bool selection_cleans_up_guard_locals() {
+  int alive = 0;
+  Tracked subject(&alive, 7);
+  int observed = match (subject) {
+    case Tracked copy if (Tracked guard(&alive, 0); false) => -1;
+    case _ => alive;
+  };
+  return observed == 1 && alive == 1;
+}
+
+int selection_return(Tracked& subject) {
+  match (subject) {
+    case Tracked copy if (copy.value > 0) => return *copy.alive;
+    case _ => return -1;
+  }
+}
+
 int main(int, char**) {
   if (declaration_lifetime_in_if(0) != 2)
     return 1;
@@ -139,5 +167,15 @@ int main(int, char**) {
     return 8;
   if (!failed_guard_does_not_initialize_unnamed_values())
     return 9;
+  if (!selection_cleans_up_before_later_cases(false))
+    return 10;
+  if (!selection_cleans_up_before_later_cases(true))
+    return 11;
+  if (!selection_cleans_up_guard_locals())
+    return 12;
+  int alive = 0;
+  Tracked subject(&alive, 7);
+  if (selection_return(subject) != 2 || alive != 1)
+    return 13;
   return 0;
 }

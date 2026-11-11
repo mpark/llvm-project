@@ -129,6 +129,7 @@ struct CopyCounter {
 };
 
 // CHECK-LABEL: define{{.*}} i32 @_Z12guarded_copy11CopyCounter
+// CHECK-NOT: match.case.selected
 // CHECK: match.select.init:
 // CHECK: call void @_ZN11CopyCounterC1ERKS_
 // CHECK-NOT: call void @_ZN11CopyCounterC1ERKS_
@@ -137,9 +138,16 @@ struct CopyCounter {
 // CHECK: br i1
 // CHECK: match.select.action:
 // CHECK-NOT: call void @_ZN11CopyCounterC1ERKS_
-// CHECK: br label %match.select.cleanup
-// CHECK: match.select.cleanup:
+// CHECK: store i32 {{[0-9]+}}, ptr %[[DEST:cleanup.dest.slot]]
+// CHECK: br label %[[CLEANUP:cleanup]]
+// CHECK: match.select.guard_failed:
+// CHECK: store i32 {{[0-9]+}}, ptr %[[DEST]]
+// CHECK: br label %[[CLEANUP]]
+// CHECK: [[CLEANUP]]:
 // CHECK: call void @_ZN11CopyCounterD1Ev
+// CHECK: switch i32 {{.*}}, label %{{.*}} [
+// CHECK-NEXT: i32 {{[0-9]+}}, label %match.select.end
+// CHECK-NEXT: i32 {{[0-9]+}}, label %match.decision.next_pattern
 int guarded_copy(CopyCounter value) {
   return match (value) {
     case CopyCounter copy if (copy.value > 0) => copy.value;

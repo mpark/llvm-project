@@ -22,7 +22,6 @@ struct Result {
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[TMP1:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[TMP2:%.*]] = alloca ptr, align 8
-// CHECK-NEXT:    [[MATCH_CASE_SELECTED:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[C:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    store ptr [[S]], ptr [[S_ADDR]], align 8
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[S_ADDR]], align 8, !nonnull [[META1:![0-9]+]], !align [[META2:![0-9]+]]
@@ -61,14 +60,9 @@ struct Result {
 // CHECK-NEXT:    store i32 [[TMP12]], ptr [[COLOR5]], align 4
 // CHECK-NEXT:    [[I:%.*]] = getelementptr inbounds nuw [[STRUCT_RESULT]], ptr [[RETVAL]], i32 0, i32 1
 // CHECK-NEXT:    store i32 -1, ptr [[I]], align 4
-// CHECK-NEXT:    store i1 true, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP:.*]]
+// CHECK-NEXT:    br label %[[MATCH_SELECT_END:.*]]
 // CHECK:       [[MATCH_SELECT_GUARD_FAILED]]:
-// CHECK-NEXT:    store i1 false, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br label %[[MATCH_SELECT_CLEANUP]]
-// CHECK:       [[MATCH_SELECT_CLEANUP]]:
-// CHECK-NEXT:    [[TMP13:%.*]] = load i1, ptr [[MATCH_CASE_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP13]], label %[[MATCH_SELECT_END:.*]], label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
+// CHECK-NEXT:    br label %[[MATCH_DECISION_NEXT_PATTERN:.*]]
 // CHECK:       [[MATCH_DECISION_NEXT_PATTERN]]:
 // CHECK-NEXT:    br label %[[MATCH_SELECT_ACTION7:.*]]
 // CHECK:       [[MATCH_DECISION_FAILURE]]:
@@ -86,8 +80,8 @@ struct Result {
 // CHECK-NEXT:    call void @_ZSt9terminatev() #[[ATTR4]]
 // CHECK-NEXT:    unreachable
 // CHECK:       [[MATCH_SELECT_END]]:
-// CHECK-NEXT:    [[TMP14:%.*]] = load i64, ptr [[RETVAL]], align 4
-// CHECK-NEXT:    ret i64 [[TMP14]]
+// CHECK-NEXT:    [[TMP13:%.*]] = load i64, ptr [[RETVAL]], align 4
+// CHECK-NEXT:    ret i64 [[TMP13]]
 //
 auto nested_decomposition_pattern(const S& s) {
   return match (s) -> Result {

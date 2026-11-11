@@ -3022,8 +3022,10 @@ void CodeGenFunction::EmitMatchCandidate(
   bool HasStagedDeclarations =
       !IsTestExpression &&
       hasStagedAndPatternDeclarations(Pattern, Instantiation);
+  bool UseCleanupDestinations = IsSelection && !HasStagedDeclarations;
   StagedPatternDeclarations StagedDeclarations;
   std::optional<RunCleanupsScope> OrdinaryCaseScope;
+  JumpDest SelectedDest, RejectedDest;
   RawAddress RetryPattern = RawAddress::invalid();
   llvm::BasicBlock *PatternFailedBB = PatternFailure;
   llvm::BasicBlock *CaseFailedBB = GuardFailure;
@@ -3045,19 +3047,24 @@ void CodeGenFunction::EmitMatchCandidate(
   llvm::BasicBlock *GuardFailedBB =
       createBasicBlock(Twine(BlockPrefix) + "guard_failed");
   llvm::BasicBlock *CleanupBB =
-      createBasicBlock(Twine(BlockPrefix) + "cleanup");
+      UseCleanupDestinations ? nullptr
+                             : createBasicBlock(Twine(BlockPrefix) + "cleanup");
   RawAddress CaseSelected = RawAddress::invalid();
   if (!IsSelection)
     CaseSelected = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
                                     Twine(StatePrefix) + "selected");
   EmitPattern(InitializePatternBB, PatternFailedBB,
               HasStagedDeclarations ? &StagedDeclarations : nullptr);
-  if (IsSelection)
+  if (IsSelection && !UseCleanupDestinations)
     CaseSelected = CreateTempAlloca(Builder.getInt1Ty(), getPointerAlign(),
                                     Twine(StatePrefix) + "selected");
 
   EmitBlock(InitializePatternBB);
   EmitSharedDeclarationProjections(Pattern, Instantiation);
+  if (UseCleanupDestinations) {
+    SelectedDest = getJumpDestInCurrentScope(Success);
+    RejectedDest = getJumpDestInCurrentScope(GuardFailure);
+  }
   if (HasStagedDeclarations)
     StagedDeclarations.begin(*this);
   else if (!IsTestExpression)
@@ -3078,13 +3085,22 @@ void CodeGenFunction::EmitMatchCandidate(
   EmitBlock(ExecuteActionBB);
   EmitAction();
   if (HaveInsertPoint()) {
-    Builder.CreateStore(Builder.getTrue(), CaseSelected);
-    if (HasStagedDeclarations)
-      Builder.CreateStore(Builder.getFalse(), RetryPattern);
-    EmitBranch(CleanupBB);
+    if (UseCleanupDestinations) {
+      EmitBranchThroughCleanup(SelectedDest);
+    } else {
+      Builder.CreateStore(Builder.getTrue(), CaseSelected);
+      if (HasStagedDeclarations)
+        Builder.CreateStore(Builder.getFalse(), RetryPattern);
+      EmitBranch(CleanupBB);
+    }
   }
 
   EmitBlock(GuardFailedBB);
+  if (UseCleanupDestinations) {
+    EmitBranchThroughCleanup(RejectedDest);
+    OrdinaryCaseScope->ForceCleanup();
+    return;
+  }
   Builder.CreateStore(Builder.getFalse(), CaseSelected);
   if (HasStagedDeclarations)
     Builder.CreateStore(Builder.getFalse(), RetryPattern);
