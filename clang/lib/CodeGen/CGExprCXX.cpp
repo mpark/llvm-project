@@ -2984,8 +2984,7 @@ static bool collectSharedCaseReferenceDeclarations(
 using SharedCaseDeclarations = SmallVector<SmallVector<const VarDecl *, 2>, 4>;
 
 static std::optional<SharedCaseDeclarations>
-collectSharedCaseDeclarations(ArrayRef<MatchCaseInstantiation> Cases,
-                              ASTContext &Context) {
+collectSharedCaseDeclarations(ArrayRef<MatchCaseInstantiation> Cases) {
   if (Cases.size() < 2)
     return std::nullopt;
 
@@ -3006,8 +3005,10 @@ collectSharedCaseDeclarations(ArrayRef<MatchCaseInstantiation> Cases,
           !llvm::all_of(
               llvm::zip_equal(Declarations, Canonical), [&](auto Pair) {
                 const auto &[D, CanonicalD] = Pair;
-                return D->getLocation() == CanonicalD->getLocation() &&
-                       Context.hasSameType(D->getType(), CanonicalD->getType());
+                return Case.PatternInstantiation->getBindingDeclaration(D) ==
+                       Cases.front()
+                           .PatternInstantiation->getBindingDeclaration(
+                               CanonicalD);
               }))
         return std::nullopt;
     }
@@ -3505,7 +3506,7 @@ RValue CodeGenFunction::EmitMatchSelectExpr(const MatchSelectExpr &S,
       ++CaseEnd;
 
     if (auto Declarations = collectSharedCaseDeclarations(
-            Cases.slice(CaseBegin, CaseEnd - CaseBegin), getContext())) {
+            Cases.slice(CaseBegin, CaseEnd - CaseBegin))) {
       unsigned HandlerIndex = SharedCaseHandlers.size();
       SharedHandlerForSourceCase[Cases[CaseBegin].CaseIndex] = HandlerIndex;
       SharedCaseHandler &Handler = SharedCaseHandlers.emplace_back();

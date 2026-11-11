@@ -46,10 +46,17 @@ bool MatchPattern::requiresTemplateRegion() const {
   if (const auto *Type = dyn_cast<TypePattern>(this))
     return Type->getType()->getContainedAutoType();
   if (const auto *Or = dyn_cast<OrPattern>(this))
-    if (!Or->bindings().empty())
+    if (!Or->hasCommonBindingTypes())
       return true;
   return llvm::any_of(children(), [](const MatchPattern *Child) {
     return Child->requiresTemplateRegion();
+  });
+}
+
+bool OrPattern::hasCommonBindingTypes() const {
+  return llvm::all_of(Bindings, [](const VarDecl *Binding) {
+    return !Binding->isParameterPack() &&
+           !Binding->getType()->isSpecificBuiltinType(BuiltinType::Dependent);
   });
 }
 
@@ -94,6 +101,14 @@ bool MatchPatternInstantiation::isViableOrAlternative(const OrPattern *P,
 void MatchPatternInstantiation::setBindingAliases(
     const ASTContext &Ctx, ArrayRef<MatchBindingAlias> Aliases) {
   BindingAliases = Aliases.copy(Ctx);
+}
+
+const ValueDecl *
+MatchPatternInstantiation::getBindingDeclaration(const ValueDecl *Value) const {
+  for (const MatchBindingAlias &Alias : BindingAliases)
+    if (Alias.Value == Value)
+      return Alias.Declaration;
+  return Value;
 }
 
 void clang::visitMatchPatternBindings(

@@ -15,6 +15,7 @@
 #include <expected>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -169,6 +170,36 @@ constexpr int named_expected_projection(const std::expected<int, int>& source) {
   }
 }
 
+constexpr int or_binding_value(int value) { return value; }
+constexpr int or_binding_value(const std::string& value) {
+  return 100 + static_cast<int>(value.size());
+}
+
+constexpr int nested_or_binding(const std::tuple<int, std::string>& source) {
+  return match (source) {
+    case ([int payload, ""] or [0, const std::string& payload]) or [int payload, "x"] =>
+      or_binding_value(payload);
+    case _ => -1;
+  };
+}
+
+template <class Product>
+constexpr int deduced_or_binding(const Product& source) {
+  return match (source) {
+    case [auto payload, 0 or ""] or [0 or "", auto payload] => or_binding_value(payload);
+    case _ => -1;
+  };
+}
+
+template <class Product>
+constexpr int guarded_deduced_or_binding(const Product& source) {
+  return match (source) {
+    case [auto payload, 0 or ""] or [0 or "", auto payload]
+        if (or_binding_value(payload) != 0) => or_binding_value(payload);
+    case _ => -1;
+  };
+}
+
 constexpr int indexed_projection(const std::variant<int, int>& source) {
   match (source) {
     case { .index<0>: const auto& payload } => {
@@ -318,6 +349,28 @@ struct Pair {
   int second;
 };
 
+int concrete_or_static(Pair source) {
+  match (source) {
+    case [int payload, 0] or [0, int payload] => {
+      static int initial = payload;
+      static int calls = 0;
+      return 100 * initial + 10 * ++calls + payload;
+    }
+    case _ => return -1;
+  }
+}
+
+int generic_or_static(Pair source) {
+  match (source) {
+    case [auto payload, 0] or [0, auto payload] => {
+      static int initial = payload;
+      static int calls = 0;
+      return 100 * initial + 10 * ++calls + payload;
+    }
+    case _ => return -1;
+  }
+}
+
 int concrete_projection_static(const std::variant<int, int>& source) {
   match (source) {
     case { int payload } => {
@@ -337,6 +390,87 @@ int concrete_projection_after_coverage(const std::variant<int, int, int>& source
     }
     case _ => return -1;
   }
+}
+
+int concrete_or_condition_static(Pair source) {
+  if (case [int payload, 0] or [0, int payload] = source) {
+    static int calls = 0;
+    return 10 * ++calls + payload;
+  }
+  return -1;
+}
+
+int concrete_or_guard_static(Pair source) {
+  int calls = 0;
+  bool selected = match(source, case [int payload, 0] or [0, int payload]
+      if ([&] {
+        static int count = 0;
+        calls = ++count;
+        return payload > 0;
+      }()));
+  return selected ? calls : -calls;
+}
+
+struct Positive {
+  int value;
+  constexpr explicit operator bool() const { return value > 0; }
+};
+
+constexpr int concrete_or_declaration_guard(Pair source) {
+  return match (source) {
+    case [int payload, 0] or [0, int payload]
+        if (Positive guard{payload}) => guard.value;
+    case _ => -1;
+  };
+}
+
+constexpr bool concrete_or_test_declaration_guard(Pair source) {
+  return match(source, case [int payload, 0] or [0, int payload]
+      if (Positive guard{payload}));
+}
+
+constexpr int concrete_or_reference(Pair& source) {
+  return match (source) {
+    case [int& payload, 0] or [0, int& payload] if (payload > 0) => [&] {
+      struct Local {
+        int value;
+        constexpr int get() const { return value; }
+      };
+      Local copy{payload};
+      return copy.get() + ++payload;
+    }();
+    case _ => -1;
+  };
+}
+
+int generic_unnamed_or_static(Pair source) {
+  match (source) {
+    case [auto, 0] or [0, auto] => {
+      static int calls = 0;
+      return ++calls;
+    }
+    case _ => return -1;
+  }
+}
+
+template <class T>
+int concrete_or_static_in_template(Pair source) {
+  match (source) {
+    case [int payload, 0] or [0, int payload] => {
+      static int calls = 0;
+      return 10 * ++calls + payload;
+    }
+    case _ => return -1;
+  }
+}
+
+constexpr int concrete_or_condition(Pair& source) {
+  if (case [int& payload, 0] or [0, int& payload] = source &&
+      payload > 0) {
+    int original = payload;
+    return original + ++payload;
+  }
+  return -1;
 }
 
 struct Triple {
@@ -418,6 +552,24 @@ constexpr bool test() {
   assert(covered_direct_placeholder(1) == 42);
   assert(direct_condition(42) == 42);
   assert(direct_condition(-1) == -1);
+  Pair first_pair{3, 0};
+  Pair second_pair{0, 4};
+  assert(concrete_or_declaration_guard({7, 0}) == 7);
+  assert(concrete_or_declaration_guard({0, 9}) == 9);
+  assert(concrete_or_declaration_guard({-2, 0}) == -1);
+  assert(concrete_or_declaration_guard({0, -2}) == -1);
+  assert(concrete_or_test_declaration_guard({7, 0}));
+  assert(concrete_or_test_declaration_guard({0, 9}));
+  assert(!concrete_or_test_declaration_guard({-2, 0}));
+  assert(!concrete_or_test_declaration_guard({0, -2}));
+  assert(concrete_or_reference(first_pair) == 7);
+  assert(first_pair.first == 4);
+  assert(concrete_or_reference(second_pair) == 9);
+  assert(second_pair.second == 5);
+  assert(concrete_or_condition(first_pair) == 9);
+  assert(first_pair.first == 5);
+  assert(concrete_or_condition(second_pair) == 11);
+  assert(second_pair.second == 6);
   assert(singleton_projection(42) == 42);
   assert(singleton_projection(std::nullopt) == -1);
   assert(named_projection(42) == 42);
@@ -427,6 +579,23 @@ constexpr bool test() {
   assert(named_expected_projection(std::expected<int, int>(42)) == 42);
   assert(named_expected_projection(
              std::expected<int, int>(std::unexpected(42))) == 142);
+  assert(nested_or_binding({7, ""}) == 7);
+  assert(nested_or_binding({0, "abc"}) == 103);
+  assert(nested_or_binding({7, "x"}) == 7);
+  assert(nested_or_binding({7, "abc"}) == -1);
+  assert(deduced_or_binding(std::tuple<int, int>{7, 0}) == 7);
+  assert(deduced_or_binding(std::tuple<int, int>{0, 7}) == 7);
+  assert(deduced_or_binding(std::tuple<int, int>{7, 9}) == -1);
+  assert(deduced_or_binding(std::tuple<int, std::string>{7, ""}) == 7);
+  assert(deduced_or_binding(std::tuple<int, std::string>{0, "abc"}) == 103);
+  assert(deduced_or_binding(std::tuple<int, std::string>{7, "abc"}) == -1);
+  assert(deduced_or_binding(std::tuple<int, std::string>{0, ""}) == 0);
+  assert(guarded_deduced_or_binding(std::tuple<int, int>{7, 0}) == 7);
+  assert(guarded_deduced_or_binding(std::tuple<int, int>{0, 7}) == 7);
+  assert(guarded_deduced_or_binding(std::tuple<int, int>{0, 0}) == -1);
+  assert(guarded_deduced_or_binding(std::tuple<int, std::string>{7, ""}) == 7);
+  assert(guarded_deduced_or_binding(std::tuple<int, std::string>{0, "abc"}) == 103);
+  assert(guarded_deduced_or_binding(std::tuple<int, std::string>{0, ""}) == -1);
   assert(indexed_projection(
              std::variant<int, int>(std::in_place_index<0>, 42)) == 42);
   assert(indexed_projection(
@@ -474,6 +643,21 @@ int main(int, char**) {
   assert(per_alternative_reference_static(first) == 2);
   assert(per_alternative_reference_static(second) == 2);
 
+  assert(concrete_or_static({0, 7}) == 717);
+  assert(concrete_or_static({3, 0}) == 723);
+  assert(concrete_or_static({0, 4}) == 734);
+  assert(concrete_or_static_in_template<int>({0, 7}) == 17);
+  assert(concrete_or_static_in_template<int>({3, 0}) == 23);
+  assert(concrete_or_static_in_template<long>({0, 7}) == 17);
+  assert(concrete_or_static_in_template<long>({3, 0}) == 23);
+  assert(generic_or_static({0, 7}) == 717);
+  assert(generic_or_static({3, 0}) == 313);
+  assert(generic_or_static({0, 4}) == 724);
+  assert(generic_or_static({5, 0}) == 325);
+  assert(generic_unnamed_or_static({0, 7}) == 1);
+  assert(generic_unnamed_or_static({3, 0}) == 1);
+  assert(generic_unnamed_or_static({0, 4}) == 2);
+  assert(generic_unnamed_or_static({5, 0}) == 2);
   assert(concrete_projection_static(first) == 11);
   assert(concrete_projection_static(second) == 22);
   std::variant<int, int, int> partially_covered(std::in_place_index<0>, 42);
@@ -484,6 +668,11 @@ int main(int, char**) {
   assert(concrete_projection_after_coverage(partially_covered) == 22);
   partially_covered.emplace<1>(3);
   assert(concrete_projection_after_coverage(partially_covered) == 33);
+  assert(concrete_or_condition_static({0, 7}) == 17);
+  assert(concrete_or_condition_static({3, 0}) == 23);
+  assert(concrete_or_guard_static({0, 7}) == 1);
+  assert(concrete_or_guard_static({3, 0}) == 2);
+
   assert(captured_lambda_value(std::variant<int, std::string>(42)) == 42);
   assert(captured_lambda_value(std::variant<int, std::string>("text")) == 4);
   assert(local_class_size(std::variant<int, std::string>(42)) == sizeof(int));

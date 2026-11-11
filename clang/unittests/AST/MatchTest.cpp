@@ -505,6 +505,150 @@ void decomposed(Product value) {
   }
 }
 
+TEST(MatchAST, OrBindingInterfacesControlTemplateRegions) {
+  auto AST = buildMatchAST(R"cpp(
+template <class First, class Second> struct Product {
+  First first;
+  Second second;
+};
+void same(Product<int, int> value) {
+  match (value) {
+    case [int payload, 0] or [0, int payload] => use(payload);
+    case _ => ;
+  }
+}
+void different(Product<int, double> value) {
+  match (value) {
+    case [int payload, 0] or [0, double payload] => use(payload);
+    case _ => ;
+  }
+}
+void nested_same(Product<int, int> value) {
+  match (value) {
+    case ([int payload, 0] or [0, int payload]) or [int payload, 1] => use(payload);
+    case _ => ;
+  }
+}
+void nested_different(Product<int, double> value) {
+  match (value) {
+    case ([int payload, 0] or [0, double payload]) or [int payload, 1] => use(payload);
+    case _ => ;
+  }
+}
+void placeholder_same(Product<int, int> value) {
+  match (value) {
+    case [auto payload, 0] or [0, auto payload] => use(payload);
+    case _ => ;
+  }
+}
+void placeholder_different(Product<int, double> value) {
+  match (value) {
+    case [auto payload, 0] or [0, auto payload] => use(payload);
+    case _ => ;
+  }
+}
+void pack(Product<int, int> value) {
+  match (value) {
+    case [0, auto ...payload] or [auto ...payload, 0] => (use(payload), ...);
+    case _ => ;
+  }
+}
+template <class T> void enclosing_template(Product<T, T> value) {
+  match (value) {
+    case [T payload, 0] or [0, T payload] => use(payload);
+    case _ => ;
+  }
+}
+void qualifiers(Product<int&, const int&> value) {
+  match (value) {
+    case [int& payload, 0] or [0, const int& payload] => use(payload);
+    case _ => ;
+  }
+}
+void no_bindings(Product<int, double> value) {
+  match (value) {
+    case [int, 0] or [0, double] => ;
+    case _ => ;
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  const struct {
+    const char *Name;
+    bool HasCommonBindingTypes;
+    unsigned NumInstantiations = 2;
+  } Cases[] = {{"same", true},
+               {"different", false},
+               {"nested_same", true, 3},
+               {"nested_different", false, 3},
+               {"placeholder_same", false},
+               {"placeholder_different", false},
+               {"pack", false},
+               {"enclosing_template", true},
+               {"qualifiers", false},
+               {"no_bindings", true}};
+  for (auto [Name, HasCommonBindingTypes, NumInstantiations] : Cases) {
+    SCOPED_TRACE(Name);
+    FunctionDecl *Function = getFunction(*AST, Name);
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    ASSERT_NE(Finder.Selection, nullptr);
+    const MatchCase &Case = Finder.Selection->getCases()[0];
+    const auto *Or = dyn_cast<OrPattern>(Case.Pattern);
+    ASSERT_NE(Or, nullptr);
+    EXPECT_EQ(Or->hasCommonBindingTypes(), HasCommonBindingTypes);
+    EXPECT_EQ(Or->requiresTemplateRegion(), !HasCommonBindingTypes);
+    EXPECT_EQ(Case.Region != nullptr, !HasCommonBindingTypes);
+    if (!Or->bindings().empty()) {
+      EXPECT_EQ(Or->bindings()[0]->getType()->isDependentType(),
+                !HasCommonBindingTypes ||
+                    llvm::StringRef(Name) == "enclosing_template");
+    }
+    if (llvm::StringRef(Name) == "enclosing_template" ||
+        llvm::StringRef(Name) == "no_bindings")
+      continue;
+    ArrayRef<MatchCaseInstantiation> Instantiations = Case.getInstantiations();
+    ASSERT_EQ(Instantiations.size(), NumInstantiations);
+    for (const auto &Instantiation : Instantiations.drop_front())
+      EXPECT_EQ(Instantiation.Handler == Instantiations.front().Handler,
+                HasCommonBindingTypes);
+    for (const auto &Instantiation : Instantiations)
+      EXPECT_EQ(Instantiation.PatternInstantiation->bindingAliases().size(),
+                HasCommonBindingTypes ? 1u : 0u);
+  }
+}
+
+TEST(MatchAST, SharedHandlersUseCheckedBindingCorrespondence) {
+  auto AST = buildMatchAST(R"cpp(
+void test(Choice<int, int>& value) {
+  match (value) {
+    case { int& payload } => use(payload);
+  }
+}
+)cpp");
+  ASSERT_TRUE(AST);
+  MatchFinder Finder;
+  ASSERT_TRUE(Finder.TraverseDecl(getFunction(*AST, "test")));
+  ASSERT_NE(Finder.Selection, nullptr);
+  auto Candidates = Finder.Selection->getCaseInstantiations();
+  ASSERT_EQ(Candidates.size(), 2u);
+  const ValueDecl *HandlerBinding = nullptr;
+  for (const MatchCaseInstantiation &Candidate : Candidates) {
+    EXPECT_EQ(Candidate.Handler, Candidates.front().Handler);
+    SmallVector<ValueDecl *, 1> Bindings;
+    visitMatchPatternBindings(
+        Candidate.Pattern, Candidate.PatternInstantiation,
+        [&](ValueDecl *Binding) { Bindings.push_back(Binding); });
+    ASSERT_EQ(Bindings.size(), 1u);
+    const ValueDecl *Declaration =
+        Candidate.PatternInstantiation->getBindingDeclaration(Bindings.front());
+    if (!HandlerBinding)
+      HandlerBinding = Declaration;
+    EXPECT_EQ(Declaration, HandlerBinding);
+  }
+}
+
 TEST(MatchAST, EmptyInstantiationTable) {
   auto AST = buildMatchAST("int value;");
   ASSERT_TRUE(AST);

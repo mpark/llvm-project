@@ -337,6 +337,7 @@ public:
   ArrayRef<MatchPattern *> alternatives() const { return Alternatives; }
   ArrayRef<SourceLocation> orLocations() const { return OrLocs; }
   ArrayRef<VarDecl *> bindings() const { return Bindings; }
+  bool hasCommonBindingTypes() const;
 
   SourceLocation getBeginLoc() const {
     return Alternatives.front()->getBeginLoc();
@@ -633,6 +634,8 @@ public:
   ArrayRef<MatchBindingAlias> bindingAliases() const { return BindingAliases; }
   void setBindingAliases(const ASTContext &Ctx,
                          ArrayRef<MatchBindingAlias> Aliases);
+  /// The declaration used by this candidate's guard and handler for Value.
+  const ValueDecl *getBindingDeclaration(const ValueDecl *Value) const;
 };
 
 /// Visit the named bindings in source order. Without an instantiation,

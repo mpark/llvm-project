@@ -181,36 +181,6 @@ collectPatternBindings(MatchPattern *Pattern,
     collectPatternBindings(Child, Bindings);
 }
 
-static void
-collectPatternBindingInterface(MatchPattern *Pattern,
-                               SmallVectorImpl<ValueDecl *> &Bindings) {
-  if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern)) {
-    VarDecl *Variable = Declaration->getDeclaration();
-    if (auto *Decomposition = dyn_cast<DecompositionDecl>(Variable)) {
-      for (BindingDecl *Binding : Decomposition->leaf_bindings())
-        if (Binding->getDeclName())
-          Bindings.push_back(Binding);
-    } else if (Variable->getDeclName()) {
-      Bindings.push_back(Variable);
-    }
-    return;
-  }
-
-  // The first child of a nested or-pattern provides the source declarations
-  // visible after the complete pattern has been parsed.
-  if (auto *Or = dyn_cast<OrPattern>(Pattern)) {
-    collectPatternBindingInterface(Or->alternatives().front(), Bindings);
-    return;
-  }
-
-  if (auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
-    if (MatchPattern *Selector = Alternative->getSelector())
-      collectPatternBindingInterface(Selector, Bindings);
-
-  for (MatchPattern *Child : Pattern->children())
-    collectPatternBindingInterface(Child, Bindings);
-}
-
 static bool checkPatternBindingReferences(
     Sema &S, MatchPattern *Pattern,
     const llvm::SmallPtrSetImpl<const ValueDecl *> &Bindings) {
@@ -1916,15 +1886,23 @@ Sema::ActOnOrPattern(ArrayRef<MatchPattern *> Alternatives,
   }
 
   SmallVector<ValueDecl *, 4> ExpectedBindings;
-  collectPatternBindingInterface(Alternatives.front(), ExpectedBindings);
+  visitMatchPatternBindings(
+      Alternatives.front(), nullptr,
+      [&](ValueDecl *Binding) { ExpectedBindings.push_back(Binding); });
   SmallVector<QualType, 4> InterfaceTypes;
   InterfaceTypes.reserve(ExpectedBindings.size());
-  for (ValueDecl *Binding : ExpectedBindings)
-    InterfaceTypes.push_back(Binding->isParameterPack() ? QualType()
-                                                        : Binding->getType());
+  for (ValueDecl *Binding : ExpectedBindings) {
+    QualType Type = Binding->getType();
+    InterfaceTypes.push_back(Binding->isParameterPack() || Type.isNull() ||
+                                     Type->isUndeducedType()
+                                 ? QualType()
+                                 : Type);
+  }
   for (MatchPattern *Alternative : Alternatives.drop_front()) {
     SmallVector<ValueDecl *, 4> ActualBindings;
-    collectPatternBindingInterface(Alternative, ActualBindings);
+    visitMatchPatternBindings(Alternative, nullptr, [&](ValueDecl *Binding) {
+      ActualBindings.push_back(Binding);
+    });
     bool SameInterface = ExpectedBindings.size() == ActualBindings.size();
     if (SameInterface)
       for (auto [Expected, Actual] :
@@ -1942,8 +1920,7 @@ Sema::ActOnOrPattern(ArrayRef<MatchPattern *> Alternatives,
     }
     for (auto [I, Actual] : llvm::enumerate(ActualBindings))
       if (InterfaceTypes[I].isNull() || Actual->getType().isNull() ||
-          InterfaceTypes[I]->isDependentType() ||
-          Actual->getType()->isDependentType() ||
+          Actual->getType()->isUndeducedType() ||
           !Context.hasSameType(InterfaceTypes[I], Actual->getType()))
         InterfaceTypes[I] = QualType();
   }

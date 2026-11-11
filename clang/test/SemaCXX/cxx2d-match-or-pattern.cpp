@@ -125,6 +125,31 @@ constexpr int bind_from_either_position(Pair pair) {
 static_assert(bind_from_either_position({0, 3}) == 3);
 static_assert(bind_from_either_position({4, 0}) == 4);
 
+constexpr int constant_or_condition() {
+  if constexpr (case [0, int value] or [int value, 0] = Pair{0, 3})
+    return value;
+  else
+    return -1;
+}
+
+constexpr int constant_or_test() {
+  if constexpr (match(Pair{0, 3}, case [0, int value] or [int value, 0]))
+    return 1;
+  else
+    return -1;
+}
+
+constexpr int constant_or_selection() {
+  return match constexpr (Pair{4, 0}) {
+    case [0, int value] or [int value, 0] => value;
+    case _ => -1;
+  };
+}
+
+static_assert(constant_or_condition() == 3);
+static_assert(constant_or_test() == 1);
+static_assert(constant_or_selection() == 4);
+
 constexpr int guard_runs_once(Pair pair) {
   int guards = 0;
   return match (pair) {
@@ -320,6 +345,78 @@ constexpr int dependent(auto value) {
 static_assert(dependent(1) == 1);
 static_assert(dependent(1L) == 1);
 static_assert(dependent(1.0) == 0);
+
+struct MixedPair {
+  int first;
+  long second;
+};
+
+constexpr int nested_differently_typed_binding(MixedPair pair) {
+  return match (pair) {
+    case ([int value, 0] or [0, long value]) or [int value, 1] => use(value);
+    case _ => -1;
+  };
+}
+
+static_assert(nested_differently_typed_binding({1, 0}) == 3);
+static_assert(nested_differently_typed_binding({0, 1}) == 4);
+static_assert(nested_differently_typed_binding({1, 1}) == 3);
+static_assert(nested_differently_typed_binding({1, 2}) == -1);
+
+constexpr int deduced_binding(Pair pair) {
+  return match (pair) {
+    case [auto value, 0] or [0, auto value] => use(value);
+    case _ => -1;
+  };
+}
+
+static_assert(deduced_binding({1, 0}) == 3);
+static_assert(deduced_binding({0, 1}) == 3);
+static_assert(deduced_binding({1, 1}) == -1);
+
+constexpr int differently_deduced_binding(MixedPair pair) {
+  return match (pair) {
+    case [auto value, 0] or [0, auto value] => use(value);
+    case _ => -1;
+  };
+}
+
+static_assert(differently_deduced_binding({1, 0}) == 3);
+static_assert(differently_deduced_binding({0, 1}) == 4);
+static_assert(differently_deduced_binding({1, 1}) == -1);
+
+constexpr int dependent_deduced_binding(auto pair) {
+  return match (pair) {
+    case [auto value, 0] or [0, auto value] => use(value);
+    case _ => -1;
+  };
+}
+
+static_assert(dependent_deduced_binding(Pair{1, 0}) == 3);
+static_assert(dependent_deduced_binding(Pair{0, 1}) == 3);
+static_assert(dependent_deduced_binding(MixedPair{1, 0}) == 3);
+static_assert(dependent_deduced_binding(MixedPair{0, 1}) == 4);
+
+constexpr bool deduced_binding_test(auto pair) {
+  return match(pair, case [auto value, 0] or [0, auto value]
+                         if (use(value) == 3));
+}
+
+static_assert(deduced_binding_test(Pair{1, 0}));
+static_assert(deduced_binding_test(Pair{0, 1}));
+static_assert(deduced_binding_test(MixedPair{1, 0}));
+static_assert(!deduced_binding_test(MixedPair{0, 1}));
+
+constexpr int deduced_binding_condition(auto pair) {
+  if (case [auto value, 0] or [0, auto value] = pair)
+    return use(value);
+  return -1;
+}
+
+static_assert(deduced_binding_condition(Pair{1, 0}) == 3);
+static_assert(deduced_binding_condition(Pair{0, 1}) == 3);
+static_assert(deduced_binding_condition(MixedPair{1, 0}) == 3);
+static_assert(deduced_binding_condition(MixedPair{0, 1}) == 4);
 
 struct Base { virtual ~Base(); };
 struct Derived : Base {};

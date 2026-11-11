@@ -110,6 +110,38 @@ int bind_from_either(Pair pair) {
   };
 }
 
+extern int use(int);
+extern int use(long);
+
+// CHECK-LABEL: define{{.*}} i32 @_Z19deduced_or_dispatch4Pair(
+// CHECK: call{{.*}} i32 @_Z3usei
+// OR-TREE-LABEL: define{{.*}} i32 @_Z19deduced_or_dispatch4Pair(
+// OR-TREE: call{{.*}} i32 @_Z3usei
+int deduced_or_dispatch(Pair pair) {
+  return match (pair) {
+    case [auto value, 0] or [0, auto value] => use(value);
+    case _ => -1;
+  };
+}
+
+struct MixedPair {
+  int first;
+  long second;
+};
+
+// CHECK-LABEL: define{{.*}} i32 @_Z31differently_deduced_or_dispatch9MixedPair(
+// CHECK-DAG: call{{.*}} i32 @_Z3usei
+// CHECK-DAG: call{{.*}} i32 @_Z3usel
+// OR-TREE-LABEL: define{{.*}} i32 @_Z31differently_deduced_or_dispatch9MixedPair(
+// OR-TREE-DAG: call{{.*}} i32 @_Z3usei
+// OR-TREE-DAG: call{{.*}} i32 @_Z3usel
+int differently_deduced_or_dispatch(MixedPair pair) {
+  return match (pair) {
+    case [auto value, 0] or [0, auto value] => use(value);
+    case _ => -1;
+  };
+}
+
 // CHECK-LABEL: define{{.*}} i32 @_Z22case_condition_binding4Pair(
 int case_condition_binding(Pair pair) {
   if (case [0, int value] or [int value, 0] = pair)

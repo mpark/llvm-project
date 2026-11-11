@@ -378,6 +378,58 @@ void structured_binding_deleted_copy(NonCopyableProduct& value) {
   }
 }
 
+void same_type_or(Product value) {
+  match (value) {
+    case [int payload, 0] or [0, int payload] => {
+      if constexpr (true)
+        (void)payload;
+      else
+        static_assert(false, "same-type concrete bindings are not generic"); // expected-error {{static assertion failed: same-type concrete bindings are not generic}}
+    }
+    case _ => ;
+  }
+}
+
+void placeholder_or(Product value) {
+  match (value) {
+    case [auto payload, 0] or [0, auto payload] => {
+      if constexpr (__is_same(decltype(payload), int))
+        (void)payload;
+      else
+        static_assert(false, "same-type placeholder bindings are still generic");
+    }
+    case _ => ;
+  }
+}
+
+void covered_placeholder_or(Product value) {
+  match (value) {
+    case [auto payload, _] or [_, auto payload] => { // expected-warning {{or-pattern alternative is redundant}}
+      if constexpr (__is_same(decltype(payload), int))
+        (void)payload;
+      else
+        static_assert(false, "coverage does not remove the template region");
+    }
+  }
+}
+
+struct MixedProduct {
+  int first;
+  double second;
+};
+
+void different_type_or(MixedProduct value) {
+  match (value) {
+    case [int payload, 0] or [0, double payload] => {
+      if constexpr (sizeof(payload) > 0)
+        (void)payload;
+      else
+        static_assert(false, "different binding types introduce a region");
+    }
+    case _ => ;
+  }
+}
+
 void concrete_projection(Choice value) {
   match (value) {
     case { int payload } => {
