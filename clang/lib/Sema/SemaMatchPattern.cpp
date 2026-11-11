@@ -878,10 +878,10 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
     }
   }
 
+  auto *Probe = new (S.Context)
+      OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
+                      Subject->getObjectKind(), Subject);
   {
-    auto *Probe = new (S.Context)
-        OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
-                        Subject->getObjectKind(), Subject);
     EnterExpressionEvaluationContext Unevaluated(
         S, Sema::ExpressionEvaluationContext::Unevaluated);
     Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
@@ -930,9 +930,6 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
     QualType ProjectionType = S.Context.VoidTy;
     ExprValueKind ProjectionValueKind = VK_PRValue;
     {
-      auto *Probe = new (S.Context)
-          OpaqueValueExpr(Loc, Subject->getType(), Subject->getValueKind(),
-                          Subject->getObjectKind(), Subject);
       EnterExpressionEvaluationContext Unevaluated(
           S, Sema::ExpressionEvaluationContext::Unevaluated);
       Sema::SFINAETrap Trap(S, /*ForValidityCheck=*/true);
@@ -2580,21 +2577,13 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
   return CastProjectionResult::Success;
 }
 
-static void
-completeClosedAlternativeTypeSelector(TypePattern *Selector,
-                                      QualType AdvertisedType,
-                                      Sema::MatchPatternState &State) {
-  MatchPatternInfo &Info = State.get(Selector);
-  Info.TypePatternResolved = true;
-  Info.CheckedSubjectType = AdvertisedType;
-}
-
-static bool checkClosedAlternativeSubPattern(
-    Sema &S, Expr *Subject, AlternativePattern *Pattern,
-    QualType AdvertisedType, Sema::MatchPatternState &State,
-    Sema::MatchProjectionCache *ProjectionCache) {
+static bool
+checkClosedAlternativeSubPattern(Sema &S, Expr *Subject,
+                                 AlternativePattern *Pattern,
+                                 Sema::MatchPatternState &State,
+                                 Sema::MatchProjectionCache *ProjectionCache) {
   if (TypePattern *Selector = Pattern->getTypeSelector())
-    completeClosedAlternativeTypeSelector(Selector, AdvertisedType, State);
+    State.get(Selector).TypePatternResolved = true;
 
   return S.CheckCompleteMatchPattern(Subject, Pattern->getSubPattern(), State,
                                      ProjectionCache);
@@ -3057,9 +3046,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     if (ProjectionCache->DeferAlternativeChoices &&
         (Selected.size() > 1 || DeferProjection)) {
       ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
-      return checkClosedAlternativeSubPattern(S, nullptr, Pattern,
-                                              Traits.AdvertisedTypes[Chosen],
-                                              State, ProjectionCache);
+      return checkClosedAlternativeSubPattern(S, nullptr, Pattern, State,
+                                              ProjectionCache);
     }
     if (!ProjectionCache->DeferAlternativeChoices) {
       if (ProjectionCache->NextPlannedAlternativeSelection <
@@ -3125,9 +3113,8 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         return true;
       }
     }
-    return checkClosedAlternativeSubPattern(
-        S, ProjectedSubject, Pattern, Traits.AdvertisedTypes[Selected.front()],
-        State, ProjectionCache);
+    return checkClosedAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
+                                            ProjectionCache);
   };
 
   if (DeferProjection)
@@ -3468,7 +3455,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         return true;
       }
       Info.TypePatternResolved = true;
-      Info.CheckedSubjectType = Subject->getType();
       return false;
     }
 
@@ -3476,7 +3462,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (CheckInitialization(Subject))
         return true;
       Info.TypePatternResolved = true;
-      Info.CheckedSubjectType = Subject->getType();
       return false;
     }
 
@@ -3485,7 +3470,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
     case CastProjectionResult::Success:
       if (PatternType->isVoidType()) {
         Info.TypePatternResolved = true;
-        Info.CheckedSubjectType = Subject->getType();
         return false;
       }
       if (isDeclarationPatternApplicable(
@@ -3493,7 +3477,6 @@ bool Sema::CheckCompleteMatchPatternImpl(
         if (CheckInitialization(Info.Projection->getProjectedExpr()))
           return true;
         Info.TypePatternResolved = true;
-        Info.CheckedSubjectType = Subject->getType();
         return false;
       }
       Info.Projection = nullptr;
