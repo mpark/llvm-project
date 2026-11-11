@@ -11555,50 +11555,67 @@ public:
       SmallVector<unsigned, 4> DiscriminatorPath;
     };
 
+    SmallVector<Entry, 8> Entries;
+    SmallVector<AlternativeProjectionInfo, 2> AlternativeProjections;
+  };
+
+  enum class MatchPatternCheckResult { Checked, NotViable, Covered, Error };
+
+  /// State for source checking or one specialized pattern candidate. Projection
+  /// storage survives successful checks; choices describe the current candidate.
+  struct MatchPatternCheckingContext {
+    enum class Mode { Source, Complete, Candidate };
+
+    explicit MatchPatternCheckingContext(Mode CheckingMode = Mode::Complete)
+        : CheckingMode(CheckingMode) {}
+
+    MatchProjectionCache Projections;
+    Mode CheckingMode;
+
     struct AlternativeChoice {
       SmallVector<unsigned, 4> Alternatives;
       unsigned Selected;
     };
 
-    SmallVector<Entry, 8> Entries;
-    SmallVector<AlternativeProjectionInfo, 2> AlternativeProjections;
     // Source checking records only deferred choices. Candidate checking records
     // the complete selection path, including singleton choices.
     SmallVector<AlternativeChoice, 4> AlternativeChoices;
     ArrayRef<unsigned> PlannedAlternativeSelections;
     unsigned NextPlannedAlternativeSelection = 0;
-    bool DeferAlternativeChoices = false;
-    bool IsExpandingCandidate = false;
-    bool CandidateIsNotViable = false;
     SmallVector<unsigned, 4> CurrentProjectionPath;
     SmallVector<unsigned, 4> CurrentDiscriminatorPath;
     struct {
       MatchUsefulnessContext *Context = nullptr;
       MatchPattern *RootPattern = nullptr;
       unsigned CaseIndex = 0;
-      bool IsNotUseful = false;
     } CandidateUsefulness;
 
+    bool isDeferring() const { return CheckingMode == Mode::Source; }
+    bool isCheckingCandidate() const { return CheckingMode == Mode::Candidate; }
+
     bool hasDeferredPatterns(const MatchPattern *Pattern) const {
-      return DeferAlternativeChoices &&
+      return isDeferring() &&
              (!AlternativeChoices.empty() || Pattern->requiresTemplateRegion());
     }
 
     bool needsCaseInstantiation(const Expr *Subject,
                                 const MatchPattern *Pattern) const;
+
+    /// Consume and record one choice while checking a semantic candidate.
+    std::optional<unsigned> selectAlternative(ArrayRef<unsigned> Alternatives);
   };
   /// Enumerates the semantic candidates produced by generic alternative and
   /// declaration-bearing or-pattern choices. Each completed check records the
-  /// choices it encountered in the projection cache; advance selects the next
+  /// choices it encountered in the checking context; advance selects the next
   /// unexplored path in depth-first order.
   struct MatchAlternativeSelectionPlan {
     SmallVector<unsigned, 4> Selections;
     bool SawAlternativeChoice = false;
 
     static bool isRequired(const MatchPattern *Pattern);
-    void beginCandidate(MatchProjectionCache &Cache,
+    void beginCandidate(MatchPatternCheckingContext &CheckingContext,
                         bool IsExpandingCandidate) const;
-    bool advance(const MatchProjectionCache &Cache);
+    bool advance(const MatchPatternCheckingContext &CheckingContext);
   };
   struct MatchPatternState {
     SmallVector<MatchPatternInfo, 8> Infos;
@@ -11620,6 +11637,34 @@ public:
           return &Info;
       return nullptr;
     }
+  };
+
+  /// Roll back checked-pattern records and newly created projections when a
+  /// tentative check fails. Candidate enumeration can retain its choices even
+  /// when the candidate itself is not viable.
+  class MatchPatternCheckingTransaction {
+    MatchPatternCheckingContext *CheckingContext;
+    MatchPatternState *State;
+    size_t InfoCount;
+    size_t ProjectionCount;
+    size_t ChoiceCount;
+    unsigned PlannedSelection;
+    bool Committed = false;
+    bool ChoicesCommitted = false;
+
+  public:
+    explicit MatchPatternCheckingTransaction(
+        MatchPatternCheckingContext *CheckingContext,
+        MatchPatternState *State = nullptr);
+    ~MatchPatternCheckingTransaction();
+
+    MatchPatternCheckingTransaction(const MatchPatternCheckingTransaction &) =
+        delete;
+    MatchPatternCheckingTransaction &
+    operator=(const MatchPatternCheckingTransaction &) = delete;
+
+    void commit() { Committed = true; }
+    void commitAlternativeChoices() { ChoicesCommitted = true; }
   };
   /// Classify irrefutability of one checked pattern without consulting prior
   /// arms or the usefulness matrix.
@@ -11668,14 +11713,14 @@ public:
   FinalizeMatchUsefulness(MatchUsefulnessContext &Context, Expr *Subject,
                           ArrayRef<MatchCase> Cases,
                           bool DiagnoseExhaustiveness = true);
-  bool
-  CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
-                            MatchPatternState &State,
-                            MatchProjectionCache *ProjectionCache = nullptr);
+  MatchPatternCheckResult CheckCompleteMatchPattern(
+      Expr *Subject, MatchPattern *Pattern, MatchPatternState &State,
+      MatchPatternCheckingContext *CheckingContext = nullptr);
   void DiscardUninitializedMatchPatternDeclarations(MatchPattern *Pattern);
-  bool CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
-                                     MatchPatternState &State,
-                                     MatchProjectionCache *ProjectionCache);
+  MatchPatternCheckResult
+  CheckCompleteMatchPatternImpl(Expr *Subject, MatchPattern *Pattern,
+                                MatchPatternState &State,
+                                MatchPatternCheckingContext *CheckingContext);
   /// Diagnose required exhaustiveness and report both required and residual
   /// coverage.
   std::optional<MatchExhaustivenessResult> CheckMatchExhaustiveness(

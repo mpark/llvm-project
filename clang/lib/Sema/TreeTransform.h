@@ -951,6 +951,25 @@ public:
   ExprResult TransformMatchSubject(MatchExpr *E, VarDecl *&HoldingVar,
                                    bool IsFullExpression = true);
 
+  struct MatchPatternCandidatePolicy {
+    bool AllowsSubstitutionFailure;
+    bool CheckConstantsBeforeViability;
+    Sema::MatchUsefulnessContext *UsefulnessContext = nullptr;
+    unsigned CaseIndex = 0;
+    bool ContributesCoverage = false;
+  };
+
+  struct MatchPatternTransformResult {
+    Sema::MatchPatternCheckResult Result;
+    MatchPatternInstantiation *PatternInstantiation = nullptr;
+    bool PatternIsIrrefutable = false;
+  };
+
+  MatchPatternTransformResult TransformMatchPatternCandidate(
+      MatchPattern *Pattern, Expr *Subject, bool Rebuild,
+      Sema::MatchPatternCheckingContext &CheckingContext,
+      const MatchPatternCandidatePolicy &Policy);
+
   CaseConditionTransformResult
   TransformMatchTestExpr(MatchTestExpr *E, Stmt *Handler, Expr *Increment,
                          bool SelectConstexprHandler = false,
@@ -19739,6 +19758,66 @@ ExprResult TreeTransform<Derived>::TransformMatchSubject(
 }
 
 template <typename Derived>
+auto TreeTransform<Derived>::TransformMatchPatternCandidate(
+    MatchPattern *Pattern, Expr *Subject, bool Rebuild,
+    Sema::MatchPatternCheckingContext &CheckingContext,
+    const MatchPatternCandidatePolicy &Policy) -> MatchPatternTransformResult {
+  using CheckResult = Sema::MatchPatternCheckResult;
+  CheckingContext.CandidateUsefulness.Context =
+      Policy.AllowsSubstitutionFailure ? Policy.UsefulnessContext : nullptr;
+  CheckingContext.CandidateUsefulness.CaseIndex = Policy.CaseIndex;
+  MatchPattern *TransformedPattern = nullptr;
+  Sema::MatchPatternState PatternState;
+  Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext,
+                                                    &PatternState);
+  Transaction.commitAlternativeChoices();
+  auto TransformAndCheck = [&] {
+    ActionResult<MatchPattern *> Transformed =
+        getDerived().TransformPattern(Pattern, Rebuild);
+    if (Transformed.isInvalid())
+      return CheckResult::Error;
+    TransformedPattern = Transformed.get();
+    CheckingContext.CandidateUsefulness.RootPattern = TransformedPattern;
+    if (Policy.CheckConstantsBeforeViability &&
+        getSema().CheckConstantExpressionPatterns(TransformedPattern))
+      return CheckResult::Error;
+    return getSema().CheckCompleteMatchPattern(Subject, TransformedPattern,
+                                               PatternState, &CheckingContext);
+  };
+
+  CheckResult Result;
+  if (Policy.AllowsSubstitutionFailure) {
+    Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
+    Result = TransformAndCheck();
+    if (Result == CheckResult::Error && Trap.hasErrorOccurred())
+      Result = CheckResult::NotViable;
+  } else {
+    Result = TransformAndCheck();
+  }
+  if (Result == CheckResult::Covered)
+    Transaction.commit();
+  if (Result != CheckResult::Checked)
+    return {Result};
+
+  if (!Policy.CheckConstantsBeforeViability &&
+      getSema().CheckConstantExpressionPatterns(TransformedPattern))
+    return {CheckResult::Error};
+
+  MatchPatternInstantiation *Instantiation = MatchPatternInstantiation::Create(
+      getSema().Context, TransformedPattern, PatternState.Infos);
+  Transaction.commit();
+  bool IsIrrefutable =
+      getSema().isMatchPatternIrrefutable(TransformedPattern, PatternState);
+  if (Policy.UsefulnessContext &&
+      getSema().UpdateMatchUsefulness(
+          *Policy.UsefulnessContext, TransformedPattern, Instantiation,
+          Policy.CaseIndex, Policy.ContributesCoverage) ==
+          Sema::MatchPatternUsefulness::NotUseful)
+    return {CheckResult::Covered};
+  return {CheckResult::Checked, Instantiation, IsIrrefutable};
+}
+
+template <typename Derived>
 auto TreeTransform<Derived>::TransformMatchTestExpr(
     MatchTestExpr *E, Stmt *Handler, Expr *Increment,
     bool SelectConstexprHandler, ArrayRef<CaseConditionElement> Continuation,
@@ -19753,7 +19832,7 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
   if (LHS.isInvalid())
     return {ExprError()};
 
-  Sema::MatchProjectionCache ProjectionCache;
+  Sema::MatchPatternCheckingContext CheckingContext;
   SmallVector<MatchTestInstantiation, 4> Instantiations;
   Sema::MatchAlternativeSelectionPlan SelectionPlan;
   bool ShareBody = !E->getRegion() && !SelectConstexprHandler;
@@ -19763,47 +19842,27 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
       Sema::MatchAlternativeSelectionPlan::isRequired(E->getPattern());
 
   do {
-    SelectionPlan.beginCandidate(ProjectionCache, AllowsSubstitutionFailure);
-    size_t SavedProjectionCount = ProjectionCache.Entries.size();
+    SelectionPlan.beginCandidate(CheckingContext, AllowsSubstitutionFailure);
 
     MatchCandidateInstantiationScope CandidateScope(getSema(), E->getRegion());
     if (CandidateScope.isInvalid())
       return {ExprError()};
-    MatchPattern *TransformedPattern = nullptr;
-    Sema::MatchPatternState PatternState;
-    auto TransformAndCheckPattern = [&] {
-      ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
-          E->getPattern(), LHS.get() != E->getSubject());
-      if (Pattern.isInvalid())
-        return true;
-      TransformedPattern = Pattern.get();
-      if (getSema().CheckConstantExpressionPatterns(TransformedPattern))
-        return true;
-      return getSema().CheckCompleteMatchPattern(
-          LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
-    };
-
-    bool NoMatch = false;
-    if (AllowsSubstitutionFailure) {
-      Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
-      if (TransformAndCheckPattern()) {
-        if (!ProjectionCache.CandidateIsNotViable && !Trap.hasErrorOccurred())
-          return {ExprError()};
-        NoMatch = true;
-      }
-    } else if (TransformAndCheckPattern()) {
+    MatchPatternTransformResult Checked =
+        getDerived().TransformMatchPatternCandidate(
+            E->getPattern(), LHS.get(), LHS.get() != E->getSubject(),
+            CheckingContext,
+            {AllowsSubstitutionFailure,
+             /*CheckConstantsBeforeViability=*/true});
+    if (Checked.Result == Sema::MatchPatternCheckResult::Error)
       return {ExprError()};
-    }
-
-    if (NoMatch) {
-      ProjectionCache.Entries.resize(SavedProjectionCount);
+    if (Checked.Result == Sema::MatchPatternCheckResult::NotViable)
       continue;
-    }
-    bool PatternIsIrrefutable =
-        getSema().isMatchPatternIrrefutable(TransformedPattern, PatternState);
+    assert(Checked.Result == Sema::MatchPatternCheckResult::Checked &&
+           "match tests do not check prior case coverage");
     MatchPatternInstantiation *PatternInstantiation =
-        MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,
-                                          PatternState.Infos);
+        Checked.PatternInstantiation;
+    MatchPattern *TransformedPattern = PatternInstantiation->getPattern();
+    bool PatternIsIrrefutable = Checked.PatternIsIrrefutable;
     getDerived().RemapMatchPatternBindings(
         E->getPattern(), PatternInstantiation,
         ShareBody && !Instantiations.empty()
@@ -19872,7 +19931,7 @@ auto TreeTransform<Derived>::TransformMatchTestExpr(
                               TransformedContinuation.Condition.get(),
                               TransformedContinuation.Handler,
                               TransformedContinuation.Increment});
-  } while (SelectionPlan.advance(ProjectionCache));
+  } while (SelectionPlan.advance(CheckingContext));
 
   if (Instantiations.empty()) {
     if (AllowsSubstitutionFailure)
@@ -19948,8 +20007,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
   SmallVector<MatchCase, 32> SourceCases(E->getCases());
   SmallVector<MatchCaseInstantiation, 32> Instantiations;
   Sema::MatchUsefulnessContext UsefulnessContext(LHS.get()->getType());
-  Sema::MatchProjectionCache ProjectionCache;
-  enum class TransformCaseResult { Success, NotUseful, NoMatch, Error };
+  Sema::MatchPatternCheckingContext CheckingContext;
+  using TransformCaseResult = Sema::MatchPatternCheckResult;
   auto TransformCase = [&](const MatchCaseInstantiation &Case,
                            MatchCaseInstantiation &Transformed,
                            std::optional<bool> &ConstexprConditionValue,
@@ -19964,67 +20023,35 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
                           ExprDependence::Instantiation);
     Source.MaybeUseful |= IsSubstitutionDependent;
     bool AllowsSubstitutionFailure = IsSubstitutionDependent || Source.Region ||
-                                     ProjectionCache.IsExpandingCandidate;
+                                     CheckingContext.isCheckingCandidate();
     if (AllowsSubstitutionFailure && PreviousCandidates.empty() &&
-        ProjectionCache.PlannedAlternativeSelections.empty() &&
+        CheckingContext.PlannedAlternativeSelections.empty() &&
         getSema().TryPruneCoveredMatchSubject(
             UsefulnessContext, Case.Pattern->getBeginLoc(), CaseIndex))
-      return TransformCaseResult::NotUseful;
+      return TransformCaseResult::Covered;
     MatchCandidateInstantiationScope CandidateScope(getSema(), Source.Region);
     if (CandidateScope.isInvalid())
       return TransformCaseResult::Error;
-    MatchPattern *TransformedPattern = nullptr;
-    Sema::MatchPatternState PatternState;
-    ProjectionCache.CandidateUsefulness.Context =
-        AllowsSubstitutionFailure ? &UsefulnessContext : nullptr;
-    ProjectionCache.CandidateUsefulness.CaseIndex = CaseIndex;
-    ProjectionCache.CandidateUsefulness.IsNotUseful = false;
-    auto TransformAndCheckPattern = [&] {
-      ActionResult<MatchPattern *> Pattern = getDerived().TransformPattern(
-          Case.Pattern, LHS.get() != E->getSubject());
-      if (Pattern.isInvalid())
-        return true;
-      TransformedPattern = Pattern.get();
-      ProjectionCache.CandidateUsefulness.RootPattern = TransformedPattern;
-      return getSema().CheckCompleteMatchPattern(
-          LHS.get(), TransformedPattern, PatternState, &ProjectionCache);
-    };
-    if (AllowsSubstitutionFailure) {
-      Sema::SFINAETrap Trap(getSema(), /*WithAccessChecking=*/true);
-      if (TransformAndCheckPattern()) {
-        if (ProjectionCache.CandidateUsefulness.IsNotUseful)
-          return TransformCaseResult::NotUseful;
-        if (ProjectionCache.CandidateIsNotViable)
-          return TransformCaseResult::NoMatch;
-        return Trap.hasErrorOccurred() ? TransformCaseResult::NoMatch
-                                       : TransformCaseResult::Error;
-      }
-    } else if (TransformAndCheckPattern()) {
-      return TransformCaseResult::Error;
-    }
-
-    if (getSema().CheckConstantExpressionPatterns(TransformedPattern))
-      return TransformCaseResult::Error;
-
+    MatchPatternTransformResult Checked =
+        getDerived().TransformMatchPatternCandidate(
+            Case.Pattern, LHS.get(), LHS.get() != E->getSubject(),
+            CheckingContext,
+            {AllowsSubstitutionFailure, /*CheckConstantsBeforeViability=*/false,
+             &UsefulnessContext, CaseIndex,
+             /*ContributesCoverage=*/!Case.Guard.hasGuard() &&
+                 Case.IfLoc.isInvalid()});
+    if (Checked.Result != TransformCaseResult::Checked)
+      return Checked.Result;
     MatchPatternInstantiation *PatternInstantiation =
-        MatchPatternInstantiation::Create(getSema().Context, TransformedPattern,
-                                          PatternState.Infos);
-    bool PatternIsIrrefutable =
-        getSema().isMatchPatternIrrefutable(TransformedPattern, PatternState);
-    bool ContributesCoverage =
-        !Case.Guard.hasGuard() && Case.IfLoc.isInvalid();
-    Sema::MatchPatternUsefulness Usefulness = getSema().UpdateMatchUsefulness(
-        UsefulnessContext, TransformedPattern, PatternInstantiation, CaseIndex,
-        ContributesCoverage);
-
-    if (Usefulness == Sema::MatchPatternUsefulness::NotUseful)
-      return TransformCaseResult::NotUseful;
+        Checked.PatternInstantiation;
+    MatchPattern *TransformedPattern = PatternInstantiation->getPattern();
+    bool PatternIsIrrefutable = Checked.PatternIsIrrefutable;
 
     // The patterns in later arms still participate in exhaustiveness and
     // usefulness analysis, but their guards and handlers are discarded once a
     // preceding constexpr arm has been selected.
     if (DiscardedByConstexpr)
-      return TransformCaseResult::Success;
+      return TransformCaseResult::Checked;
 
     const MatchCaseInstantiation *SharedBody =
         !Source.Region && !E->isConstexpr() && !PreviousCandidates.empty()
@@ -20039,7 +20066,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       Transformed = *SharedBody;
       Transformed.Pattern = TransformedPattern;
       Transformed.PatternInstantiation = PatternInstantiation;
-      return TransformCaseResult::Success;
+      return TransformCaseResult::Checked;
     }
 
     StmtResult GuardInit = getDerived().TransformMatchBody(Case.Guard.Init);
@@ -20074,7 +20101,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
       }
 
       if (ConstexprConditionValue && !*ConstexprConditionValue)
-        return TransformCaseResult::Success;
+        return TransformCaseResult::Checked;
     }
 
     StmtResult Handler = getDerived().TransformMatchBody(
@@ -20128,7 +20155,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
     Transformed = {TransformedPattern, Case.IfLoc,       CandidateGuard,
                    Handler.get(),      CaseIndex,        PatternInstantiation,
                    Attributes,         Case.NotReturnLoc};
-    return TransformCaseResult::Success;
+    return TransformCaseResult::Checked;
   };
 
   bool ConstexprSelectionComplete = false;
@@ -20144,9 +20171,8 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           Sema::MatchAlternativeSelectionPlan::isRequired(Case.Pattern);
       bool SawViableCandidate = false;
       do {
-        SelectionPlan.beginCandidate(ProjectionCache,
+        SelectionPlan.beginCandidate(CheckingContext,
                                      PatternHasAlternativeChoice);
-        size_t SavedProjectionCount = ProjectionCache.Entries.size();
         MatchCaseInstantiation ExpandedCase;
         std::optional<bool> ConstexprConditionValue;
         bool DiscardedByConstexpr = ConstexprSelectionComplete;
@@ -20155,9 +20181,7 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
             ArrayRef(Instantiations).drop_front(FirstInstantiation));
         if (Result == TransformCaseResult::Error)
           return ExprError();
-        if (Result == TransformCaseResult::NoMatch)
-          ProjectionCache.Entries.resize(SavedProjectionCount);
-        else if (Result == TransformCaseResult::Success) {
+        if (Result == TransformCaseResult::Checked) {
           SawViableCandidate = true;
           if (!DiscardedByConstexpr &&
               (!E->isConstexpr() || !ConstexprConditionValue ||
@@ -20166,11 +20190,10 @@ TreeTransform<Derived>::TransformMatchSelectExpr(MatchSelectExpr *E) {
           ConstexprSelectionComplete |= E->isConstexpr() &&
                                         ConstexprConditionValue &&
                                         *ConstexprConditionValue;
-        } else {
-          assert(Result == TransformCaseResult::NotUseful);
+        } else if (Result == TransformCaseResult::Covered) {
           SawViableCandidate = true;
         }
-      } while (SelectionPlan.advance(ProjectionCache));
+      } while (SelectionPlan.advance(CheckingContext));
       if (!SawViableCandidate &&
           (SelectionPlan.SawAlternativeChoice ||
            (Source.Region && !Source.MaybeUseful)) &&

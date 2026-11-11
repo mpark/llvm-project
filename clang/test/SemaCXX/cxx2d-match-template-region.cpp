@@ -599,6 +599,29 @@ void one_viable_projectable_state(Choice value) {
   }
 }
 
+constexpr bool one_viable_test_guard(Choice value) {
+  return match (value, case { Integer auto payload }
+                          if ([](auto integer) {
+                            static_assert(__is_same(decltype(integer), int));
+                            return integer > 0;
+                          }(payload)));
+}
+
+static_assert(one_viable_test_guard({0, 7, 0.0}));
+static_assert(!one_viable_test_guard({0, -1, 0.0}));
+static_assert(!one_viable_test_guard({1, 0, 7.0}));
+
+constexpr int one_viable_condition_handler(Choice value) {
+  if (case { Integer auto payload } = value) {
+    static_assert(__is_same(decltype(payload), int));
+    return payload;
+  }
+  return -1;
+}
+
+static_assert(one_viable_condition_handler({0, 7, 0.0}) == 7);
+static_assert(one_viable_condition_handler({1, 0, 7.0}) == -1);
+
 void type_constraint_selector(Choice value) {
   match (value) {
     case { Integer: auto payload } => {

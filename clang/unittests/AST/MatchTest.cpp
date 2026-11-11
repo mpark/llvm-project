@@ -11,10 +11,12 @@
 #include "clang/AST/ASTNodeTraverser.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/ASTUnit.h"
+#include "clang/Sema/Sema.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -617,6 +619,179 @@ void no_bindings(Product<int, double> value) {
       EXPECT_EQ(Instantiation.PatternInstantiation->bindingAliases().size(),
                 HasCommonBindingTypes ? 1u : 0u);
   }
+}
+
+TEST(MatchAST, SelectionPlanningDistinguishesPatternChoices) {
+  const struct {
+    const char *Pattern;
+    bool RequiresSelection;
+  } Cases[] = {{"_", false},
+               {"0 or 1", false},
+               {"(0 or 1) or (2 or 3)", false},
+               {"int", false},
+               {"[0 or 1, int payload]", false},
+               {"[int payload, 0 or 1]", false},
+               {"[0 or 1, [int payload, _]]", false},
+               {"[[int or long, _], _]", true},
+               {"(int or long) or double", true},
+               {"{ int payload }", true},
+               {"{ .value: int payload }", false},
+               {"{ .value: auto payload }", false},
+               {"{ .index<0>: int payload }", false},
+               {"{ int: _ }", true},
+               {"{ Any: _ }", true},
+               {"{ .value: [int or long, _] }", true},
+               {"{}", false}};
+  for (auto [Pattern, RequiresSelection] : Cases) {
+    SCOPED_TRACE(Pattern);
+    auto AST = buildMatchAST("template <class> concept Any = true;\n"
+                             "template <class T> void test(T value) {\n"
+                             "  match (value) { case " +
+                             std::string(Pattern) + " => ; }\n}");
+    ASSERT_TRUE(AST);
+    FunctionDecl *Function = getFunction(*AST, "test");
+    ASSERT_NE(Function, nullptr);
+    MatchFinder Finder;
+    ASSERT_TRUE(Finder.TraverseDecl(Function));
+    ASSERT_NE(Finder.Selection, nullptr);
+    ASSERT_EQ(Finder.Selection->getCases().size(), 1u);
+    EXPECT_EQ(Sema::MatchAlternativeSelectionPlan::isRequired(
+                  Finder.Selection->getCases()[0].Pattern),
+              RequiresSelection);
+  }
+}
+
+TEST(MatchAST, SelectionPlanningEnumeratesNestedChoices) {
+  Sema::MatchAlternativeSelectionPlan Plan;
+  Sema::MatchPatternCheckingContext CheckingContext;
+  const unsigned FirstAlternatives[] = {2, 5};
+  const unsigned SecondAlternatives[] = {3, 7};
+  std::vector<std::vector<unsigned>> Selections;
+  do {
+    Plan.beginCandidate(CheckingContext, /*IsExpandingCandidate=*/true);
+    std::optional<unsigned> First =
+        CheckingContext.selectAlternative(FirstAlternatives);
+    ASSERT_TRUE(First);
+    std::optional<unsigned> Second =
+        CheckingContext.selectAlternative(SecondAlternatives);
+    ASSERT_TRUE(Second);
+    Selections.push_back({*First, *Second});
+    EXPECT_EQ(CheckingContext.AlternativeChoices.size(), 2u);
+    EXPECT_EQ(CheckingContext.NextPlannedAlternativeSelection,
+              Plan.Selections.size());
+  } while (Plan.advance(CheckingContext));
+
+  const std::vector<std::vector<unsigned>> Expected = {
+      {2, 3}, {2, 7}, {5, 3}, {5, 7}};
+  EXPECT_EQ(Selections, Expected);
+  EXPECT_TRUE(Plan.SawAlternativeChoice);
+}
+
+TEST(MatchAST, SelectionPlanningRejectsUnavailableChoices) {
+  Sema::MatchAlternativeSelectionPlan Plan;
+  Plan.Selections = {2, 7};
+  Sema::MatchPatternCheckingContext CheckingContext;
+  Plan.beginCandidate(CheckingContext, /*IsExpandingCandidate=*/true);
+
+  const unsigned FirstAlternatives[] = {2, 5};
+  const unsigned SecondAlternatives[] = {3};
+  EXPECT_EQ(CheckingContext.selectAlternative(FirstAlternatives), 2u);
+  EXPECT_FALSE(CheckingContext.selectAlternative(SecondAlternatives));
+  EXPECT_EQ(CheckingContext.NextPlannedAlternativeSelection, 2u);
+  ASSERT_EQ(CheckingContext.AlternativeChoices.size(), 1u);
+  EXPECT_EQ(CheckingContext.AlternativeChoices.front().Selected, 2u);
+
+  ASSERT_TRUE(Plan.advance(CheckingContext));
+  EXPECT_EQ(Plan.Selections, (SmallVector<unsigned, 4>{5}));
+  Plan.beginCandidate(CheckingContext, /*IsExpandingCandidate=*/true);
+  EXPECT_TRUE(CheckingContext.AlternativeChoices.empty());
+  EXPECT_EQ(CheckingContext.NextPlannedAlternativeSelection, 0u);
+  EXPECT_EQ(CheckingContext.selectAlternative(FirstAlternatives), 5u);
+  EXPECT_EQ(CheckingContext.selectAlternative(SecondAlternatives), 3u);
+  EXPECT_FALSE(Plan.advance(CheckingContext));
+}
+
+TEST(MatchAST, CandidateCheckingKeepsProjectionsButResetsSelectionState) {
+  Sema::MatchAlternativeSelectionPlan Plan;
+  Plan.Selections = {3};
+  Sema::MatchPatternCheckingContext CheckingContext;
+  CheckingContext.Projections.Entries.push_back(
+      {nullptr, nullptr, QualType(), 0, {}, {}});
+  CheckingContext.CurrentProjectionPath = {1, 2};
+  CheckingContext.CurrentDiscriminatorPath = {1};
+  CheckingContext.CandidateUsefulness.CaseIndex = 7;
+
+  Plan.beginCandidate(CheckingContext, /*IsExpandingCandidate=*/true);
+  EXPECT_TRUE(CheckingContext.isCheckingCandidate());
+  EXPECT_FALSE(CheckingContext.isDeferring());
+  EXPECT_EQ(CheckingContext.Projections.Entries.size(), 1u);
+  EXPECT_TRUE(CheckingContext.CurrentProjectionPath.empty());
+  EXPECT_TRUE(CheckingContext.CurrentDiscriminatorPath.empty());
+  EXPECT_EQ(CheckingContext.CandidateUsefulness.CaseIndex, 0u);
+
+  const unsigned Alternatives[] = {3, 5};
+  ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 3u);
+  ASSERT_TRUE(Plan.advance(CheckingContext));
+  Plan.beginCandidate(CheckingContext, /*IsExpandingCandidate=*/false);
+  EXPECT_FALSE(CheckingContext.isCheckingCandidate());
+  EXPECT_TRUE(CheckingContext.AlternativeChoices.empty());
+  EXPECT_EQ(CheckingContext.selectAlternative(Alternatives), 5u);
+  EXPECT_EQ(CheckingContext.Projections.Entries.size(), 1u);
+}
+
+TEST(MatchAST, TentativePatternCheckingRollsBackRecordsAndChoices) {
+  Sema::MatchPatternCheckingContext CheckingContext;
+  Sema::MatchPatternState State;
+  const unsigned Alternatives[] = {3, 5};
+  const unsigned Selections[] = {3, 5};
+  CheckingContext.PlannedAlternativeSelections = Selections;
+  ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 3u);
+  State.Infos.emplace_back();
+
+  {
+    Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
+    CheckingContext.Projections.Entries.push_back(
+        {nullptr, nullptr, QualType(), 0, {}, {}});
+    State.Infos.emplace_back();
+    ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 5u);
+  }
+  EXPECT_TRUE(CheckingContext.Projections.Entries.empty());
+  EXPECT_EQ(State.Infos.size(), 1u);
+  EXPECT_EQ(CheckingContext.AlternativeChoices.size(), 1u);
+  EXPECT_EQ(CheckingContext.NextPlannedAlternativeSelection, 1u);
+}
+
+TEST(MatchAST, RejectedCandidateKeepsChoicesForEnumeration) {
+  Sema::MatchPatternCheckingContext CheckingContext;
+  Sema::MatchPatternState State;
+  Sema::MatchAlternativeSelectionPlan Plan;
+  const unsigned Alternatives[] = {3, 5};
+  {
+    Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
+    CheckingContext.Projections.Entries.push_back(
+        {nullptr, nullptr, QualType(), 0, {}, {}});
+    State.Infos.emplace_back();
+    ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 3u);
+    Transaction.commitAlternativeChoices();
+  }
+  EXPECT_TRUE(CheckingContext.Projections.Entries.empty());
+  EXPECT_TRUE(State.Infos.empty());
+  ASSERT_TRUE(Plan.advance(CheckingContext));
+  EXPECT_EQ(Plan.Selections, (SmallVector<unsigned, 4>{5}));
+}
+
+TEST(MatchAST, SuccessfulPatternCheckingCommitsRecords) {
+  Sema::MatchPatternCheckingContext CheckingContext;
+  Sema::MatchPatternState State;
+  {
+    Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
+    CheckingContext.Projections.Entries.push_back(
+        {nullptr, nullptr, QualType(), 0, {}, {}});
+    State.Infos.emplace_back();
+    Transaction.commit();
+  }
+  EXPECT_EQ(CheckingContext.Projections.Entries.size(), 1u);
+  EXPECT_EQ(State.Infos.size(), 1u);
 }
 
 TEST(MatchAST, SharedHandlersUseCheckedBindingCorrespondence) {

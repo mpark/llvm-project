@@ -4591,7 +4591,7 @@ private:
                       bool DeferHandlerChecking);
   bool ParseMatchCase(Expr *Subject, TypeLoc OrigResultType, QualType &RetTy,
                       MatchCase &Case,
-                      Sema::MatchProjectionCache &ProjectionCache,
+                      Sema::MatchPatternCheckingContext &CheckingContext,
                       bool IsStatement, bool DeferHandlerChecking);
   Sema::ConditionResult ParseMatchGuard(SourceLocation &IfLoc,
                                         StmtResult &InitStmt);

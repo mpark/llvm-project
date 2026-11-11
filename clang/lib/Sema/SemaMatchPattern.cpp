@@ -32,6 +32,7 @@
 
 using namespace clang;
 using namespace sema;
+using MatchPatternCheckResult = Sema::MatchPatternCheckResult;
 
 Sema::MatchDeclContextRAII::MatchDeclContextRAII(Sema &S, SourceLocation Loc,
                                                  Scope *ParsingScope) {
@@ -101,60 +102,97 @@ void Sema::MatchTemplateRegionRAII::enter(SourceLocation Loc,
 
 bool Sema::MatchAlternativeSelectionPlan::isRequired(
     const MatchPattern *Pattern) {
-  auto PerformsDeclarationInitialization = [](const MatchPattern *Current,
-                                              auto &Recurse) -> bool {
-    if (isa<DeclarationPattern, TypePattern>(Current))
+  auto RequiresSelection = [](const MatchPattern *Current, bool InOrPattern,
+                              auto &Recurse) -> bool {
+    if (InOrPattern && isa<DeclarationPattern, TypePattern>(Current))
       return true;
+    if (const auto *Alternative = dyn_cast<AlternativePattern>(Current))
+      if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
+          Alternative->isTypeSelected() ||
+          Alternative->isTypeConstraintSelected())
+        return true;
+    InOrPattern |= isa<OrPattern>(Current);
     return llvm::any_of(Current->children(), [&](const MatchPattern *Child) {
-      return Recurse(Child, Recurse);
+      return Recurse(Child, InOrPattern, Recurse);
     });
   };
-
-  if (isa<OrPattern>(Pattern) &&
-      PerformsDeclarationInitialization(Pattern,
-                                        PerformsDeclarationInitialization))
-    return true;
-  if (const auto *Alternative = dyn_cast<AlternativePattern>(Pattern))
-    if (Alternative->getAlternativeKind() == AlternativePattern::Generic ||
-        Alternative->isTypeSelected() ||
-        Alternative->isTypeConstraintSelected())
-      return true;
-  return llvm::any_of(Pattern->children(), [](const MatchPattern *Child) {
-    return isRequired(Child);
-  });
+  return RequiresSelection(Pattern, false, RequiresSelection);
 }
 
-bool Sema::MatchProjectionCache::needsCaseInstantiation(
+bool Sema::MatchPatternCheckingContext::needsCaseInstantiation(
     const Expr *Subject, const MatchPattern *Pattern) const {
   return hasDeferredPatterns(Pattern) ||
          (Subject->isTypeDependent() &&
           MatchAlternativeSelectionPlan::isRequired(Pattern));
 }
 
+std::optional<unsigned> Sema::MatchPatternCheckingContext::selectAlternative(
+    ArrayRef<unsigned> Alternatives) {
+  assert(!isDeferring() && "source checking does not consume choices");
+  assert(!Alternatives.empty() && "cannot select from an empty candidate set");
+  unsigned Selected = Alternatives.front();
+  if (NextPlannedAlternativeSelection < PlannedAlternativeSelections.size())
+    Selected = PlannedAlternativeSelections[NextPlannedAlternativeSelection++];
+  if (!llvm::is_contained(Alternatives, Selected))
+    return std::nullopt;
+  AlternativeChoices.push_back(
+      {SmallVector<unsigned, 4>(Alternatives), Selected});
+  return Selected;
+}
+
 void Sema::MatchAlternativeSelectionPlan::beginCandidate(
-    MatchProjectionCache &Cache, bool IsExpandingCandidate) const {
-  Cache.AlternativeChoices.clear();
-  Cache.PlannedAlternativeSelections = Selections;
-  Cache.NextPlannedAlternativeSelection = 0;
-  Cache.CurrentProjectionPath.clear();
-  Cache.CurrentDiscriminatorPath.clear();
-  Cache.IsExpandingCandidate = IsExpandingCandidate;
-  Cache.CandidateIsNotViable = false;
+    MatchPatternCheckingContext &CheckingContext,
+    bool IsExpandingCandidate) const {
+  CheckingContext.AlternativeChoices.clear();
+  CheckingContext.PlannedAlternativeSelections = Selections;
+  CheckingContext.NextPlannedAlternativeSelection = 0;
+  CheckingContext.CurrentProjectionPath.clear();
+  CheckingContext.CurrentDiscriminatorPath.clear();
+  CheckingContext.CheckingMode =
+      IsExpandingCandidate ? MatchPatternCheckingContext::Mode::Candidate
+                           : MatchPatternCheckingContext::Mode::Complete;
+  CheckingContext.CandidateUsefulness = {};
+}
+
+Sema::MatchPatternCheckingTransaction::MatchPatternCheckingTransaction(
+    MatchPatternCheckingContext *CheckingContext, MatchPatternState *State)
+    : CheckingContext(CheckingContext), State(State),
+      InfoCount(State ? State->Infos.size() : 0),
+      ProjectionCount(
+          CheckingContext ? CheckingContext->Projections.Entries.size() : 0),
+      ChoiceCount(CheckingContext ? CheckingContext->AlternativeChoices.size()
+                                  : 0),
+      PlannedSelection(CheckingContext
+                           ? CheckingContext->NextPlannedAlternativeSelection
+                           : 0) {}
+
+Sema::MatchPatternCheckingTransaction::~MatchPatternCheckingTransaction() {
+  if (Committed)
+    return;
+  if (State)
+    State->Infos.resize(InfoCount);
+  if (!CheckingContext)
+    return;
+  CheckingContext->Projections.Entries.resize(ProjectionCount);
+  if (!ChoicesCommitted) {
+    CheckingContext->AlternativeChoices.resize(ChoiceCount);
+    CheckingContext->NextPlannedAlternativeSelection = PlannedSelection;
+  }
 }
 
 bool Sema::MatchAlternativeSelectionPlan::advance(
-    const MatchProjectionCache &Cache) {
-  SawAlternativeChoice |= !Cache.AlternativeChoices.empty();
+    const MatchPatternCheckingContext &CheckingContext) {
+  SawAlternativeChoice |= !CheckingContext.AlternativeChoices.empty();
   SmallVector<unsigned, 4> NextSelections;
-  for (unsigned I = Cache.AlternativeChoices.size(); I-- > 0;) {
-    const auto &Choice = Cache.AlternativeChoices[I];
+  for (unsigned I = CheckingContext.AlternativeChoices.size(); I-- > 0;) {
+    const auto &Choice = CheckingContext.AlternativeChoices[I];
     auto Selected = llvm::find(Choice.Alternatives, Choice.Selected);
     assert(Selected != Choice.Alternatives.end() &&
            "selected alternative is not a candidate");
     if (std::next(Selected) == Choice.Alternatives.end())
       continue;
     for (unsigned J = 0; J < I; ++J)
-      NextSelections.push_back(Cache.AlternativeChoices[J].Selected);
+      NextSelections.push_back(CheckingContext.AlternativeChoices[J].Selected);
     NextSelections.push_back(*std::next(Selected));
     Selections = std::move(NextSelections);
     return true;
@@ -853,23 +891,22 @@ static QualType getAlternativeProjectionBindingType(Sema &S, SourceLocation Loc,
                               DeclarationName());
 }
 
-static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
-                                            Expr *Subject,
-                                            AlternativeTraitsInfo &Info,
-                                            Sema::MatchProjectionCache *Cache) {
+static bool determineAlternativeProjections(
+    Sema &S, SourceLocation Loc, Expr *Subject, AlternativeTraitsInfo &Info,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   if (Info.IsBuiltinPointer)
     return false;
 
-  if (Cache) {
+  if (CheckingContext) {
     auto Cached = llvm::find_if(
-        Cache->AlternativeProjections,
+        CheckingContext->Projections.AlternativeProjections,
         [&](const Sema::MatchProjectionCache::AlternativeProjectionInfo &P) {
           return S.Context.hasSameType(P.TraitsType, Info.Type) &&
                  S.Context.hasSameType(P.SubjectType, Subject->getType()) &&
                  P.SubjectValueKind == Subject->getValueKind() &&
                  P.SubjectObjectKind == Subject->getObjectKind();
         });
-    if (Cached != Cache->AlternativeProjections.end()) {
+    if (Cached != CheckingContext->Projections.AlternativeProjections.end()) {
       Info.ProjectionTypes = Cached->ProjectionTypes;
       Info.ProjectionValueKinds = Cached->ProjectionValueKinds;
       Info.IndexType = Cached->IndexType;
@@ -962,8 +999,9 @@ static bool determineAlternativeProjections(Sema &S, SourceLocation Loc,
     Info.ProjectionValueKinds.push_back(ProjectionValueKind);
   }
 
-  if (Cache) {
-    auto &Cached = Cache->AlternativeProjections.emplace_back();
+  if (CheckingContext) {
+    auto &Cached =
+        CheckingContext->Projections.AlternativeProjections.emplace_back();
     Cached.TraitsType = Info.Type;
     Cached.SubjectType = Subject->getType();
     Cached.IndexType = Info.IndexType;
@@ -1050,13 +1088,12 @@ static bool alternativeValueMatchesPattern(Sema &S, Expr *Pattern,
 static bool buildAlternativeValuePatternCondition(
     Sema &S, SourceLocation Loc, Expr *Subject,
     const AlternativeTraitsInfo &Traits, MatchPatternInfo &PatternInfo,
-    Sema::MatchProjectionCache *ProjectionCache);
+    Sema::MatchPatternCheckingContext *CheckingContext);
 
-static bool
-classifyAlternativeValuePattern(Sema &S, Expr *Subject,
-                                ExpressionPattern *Pattern,
-                                MatchPatternInfo &PatternInfo,
-                                Sema::MatchProjectionCache *ProjectionCache) {
+static bool classifyAlternativeValuePattern(
+    Sema &S, Expr *Subject, ExpressionPattern *Pattern,
+    MatchPatternInfo &PatternInfo,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   if (Subject->isTypeDependent() || Pattern->getExpr()->isValueDependent())
     return false;
 
@@ -1077,7 +1114,7 @@ classifyAlternativeValuePattern(Sema &S, Expr *Subject,
                                                    SubjectType, Traits))
       return false;
     if (determineAlternativeProjections(S, Pattern->getBeginLoc(), Subject,
-                                        Traits, ProjectionCache))
+                                        Traits, CheckingContext))
       return true;
     for (unsigned I = 0; I < Traits.Size; ++I)
       if (Traits.Values[I] && alternativeValueMatchesPattern(
@@ -1090,7 +1127,7 @@ classifyAlternativeValuePattern(Sema &S, Expr *Subject,
   storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected,
                              /*IsAlternativeValuePattern=*/true);
   return buildAlternativeValuePatternCondition(
-      S, Pattern->getBeginLoc(), Subject, Traits, PatternInfo, ProjectionCache);
+      S, Pattern->getBeginLoc(), Subject, Traits, PatternInfo, CheckingContext);
 }
 
 static ExprResult buildConstantPatternValue(Sema &S, Expr *Pattern,
@@ -1388,8 +1425,8 @@ static void forEachPatternDeclaration(
 
 static bool shouldDeferAlternativeProjection(
     const AlternativePattern *Pattern,
-    const Sema::MatchProjectionCache *ProjectionCache) {
-  return ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+    const Sema::MatchPatternCheckingContext *CheckingContext) {
+  return CheckingContext && CheckingContext->isDeferring() &&
          Pattern->requiresTemplateRegion();
 }
 
@@ -2022,14 +2059,16 @@ Sema::ActOnDecompositionPattern(ArrayRef<MatchPattern *> Patterns,
 }
 
 static MatchProjection *
-findMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
+findMatchProjection(Sema &S, Sema::MatchPatternCheckingContext *CheckingContext,
                     const Expr *Subject, MatchProjection::ProjectionKind Kind,
                     QualType Discriminator = QualType(), unsigned Arity = 0) {
-  if (!Cache)
+  if (!CheckingContext)
     return nullptr;
-  for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
+  for (const Sema::MatchProjectionCache::Entry &Entry :
+       CheckingContext->Projections.Entries) {
     if (Entry.Subject != Subject || Entry.Projection->getKind() != Kind ||
-        Entry.Arity != Arity || Entry.Path != Cache->CurrentProjectionPath)
+        Entry.Arity != Arity ||
+        Entry.Path != CheckingContext->CurrentProjectionPath)
       continue;
     if (Discriminator.isNull() == Entry.Discriminator.isNull() &&
         (Discriminator.isNull() ||
@@ -2040,40 +2079,43 @@ findMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
 }
 
 static MatchProjection *
-createMatchProjection(Sema &S, Sema::MatchProjectionCache *Cache,
+createMatchProjection(Sema &S,
+                      Sema::MatchPatternCheckingContext *CheckingContext,
                       const Expr *Subject, MatchProjection::ProjectionKind Kind,
                       QualType Discriminator = QualType(), unsigned Arity = 0) {
   auto *Projection = new (S.Context) MatchProjection(Kind);
-  if (Cache)
-    Cache->Entries.push_back({Subject, Projection, Discriminator, Arity,
-                              Cache->CurrentProjectionPath,
-                              Cache->CurrentDiscriminatorPath});
+  if (CheckingContext)
+    CheckingContext->Projections.Entries.push_back(
+        {Subject, Projection, Discriminator, Arity,
+         CheckingContext->CurrentProjectionPath,
+         CheckingContext->CurrentDiscriminatorPath});
   return Projection;
 }
 
-static MatchProjection *
-findAlternativeHoldingProjection(Sema::MatchProjectionCache *Cache,
-                                 const Expr *Subject) {
-  if (!Cache)
+static MatchProjection *findAlternativeHoldingProjection(
+    Sema::MatchPatternCheckingContext *CheckingContext, const Expr *Subject) {
+  if (!CheckingContext)
     return nullptr;
-  for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
+  for (const Sema::MatchProjectionCache::Entry &Entry :
+       CheckingContext->Projections.Entries) {
     if (Entry.Subject == Subject &&
         Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
-        Entry.DiscriminatorPath == Cache->CurrentDiscriminatorPath)
+        Entry.DiscriminatorPath == CheckingContext->CurrentDiscriminatorPath)
       return Entry.Projection;
   }
   return nullptr;
 }
 
 static MatchProjection *findAlternativeDiscriminatorProjection(
-    Sema &S, Sema::MatchProjectionCache *Cache, const Expr *Subject,
-    QualType TraitsType) {
-  if (!Cache)
+    Sema &S, Sema::MatchPatternCheckingContext *CheckingContext,
+    const Expr *Subject, QualType TraitsType) {
+  if (!CheckingContext)
     return nullptr;
-  for (const Sema::MatchProjectionCache::Entry &Entry : Cache->Entries) {
+  for (const Sema::MatchProjectionCache::Entry &Entry :
+       CheckingContext->Projections.Entries) {
     if (Entry.Subject == Subject &&
         Entry.Projection->getKind() == MatchProjection::AlternativeProjection &&
-        Entry.DiscriminatorPath == Cache->CurrentDiscriminatorPath &&
+        Entry.DiscriminatorPath == CheckingContext->CurrentDiscriminatorPath &&
         !Entry.Discriminator.isNull() &&
         S.Context.hasSameType(Entry.Discriminator, TraitsType))
       return Entry.Projection;
@@ -2088,13 +2130,14 @@ static ExprResult buildMatchProjectionCondition(Sema &S,
 static bool initializeAlternativeStateProjection(
     Sema &S, SourceLocation Loc, Expr *Subject,
     const AlternativeTraitsInfo &Traits, ArrayRef<unsigned> Selected,
-    MatchProjection *Projection, Sema::MatchProjectionCache *ProjectionCache) {
+    MatchProjection *Projection,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   assert(!Selected.empty() && "alternative state condition has no states");
 
   MatchProjection *SharedHolding =
-      findAlternativeHoldingProjection(ProjectionCache, Subject);
+      findAlternativeHoldingProjection(CheckingContext, Subject);
   MatchProjection *SharedDiscriminator = findAlternativeDiscriminatorProjection(
-      S, ProjectionCache, Subject, Traits.Type);
+      S, CheckingContext, Subject, Traits.Type);
   VarDecl *HoldingVar;
   if (SharedHolding && SharedHolding != Projection) {
     HoldingVar = SharedHolding->getHoldingVar();
@@ -2163,15 +2206,15 @@ static bool initializeAlternativeStateProjection(
 static bool buildAlternativeValuePatternCondition(
     Sema &S, SourceLocation Loc, Expr *Subject,
     const AlternativeTraitsInfo &Traits, MatchPatternInfo &PatternInfo,
-    Sema::MatchProjectionCache *ProjectionCache) {
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   constexpr unsigned ValuePatternCacheKey = ~0u;
   MatchProjection *Projection = createMatchProjection(
-      S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+      S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
       Traits.Type, ValuePatternCacheKey);
   PatternInfo.Projection = Projection;
   if (initializeAlternativeStateProjection(S, Loc, Subject, Traits,
                                            PatternInfo.SelectedAlternatives,
-                                           Projection, ProjectionCache))
+                                           Projection, CheckingContext))
     return true;
   PatternInfo.Condition = Projection->getConditionExpr();
   return false;
@@ -2310,18 +2353,18 @@ static TypePattern *createTypeSubpatternPackElement(Sema &S,
   return cast<TypePattern>(S.ActOnTypePattern(TInfo).get());
 }
 
-static bool
+static MatchPatternCheckResult
 checkDecompositionSubpattern(Sema &S, Expr *Subject, MatchPattern *Pattern,
                              Sema::MatchPatternState &State,
-                             Sema::MatchProjectionCache *ProjectionCache,
+                             Sema::MatchPatternCheckingContext *CheckingContext,
                              bool InstantiateDeclarationPatterns) {
   if (auto *Declaration = dyn_cast<DeclarationPattern>(Pattern);
       Declaration && (InstantiateDeclarationPatterns ||
                       Declaration->getPackSourceDeclaration() !=
                           Declaration->getDeclaration()))
     return S.CheckCompleteMatchPatternImpl(Subject, Pattern, State,
-                                           ProjectionCache);
-  return S.CheckCompleteMatchPattern(Subject, Pattern, State, ProjectionCache);
+                                           CheckingContext);
+  return S.CheckCompleteMatchPattern(Subject, Pattern, State, CheckingContext);
 }
 
 static ArrayRef<MatchPattern *>
@@ -2492,11 +2535,13 @@ static void setCastProjection(Sema::MatchPatternState &State,
 
 static CastProjectionResult buildDeclarationLikeCastProjection(
     Sema &S, Expr *Subject, MatchPattern *Pattern, QualType PatternType,
-    Sema::MatchPatternState &State, Sema::MatchProjectionCache *Cache) {
+    Sema::MatchPatternState &State,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType TargetType = PatternType.getNonReferenceType().getUnqualifiedType();
-  if (MatchProjection *Projection = findMatchProjection(
-          S, Cache, Subject, MatchProjection::CastProjection, TargetType)) {
+  if (MatchProjection *Projection =
+          findMatchProjection(S, CheckingContext, Subject,
+                              MatchProjection::CastProjection, TargetType)) {
     setCastProjection(State, Pattern, Projection);
     return CastProjectionResult::Success;
   }
@@ -2528,7 +2573,7 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
     return CastProjectionResult::Error;
 
   MatchProjection *Projection = createMatchProjection(
-      S, Cache, Subject, MatchProjection::CastProjection, TargetType);
+      S, CheckingContext, Subject, MatchProjection::CastProjection, TargetType);
   setCastProjection(State, Pattern, Projection);
   Projection->setHoldingVar(HoldingVar);
 
@@ -2577,36 +2622,34 @@ static CastProjectionResult buildDeclarationLikeCastProjection(
   return CastProjectionResult::Success;
 }
 
-static bool
-checkClosedAlternativeSubPattern(Sema &S, Expr *Subject,
-                                 AlternativePattern *Pattern,
-                                 Sema::MatchPatternState &State,
-                                 Sema::MatchProjectionCache *ProjectionCache) {
+static MatchPatternCheckResult checkClosedAlternativeSubPattern(
+    Sema &S, Expr *Subject, AlternativePattern *Pattern,
+    Sema::MatchPatternState &State,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   if (TypePattern *Selector = Pattern->getTypeSelector())
     State.get(Selector).TypePatternResolved = true;
 
   return S.CheckCompleteMatchPattern(Subject, Pattern->getSubPattern(), State,
-                                     ProjectionCache);
+                                     CheckingContext);
 }
 
-static bool
-checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
-                            const AlternativeTraitsInfo &Traits,
-                            Sema::MatchPatternState &State,
-                            Sema::MatchProjectionCache *ProjectionCache) {
+static MatchPatternCheckResult checkOpenAlternativePattern(
+    Sema &S, Expr *Subject, AlternativePattern *Pattern,
+    const AlternativeTraitsInfo &Traits, Sema::MatchPatternState &State,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType SubjectType = Subject->getType().getNonReferenceType();
   if (Pattern->isNamed() || Pattern->isParameterizedNamed()) {
     S.Diag(Pattern->getDiscriminatorRange().getBegin(),
            diag::err_alternative_name_not_found)
         << Pattern->getName() << SubjectType;
-    return true;
+    return MatchPatternCheckResult::Error;
   }
   if (Pattern->isTypeConstraintSelected()) {
     S.Diag(Pattern->getDiscriminatorRange().getBegin(),
            diag::err_open_alternative_type_constraint_selector)
         << SubjectType;
-    return true;
+    return MatchPatternCheckResult::Error;
   }
 
   MatchPatternInfo &PatternInfo = State.get(Pattern);
@@ -2615,7 +2658,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   ExprValueKind SubjectValueKind = Subject->getValueKind();
   auto GetHoldingVar = [&]() -> VarDecl * {
     if (MatchProjection *Shared =
-            findAlternativeHoldingProjection(ProjectionCache, Subject))
+            findAlternativeHoldingProjection(CheckingContext, Subject))
       if (Shared->getHoldingVar())
         return Shared->getHoldingVar();
     return BuildVarDecl(S, Loc, S.Context.getAutoRRefDeductType(), Subject);
@@ -2624,25 +2667,24 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   if (Pattern->isEmpty()) {
     if (!Traits.OpenHasValue) {
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
-      return true;
+      return MatchPatternCheckResult::Error;
     }
 
     constexpr unsigned EmptyProjectionCacheKey = 0;
     if (MatchProjection *Projection = findMatchProjection(
-            S, ProjectionCache, Subject,
-            MatchProjection::AlternativeProjection, Traits.Type,
-            EmptyProjectionCacheKey)) {
+            S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
+            Traits.Type, EmptyProjectionCacheKey)) {
       PatternInfo.Projection = Projection;
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     MatchProjection *Projection = createMatchProjection(
-        S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+        S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
         Traits.Type, EmptyProjectionCacheKey);
     PatternInfo.Projection = Projection;
     VarDecl *HoldingVar = GetHoldingVar();
     if (HoldingVar->isInvalidDecl())
-      return true;
+      return MatchPatternCheckResult::Error;
     Projection->setHoldingVar(HoldingVar);
     Expr *HoldingRef = S.BuildDeclRefExpr(
         HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue,
@@ -2651,11 +2693,11 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
     ExprResult HasValueCall =
         buildAlternativeTraitsCall(S, Loc, Traits, "has_value", ForwardedRef);
     if (HasValueCall.isInvalid())
-      return true;
+      return MatchPatternCheckResult::Error;
     VarDecl *HasValueVar = BuildVarDecl(
         S, Loc, S.Context.getAutoDeductType(), HasValueCall.get());
     if (HasValueVar->isInvalidDecl())
-      return true;
+      return MatchPatternCheckResult::Error;
     Projection->setIntermediateVar(HasValueVar);
     Expr *HasValueRef =
         S.BuildDeclRefExpr(HasValueVar,
@@ -2664,17 +2706,19 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
     ExprResult HasValueCondition =
         S.CheckBooleanCondition(Loc, HasValueRef);
     if (HasValueCondition.isInvalid())
-      return true;
+      return MatchPatternCheckResult::Error;
     ExprResult RawCondition =
         S.CreateBuiltinUnaryOp(Loc, UO_LNot, HasValueCondition.get());
     if (RawCondition.isInvalid())
-      return true;
+      return MatchPatternCheckResult::Error;
     VarDecl *ConditionVar =
         BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCondition.get());
     if (ConditionVar->isInvalidDecl())
-      return true;
+      return MatchPatternCheckResult::Error;
     Projection->setConditionVar(ConditionVar);
-    return buildMatchProjectionCondition(S, Projection, Loc).isInvalid();
+    return buildMatchProjectionCondition(S, Projection, Loc).isInvalid()
+               ? MatchPatternCheckResult::Error
+               : MatchPatternCheckResult::Checked;
   }
 
   DeclarationPattern *InitializationPattern = nullptr;
@@ -2689,7 +2733,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
       !InitializationTypePattern) {
     S.Diag(Loc, diag::err_open_alternative_pattern_not_type_directed)
         << SubjectType;
-    return true;
+    return MatchPatternCheckResult::Error;
   }
   bool IsInitialization =
       InitializationPattern != nullptr || InitializationTypePattern != nullptr;
@@ -2700,17 +2744,17 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   if (RequestedType->getContainedAutoType() || RequestedType->isVoidType()) {
     S.Diag(Loc, diag::err_open_alternative_pattern_not_type_directed)
         << SubjectType;
-    return true;
+    return MatchPatternCheckResult::Error;
   }
 
   PatternInfo.IsOpenAlternativeInitialization = IsInitialization;
   PatternInfo.OpenAlternativeType = RequestedType;
 
   auto CheckSubPattern = [&](Expr *ProjectedSubject) {
-    if (shouldDeferAlternativeProjection(Pattern, ProjectionCache))
+    if (shouldDeferAlternativeProjection(Pattern, CheckingContext))
       ProjectedSubject = nullptr;
     return S.CheckCompleteMatchPattern(
-        ProjectedSubject, Pattern->getSubPattern(), State, ProjectionCache);
+        ProjectedSubject, Pattern->getSubPattern(), State, CheckingContext);
   };
 
   constexpr unsigned CastProjectionCacheKey = 1;
@@ -2719,19 +2763,19 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                                     ? InitializationProjectionCacheKey
                                     : CastProjectionCacheKey;
   if (MatchProjection *Projection = findMatchProjection(
-          S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+          S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
           RequestedType, ProjectionCacheKey)) {
     PatternInfo.Projection = Projection;
     return CheckSubPattern(Projection->getProjectedExpr());
   }
 
   MatchProjection *Projection = createMatchProjection(
-      S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+      S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
       RequestedType, ProjectionCacheKey);
   PatternInfo.Projection = Projection;
   VarDecl *HoldingVar = GetHoldingVar();
   if (HoldingVar->isInvalidDecl())
-    return true;
+    return MatchPatternCheckResult::Error;
   Projection->setHoldingVar(HoldingVar);
   Expr *HoldingRef = S.BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue, Loc);
@@ -2748,7 +2792,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                                  : S.Context.getAutoRRefDeductType();
     VarDecl *ProjectedVar = BuildVarDecl(S, Loc, ProjectedType, ProjectedExpr);
     if (ProjectedVar->isInvalidDecl())
-      return true;
+      return MatchPatternCheckResult::Error;
     Projection->setProjectedVar(ProjectedVar);
     Expr *ProjectedRef = S.BuildDeclRefExpr(
         ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
@@ -2762,7 +2806,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   ExprResult OperationCall = buildOpenAlternativeTraitsCall(
       S, Loc, Traits, SubjectType, Operation, RequestedType, ForwardedRef);
   if (OperationCall.isInvalid())
-    return true;
+    return MatchPatternCheckResult::Error;
 
   ExprValueKind OperationValueKind = OperationCall.get()->getValueKind();
   QualType CastVarType = OperationValueKind == VK_PRValue
@@ -2770,7 +2814,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
                              : S.Context.getAutoRRefDeductType();
   VarDecl *CastVar = BuildVarDecl(S, Loc, CastVarType, OperationCall.get());
   if (CastVar->isInvalidDecl())
-    return true;
+    return MatchPatternCheckResult::Error;
   Projection->setIntermediateVar(CastVar);
 
   auto BuildCastRef = [&]() {
@@ -2801,7 +2845,7 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   if (InvalidOperationResult) {
     S.Diag(Loc, diag::err_open_alternative_operation_result)
         << SubjectType << Operation;
-    return true;
+    return MatchPatternCheckResult::Error;
   }
 
   ExprResult RawCondition = S.CheckBooleanCondition(Loc, BuildCastRef());
@@ -2810,10 +2854,10 @@ checkOpenAlternativePattern(Sema &S, Expr *Subject, AlternativePattern *Pattern,
   VarDecl *ConditionVar =
       BuildVarDecl(S, Loc, S.Context.getAutoDeductType(), RawCondition.get());
   if (ConditionVar->isInvalidDecl())
-    return true;
+    return MatchPatternCheckResult::Error;
   Projection->setConditionVar(ConditionVar);
   if (buildMatchProjectionCondition(S, Projection, Loc).isInvalid())
-    return true;
+    return MatchPatternCheckResult::Error;
 
   ExprResult Projected = BuildProjection();
   assert(Projected.isUsable() &&
@@ -2826,7 +2870,7 @@ class MatchCandidatePlanner {
   AlternativePattern *Candidate;
   const AlternativeTraitsInfo &Traits;
   Sema::MatchPatternState &State;
-  Sema::MatchProjectionCache &Cache;
+  Sema::MatchPatternCheckingContext &CheckingContext;
 
   bool canMatchDeclaration(DeclarationPattern *Pattern, Expr *Subject) {
     VarDecl *VD = Pattern->getDeclaration();
@@ -2891,9 +2935,9 @@ class MatchCandidatePlanner {
   bool isCovered(MatchPatternInfo &Info, unsigned Index) {
     Info.SelectedAlternatives = ArrayRef<unsigned>(&Index, 1);
     return S.UpdateMatchCandidateDomainUsefulness(
-               *Cache.CandidateUsefulness.Context,
-               Cache.CandidateUsefulness.RootPattern, Candidate, State,
-               Cache.CandidateUsefulness.CaseIndex,
+               *CheckingContext.CandidateUsefulness.Context,
+               CheckingContext.CandidateUsefulness.RootPattern, Candidate,
+               State, CheckingContext.CandidateUsefulness.CaseIndex,
                /*RecordNotUseful=*/false) ==
            Sema::MatchPatternUsefulness::NotUseful;
   }
@@ -2902,15 +2946,16 @@ public:
   MatchCandidatePlanner(Sema &S, AlternativePattern *Candidate,
                         const AlternativeTraitsInfo &Traits,
                         Sema::MatchPatternState &State,
-                        Sema::MatchProjectionCache &Cache)
-      : S(S), Candidate(Candidate), Traits(Traits), State(State), Cache(Cache) {
-  }
+                        Sema::MatchPatternCheckingContext &CheckingContext)
+      : S(S), Candidate(Candidate), Traits(Traits), State(State),
+        CheckingContext(CheckingContext) {}
 
   void preselect(SmallVectorImpl<unsigned> &Selected) {
-    if (!Cache.IsExpandingCandidate ||
-        !Cache.PlannedAlternativeSelections.empty() ||
-        !Cache.CandidateUsefulness.Context ||
-        !Cache.CandidateUsefulness.RootPattern || !Candidate->getSubPattern())
+    if (!CheckingContext.isCheckingCandidate() ||
+        !CheckingContext.PlannedAlternativeSelections.empty() ||
+        !CheckingContext.CandidateUsefulness.Context ||
+        !CheckingContext.CandidateUsefulness.RootPattern ||
+        !Candidate->getSubPattern())
       return;
 
     MatchPatternInfo &Info = State.get(Candidate);
@@ -2942,44 +2987,46 @@ public:
   }
 };
 
-static bool
-checkBracedAlternativePattern(Sema &S, Expr *Subject,
-                              AlternativePattern *Pattern,
-                              Sema::MatchPatternState &State,
-                              Sema::MatchProjectionCache *ProjectionCache) {
+static MatchPatternCheckResult checkBracedAlternativePattern(
+    Sema &S, Expr *Subject, AlternativePattern *Pattern,
+    Sema::MatchPatternState &State,
+    Sema::MatchPatternCheckingContext *CheckingContext) {
   SourceLocation Loc = Pattern->getBeginLoc();
   QualType SubjectType = Subject->getType().getNonReferenceType();
   if ((Pattern->getSelector() || Pattern->isTypeConstraintSelected()) &&
       static_cast<bool>(Pattern->getDependence() &
                         ExprDependence::Instantiation)) {
     MatchPattern *Selector = Pattern->getSelector();
-    if (Pattern->isTypeSelected() &&
-        S.CheckCompleteMatchPattern(nullptr, Selector, State, ProjectionCache))
-      return true;
-    return Pattern->getSubPattern() &&
-           S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(), State,
-                                       ProjectionCache);
+    if (Pattern->isTypeSelected()) {
+      auto Result = S.CheckCompleteMatchPattern(nullptr, Selector, State,
+                                                CheckingContext);
+      if (Result != MatchPatternCheckResult::Checked)
+        return Result;
+    }
+    if (!Pattern->getSubPattern())
+      return MatchPatternCheckResult::Checked;
+    return S.CheckCompleteMatchPattern(nullptr, Pattern->getSubPattern(), State,
+                                       CheckingContext);
   }
   AlternativeTraitsInfo Traits;
   if (lookupAlternativeTraits(S, Loc, SubjectType, Traits))
-    return true;
+    return MatchPatternCheckResult::Error;
   if (Traits.IsOpen)
     return checkOpenAlternativePattern(S, Subject, Pattern, Traits, State,
-                                       ProjectionCache);
+                                       CheckingContext);
 
-  if (determineAlternativeProjections(S, Loc, Subject, Traits,
-                                      ProjectionCache))
-    return true;
+  if (determineAlternativeProjections(S, Loc, Subject, Traits, CheckingContext))
+    return MatchPatternCheckResult::Error;
 
   bool DeferProjection =
-      shouldDeferAlternativeProjection(Pattern, ProjectionCache);
+      shouldDeferAlternativeProjection(Pattern, CheckingContext);
   llvm::SmallVector<unsigned, 4> Selected;
   if (Pattern->isNamed()) {
     std::optional<unsigned> Named =
         lookupAlternativeName(S, Pattern->getDiscriminatorRange().getBegin(),
                               SubjectType, Traits, Pattern->getName());
     if (!Named)
-      return true;
+      return MatchPatternCheckResult::Error;
     Selected.push_back(*Named);
   }
 
@@ -2987,7 +3034,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
     std::optional<unsigned> Named =
         lookupParameterizedAlternativeName(S, SubjectType, Traits, Pattern);
     if (!Named)
-      return true;
+      return MatchPatternCheckResult::Error;
     Selected.push_back(*Named);
   }
 
@@ -3003,7 +3050,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
         Selected.push_back(I);
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_empty_alternative_not_found) << SubjectType;
-      return true;
+      return MatchPatternCheckResult::Error;
     }
   } else if (!Pattern->isNamed() && !Pattern->isParameterizedNamed()) {
     for (unsigned I = 0; I < Traits.Size; ++I) {
@@ -3027,77 +3074,72 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
     // Cheap planning precedes candidate declarations and their initializers.
     // Covered domains are omitted without instantiating their constraints.
-    if (!UsesAdvertisedTypes && ProjectionCache)
-      MatchCandidatePlanner(S, Pattern, Traits, State, *ProjectionCache)
+    if (!UsesAdvertisedTypes && CheckingContext)
+      MatchCandidatePlanner(S, Pattern, Traits, State, *CheckingContext)
           .preselect(Selected);
 
     if (Selected.empty()) {
       S.Diag(Loc, diag::err_match_pattern_no_viable_candidate)
           << /*BracedAlternative=*/true << SubjectType;
-      return true;
+      return MatchPatternCheckResult::Error;
     }
 
-    assert(ProjectionCache &&
+    assert(CheckingContext &&
            "generic alternative patterns require a projection cache");
-    if (!ProjectionCache)
-      return true;
+    if (!CheckingContext)
+      return MatchPatternCheckResult::Error;
 
-    unsigned Chosen = Selected.front();
-    if (ProjectionCache->DeferAlternativeChoices &&
+    if (CheckingContext->isDeferring() &&
         (Selected.size() > 1 || DeferProjection)) {
-      ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
+      CheckingContext->AlternativeChoices.push_back(
+          {Selected, Selected.front()});
       return checkClosedAlternativeSubPattern(S, nullptr, Pattern, State,
-                                              ProjectionCache);
+                                              CheckingContext);
     }
-    if (!ProjectionCache->DeferAlternativeChoices) {
-      if (ProjectionCache->NextPlannedAlternativeSelection <
-          ProjectionCache->PlannedAlternativeSelections.size()) {
-        Chosen = ProjectionCache->PlannedAlternativeSelections
-                     [ProjectionCache->NextPlannedAlternativeSelection++];
-        if (!llvm::is_contained(Selected, Chosen))
-          return true;
-      }
-      ProjectionCache->AlternativeChoices.push_back({Selected, Chosen});
+    if (!CheckingContext->isDeferring()) {
+      std::optional<unsigned> Chosen =
+          CheckingContext->selectAlternative(Selected);
+      if (!Chosen)
+        return MatchPatternCheckResult::Error;
+      Selected.assign(1, *Chosen);
     }
-    Selected.assign(1, Chosen);
   }
 
   MatchPatternInfo &PatternInfo = State.get(Pattern);
   storeAlternativeTraitsInfo(S, PatternInfo, Traits, Selected);
 
-  if (ProjectionCache && ProjectionCache->CandidateUsefulness.Context &&
-      ProjectionCache->CandidateUsefulness.RootPattern &&
+  if (CheckingContext && CheckingContext->CandidateUsefulness.Context &&
+      CheckingContext->CandidateUsefulness.RootPattern &&
       S.UpdateMatchCandidateDomainUsefulness(
-          *ProjectionCache->CandidateUsefulness.Context,
-          ProjectionCache->CandidateUsefulness.RootPattern, Pattern, State,
-          ProjectionCache->CandidateUsefulness.CaseIndex) ==
+          *CheckingContext->CandidateUsefulness.Context,
+          CheckingContext->CandidateUsefulness.RootPattern, Pattern, State,
+          CheckingContext->CandidateUsefulness.CaseIndex) ==
           Sema::MatchPatternUsefulness::NotUseful) {
-    ProjectionCache->CandidateUsefulness.IsNotUseful = true;
-    return true;
+    return MatchPatternCheckResult::Covered;
   }
 
   if (Pattern->getSubPattern() &&
       !Traits.HasAlternativeType[Selected.front()]) {
     S.Diag(Loc, diag::err_alternative_state_not_projectable)
         << SubjectType << Selected.front();
-    return true;
+    return MatchPatternCheckResult::Error;
   }
 
   auto CheckSubPattern = [&](Expr *ProjectedSubject) {
     size_t SavedProjectionPathSize =
-        ProjectionCache ? ProjectionCache->CurrentProjectionPath.size() : 0;
+        CheckingContext ? CheckingContext->CurrentProjectionPath.size() : 0;
     size_t SavedDiscriminatorPathSize =
-        ProjectionCache ? ProjectionCache->CurrentDiscriminatorPath.size() : 0;
+        CheckingContext ? CheckingContext->CurrentDiscriminatorPath.size() : 0;
     llvm::scope_exit RestoreProjectionPath([&] {
-      if (ProjectionCache) {
-        ProjectionCache->CurrentProjectionPath.resize(SavedProjectionPathSize);
-        ProjectionCache->CurrentDiscriminatorPath.resize(
+      if (CheckingContext) {
+        CheckingContext->CurrentProjectionPath.resize(SavedProjectionPathSize);
+        CheckingContext->CurrentDiscriminatorPath.resize(
             SavedDiscriminatorPathSize);
       }
     });
-    if (ProjectionCache) {
-      ProjectionCache->CurrentProjectionPath.push_back(Selected.front() + 1);
-      ProjectionCache->CurrentDiscriminatorPath.push_back(Selected.front() + 1);
+    if (CheckingContext) {
+      CheckingContext->CurrentProjectionPath.push_back(Selected.front() + 1);
+      CheckingContext->CurrentDiscriminatorPath.push_back(Selected.front() + 1);
     }
     if (const ConceptReference *Constraint =
             Pattern->getTypeConstraintSelector()) {
@@ -3105,16 +3147,16 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
       std::optional<bool> Satisfied =
           satisfiesTypeConstraint(S, Constraint, DeclaredType);
       if (!Satisfied)
-        return true;
+        return MatchPatternCheckResult::Error;
       if (!*Satisfied) {
         S.Diag(Constraint->getLocation(),
                diag::err_type_constraint_selector_not_satisfied)
             << DeclaredType << Constraint->getNamedConcept();
-        return true;
+        return MatchPatternCheckResult::Error;
       }
     }
     return checkClosedAlternativeSubPattern(S, ProjectedSubject, Pattern, State,
-                                            ProjectionCache);
+                                            CheckingContext);
   };
 
   if (DeferProjection)
@@ -3122,41 +3164,41 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
 
   unsigned CacheKey = Pattern->isEmpty() ? 0 : Selected.front() + 1;
   if (MatchProjection *Projection = findMatchProjection(
-          S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+          S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
           Traits.Type, CacheKey)) {
     PatternInfo.Projection = Projection;
     if (!Pattern->getSubPattern())
-      return false;
+      return MatchPatternCheckResult::Checked;
     return CheckSubPattern(Projection->getProjectedExpr());
   }
 
   MatchProjection *Projection = createMatchProjection(
-      S, ProjectionCache, Subject, MatchProjection::AlternativeProjection,
+      S, CheckingContext, Subject, MatchProjection::AlternativeProjection,
       Traits.Type, CacheKey);
   PatternInfo.Projection = Projection;
 
   ExprValueKind SubjectValueKind = Subject->getValueKind();
   if (initializeAlternativeStateProjection(S, Loc, Subject, Traits, Selected,
-                                           Projection, ProjectionCache))
-    return true;
+                                           Projection, CheckingContext))
+    return MatchPatternCheckResult::Error;
   VarDecl *HoldingVar = Projection->getHoldingVar();
   Expr *HoldingRef = S.BuildDeclRefExpr(
       HoldingVar, HoldingVar->getType().getNonReferenceType(), VK_LValue, Loc);
   Expr *ForwardedRef = asValueKind(S, HoldingRef, SubjectValueKind);
 
   if (!Pattern->getSubPattern())
-    return false;
+    return MatchPatternCheckResult::Checked;
 
   unsigned Index = Selected.front();
   ExprResult GetCall =
       buildAlternativeTraitsGetCall(S, Loc, Traits, ForwardedRef, Index);
   if (GetCall.isInvalid())
-    return true;
+    return MatchPatternCheckResult::Error;
   if (GetCall.get()->getType()->isVoidType()) {
     GetCall = S.ActOnFinishFullExpr(GetCall.get(), Loc,
                                     /*DiscardedValue=*/false);
     if (GetCall.isInvalid())
-      return true;
+      return MatchPatternCheckResult::Error;
     Projection->setProjectedExpr(GetCall.get());
     return CheckSubPattern(GetCall.get());
   }
@@ -3178,7 +3220,7 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   }
   VarDecl *ProjectedVar = BuildVarDecl(S, Loc, ProjectedType, GetCall.get());
   if (ProjectedVar->isInvalidDecl())
-    return true;
+    return MatchPatternCheckResult::Error;
   Projection->setProjectedVar(ProjectedVar);
   Expr *ProjectedRef = S.BuildDeclRefExpr(
       ProjectedVar, ProjectedVar->getType().getNonReferenceType(), VK_LValue,
@@ -3188,9 +3230,9 @@ checkBracedAlternativePattern(Sema &S, Expr *Subject,
   return CheckSubPattern(ProjectedRef);
 }
 
-bool Sema::CheckCompleteMatchPatternImpl(
+Sema::MatchPatternCheckResult Sema::CheckCompleteMatchPatternImpl(
     Expr *Subject, MatchPattern *Pattern, MatchPatternState &State,
-    MatchProjectionCache *ProjectionCache) {
+    MatchPatternCheckingContext *CheckingContext) {
   bool PatternIsInstantiationDependent = static_cast<bool>(
       Pattern->getDependence() & ExprDependence::Instantiation);
   if (Subject && PatternIsInstantiationDependent &&
@@ -3217,20 +3259,20 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::ExpressionPatternClass: {
     // Subject is dependent.
     if (!Subject)
-      return false;
+      return MatchPatternCheckResult::Checked;
     ExpressionPattern *P = static_cast<ExpressionPattern *>(Pattern);
     MatchPatternInfo &PatternInfo = State.get(P);
     if (P->getExpr()->isTypeDependent()) {
       ExprResult Cond = ActOnBinOp(S, Loc, tok::TokenKind::equalequal,
                                    P->getExpr(), Subject);
       if (Cond.isInvalid())
-        return true;
+        return MatchPatternCheckResult::Error;
       PatternInfo.Condition = Cond.get();
       break;
     }
     if (classifyAlternativeValuePattern(*this, Subject, P, PatternInfo,
-                                        ProjectionCache))
-      return true;
+                                        CheckingContext))
+      return MatchPatternCheckResult::Error;
     if (PatternInfo.IsAlternativeValuePattern)
       break;
 
@@ -3263,31 +3305,31 @@ bool Sema::CheckCompleteMatchPatternImpl(
                     : diag::err_expression_pattern_not_testable)
           << P->getExpr()->getType() << Subject->getType()
           << P->getExpr()->getSourceRange();
-      return true;
+      return MatchPatternCheckResult::Error;
     }
 
     ExprResult Cond = buildExpressionPatternCondition(
         *this, S, Loc, Subject, PatternValue, *Kind);
     if (Cond.isInvalid())
-      return true;
+      return MatchPatternCheckResult::Error;
     PatternInfo.Condition = Cond.get();
     break;
   }
   case MatchPattern::ParenPatternClass: {
     auto *P = static_cast<ParenPattern *>(Pattern);
     return CheckCompleteMatchPattern(Subject, P->getSubPattern(), State,
-                                     ProjectionCache);
+                                     CheckingContext);
   }
   case MatchPattern::DeclarationPatternClass: {
     auto *P = static_cast<DeclarationPattern *>(Pattern);
     VarDecl *VD = P->getDeclaration();
-    if (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+    if (CheckingContext && CheckingContext->isDeferring() &&
         VD->getType()->getContainedAutoType()) {
       if (auto *DD = dyn_cast<DecompositionDecl>(VD);
           DD && Subject && !Subject->isTypeDependent() &&
           !isDecompositionDeclarationPatternApplicable(*this, DD, Subject)) {
         AddInitializerToDecl(DD, Subject, /*DirectInit=*/false);
-        return true;
+        return MatchPatternCheckResult::Error;
       }
       Subject = nullptr;
     }
@@ -3303,7 +3345,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
       }
       if (auto *DD = dyn_cast<DecompositionDecl>(VD))
         CheckCompleteDecompositionDeclaration(DD);
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     auto *Decomposition = dyn_cast<DecompositionDecl>(VD);
@@ -3317,7 +3359,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
                 GetDecompositionElementCount(Subject->getType(), Loc))
           Arity = *Count;
       if (MatchProjection *Projection = findMatchProjection(
-              *this, ProjectionCache, Subject,
+              *this, CheckingContext, Subject,
               MatchProjection::DecompositionProjection, QualType(), Arity)) {
         State.get(P).Projection = Projection;
         DecompositionDecl *Canonical = Projection->getDecomposedDecl();
@@ -3327,7 +3369,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
             })) {
           CheckCompleteDecompositionDeclaration(Decomposition);
           if (Decomposition->isInvalidDecl())
-            return true;
+            return MatchPatternCheckResult::Error;
         }
         for (auto [Alias, Binding] :
              llvm::zip(Decomposition->bindings(), Canonical->bindings())) {
@@ -3356,14 +3398,14 @@ bool Sema::CheckCompleteMatchPatternImpl(
           if (DecompositionDecl *Nested = Alias->getNestedDecomposition())
             if (CheckCompleteNestedDecompositionDeclaration(Nested, Alias,
                                                             Decomposition))
-              return true;
+              return MatchPatternCheckResult::Error;
         }
         FinalizeDeclaration(Decomposition);
-        return false;
+        return MatchPatternCheckResult::Checked;
       }
 
       MatchProjection *Projection = createMatchProjection(
-          *this, ProjectionCache, Subject,
+          *this, CheckingContext, Subject,
           MatchProjection::DecompositionProjection, QualType(), Arity);
       State.get(P).Projection = Projection;
     }
@@ -3379,14 +3421,12 @@ bool Sema::CheckCompleteMatchPatternImpl(
                           *this, Decomposition, Subject));
       if (IsApplicable)
         VD->setType(DeducedType);
-      else if (ProjectionCache && ProjectionCache->IsExpandingCandidate) {
-        ProjectionCache->CandidateIsNotViable = true;
-        return true;
-      }
+      else if (CheckingContext && CheckingContext->isCheckingCandidate())
+        return MatchPatternCheckResult::NotViable;
     } else if (!Subject->isTypeDependent()) {
       if (!isDeclarationPatternApplicable(*this, Subject, PatternType)) {
         switch (buildDeclarationLikeCastProjection(
-            *this, Subject, P, PatternType, State, ProjectionCache)) {
+            *this, Subject, P, PatternType, State, CheckingContext)) {
         case CastProjectionResult::Success:
           Subject = State.get(P).Projection->getProjectedExpr();
           break;
@@ -3394,10 +3434,10 @@ bool Sema::CheckCompleteMatchPatternImpl(
           Diag(P->getBeginLoc(), diag::err_declaration_pattern_not_applicable)
               << PatternType << Subject->getType();
           VD->setInvalidDecl();
-          return true;
+          return MatchPatternCheckResult::Error;
         case CastProjectionResult::Error:
           VD->setInvalidDecl();
-          return true;
+          return MatchPatternCheckResult::Error;
         }
       }
     }
@@ -3413,9 +3453,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
       // not cause matching to retry a later arm.
       NonSFINAEContext NonSFINAE(*this);
       if (Initialize())
-        return true;
+        return MatchPatternCheckResult::Error;
     } else if (Initialize()) {
-      return true;
+      return MatchPatternCheckResult::Error;
     }
     if (MatchProjection *Projection = State.get(P).Projection)
       Projection->setDecomposedDecl(Decomposition);
@@ -3424,9 +3464,9 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::TypePatternClass: {
     auto *P = static_cast<TypePattern *>(Pattern);
     if (!Subject || Subject->isTypeDependent() ||
-        (ProjectionCache && ProjectionCache->DeferAlternativeChoices &&
+        (CheckingContext && CheckingContext->isDeferring() &&
          P->getType()->getContainedAutoType()))
-      return false;
+      return MatchPatternCheckResult::Checked;
 
     QualType PatternType = P->getType();
     if (PatternType->getContainedAutoType()) {
@@ -3435,10 +3475,10 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (DeduceAutoType(P->getTypeSourceInfo()->getTypeLoc(), Subject,
                          DeducedType, DeductionInfo) !=
           TemplateDeductionResult::Success)
-        return true;
+        return MatchPatternCheckResult::Error;
       PatternType = DeducedType;
     } else if (PatternType->isDependentType()) {
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     MatchPatternInfo &Info = State.get(P);
@@ -3452,49 +3492,52 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (!PatternType->isVoidType()) {
         Diag(P->getBeginLoc(), diag::err_type_pattern_not_applicable)
             << PatternType << Subject->getType();
-        return true;
+        return MatchPatternCheckResult::Error;
       }
       Info.TypePatternResolved = true;
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     if (isDeclarationPatternApplicable(*this, Subject, PatternType)) {
       if (CheckInitialization(Subject))
-        return true;
+        return MatchPatternCheckResult::Error;
       Info.TypePatternResolved = true;
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     switch (buildDeclarationLikeCastProjection(*this, Subject, P, PatternType,
-                                               State, ProjectionCache)) {
+                                               State, CheckingContext)) {
     case CastProjectionResult::Success:
       if (PatternType->isVoidType()) {
         Info.TypePatternResolved = true;
-        return false;
+        return MatchPatternCheckResult::Checked;
       }
       if (isDeclarationPatternApplicable(
               *this, Info.Projection->getProjectedExpr(), PatternType)) {
         if (CheckInitialization(Info.Projection->getProjectedExpr()))
-          return true;
+          return MatchPatternCheckResult::Error;
         Info.TypePatternResolved = true;
-        return false;
+        return MatchPatternCheckResult::Checked;
       }
       Info.Projection = nullptr;
       [[fallthrough]];
     case CastProjectionResult::NotApplicable:
       Diag(P->getBeginLoc(), diag::err_type_pattern_not_applicable)
           << PatternType << Subject->getType();
-      return true;
+      return MatchPatternCheckResult::Error;
     case CastProjectionResult::Error:
-      return true;
+      return MatchPatternCheckResult::Error;
     }
     break;
   }
   case MatchPattern::AndPatternClass: {
     auto *P = static_cast<AndPattern *>(Pattern);
-    for (MatchPattern *Conjunct : P->conjuncts())
-      if (CheckCompleteMatchPattern(Subject, Conjunct, State, ProjectionCache))
-        return true;
+    for (MatchPattern *Conjunct : P->conjuncts()) {
+      auto Result =
+          CheckCompleteMatchPattern(Subject, Conjunct, State, CheckingContext);
+      if (Result != MatchPatternCheckResult::Checked)
+        return Result;
+    }
     break;
   }
   case MatchPattern::OrPatternClass: {
@@ -3506,73 +3549,58 @@ bool Sema::CheckCompleteMatchPatternImpl(
     // Alternative projection and declaration initialization belong to the
     // selected alternative. Defer such or-patterns so each viable child
     // receives its own semantic arm instantiation.
-    if (Subject && NeedsSelectedAlternative && ProjectionCache) {
+    if (Subject && NeedsSelectedAlternative && CheckingContext) {
       SmallVector<unsigned, 4> Alternatives;
       for (unsigned I = 0; I != P->alternatives().size(); ++I)
         Alternatives.push_back(I);
-      if (ProjectionCache->DeferAlternativeChoices) {
+      if (CheckingContext->isDeferring()) {
         for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
-          if (CheckCompleteMatchPattern(nullptr, Alternative, State,
-                                        ProjectionCache))
-            return true;
+          auto Result = CheckCompleteMatchPattern(nullptr, Alternative, State,
+                                                  CheckingContext);
+          if (Result != MatchPatternCheckResult::Checked)
+            return Result;
           Viable[I] = 1;
         }
-        ProjectionCache->AlternativeChoices.push_back(
+        CheckingContext->AlternativeChoices.push_back(
             {Alternatives, Alternatives.front()});
       } else {
-        unsigned Chosen = Alternatives.front();
-        if (ProjectionCache->NextPlannedAlternativeSelection <
-            ProjectionCache->PlannedAlternativeSelections.size())
-          Chosen = ProjectionCache->PlannedAlternativeSelections
-                       [ProjectionCache->NextPlannedAlternativeSelection++];
-        if (!llvm::is_contained(Alternatives, Chosen))
-          return true;
-        ProjectionCache->AlternativeChoices.push_back({Alternatives, Chosen});
-        if (CheckCompleteMatchPattern(Subject, P->alternatives()[Chosen], State,
-                                      ProjectionCache))
-          return true;
-        Viable[Chosen] = 1;
+        std::optional<unsigned> Chosen =
+            CheckingContext->selectAlternative(Alternatives);
+        if (!Chosen)
+          return MatchPatternCheckResult::Error;
+        auto Result = CheckCompleteMatchPattern(
+            Subject, P->alternatives()[*Chosen], State, CheckingContext);
+        if (Result != MatchPatternCheckResult::Checked)
+          return Result;
+        Viable[*Chosen] = 1;
       }
     } else {
       for (auto [I, Alternative] : llvm::enumerate(P->alternatives())) {
         if (!Subject) {
-          if (CheckCompleteMatchPattern(nullptr, Alternative, State,
-                                        ProjectionCache))
-            return true;
+          auto Result = CheckCompleteMatchPattern(nullptr, Alternative, State,
+                                                  CheckingContext);
+          if (Result != MatchPatternCheckResult::Checked)
+            return Result;
           Viable[I] = 1;
           continue;
         }
 
-        size_t SavedInfoCount = State.Infos.size();
-        size_t SavedProjectionCount =
-            ProjectionCache ? ProjectionCache->Entries.size() : 0;
-        size_t SavedChoiceCount =
-            ProjectionCache ? ProjectionCache->AlternativeChoices.size() : 0;
-        unsigned SavedPlannedSelection =
-            ProjectionCache ? ProjectionCache->NextPlannedAlternativeSelection
-                            : 0;
-        bool Invalid;
+        MatchPatternCheckingTransaction Transaction(CheckingContext, &State);
+        MatchPatternCheckResult Result;
         bool SubstitutionFailure;
         {
           SFINAETrap Trap(*this, /*WithAccessChecking=*/true);
-          Invalid = CheckCompleteMatchPattern(Subject, Alternative, State,
-                                              ProjectionCache);
+          Result = CheckCompleteMatchPattern(Subject, Alternative, State,
+                                             CheckingContext);
           SubstitutionFailure = Trap.hasErrorOccurred();
         }
-        if (!Invalid) {
+        if (Result == MatchPatternCheckResult::Checked) {
+          Transaction.commit();
           Viable[I] = 1;
           continue;
         }
         if (!SubstitutionFailure)
-          return true;
-
-        State.Infos.resize(SavedInfoCount);
-        if (ProjectionCache) {
-          ProjectionCache->Entries.resize(SavedProjectionCount);
-          ProjectionCache->AlternativeChoices.resize(SavedChoiceCount);
-          ProjectionCache->NextPlannedAlternativeSelection =
-              SavedPlannedSelection;
-        }
+          return Result;
       }
     }
 
@@ -3580,7 +3608,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
     if (!ViableCount) {
       Diag(P->getBeginLoc(), diag::err_or_pattern_no_viable_alternative)
           << Subject->getType();
-      return true;
+      return MatchPatternCheckResult::Error;
     }
 
     unsigned char *Storage = Context.Allocate<unsigned char>(Viable.size());
@@ -3591,23 +3619,26 @@ bool Sema::CheckCompleteMatchPatternImpl(
   case MatchPattern::AlternativePatternClass: {
     AlternativePattern *P = static_cast<AlternativePattern *>(Pattern);
     if (!Subject) {
-      if (P->isTypeSelected() &&
-          CheckCompleteMatchPattern(nullptr, P->getSelector(), State))
-        return true;
+      if (P->isTypeSelected()) {
+        auto Result =
+            CheckCompleteMatchPattern(nullptr, P->getSelector(), State);
+        if (Result != MatchPatternCheckResult::Checked)
+          return Result;
+      }
       if (!P->getSubPattern())
-        return false;
+        return MatchPatternCheckResult::Checked;
       return CheckCompleteMatchPattern(nullptr, P->getSubPattern(), State);
     }
     return checkBracedAlternativePattern(*this, Subject, P, State,
-                                         ProjectionCache);
+                                         CheckingContext);
   }
   case MatchPattern::DecompositionPatternClass: {
     DecompositionPattern *P = static_cast<DecompositionPattern *>(Pattern);
     size_t SavedProjectionPathSize =
-        ProjectionCache ? ProjectionCache->CurrentProjectionPath.size() : 0;
+        CheckingContext ? CheckingContext->CurrentProjectionPath.size() : 0;
     llvm::scope_exit RestoreProjectionPath([&] {
-      if (ProjectionCache)
-        ProjectionCache->CurrentProjectionPath.resize(SavedProjectionPathSize);
+      if (CheckingContext)
+        CheckingContext->CurrentProjectionPath.resize(SavedProjectionPathSize);
     });
     MatchPattern *Pack = getDecompositionSubpatternPack(P);
     auto *DeclarationPack =
@@ -3618,10 +3649,11 @@ bool Sema::CheckCompleteMatchPatternImpl(
       for (MatchPattern *C : P->children()) {
         if (C == Pack)
           continue;
-        if (CheckCompleteMatchPattern(nullptr, C, State))
-          return true;
+        auto Result = CheckCompleteMatchPattern(nullptr, C, State);
+        if (Result != MatchPatternCheckResult::Checked)
+          return Result;
       }
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
 
     unsigned Arity = P->getNumPatterns();
@@ -3632,21 +3664,21 @@ bool Sema::CheckCompleteMatchPatternImpl(
       if (!ElementCount) {
         Diag(P->getBeginLoc(), diag::err_decomp_pattern_unbindable_type)
             << Subject->getType().getNonReferenceType();
-        return true;
+        return MatchPatternCheckResult::Error;
       }
       unsigned FixedPatterns = P->getNumPatterns() - 1;
       if (*ElementCount < FixedPatterns) {
         Diag(P->getBeginLoc(), diag::err_decomp_pattern_pack_too_small)
             << Subject->getType().getNonReferenceType() << *ElementCount
             << FixedPatterns;
-        return true;
+        return MatchPatternCheckResult::Error;
       }
       Arity = *ElementCount;
       Patterns =
           expandDecompositionSubpatternPack(*this, P, Pack, Arity, State);
     }
     if (MatchProjection *Projection = findMatchProjection(
-            *this, ProjectionCache, Subject,
+            *this, CheckingContext, Subject,
             MatchProjection::DecompositionProjection, QualType(), Arity)) {
       DecompositionDecl *Decomposed = Projection->getDecomposedDecl();
       State.get(P).Projection = Projection;
@@ -3654,18 +3686,19 @@ bool Sema::CheckCompleteMatchPatternImpl(
       llvm::append_range(Bindings, Decomposed->flat_bindings());
       for (auto [Binding, Child] : llvm::zip(Bindings, Patterns)) {
         Expr *Element = getDecompositionElement(*this, Subject, Binding);
-        if (checkDecompositionSubpattern(*this, Element, Child, State,
-                                         ProjectionCache,
-                                         DeclarationPack != nullptr))
-          return true;
-        if (ProjectionCache)
-          appendProjectionPath(Child, ProjectionCache->CurrentProjectionPath,
+        auto Result = checkDecompositionSubpattern(*this, Element, Child, State,
+                                                   CheckingContext,
+                                                   DeclarationPack != nullptr);
+        if (Result != MatchPatternCheckResult::Checked)
+          return Result;
+        if (CheckingContext)
+          appendProjectionPath(Child, CheckingContext->CurrentProjectionPath,
                                State);
       }
-      return false;
+      return MatchPatternCheckResult::Checked;
     }
     MatchProjection *Projection = createMatchProjection(
-        *this, ProjectionCache, Subject,
+        *this, CheckingContext, Subject,
         MatchProjection::DecompositionProjection, QualType(), Arity);
     State.get(P).Projection = Projection;
     QualType Type = Context.getAutoRRefDeductType();
@@ -3685,7 +3718,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
     // TODO: Consider ActOnInitializerError
     AddInitializerToDecl(Decomposed, Subject, /*DirectInit=*/false);
     if (Decomposed->isInvalidDecl()) {
-      return true;
+      return MatchPatternCheckResult::Error;
     }
     if (isMatchSubjectProductType(Subject->getType())) {
       for (BindingDecl *Binding : Bindings) {
@@ -3697,7 +3730,7 @@ bool Sema::CheckCompleteMatchPatternImpl(
             Field, DeclAccessPair::make(Field, Field->getAccess()),
             DeclarationNameInfo(Field->getDeclName(), Binding->getLocation()));
         if (DirectBinding.isInvalid())
-          return true;
+          return MatchPatternCheckResult::Error;
         Binding->setBinding(Binding->getType(), DirectBinding.get());
       }
     }
@@ -3705,19 +3738,19 @@ bool Sema::CheckCompleteMatchPatternImpl(
     for (MatchPattern *C : Patterns) {
       BindingDecl *BD = Bindings[I];
       Expr *Element = getDecompositionElement(*this, Subject, BD);
-      if (checkDecompositionSubpattern(*this, Element, C, State,
-                                       ProjectionCache,
-                                       DeclarationPack != nullptr)) {
-        return true;
-      }
-      if (ProjectionCache)
-        appendProjectionPath(C, ProjectionCache->CurrentProjectionPath, State);
+      auto Result = checkDecompositionSubpattern(*this, Element, C, State,
+                                                 CheckingContext,
+                                                 DeclarationPack != nullptr);
+      if (Result != MatchPatternCheckResult::Checked)
+        return Result;
+      if (CheckingContext)
+        appendProjectionPath(C, CheckingContext->CurrentProjectionPath, State);
       ++I;
     }
     break;
   }
   }
-  return false;
+  return MatchPatternCheckResult::Checked;
 }
 
 static bool isMatchSubjectProductPattern(MatchPattern *Pattern) {
@@ -3733,31 +3766,32 @@ static bool isMatchSubjectProductPattern(MatchPattern *Pattern) {
   return false;
 }
 
-bool Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
-                                     MatchPatternState &State,
-                                     MatchProjectionCache *ProjectionCache) {
+Sema::MatchPatternCheckResult
+Sema::CheckCompleteMatchPattern(Expr *Subject, MatchPattern *Pattern,
+                                MatchPatternState &State,
+                                MatchPatternCheckingContext *CheckingContext) {
   if (Subject && isMatchSubjectProductType(Subject->getType()) &&
       !isMatchSubjectProductPattern(Pattern)) {
     DiscardUninitializedMatchPatternDeclarations(Pattern);
     Diag(Pattern->getBeginLoc(), diag::err_match_multiple_subject_pattern)
         << Pattern->getSourceRange();
-    return true;
+    return MatchPatternCheckResult::Error;
   }
   if (!State.CheckedBindingReferences) {
     State.CheckedBindingReferences = true;
     if (checkPatternBindingReferences(*this, Pattern))
-      return true;
+      return MatchPatternCheckResult::Error;
   }
   bool CheckAndPatternMoves = !State.CheckedAndPatternMoves;
   State.CheckedAndPatternMoves = true;
   State.get(Pattern);
-  bool Invalid = CheckCompleteMatchPatternImpl(Subject, Pattern, State,
-                                               ProjectionCache);
-  if (!Invalid && CheckAndPatternMoves)
+  MatchPatternCheckResult Result =
+      CheckCompleteMatchPatternImpl(Subject, Pattern, State, CheckingContext);
+  if (Result == MatchPatternCheckResult::Checked && CheckAndPatternMoves)
     CheckAndMatchPattern(Pattern);
-  if (Invalid)
+  if (Result != MatchPatternCheckResult::Checked)
     DiscardUninitializedMatchPatternDeclarations(Pattern);
-  return Invalid;
+  return Result;
 }
 
 void Sema::DiscardUninitializedMatchPatternDeclarations(
