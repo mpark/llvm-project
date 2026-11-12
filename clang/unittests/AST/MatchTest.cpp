@@ -715,8 +715,7 @@ TEST(MatchAST, CandidateCheckingKeepsProjectionsButResetsSelectionState) {
   Sema::MatchAlternativeSelectionPlan Plan;
   Plan.Selections = {3};
   Sema::MatchPatternCheckingContext CheckingContext;
-  CheckingContext.Projections.Entries.push_back(
-      {nullptr, nullptr, QualType(), 0, {}, {}});
+  CheckingContext.Projections.Entries.push_back({nullptr, nullptr, {}, {}, {}});
   CheckingContext.CurrentProjectionPath = {1, 2};
   CheckingContext.CurrentDiscriminatorPath = {1};
   CheckingContext.CandidateUsefulness.CaseIndex = 7;
@@ -751,7 +750,7 @@ TEST(MatchAST, TentativePatternCheckingRollsBackRecordsAndChoices) {
   {
     Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
     CheckingContext.Projections.Entries.push_back(
-        {nullptr, nullptr, QualType(), 0, {}, {}});
+        {nullptr, nullptr, {}, {}, {}});
     State.Infos.emplace_back();
     ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 5u);
   }
@@ -769,7 +768,7 @@ TEST(MatchAST, RejectedCandidateKeepsChoicesForEnumeration) {
   {
     Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
     CheckingContext.Projections.Entries.push_back(
-        {nullptr, nullptr, QualType(), 0, {}, {}});
+        {nullptr, nullptr, {}, {}, {}});
     State.Infos.emplace_back();
     ASSERT_EQ(CheckingContext.selectAlternative(Alternatives), 3u);
     Transaction.commitAlternativeChoices();
@@ -786,7 +785,7 @@ TEST(MatchAST, SuccessfulPatternCheckingCommitsRecords) {
   {
     Sema::MatchPatternCheckingTransaction Transaction(&CheckingContext, &State);
     CheckingContext.Projections.Entries.push_back(
-        {nullptr, nullptr, QualType(), 0, {}, {}});
+        {nullptr, nullptr, {}, {}, {}});
     State.Infos.emplace_back();
     Transaction.commit();
   }
@@ -857,6 +856,29 @@ static_assert(test(EmptyStates{0}) == 0);
 static_assert(test(EmptyStates{1}) == 1);
 )cpp");
   ASSERT_TRUE(AST);
+}
+
+TEST(MatchAST, ProjectionCacheKeysDistinguishOperations) {
+  using Operation = Sema::MatchProjectionCache::Operation;
+  using Key = Sema::MatchProjectionCache::Key;
+  Key State{Operation::ClosedAlternative, {}, 0};
+  Key Empty{Operation::EmptyAlternative};
+  Key Value{Operation::AdvertisedValue};
+  Key OpenCast{Operation::OpenCast};
+  Key OpenInit{Operation::OpenInit};
+  EXPECT_FALSE(State == Empty);
+  EXPECT_FALSE(State == Value);
+  EXPECT_FALSE(OpenCast == OpenInit);
+  EXPECT_FALSE(State == Key(Operation::ClosedAlternative, {}, 1));
+  EXPECT_FALSE(Key(Operation::Decomposition, {}, 1) ==
+               Key(Operation::Decomposition, {}, 2));
+  EXPECT_EQ(State.getProjectionKind(), MatchProjection::AlternativeProjection);
+  EXPECT_EQ(OpenCast.getProjectionKind(),
+            MatchProjection::AlternativeProjection);
+  EXPECT_EQ(Key(Operation::DynamicCast).getProjectionKind(),
+            MatchProjection::CastProjection);
+  EXPECT_EQ(Key(Operation::Decomposition).getProjectionKind(),
+            MatchProjection::DecompositionProjection);
 }
 
 TEST(MatchAST, SharedHandlersUseCheckedBindingCorrespondence) {

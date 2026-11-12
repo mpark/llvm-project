@@ -11539,11 +11539,38 @@ public:
       ExprObjectKind SubjectObjectKind;
     };
 
+    enum class Operation {
+      ClosedAlternative,
+      EmptyAlternative,
+      AdvertisedValue,
+      OpenEmpty,
+      OpenCast,
+      OpenInit,
+      DynamicCast,
+      Decomposition,
+    };
+
+    struct Key {
+      Operation Op;
+      QualType Type;
+      unsigned IndexOrArity;
+
+      Key(Operation Op = Operation::Decomposition, QualType Type = {},
+          unsigned IndexOrArity = 0)
+          : Op(Op), Type(Type.isNull() ? Type : Type.getCanonicalType()),
+            IndexOrArity(IndexOrArity) {}
+
+      MatchProjection::ProjectionKind getProjectionKind() const;
+      bool operator==(const Key &Other) const {
+        return Op == Other.Op && Type == Other.Type &&
+               IndexOrArity == Other.IndexOrArity;
+      }
+    };
+
     struct Entry {
       const Expr *Subject;
       MatchProjection *Projection;
-      QualType Discriminator;
-      unsigned Arity;
+      Key CacheKey;
       // The full semantic path identifies conditionally initialized projected
       // values. The discriminator path contains only enclosing alternatives,
       // allowing independent sibling discriminators to be shared.
