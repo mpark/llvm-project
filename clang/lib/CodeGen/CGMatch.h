@@ -11,6 +11,7 @@
 
 #include "clang/AST/ExprCXX.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
 
 #include <memory>
@@ -22,47 +23,111 @@ bool hasMatchPatternDeclarations(
     const MatchPattern *Pattern,
     const MatchPatternInstantiation *Instantiation);
 
+/// Non-owning access to the checked form consumed by runtime matching.
+class MatchCandidateRef {
+  llvm::PointerUnion<const MatchCaseInstantiation *,
+                     const MatchTestInstantiation *>
+      Record;
+
+public:
+  MatchCandidateRef() = default;
+  MatchCandidateRef(const MatchCaseInstantiation &Case) : Record(&Case) {}
+  MatchCandidateRef(const MatchTestInstantiation &Test) : Record(&Test) {}
+
+  const MatchCaseInstantiation *getCase() const {
+    return llvm::dyn_cast_if_present<const MatchCaseInstantiation *>(Record);
+  }
+  const MatchTestInstantiation *getTest() const {
+    return llvm::dyn_cast_if_present<const MatchTestInstantiation *>(Record);
+  }
+  const MatchPattern *getPattern() const {
+    return getCase() ? getCase()->Pattern : getTest()->Pattern;
+  }
+  const MatchPatternInstantiation *getPatternInstantiation() const {
+    return getCase() ? getCase()->PatternInstantiation
+                     : getTest()->PatternInstantiation;
+  }
+  const MatchGuard &getGuard() const {
+    return getCase() ? getCase()->Guard : getTest()->Guard;
+  }
+  ArrayRef<const Attr *> getAttributes() const {
+    return getCase() ? getCase()->Attributes : ArrayRef<const Attr *>{};
+  }
+  unsigned getSourceIndex() const {
+    return getCase() ? getCase()->CaseIndex : 0;
+  }
+  friend bool operator==(MatchCandidateRef LHS, MatchCandidateRef RHS) {
+    return LHS.Record == RHS.Record;
+  }
+  friend bool operator!=(MatchCandidateRef LHS, MatchCandidateRef RHS) {
+    return !(LHS == RHS);
+  }
+};
+
+struct MatchPathComponent {
+  enum ComponentKind {
+    Decomposition,
+    ClosedAlternative,
+    OpenAlternative,
+    Cast
+  } Kind;
+  const MatchProjection *Projection;
+  unsigned Index = 0;
+  QualType Type;
+};
+
+/// One checked test, shared by matrix columns and emitted decision nodes.
+struct MatchDecisionTest {
+  enum TestKind {
+    Residual,
+    ClosedAlternative,
+    OpenProjection,
+    IntegralValue,
+    Constant
+  } Kind = Residual;
+
+  MatchCandidateRef Candidate;
+  const Expr *Condition = nullptr;
+  const MatchProjection *Projection = nullptr;
+  const MatchIntegralPatternTest *IntegralTest = nullptr;
+  unsigned AlternativeIndex = 0;
+  QualType ProjectionType;
+  bool ConstantValue = false;
+  SmallVector<MatchPathComponent, 2> SubjectPath;
+};
+
+struct MatchBindingAction {
+  enum ActionKind { Projection, Declaration } Kind;
+  const MatchProjection *Project = nullptr;
+  const DeclarationPattern *Declare = nullptr;
+  SmallVector<MatchPathComponent, 2> SubjectPath;
+};
+
+/// Bindings between and-pattern conjuncts are ordering barriers. Other
+/// bindings are deferred until all tests in their row have succeeded.
+struct MatchOperation {
+  enum OperationKind { Test, Bindings } Kind = Test;
+  MatchDecisionTest MatchTest;
+  SmallVector<MatchBindingAction, 2> BindingActions;
+};
+
+struct MatchDecisionCandidate {
+  MatchCandidateRef Record;
+  SmallVector<MatchOperation, 4> Operations;
+  SmallVector<MatchBindingAction, 2> Bindings;
+  bool ShareAction = false;
+};
+
 /// A decision tree over the refutable columns of a match.
 ///
-/// Test nodes specialize source-ordered rows on closed-alternative states or
-/// open-protocol projection conditions. Pattern-test nodes evaluate residual
-/// expression and type conditions. A successful test can expose additional
-/// columns from a decomposition or projected payload. Candidate nodes hand any
-/// remaining tests and the action back to the ordinary match emitter.
+/// Specialization consumes tests and exposes projected payloads. Candidate
+/// nodes contain explicit remaining operations and deferred bindings, not a
+/// source pattern to replay with a list of already completed tests.
 class MatchDecisionTree {
 public:
-  struct Candidate {
-    const MatchCaseInstantiation *Case = nullptr;
-    SmallVector<const MatchPattern *, 2> KnownTestPatterns;
-    SmallVector<const MatchPattern *, 2> CompletedPatterns;
-    bool ShareAction = false;
-  };
-
-  struct Test {
-    enum TestKind { ClosedAlternative, OpenProjection } Kind = OpenProjection;
-
-    const MatchCaseInstantiation *Case = nullptr;
-    unsigned AlternativeIndex = 0;
-    const MatchProjection *Projection = nullptr;
-    bool MaterializeProjection = false;
-    /// Ancestor projections needed to reach the test projection.
-    SmallVector<const MatchProjection *, 2> ProjectionPath;
-  };
-
-  struct PatternTest {
-    enum TestKind { Residual, IntegralValue } Kind = Residual;
-
-    const MatchCaseInstantiation *Case = nullptr;
-    const MatchPattern *Pattern = nullptr;
-    const MatchIntegralPatternTest *IntegralTest = nullptr;
-    /// Ancestor projections needed to reach the pattern subject.
-    SmallVector<const MatchProjection *, 2> ProjectionPath;
-  };
-
   struct Node;
 
   struct Switch {
-    enum DiscriminatorKind { ClosedAlternative, IntegralValue } Kind;
     struct Branch {
       llvm::APSInt Value;
       std::unique_ptr<Node> Success;
@@ -85,14 +150,12 @@ public:
       NK_Failure,
       NK_Candidate,
       NK_Test,
-      NK_PatternTest,
       NK_Switch,
       NK_BatchedCast
     } Kind;
 
-    Candidate MatchCandidate = {};
-    Test MatchTest = {};
-    PatternTest PatternMatch = {};
+    MatchDecisionCandidate MatchCandidate = {};
+    MatchDecisionTest MatchTest = {};
     Switch MatchSwitch = {};
     BatchedCast MatchBatchedCast = {};
     std::unique_ptr<Node> Success;
@@ -110,6 +173,9 @@ private:
 
 public:
   static MatchDecisionTree build(ArrayRef<MatchCaseInstantiation> Cases,
+                                 const ASTContext &Context,
+                                 bool EnableBatchedDynamicCast = false);
+  static MatchDecisionTree build(ArrayRef<MatchTestInstantiation> Tests,
                                  const ASTContext &Context,
                                  bool EnableBatchedDynamicCast = false);
 

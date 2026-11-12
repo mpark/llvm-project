@@ -44,7 +44,7 @@ struct Pair {
 
 // CHECK-LABEL: define{{.*}} i1 @_Z26nested_checks_without_copyR4Pair
 // CHECK-NOT: call{{.*}}Copyable{{[CD]}}
-// CHECK: ret i1 %{{.*}}
+// CHECK: ret i1 true
 bool nested_checks_without_copy(Pair& value) {
   return match(value, case [Copyable, int]);
 }

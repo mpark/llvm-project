@@ -13,7 +13,7 @@
 // OR-TREE: switch i32 %match.value, label %{{.*}} [
 // OR-TREE-DAG: i32 0, label %{{.*}}
 // OR-TREE-DAG: i32 1, label %{{.*}}
-// OR-TREE: match.select.action:
+// OR-TREE: match.select.shared_action:
 // OR-TREE-COUNT-1: store i32 1
 int classify(int value) {
   return match (value) {
@@ -42,7 +42,7 @@ bool operator==(int value, SecondPattern) { return second(value); }
 // CHECK: %[[SECOND:.*]] = tail call{{.*}} i1 @_Z6secondi(i32 {{.*}} %[[VALUE]])
 // CHECK-NEXT: br label %[[DONE]]
 // CHECK: [[DONE]]:
-// CHECK: phi i1 [ true, %{{.*}} ], [ %[[SECOND]], %[[SECOND_BLOCK]] ]
+// CHECK: phi i1 [ %[[SECOND]], %[[SECOND_BLOCK]] ], [ true, %{{.*}} ]
 bool short_circuit(int value) {
   return match(value, case first_pattern or second_pattern);
 }
@@ -55,7 +55,7 @@ bool short_circuit(int value) {
 // OR-TREE-LABEL: define{{.*}} i32 @_Z23selection_short_circuiti(
 // OR-TREE-COUNT-1: call{{.*}} i1 @_Zeqi12FirstPattern
 // OR-TREE-COUNT-1: call{{.*}} i1 @_Zeqi13SecondPattern
-// OR-TREE: match.select.action:
+// OR-TREE: match.select.shared_action:
 // OR-TREE-COUNT-1: store i32 1
 int selection_short_circuit(int value) {
   return match (value) {

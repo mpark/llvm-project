@@ -5707,10 +5707,6 @@ public:
     return I.PatternInstantiation == getSourceExpr()->getPatternInstantiation();
   }
 
-  MatchTestInstantiation getDirectInstantiation() const {
-    return {Pattern, IfLoc, Guard, PatternInstantiation, PatternIsIrrefutable};
-  }
-
   bool hasSemanticInstantiations() const { return !Instantiations.empty(); }
 
   bool hasConditionInstantiations() const {

@@ -32,4 +32,18 @@ int dependent_case(T value) {
 template int dependent_case(int);
 
 // CHECK-LABEL: define{{.*}} i32 @_Z14dependent_caseIiEiT_
+// CHECK-NOT: llvm.expect
+// CHECK: ret i32
+
+template<class T>
+int dependent_refutable_case(T value) {
+  return match (value) {
+    [[likely]] case 0 => 1;
+    case _ => 0;
+  };
+}
+
+template int dependent_refutable_case(int);
+
+// CHECK-LABEL: define{{.*}} i32 @_Z24dependent_refutable_caseIiEiT_
 // CHECK: call i1 @llvm.expect.i1(i1 {{.*}}, i1 true)

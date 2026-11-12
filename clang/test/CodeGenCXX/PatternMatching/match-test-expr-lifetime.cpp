@@ -18,7 +18,6 @@ struct Lifetime {
 // CHECK-NEXT:    [[FLAG:%.*]] = alloca i8, align 1
 // CHECK-NEXT:    [[TMP0:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[REF_TMP:%.*]] = alloca [[STRUCT_LIFETIME:%.*]], align 8
-// CHECK-NEXT:    [[MATCH_TEST_SELECTED:%.*]] = alloca i1, align 8
 // CHECK-NEXT:    [[TMP1:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[B:%.*]] = alloca ptr, align 8
 // CHECK-NEXT:    [[CLEANUP_DEST_SLOT:%.*]] = alloca i32, align 4
@@ -29,18 +28,18 @@ struct Lifetime {
 // CHECK-NEXT:    store ptr [[REF_TMP]], ptr [[TMP0]], align 8
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1:![0-9]+]], !align [[META2:![0-9]+]]
 // CHECK-NEXT:    store ptr [[TMP3]], ptr [[TMP1]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_DECOMP_NEXT_PATTERN]]:
 // CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[N1:%.*]] = getelementptr inbounds nuw [[STRUCT_LIFETIME]], ptr [[TMP4]], i32 0, i32 1
 // CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[N1]], align 8
 // CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[TMP5]], 101
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_TEST_INIT:.*]], label %[[MATCH_TEST_NO_MATCH:.*]]
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECISION_SUCCESS:.*]], label %[[MATCH_DECISION_FAILURE:.*]]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_INIT:.*]]
 // CHECK:       [[MATCH_TEST_INIT]]:
 // CHECK-NEXT:    [[TMP6:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[FLAG2:%.*]] = getelementptr inbounds nuw [[STRUCT_LIFETIME]], ptr [[TMP6]], i32 0, i32 0
 // CHECK-NEXT:    store ptr [[FLAG2]], ptr [[B]], align 8
-// CHECK-NEXT:    br i1 true, label %[[MATCH_TEST_ACTION:.*]], label %[[MATCH_TEST_GUARD_FAILED:.*]]
+// CHECK-NEXT:    br label %[[MATCH_TEST_ACTION:.*]]
 // CHECK:       [[MATCH_TEST_ACTION]]:
 // CHECK-NEXT:    [[TMP7:%.*]] = load ptr, ptr [[B]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[TMP8:%.*]] = load ptr, ptr [[TMP7]], align 8
@@ -49,22 +48,15 @@ struct Lifetime {
 // CHECK-NEXT:    store i1 [[LOADEDV]], ptr [[RETVAL]], align 1
 // CHECK-NEXT:    store i32 1, ptr [[CLEANUP_DEST_SLOT]], align 4
 // CHECK-NEXT:    br label %[[CLEANUP:.*]]
-// CHECK:       [[MATCH_TEST_GUARD_FAILED]]:
-// CHECK-NEXT:    store i1 false, ptr [[MATCH_TEST_SELECTED]], align 8
-// CHECK-NEXT:    br label %[[MATCH_TEST_CLEANUP:.*]]
-// CHECK:       [[MATCH_TEST_CLEANUP]]:
-// CHECK-NEXT:    [[TMP10:%.*]] = load i1, ptr [[MATCH_TEST_SELECTED]], align 8
-// CHECK-NEXT:    br i1 [[TMP10]], label %[[MATCH_TEST_SUCCEEDED:.*]], label %[[MATCH_TEST_NO_MATCH]]
-// CHECK:       [[MATCH_TEST_SUCCEEDED]]:
-// CHECK-NEXT:    store i32 2, ptr [[CLEANUP_DEST_SLOT]], align 4
-// CHECK-NEXT:    br label %[[CLEANUP]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_NO_MATCH:.*]]
 // CHECK:       [[MATCH_TEST_NO_MATCH]]:
-// CHECK-NEXT:    [[TMP11:%.*]] = load i32, ptr [[N_ADDR]], align 4
-// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[TMP11]], 202
+// CHECK-NEXT:    [[TMP10:%.*]] = load i32, ptr [[N_ADDR]], align 4
+// CHECK-NEXT:    [[CMP3:%.*]] = icmp eq i32 [[TMP10]], 202
 // CHECK-NEXT:    br i1 [[CMP3]], label %[[IF_THEN:.*]], label %[[IF_END:.*]]
 // CHECK:       [[IF_THEN]]:
-// CHECK-NEXT:    [[TMP12:%.*]] = load i8, ptr [[FLAG]], align 1
-// CHECK-NEXT:    [[LOADEDV4:%.*]] = icmp ne i8 [[TMP12]], 0
+// CHECK-NEXT:    [[TMP11:%.*]] = load i8, ptr [[FLAG]], align 1
+// CHECK-NEXT:    [[LOADEDV4:%.*]] = icmp ne i8 [[TMP11]], 0
 // CHECK-NEXT:    store i1 [[LOADEDV4]], ptr [[RETVAL]], align 1
 // CHECK-NEXT:    store i32 1, ptr [[CLEANUP_DEST_SLOT]], align 4
 // CHECK-NEXT:    br label %[[CLEANUP]]
@@ -79,13 +71,13 @@ struct Lifetime {
 // CHECK-NEXT:      i32 2, label %[[IF_END5:.*]]
 // CHECK-NEXT:    ]
 // CHECK:       [[IF_END5]]:
-// CHECK-NEXT:    [[TMP13:%.*]] = load i8, ptr [[FLAG]], align 1
-// CHECK-NEXT:    [[LOADEDV6:%.*]] = icmp ne i8 [[TMP13]], 0
+// CHECK-NEXT:    [[TMP12:%.*]] = load i8, ptr [[FLAG]], align 1
+// CHECK-NEXT:    [[LOADEDV6:%.*]] = icmp ne i8 [[TMP12]], 0
 // CHECK-NEXT:    store i1 [[LOADEDV6]], ptr [[RETVAL]], align 1
 // CHECK-NEXT:    br label %[[RETURN]]
 // CHECK:       [[RETURN]]:
-// CHECK-NEXT:    [[TMP14:%.*]] = load i1, ptr [[RETVAL]], align 1
-// CHECK-NEXT:    ret i1 [[TMP14]]
+// CHECK-NEXT:    [[TMP13:%.*]] = load i1, ptr [[RETVAL]], align 1
+// CHECK-NEXT:    ret i1 [[TMP13]]
 // CHECK:       [[UNREACHABLE]]:
 // CHECK-NEXT:    unreachable
 //
@@ -115,21 +107,25 @@ bool extend(int n) {
 // CHECK-NEXT:    store ptr [[REF_TMP]], ptr [[TMP0]], align 8
 // CHECK-NEXT:    [[TMP3:%.*]] = load ptr, ptr [[TMP0]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    store ptr [[TMP3]], ptr [[TMP1]], align 8
-// CHECK-NEXT:    br label %[[MATCH_DECOMP_NEXT_PATTERN:.*]]
-// CHECK:       [[MATCH_DECOMP_NEXT_PATTERN]]:
 // CHECK-NEXT:    [[TMP4:%.*]] = load ptr, ptr [[TMP1]], align 8, !nonnull [[META1]], !align [[META2]]
 // CHECK-NEXT:    [[N1:%.*]] = getelementptr inbounds nuw [[STRUCT_LIFETIME]], ptr [[TMP4]], i32 0, i32 1
 // CHECK-NEXT:    [[TMP5:%.*]] = load i32, ptr [[N1]], align 8
 // CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[TMP5]], 101
-// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_PATTERN_SUCCESS:.*]], label %[[MATCH_PATTERN_FAILURE:.*]]
-// CHECK:       [[MATCH_PATTERN_SUCCESS]]:
-// CHECK-NEXT:    br label %[[MATCH_PATTERN_END:.*]]
-// CHECK:       [[MATCH_PATTERN_FAILURE]]:
-// CHECK-NEXT:    br label %[[MATCH_PATTERN_END]]
-// CHECK:       [[MATCH_PATTERN_END]]:
-// CHECK-NEXT:    [[MATCH_PATTERN_RESULT:%.*]] = phi i1 [ true, %[[MATCH_PATTERN_SUCCESS]] ], [ false, %[[MATCH_PATTERN_FAILURE]] ]
+// CHECK-NEXT:    br i1 [[CMP]], label %[[MATCH_DECISION_SUCCESS:.*]], label %[[MATCH_DECISION_FAILURE:.*]]
+// CHECK:       [[MATCH_DECISION_SUCCESS]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_INIT:.*]]
+// CHECK:       [[MATCH_TEST_INIT]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_ACTION:.*]]
+// CHECK:       [[MATCH_TEST_ACTION]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_END:.*]]
+// CHECK:       [[MATCH_DECISION_FAILURE]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_NO_MATCH:.*]]
+// CHECK:       [[MATCH_TEST_NO_MATCH]]:
+// CHECK-NEXT:    br label %[[MATCH_TEST_END]]
+// CHECK:       [[MATCH_TEST_END]]:
+// CHECK-NEXT:    [[MATCH_TEST_RESULT:%.*]] = phi i1 [ true, %[[MATCH_TEST_ACTION]] ], [ false, %[[MATCH_TEST_NO_MATCH]] ]
 // CHECK-NEXT:    call void @_ZN8LifetimeD1Ev(ptr noundef nonnull align 8 dead_on_return(12) dereferenceable(12) [[REF_TMP]]) #[[ATTR1]]
-// CHECK-NEXT:    br i1 [[MATCH_PATTERN_RESULT]], label %[[IF_THEN:.*]], label %[[IF_ELSE:.*]]
+// CHECK-NEXT:    br i1 [[MATCH_TEST_RESULT]], label %[[IF_THEN:.*]], label %[[IF_ELSE:.*]]
 // CHECK:       [[IF_THEN]]:
 // CHECK-NEXT:    [[TMP6:%.*]] = load i8, ptr [[FLAG]], align 1
 // CHECK-NEXT:    [[LOADEDV:%.*]] = icmp ne i8 [[TMP6]], 0

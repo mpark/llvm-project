@@ -106,6 +106,12 @@ class RegionCodeGenTy;
 class TargetCodeGenInfo;
 struct OMPTaskDataTy;
 struct CGCoroData;
+class MatchDecisionTree;
+struct MatchDecisionCandidate;
+struct MatchDecisionTest;
+struct MatchBindingAction;
+struct MatchOperation;
+struct MatchPathComponent;
 
 // clang-format off
 /// The kind of evaluation to perform on values of a particular
@@ -5458,29 +5464,30 @@ public:
     void emitCleanups(CodeGenFunction &CGF);
   };
   enum class MatchCandidateKind { Test, Condition, Selection };
-  void EmitMatchCandidate(
-      const MatchPattern *Pattern,
-      const MatchPatternInstantiation *Instantiation, const MatchGuard &Guard,
-      llvm::BasicBlock *PatternFailure, llvm::BasicBlock *GuardFailure,
-      llvm::BasicBlock *Success,
-      llvm::function_ref<void(llvm::BasicBlock *, llvm::BasicBlock *,
-                              StagedPatternDeclarations *)>
-          EmitPattern,
-      llvm::function_ref<void()> EmitAction, Stmt::Likelihood GuardLikelihood,
-      MatchCandidateKind Kind);
-  RValue
-  EmitMatchPattern(const MatchPattern *Pattern,
-                   const MatchPatternInstantiation *Instantiation,
-                   const Expr *Subject,
-                   StagedPatternDeclarations *StagedDeclarations = nullptr);
-  void EmitMatchPatternBranch(
-      const MatchPattern *Pattern,
-      const MatchPatternInstantiation *Instantiation, const Expr *Subject,
-      llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
-      StagedPatternDeclarations *StagedDeclarations = nullptr,
-      ArrayRef<const MatchPattern *> KnownTestPatterns = {},
-      ArrayRef<const MatchPattern *> CompletedPatterns = {});
+  void EmitMatchCandidate(const MatchDecisionCandidate &Candidate,
+                          llvm::BasicBlock *PatternFailure,
+                          llvm::BasicBlock *GuardFailure,
+                          llvm::BasicBlock *Success,
+                          llvm::function_ref<void()> EmitAction,
+                          MatchCandidateKind Kind);
+  void EmitMatchDecisionTree(
+      const MatchDecisionTree &Decision, llvm::BasicBlock *NoMatch,
+      llvm::function_ref<void(const MatchDecisionCandidate &,
+                              llvm::BasicBlock *, llvm::BasicBlock *)>
+          EmitCandidate);
+  llvm::Value *EmitMatchDecisionTest(const MatchDecisionTest &Test);
+  void EmitMatchOperations(ArrayRef<MatchOperation> Operations,
+                           const MatchPatternInstantiation *Instantiation,
+                           llvm::BasicBlock *Success, llvm::BasicBlock *Failure,
+                           StagedPatternDeclarations *Staged = nullptr);
+  void EmitMatchSubjectPath(ArrayRef<MatchPathComponent> Path);
+  void
+  EmitMatchBindingProjections(ArrayRef<MatchBindingAction> Bindings,
+                              const MatchPatternInstantiation *Instantiation);
+  void EmitMatchBindings(ArrayRef<MatchBindingAction> Bindings,
+                         const MatchPatternInstantiation *Instantiation);
   void EmitMatchDiscriminator(const MatchProjection &Projection);
+  void EmitMatchProjection(const MatchProjection &Projection);
   void EmitMatchProjectionValue(const MatchProjection &Projection);
   void EmitSharedDeclarationProjections(
       const MatchPattern *Pattern,
@@ -5495,8 +5502,6 @@ public:
   void EmitMatchGuardBranch(const MatchGuard &MG, llvm::BasicBlock *Success,
                             llvm::BasicBlock *Failure,
                             Stmt::Likelihood LH = Stmt::LH_None);
-  RValue EmitMatchGuard(const MatchGuard &MG, llvm::Value *PatBoolRes);
-
   //===--------------------------------------------------------------------===//
   //                         Annotations Emission
   //===--------------------------------------------------------------------===//
